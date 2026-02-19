@@ -1,0 +1,40 @@
+name: Sync to HuggingFace Space
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app.py'
+      - 'requirements.txt'
+      - 'data/**'
+      - 'README.md'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to HuggingFace Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Only sync if HF_TOKEN is configured
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN not set, skipping sync"
+            exit 0
+          fi
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          # Add HF remote and push
+          git remote add hf https://huggingface.co/spaces/yxc20089/OpenRA-Bench || true
+          git remote set-url hf https://x-access-token:${HF_TOKEN}@huggingface.co/spaces/yxc20089/OpenRA-Bench
+
+          # Push main branch to HF
+          git push hf main --force
