@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from openra_rl_util.rubrics import compute_composite_score_from_games, compute_game_metrics
+
 # Evaluation results file
 RESULTS_FILE = Path(__file__).parent / "data" / "results.csv"
 
@@ -122,10 +124,8 @@ async def run_game(env: Any, agent_fn: Any, max_steps: int) -> Dict[str, Any]:
         max_steps: Maximum steps before timeout.
 
     Returns:
-        Dict with game metrics (from rubrics.compute_game_metrics).
+        Dict with game metrics (from compute_game_metrics).
     """
-    from rubrics import compute_game_metrics
-
     obs = await env.reset()
     steps = 0
 
@@ -143,10 +143,9 @@ def get_agent_fn(agent_type: str) -> Any:
     Returns a callable that takes an observation and returns an action.
     """
     if agent_type == "scripted":
-        # Import inline to avoid hard dependency
         from openra_env.models import OpenRAAction
         # Simple no-op agent for evaluation framework testing
-        # Replace with actual ScriptedBot integration
+        # TODO: Wire to openra_env.agents.scripted.ScriptedBot when extracted
         return lambda obs: OpenRAAction(commands=[])
     else:
         from openra_env.models import OpenRAAction
@@ -168,7 +167,7 @@ async def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
             result_str = metrics["result"] or "timeout"
             print(f"{result_str} (ticks: {metrics['ticks']}, K/D: {metrics['kd_ratio']:.1f})")
 
-    # Aggregate results
+    # Aggregate results using single source of truth from openra-rl-util
     wins = sum(1 for g in game_results if g["win"])
     total = len(game_results)
 
@@ -178,7 +177,7 @@ async def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
         "opponent": args.opponent,
         "games": total,
         "win_rate": round(100.0 * wins / max(total, 1), 1),
-        "score": round(compute_composite_score(game_results), 1),
+        "score": round(compute_composite_score_from_games(game_results), 1),
         "avg_kills": round(sum(g["kills_cost"] for g in game_results) / max(total, 1)),
         "avg_deaths": round(sum(g["deaths_cost"] for g in game_results) / max(total, 1)),
         "kd_ratio": round(
@@ -193,28 +192,6 @@ async def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "replay_url": "",
     }
-
-
-def compute_composite_score(game_results: List[Dict[str, Any]]) -> float:
-    """Compute the OpenRA-Bench composite score.
-
-    Score = 50% win_rate + 25% avg_kd_normalized + 25% avg_economy_normalized
-    """
-    total = len(game_results)
-    if total == 0:
-        return 0.0
-
-    win_rate = sum(1 for g in game_results if g["win"]) / total
-
-    # K/D ratio normalized: kd / (kd + 1) maps [0, inf) -> [0, 1)
-    avg_kd = sum(g["kd_ratio"] for g in game_results) / total
-    kd_norm = avg_kd / (avg_kd + 1)
-
-    # Economy normalized: assets / (assets + 10000)
-    avg_assets = sum(g["assets_value"] for g in game_results) / total
-    econ_norm = avg_assets / (avg_assets + 10000) if avg_assets >= 0 else 0.0
-
-    return 100.0 * (0.5 * win_rate + 0.25 * kd_norm + 0.25 * econ_norm)
 
 
 def append_results(results: Dict[str, Any], output_path: Path) -> None:
