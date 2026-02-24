@@ -10,7 +10,6 @@ Deploy on HuggingFace Spaces:
     Push app.py, requirements.txt, data/, and README.md to your HF Space.
 """
 
-import asyncio
 import csv
 import json
 import os
@@ -18,9 +17,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import gradio as gr
+import httpx
 import pandas as pd
 
-from evaluate_runner import DEFAULT_SERVER, run_evaluation, wake_hf_space
+from evaluate_runner import DEFAULT_SERVER, wake_hf_space
 
 # ── Data Loading ──────────────────────────────────────────────────────────────
 
@@ -171,88 +171,121 @@ def save_submission(results: dict) -> None:
         writer.writerow(results)
 
 
-# ── Evaluation Handler ────────────────────────────────────────────────────────
+# ── Try Agent Handler ─────────────────────────────────────────────────────────
 
 
-def run_eval_sync(agent_name: str, opponent: str, num_games: int):
-    """Generator that runs evaluation and yields progress updates."""
-    if not agent_name or not agent_name.strip():
-        yield "Error: Please enter an agent name.", None, ""
-        return
-
-    agent_name = agent_name.strip()
-    num_games = int(num_games)
-
+def run_try_agent(opponent: str):
+    """Generator that streams LLM agent gameplay from the OpenRA-RL server."""
     log_lines = []
 
     def log(msg: str):
         log_lines.append(msg)
         return "\n".join(log_lines)
 
-    # Wake server
-    yield log(f"Connecting to {DEFAULT_SERVER}..."), None, ""
+    # Wake server first
+    yield log(f"Connecting to {DEFAULT_SERVER}..."), ""
     status = wake_hf_space(DEFAULT_SERVER)
-    yield log(status), None, ""
-
-    # Track per-game progress
-    game_log = []
-
-    def on_game_done(game_num, total, metrics):
-        result = metrics["result"] or "timeout"
-        kd = metrics["kd_ratio"]
-        game_log.append({
-            "Game": game_num,
-            "Result": result,
-            "K/D": round(kd, 1),
-            "Ticks": metrics["ticks"],
-        })
-
-    yield log(f"Running {num_games} game(s) vs {opponent} AI..."), None, ""
+    yield log(status), ""
+    yield log(f"Starting game — LLM agent vs {opponent} AI..."), ""
 
     try:
-        results = asyncio.run(
-            run_evaluation(
-                agent_name=agent_name,
-                opponent=opponent,
-                num_games=num_games,
-                server_url=DEFAULT_SERVER,
-                on_game_done=on_game_done,
-            )
-        )
+        with httpx.stream(
+            "GET",
+            f"{DEFAULT_SERVER}/try-agent",
+            params={"opponent": opponent},
+            timeout=httpx.Timeout(connect=30.0, read=360.0, write=30.0, pool=30.0),
+        ) as resp:
+            if resp.status_code == 409:
+                yield log("A game is already in progress. Please try again later."), ""
+                return
+            if resp.status_code != 200:
+                yield log(f"Error: Server returned {resp.status_code}"), ""
+                return
+
+            final_data = None
+            event_type = ""
+
+            for line in resp.iter_lines():
+                if not line.strip():
+                    continue
+
+                # Parse SSE: event line sets type, data line has payload
+                if line.startswith("event: "):
+                    event_type = line[7:].strip()
+                    continue
+                if not line.startswith("data: "):
+                    continue
+
+                try:
+                    data = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+
+                etype = event_type or data.get("type", "")
+
+                if etype == "status":
+                    yield log(data["message"]), ""
+
+                elif etype == "turn":
+                    yield log(
+                        f"[Turn {data['turn']}] "
+                        f"API calls: {data['api_calls']} | "
+                        f"Elapsed: {data['elapsed']}s"
+                    ), ""
+
+                elif etype == "llm":
+                    content = data.get("content", "")
+                    if content:
+                        # Truncate long LLM reasoning for display
+                        display = content[:300] + "..." if len(content) > 300 else content
+                        yield log(f"  AI: {display}"), ""
+
+                elif etype == "tool_call":
+                    yield log(f"  >> {data['name']}({data.get('args', '')})"), ""
+
+                elif etype == "game_state":
+                    yield log(
+                        f"  State: tick={data.get('tick', '?')} "
+                        f"units={data.get('units', '?')} "
+                        f"buildings={data.get('buildings', '?')} "
+                        f"cash=${data.get('cash', '?')}"
+                    ), ""
+
+                elif etype == "done":
+                    result = data.get("result", "?").upper()
+                    yield log(f"\nGAME OVER: {result} (tick {data.get('tick', '?')})"), ""
+
+                elif etype == "final":
+                    final_data = data
+
+                elif etype == "error":
+                    yield log(f"Error: {data.get('message', 'Unknown error')}"), ""
+
+            # Show final scorecard
+            if final_data:
+                result = final_data.get("result", "ongoing").upper()
+                summary = (
+                    f"### Game Result: {result}\n\n"
+                    f"| Metric | Value |\n|--------|-------|\n"
+                    f"| Result | **{result}** |\n"
+                    f"| Ticks | {final_data.get('tick', '?')} |\n"
+                    f"| LLM Turns | {final_data.get('turns', '?')} |\n"
+                    f"| Tool Calls | {final_data.get('tool_calls', '?')} |\n"
+                    f"| Duration | {final_data.get('elapsed', '?')}s |\n"
+                    f"| Units Killed | {final_data.get('units_killed', 0)} |\n"
+                    f"| Units Lost | {final_data.get('units_lost', 0)} |\n"
+                    f"| Kill Value | ${final_data.get('kills_cost', 0)} |\n"
+                    f"| Death Value | ${final_data.get('deaths_cost', 0)} |\n"
+                    f"| Cash | ${final_data.get('cash', 0)} |\n"
+                )
+                yield "\n".join(log_lines), summary
+            else:
+                yield "\n".join(log_lines), ""
+
+    except httpx.ReadTimeout:
+        yield log("Connection timed out. The game may still be running on the server."), ""
     except Exception as e:
-        yield log(f"Error: {e}"), None, ""
-        return
-
-    # Save results
-    save_submission(results)
-
-    # Format output
-    for g in game_log:
-        log(f"  Game {g['Game']}: {g['Result']} (K/D: {g['K/D']}, ticks: {g['Ticks']})")
-
-    log(f"\nEvaluation complete!")
-
-    summary = (
-        f"### Results: {agent_name}\n\n"
-        f"| Metric | Value |\n|--------|-------|\n"
-        f"| **Score** | **{results['score']}** |\n"
-        f"| Win Rate | {results['win_rate']}% |\n"
-        f"| K/D Ratio | {results['kd_ratio']} |\n"
-        f"| Avg Economy | {results['avg_economy']} |\n"
-        f"| Games | {results['games']} vs {results['opponent']} |\n"
-    )
-
-    results_df = pd.DataFrame([{
-        "Agent": results["agent_name"],
-        "Type": results["agent_type"],
-        "Opponent": results["opponent"],
-        "Games": results["games"],
-        "Win Rate (%)": results["win_rate"],
-        "Score": results["score"],
-        "K/D Ratio": results["kd_ratio"],
-    }])
-
-    yield "\n".join(log_lines), results_df, summary
+        yield log(f"Error: {e}"), ""
 
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -300,10 +333,10 @@ The benchmark score combines three components:
 SUBMIT_MD = """
 ## How to Submit Results
 
-### Option A: In-Browser (no setup needed)
+### Option A: Watch AI Play (no setup needed)
 
-Use the **Evaluate** tab to run a scripted agent directly from your browser.
-Results are saved to the leaderboard automatically.
+Use the **Try** tab to watch a pre-configured LLM agent play Red Alert
+directly in your browser. No API keys or setup required.
 
 ### Option B: CLI with HuggingFace-hosted server (no Docker needed)
 
@@ -439,50 +472,39 @@ def build_app() -> gr.Blocks:
                         outputs=leaderboard,
                     )
 
-            # ── Evaluate Tab ──────────────────────────────────────────────
-            with gr.Tab("Evaluate"):
+            # ── Try Tab ───────────────────────────────────────────────────
+            with gr.Tab("Try"):
                 gr.Markdown(
-                    "## Run Evaluation\n\n"
-                    "Run a scripted agent against the HuggingFace-hosted "
-                    "OpenRA-RL environment. No Docker or local setup needed."
+                    "## Watch AI Play Red Alert\n\n"
+                    "Watch a pre-configured LLM agent play a game of Red Alert "
+                    "against the built-in AI. No setup needed — just pick a "
+                    "difficulty and click play."
                 )
                 with gr.Row():
-                    eval_name = gr.Textbox(
-                        label="Agent Name",
-                        placeholder="e.g. MyBot-v1",
-                        scale=2,
-                    )
-                    eval_opponent = gr.Dropdown(
+                    try_opponent = gr.Dropdown(
                         choices=["Easy", "Normal", "Hard"],
                         value="Normal",
-                        label="Opponent",
+                        label="Opponent Difficulty",
                         scale=1,
                     )
-                    eval_games = gr.Slider(
-                        minimum=1,
-                        maximum=20,
-                        value=3,
-                        step=1,
-                        label="Games",
+                    try_btn = gr.Button(
+                        "Watch AI Play",
+                        variant="primary",
                         scale=1,
                     )
-                eval_btn = gr.Button("Run Evaluation", variant="primary")
 
-                eval_log = gr.Textbox(
-                    label="Progress",
-                    lines=10,
+                try_log = gr.Textbox(
+                    label="Live Game Log",
+                    lines=18,
                     interactive=False,
+                    show_copy_button=True,
                 )
-                eval_results = gr.Dataframe(
-                    label="Game Results",
-                    interactive=False,
-                )
-                eval_summary = gr.Markdown()
+                try_summary = gr.Markdown()
 
-                eval_btn.click(
-                    fn=run_eval_sync,
-                    inputs=[eval_name, eval_opponent, eval_games],
-                    outputs=[eval_log, eval_results, eval_summary],
+                try_btn.click(
+                    fn=run_try_agent,
+                    inputs=[try_opponent],
+                    outputs=[try_log, try_summary],
                 )
 
             # ── About Tab ─────────────────────────────────────────────────
