@@ -17,10 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import gradio as gr
-import httpx
 import pandas as pd
 
-from evaluate_runner import DEFAULT_SERVER, wake_hf_space
+from evaluate_runner import DEFAULT_SERVER
 
 # ── Data Loading ──────────────────────────────────────────────────────────────
 
@@ -171,123 +170,6 @@ def save_submission(results: dict) -> None:
         writer.writerow(results)
 
 
-# ── Try Agent Handler ─────────────────────────────────────────────────────────
-
-
-def run_try_agent(opponent: str):
-    """Generator that streams LLM agent gameplay from the OpenRA-RL server."""
-    log_lines = []
-
-    def log(msg: str):
-        log_lines.append(msg)
-        return "\n".join(log_lines)
-
-    # Wake server first
-    yield log(f"Connecting to {DEFAULT_SERVER}..."), ""
-    status = wake_hf_space(DEFAULT_SERVER)
-    yield log(status), ""
-    yield log(f"Starting game — LLM agent vs {opponent} AI..."), ""
-
-    try:
-        with httpx.stream(
-            "GET",
-            f"{DEFAULT_SERVER}/try-agent",
-            params={"opponent": opponent},
-            timeout=httpx.Timeout(connect=30.0, read=360.0, write=30.0, pool=30.0),
-        ) as resp:
-            if resp.status_code == 409:
-                yield log("A game is already in progress. Please try again later."), ""
-                return
-            if resp.status_code != 200:
-                yield log(f"Error: Server returned {resp.status_code}"), ""
-                return
-
-            final_data = None
-            event_type = ""
-
-            for line in resp.iter_lines():
-                if not line.strip():
-                    continue
-
-                # Parse SSE: event line sets type, data line has payload
-                if line.startswith("event: "):
-                    event_type = line[7:].strip()
-                    continue
-                if not line.startswith("data: "):
-                    continue
-
-                try:
-                    data = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-
-                etype = event_type or data.get("type", "")
-
-                if etype == "status":
-                    yield log(data["message"]), ""
-
-                elif etype == "turn":
-                    yield log(
-                        f"[Turn {data['turn']}] "
-                        f"API calls: {data['api_calls']} | "
-                        f"Elapsed: {data['elapsed']}s"
-                    ), ""
-
-                elif etype == "llm":
-                    content = data.get("content", "")
-                    if content:
-                        # Truncate long LLM reasoning for display
-                        display = content[:300] + "..." if len(content) > 300 else content
-                        yield log(f"  AI: {display}"), ""
-
-                elif etype == "tool_call":
-                    yield log(f"  >> {data['name']}({data.get('args', '')})"), ""
-
-                elif etype == "game_state":
-                    yield log(
-                        f"  State: tick={data.get('tick', '?')} "
-                        f"units={data.get('units', '?')} "
-                        f"buildings={data.get('buildings', '?')} "
-                        f"cash=${data.get('cash', '?')}"
-                    ), ""
-
-                elif etype == "done":
-                    result = data.get("result", "?").upper()
-                    yield log(f"\nGAME OVER: {result} (tick {data.get('tick', '?')})"), ""
-
-                elif etype == "final":
-                    final_data = data
-
-                elif etype == "error":
-                    yield log(f"Error: {data.get('message', 'Unknown error')}"), ""
-
-            # Show final scorecard
-            if final_data:
-                result = final_data.get("result", "ongoing").upper()
-                summary = (
-                    f"### Game Result: {result}\n\n"
-                    f"| Metric | Value |\n|--------|-------|\n"
-                    f"| Result | **{result}** |\n"
-                    f"| Ticks | {final_data.get('tick', '?')} |\n"
-                    f"| LLM Turns | {final_data.get('turns', '?')} |\n"
-                    f"| Tool Calls | {final_data.get('tool_calls', '?')} |\n"
-                    f"| Duration | {final_data.get('elapsed', '?')}s |\n"
-                    f"| Units Killed | {final_data.get('units_killed', 0)} |\n"
-                    f"| Units Lost | {final_data.get('units_lost', 0)} |\n"
-                    f"| Kill Value | ${final_data.get('kills_cost', 0)} |\n"
-                    f"| Death Value | ${final_data.get('deaths_cost', 0)} |\n"
-                    f"| Cash | ${final_data.get('cash', 0)} |\n"
-                )
-                yield "\n".join(log_lines), summary
-            else:
-                yield "\n".join(log_lines), ""
-
-    except httpx.ReadTimeout:
-        yield log("Connection timed out. The game may still be running on the server."), ""
-    except Exception as e:
-        yield log(f"Error: {e}"), ""
-
-
 # ── UI ────────────────────────────────────────────────────────────────────────
 
 ABOUT_MD = """
@@ -335,7 +217,8 @@ SUBMIT_MD = """
 
 ### Option A: Watch AI Play (no setup needed)
 
-Use the **Try** tab to watch a pre-configured LLM agent play Red Alert
+Visit the [OpenRA-RL Space](https://huggingface.co/spaces/openra-rl/openra-rl)
+and click **Try** to watch a pre-configured LLM agent play Red Alert
 directly in your browser. No API keys or setup required.
 
 ### Option B: CLI with HuggingFace-hosted server (no Docker needed)
@@ -471,41 +354,6 @@ def build_app() -> gr.Blocks:
                         inputs=[search_box, type_filter, opponent_filter],
                         outputs=leaderboard,
                     )
-
-            # ── Try Tab ───────────────────────────────────────────────────
-            with gr.Tab("Try"):
-                gr.Markdown(
-                    "## Watch AI Play Red Alert\n\n"
-                    "Watch a pre-configured LLM agent play a game of Red Alert "
-                    "against the built-in AI. No setup needed — just pick a "
-                    "difficulty and click play."
-                )
-                with gr.Row():
-                    try_opponent = gr.Dropdown(
-                        choices=["Easy", "Normal", "Hard"],
-                        value="Normal",
-                        label="Opponent Difficulty",
-                        scale=1,
-                    )
-                    try_btn = gr.Button(
-                        "Watch AI Play",
-                        variant="primary",
-                        scale=1,
-                    )
-
-                try_log = gr.Textbox(
-                    label="Live Game Log",
-                    lines=18,
-                    interactive=False,
-                    show_copy_button=True,
-                )
-                try_summary = gr.Markdown()
-
-                try_btn.click(
-                    fn=run_try_agent,
-                    inputs=[try_opponent],
-                    outputs=[try_log, try_summary],
-                )
 
             # ── About Tab ─────────────────────────────────────────────────
             with gr.Tab("About"):
