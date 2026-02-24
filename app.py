@@ -166,18 +166,34 @@ The benchmark score combines three components:
 SUBMIT_MD = """
 ## How to Submit Results
 
-### 1. Set up the environment
+### 1. Set up the evaluation harness
 
 ```bash
-git clone --recursive https://github.com/yxc20089/OpenRA-RL.git
-cd OpenRA-RL
-pip install -e .
-docker compose up openra-rl
+git clone https://github.com/yxc20089/OpenRA-Bench.git
+cd OpenRA-Bench
+pip install -r requirements.txt
+pip install openra-rl openra-rl-util
 ```
 
 ### 2. Run the evaluation
 
+**Option A: HuggingFace-hosted (no Docker needed)**
+
 ```bash
+python evaluate.py \\
+    --agent scripted \\
+    --agent-name "MyBot-v1" \\
+    --agent-type Scripted \\
+    --opponent Normal \\
+    --games 10 \\
+    --server https://openra-rl-openra-rl.hf.space
+```
+
+**Option B: Local server (Docker)**
+
+```bash
+git clone --recursive https://github.com/yxc20089/OpenRA-RL.git
+cd OpenRA-RL && pip install -e . && docker compose up openra-rl
 cd /path/to/OpenRA-Bench
 
 python evaluate.py \\
@@ -207,7 +223,7 @@ python evaluate.py \\
 | `--agent-type` | Category: `Scripted`, `LLM`, `RL` |
 | `--opponent` | AI difficulty: `Easy`, `Normal`, `Hard` |
 | `--games` | Number of games (minimum 10) |
-| `--server` | OpenRA-RL server URL |
+| `--server` | OpenRA-RL server URL (local or HuggingFace-hosted) |
 
 ### Custom Agents
 
@@ -217,7 +233,7 @@ For custom agents, implement the standard `reset/step` loop:
 from openra_env.client import OpenRAEnv
 from openra_env.models import OpenRAAction
 
-async with OpenRAEnv("http://localhost:8000") as env:
+async with OpenRAEnv("https://openra-rl-openra-rl.hf.space") as env:
     obs = await env.reset()
     while not obs.done:
         action = your_agent.decide(obs)

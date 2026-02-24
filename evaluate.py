@@ -5,16 +5,22 @@ Runs N games of an agent against a built-in AI opponent, collects metrics,
 and appends aggregate results to data/results.csv.
 
 Usage:
-    # Start the OpenRA-RL server first:
+    # Option A: Local server (Docker)
     docker compose up openra-rl
-
-    # Run evaluation:
     python evaluate.py \
         --agent scripted \
         --agent-name "ScriptedBot-v1" \
         --opponent hard \
         --games 10 \
         --server http://localhost:8000
+
+    # Option B: HuggingFace-hosted server (no Docker needed)
+    python evaluate.py \
+        --agent scripted \
+        --agent-name "ScriptedBot-v1" \
+        --opponent hard \
+        --games 10 \
+        --server https://openra-rl-openra-rl.hf.space
 
     # Dry run (validate args without connecting):
     python evaluate.py --dry-run --agent-name "Test" --games 5
@@ -25,9 +31,11 @@ import asyncio
 import csv
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.request import urlopen
 
 from openra_rl_util.rubrics import compute_composite_score_from_games, compute_game_metrics
 
@@ -86,7 +94,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--server",
         default="http://localhost:8000",
-        help="OpenRA-RL server URL (default: http://localhost:8000)",
+        help="OpenRA-RL server URL. Use http://localhost:8000 for local Docker, "
+        "or https://openra-rl-openra-rl.hf.space for HuggingFace-hosted",
     )
     parser.add_argument(
         "--max-steps",
@@ -152,9 +161,34 @@ def get_agent_fn(agent_type: str) -> Any:
         return lambda obs: OpenRAAction(commands=[])
 
 
+def _wake_hf_space(server_url: str, max_wait: int = 120) -> None:
+    """Send HTTP request to wake a sleeping HuggingFace Space.
+
+    HF Spaces sleep after inactivity. An HTTP GET wakes them up,
+    but it may take up to ~2 minutes for the container to start.
+    """
+    if ".hf.space" not in server_url:
+        return
+
+    print(f"  Waking HuggingFace Space...", end=" ", flush=True)
+    start = time.time()
+    while time.time() - start < max_wait:
+        try:
+            with urlopen(server_url, timeout=10) as resp:
+                if resp.status == 200:
+                    print("ready.")
+                    return
+        except Exception:
+            pass
+        time.sleep(5)
+    print("timed out (Space may still be starting).")
+
+
 async def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
     """Run the full evaluation: N games, collect metrics, compute aggregates."""
     from openra_env.client import OpenRAEnv
+
+    _wake_hf_space(args.server)
 
     agent_fn = get_agent_fn(args.agent)
     game_results: List[Dict[str, Any]] = []

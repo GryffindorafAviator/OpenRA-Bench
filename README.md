@@ -35,17 +35,21 @@ python app.py
 ### Run an evaluation
 
 ```bash
-# Start OpenRA-RL server
-cd /path/to/OpenRA-RL
-docker compose up openra-rl
-
-# Run benchmark
-cd /path/to/OpenRA-Bench
+# Against the HuggingFace-hosted environment (no Docker needed)
 python evaluate.py \
     --agent scripted \
     --agent-name "MyBot-v1" \
     --opponent Normal \
-    --games 10
+    --games 10 \
+    --server https://openra-rl-openra-rl.hf.space
+
+# Or against a local Docker server
+python evaluate.py \
+    --agent scripted \
+    --agent-name "MyBot-v1" \
+    --opponent Normal \
+    --games 10 \
+    --server http://localhost:8000
 ```
 
 ### Submit results
@@ -67,4 +71,5 @@ python evaluate.py \
 - [OpenRA-RL Documentation](https://openra-rl.dev)
 - [OpenRA-RL GitHub](https://github.com/yxc20089/OpenRA-RL)
 - [OpenEnv Framework](https://huggingface.co/openenv)
-- [HuggingFace Space](https://huggingface.co/spaces/openra-rl/OpenRA-Bench)
+- [Leaderboard Space](https://huggingface.co/spaces/openra-rl/OpenRA-Bench)
+- [Environment Space](https://huggingface.co/spaces/openra-rl/OpenRA-RL)
