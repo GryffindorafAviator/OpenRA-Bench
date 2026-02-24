@@ -1,7 +1,7 @@
 """OpenRA-Bench: Agent Leaderboard for OpenRA-RL.
 
 A Gradio app that displays agent rankings, supports filtering by type
-and opponent difficulty, and provides submission instructions.
+and opponent difficulty, and lets users run evaluations in-browser.
 
 Run locally:
     python app.py
@@ -10,11 +10,17 @@ Deploy on HuggingFace Spaces:
     Push app.py, requirements.txt, data/, and README.md to your HF Space.
 """
 
+import asyncio
+import csv
+import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import gradio as gr
 import pandas as pd
+
+from evaluate_runner import DEFAULT_SERVER, run_evaluation, wake_hf_space
 
 # ── Data Loading ──────────────────────────────────────────────────────────────
 
@@ -121,6 +127,134 @@ def filter_leaderboard(
     return add_type_badges(df)
 
 
+# ── Result Persistence ────────────────────────────────────────────────────────
+
+SUBMISSIONS_DIR = Path(__file__).parent / "submissions"
+SUBMISSIONS_DIR.mkdir(exist_ok=True)
+
+# CommitScheduler pushes submissions to HF dataset (only on HF Spaces)
+_scheduler = None
+if os.environ.get("HF_TOKEN") and os.environ.get("SPACE_ID"):
+    try:
+        from huggingface_hub import CommitScheduler
+
+        _scheduler = CommitScheduler(
+            repo_id="openra-rl/bench-results",
+            repo_type="dataset",
+            folder_path=str(SUBMISSIONS_DIR),
+            every=5,
+            token=os.environ["HF_TOKEN"],
+        )
+    except Exception:
+        pass  # Running locally without HF token — skip
+
+
+def save_submission(results: dict) -> None:
+    """Append results to local JSONL and CSV."""
+    # JSONL for CommitScheduler → HF dataset
+    jsonl_path = SUBMISSIONS_DIR / "results.jsonl"
+    with open(jsonl_path, "a") as f:
+        f.write(json.dumps(results) + "\n")
+
+    # Also append to data/results.csv for the leaderboard
+    csv_path = DATA_PATH
+    file_exists = csv_path.exists() and csv_path.stat().st_size > 0
+    fieldnames = [
+        "agent_name", "agent_type", "opponent", "games", "win_rate",
+        "score", "avg_kills", "avg_deaths", "kd_ratio", "avg_economy",
+        "avg_game_length", "timestamp", "replay_url",
+    ]
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(results)
+
+
+# ── Evaluation Handler ────────────────────────────────────────────────────────
+
+
+def run_eval_sync(agent_name: str, opponent: str, num_games: int):
+    """Generator that runs evaluation and yields progress updates."""
+    if not agent_name or not agent_name.strip():
+        yield "Error: Please enter an agent name.", None, ""
+        return
+
+    agent_name = agent_name.strip()
+    num_games = int(num_games)
+
+    log_lines = []
+
+    def log(msg: str):
+        log_lines.append(msg)
+        return "\n".join(log_lines)
+
+    # Wake server
+    yield log(f"Connecting to {DEFAULT_SERVER}..."), None, ""
+    status = wake_hf_space(DEFAULT_SERVER)
+    yield log(status), None, ""
+
+    # Track per-game progress
+    game_log = []
+
+    def on_game_done(game_num, total, metrics):
+        result = metrics["result"] or "timeout"
+        kd = metrics["kd_ratio"]
+        game_log.append({
+            "Game": game_num,
+            "Result": result,
+            "K/D": round(kd, 1),
+            "Ticks": metrics["ticks"],
+        })
+
+    yield log(f"Running {num_games} game(s) vs {opponent} AI..."), None, ""
+
+    try:
+        results = asyncio.run(
+            run_evaluation(
+                agent_name=agent_name,
+                opponent=opponent,
+                num_games=num_games,
+                server_url=DEFAULT_SERVER,
+                on_game_done=on_game_done,
+            )
+        )
+    except Exception as e:
+        yield log(f"Error: {e}"), None, ""
+        return
+
+    # Save results
+    save_submission(results)
+
+    # Format output
+    for g in game_log:
+        log(f"  Game {g['Game']}: {g['Result']} (K/D: {g['K/D']}, ticks: {g['Ticks']})")
+
+    log(f"\nEvaluation complete!")
+
+    summary = (
+        f"### Results: {agent_name}\n\n"
+        f"| Metric | Value |\n|--------|-------|\n"
+        f"| **Score** | **{results['score']}** |\n"
+        f"| Win Rate | {results['win_rate']}% |\n"
+        f"| K/D Ratio | {results['kd_ratio']} |\n"
+        f"| Avg Economy | {results['avg_economy']} |\n"
+        f"| Games | {results['games']} vs {results['opponent']} |\n"
+    )
+
+    results_df = pd.DataFrame([{
+        "Agent": results["agent_name"],
+        "Type": results["agent_type"],
+        "Opponent": results["opponent"],
+        "Games": results["games"],
+        "Win Rate (%)": results["win_rate"],
+        "Score": results["score"],
+        "K/D Ratio": results["kd_ratio"],
+    }])
+
+    yield "\n".join(log_lines), results_df, summary
+
+
 # ── UI ────────────────────────────────────────────────────────────────────────
 
 ABOUT_MD = """
@@ -166,20 +300,19 @@ The benchmark score combines three components:
 SUBMIT_MD = """
 ## How to Submit Results
 
-### 1. Set up the evaluation harness
+### Option A: In-Browser (no setup needed)
+
+Use the **Evaluate** tab to run a scripted agent directly from your browser.
+Results are saved to the leaderboard automatically.
+
+### Option B: CLI with HuggingFace-hosted server (no Docker needed)
 
 ```bash
 git clone https://github.com/yxc20089/OpenRA-Bench.git
 cd OpenRA-Bench
 pip install -r requirements.txt
 pip install openra-rl openra-rl-util
-```
 
-### 2. Run the evaluation
-
-**Option A: HuggingFace-hosted (no Docker needed)**
-
-```bash
 python evaluate.py \\
     --agent scripted \\
     --agent-name "MyBot-v1" \\
@@ -189,7 +322,7 @@ python evaluate.py \\
     --server https://openra-rl-openra-rl.hf.space
 ```
 
-**Option B: Local server (Docker)**
+### Option C: Local server (Docker)**
 
 ```bash
 git clone --recursive https://github.com/yxc20089/OpenRA-RL.git
@@ -305,6 +438,52 @@ def build_app() -> gr.Blocks:
                         inputs=[search_box, type_filter, opponent_filter],
                         outputs=leaderboard,
                     )
+
+            # ── Evaluate Tab ──────────────────────────────────────────────
+            with gr.Tab("Evaluate"):
+                gr.Markdown(
+                    "## Run Evaluation\n\n"
+                    "Run a scripted agent against the HuggingFace-hosted "
+                    "OpenRA-RL environment. No Docker or local setup needed."
+                )
+                with gr.Row():
+                    eval_name = gr.Textbox(
+                        label="Agent Name",
+                        placeholder="e.g. MyBot-v1",
+                        scale=2,
+                    )
+                    eval_opponent = gr.Dropdown(
+                        choices=["Easy", "Normal", "Hard"],
+                        value="Normal",
+                        label="Opponent",
+                        scale=1,
+                    )
+                    eval_games = gr.Slider(
+                        minimum=1,
+                        maximum=20,
+                        value=3,
+                        step=1,
+                        label="Games",
+                        scale=1,
+                    )
+                eval_btn = gr.Button("Run Evaluation", variant="primary")
+
+                eval_log = gr.Textbox(
+                    label="Progress",
+                    lines=10,
+                    interactive=False,
+                )
+                eval_results = gr.Dataframe(
+                    label="Game Results",
+                    interactive=False,
+                )
+                eval_summary = gr.Markdown()
+
+                eval_btn.click(
+                    fn=run_eval_sync,
+                    inputs=[eval_name, eval_opponent, eval_games],
+                    outputs=[eval_log, eval_results, eval_summary],
+                )
 
             # ── About Tab ─────────────────────────────────────────────────
             with gr.Tab("About"):
