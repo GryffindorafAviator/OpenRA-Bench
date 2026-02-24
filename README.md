@@ -67,3 +67,4 @@ python evaluate.py \
 - [OpenRA-RL Documentation](https://openra-rl.dev)
 - [OpenRA-RL GitHub](https://github.com/yxc20089/OpenRA-RL)
 - [OpenEnv Framework](https://huggingface.co/openenv)
+- [HuggingFace Space](https://huggingface.co/spaces/openra-rl/OpenRA-Bench)

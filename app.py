@@ -160,6 +160,7 @@ The benchmark score combines three components:
 - [GitHub Repository](https://github.com/yxc20089/OpenRA-RL)
 - [OpenRA-Bench Source](https://github.com/yxc20089/OpenRA-Bench)
 - [OpenEnv Framework](https://huggingface.co/openenv)
+- [HuggingFace Space](https://huggingface.co/spaces/openra-rl/OpenRA-Bench)
 """
 
 SUBMIT_MD = """
