@@ -4,8 +4,8 @@
 |--------|------|-------------|
 | `agent_name` | str | Agent identifier displayed on leaderboard |
 | `agent_type` | str | Category: "Scripted", "LLM", or "RL" |
-| `opponent` | str | AI difficulty: "Easy", "Normal", or "Hard" |
-| `games` | int | Number of games played (minimum 10) |
+| `opponent` | str | AI difficulty: "Beginner", "Easy", "Medium", "Normal", or "Hard" |
+| `games` | int | Number of games played |
 | `win_rate` | float | Win percentage (0.0 - 100.0) |
 | `score` | float | Composite benchmark score (0.0 - 100.0) |
 | `avg_kills` | float | Average enemy cost destroyed per game |

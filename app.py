@@ -19,7 +19,7 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 
-from evaluate_runner import DEFAULT_SERVER
+from evaluate_runner import DEFAULT_SERVER, compute_composite_score, compute_game_metrics
 
 # ── Data Loading ──────────────────────────────────────────────────────────────
 
@@ -170,6 +170,127 @@ def save_submission(results: dict) -> None:
         writer.writerow(results)
 
 
+# ── Submission Handling ───────────────────────────────────────────────────────
+
+VALID_OPPONENTS = {"Beginner", "Easy", "Medium", "Normal", "Hard"}
+VALID_AGENT_TYPES = {"Scripted", "LLM", "RL"}
+REQUIRED_FIELDS = [
+    "agent_name", "agent_type", "opponent", "result",
+    "ticks", "kills_cost", "deaths_cost", "assets_value",
+]
+
+
+def validate_submission(data: dict) -> tuple[bool, str]:
+    """Validate an uploaded JSON submission.
+
+    Returns (is_valid, error_message).
+    """
+    for field in REQUIRED_FIELDS:
+        if field not in data:
+            return False, f"Missing required field: {field}"
+
+    if data["agent_type"] not in VALID_AGENT_TYPES:
+        return False, (
+            f"Invalid agent_type: {data['agent_type']}. "
+            f"Must be one of: {', '.join(sorted(VALID_AGENT_TYPES))}"
+        )
+
+    if data["opponent"] not in VALID_OPPONENTS:
+        return False, (
+            f"Invalid opponent: {data['opponent']}. "
+            f"Must be one of: {', '.join(sorted(VALID_OPPONENTS))}"
+        )
+
+    return True, ""
+
+
+def _score_from_submission(data: dict) -> dict:
+    """Build a CSV-ready results dict from a validated submission."""
+    game_result = {
+        "result": data.get("result", ""),
+        "win": data.get("win", data.get("result") == "win"),
+        "ticks": data.get("ticks", 0),
+        "kills_cost": data.get("kills_cost", 0),
+        "deaths_cost": data.get("deaths_cost", 0),
+        "kd_ratio": data.get("kd_ratio", 0),
+        "assets_value": data.get("assets_value", 0),
+        "cash": data.get("cash", 0),
+    }
+    score = compute_composite_score([game_result])
+    kills = data.get("kills_cost", 0)
+    deaths = data.get("deaths_cost", 0)
+    games = data.get("games", 1)
+
+    return {
+        "agent_name": data["agent_name"],
+        "agent_type": data["agent_type"],
+        "opponent": data["opponent"],
+        "games": games,
+        "win_rate": round(100.0 * (1 if data.get("win") else 0) / max(games, 1), 1),
+        "score": round(score, 1),
+        "avg_kills": kills,
+        "avg_deaths": deaths,
+        "kd_ratio": round(kills / max(deaths, 1), 2),
+        "avg_economy": data.get("assets_value", 0),
+        "avg_game_length": data.get("ticks", 0),
+        "timestamp": data.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%d"))[:10],
+        "replay_url": "",
+    }
+
+
+def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
+    """Process an uploaded bench submission JSON + optional replay."""
+    if json_file is None:
+        return "Please upload a JSON file.", add_type_badges(load_data())
+
+    try:
+        with open(json_file.name) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, Exception) as e:
+        return f"Invalid JSON: {e}", add_type_badges(load_data())
+
+    is_valid, error = validate_submission(data)
+    if not is_valid:
+        return f"Validation error: {error}", add_type_badges(load_data())
+
+    results_row = _score_from_submission(data)
+
+    # Save replay if provided
+    if replay_file is not None:
+        import shutil
+        replay_name = Path(replay_file.name).name
+        shutil.copy2(replay_file.name, SUBMISSIONS_DIR / replay_name)
+        results_row["replay_url"] = replay_name
+
+    save_submission(results_row)
+
+    return (
+        f"Submitted! **{data['agent_name']}** ({data['agent_type']}) "
+        f"vs {data['opponent']}: score **{results_row['score']}**",
+        add_type_badges(load_data()),
+    )
+
+
+def handle_api_submit(json_data: str) -> str:
+    """API endpoint: accept JSON string submission. Used by CLI auto-upload."""
+    try:
+        data = json.loads(json_data)
+    except (json.JSONDecodeError, Exception) as e:
+        return f"Invalid JSON: {e}"
+
+    is_valid, error = validate_submission(data)
+    if not is_valid:
+        return f"Validation error: {error}"
+
+    results_row = _score_from_submission(data)
+    save_submission(results_row)
+
+    return (
+        f"OK: {data['agent_name']} ({data['agent_type']}) "
+        f"vs {data['opponent']}: score {results_row['score']}"
+    )
+
+
 # ── UI ────────────────────────────────────────────────────────────────────────
 
 ABOUT_MD = """
@@ -183,7 +304,7 @@ ABOUT_MD = """
 
 - **Game**: Red Alert (OpenRA engine)
 - **Format**: 1v1 agent vs built-in AI
-- **Opponents**: Easy, Normal, Hard difficulty
+- **Opponents**: Beginner, Easy, Medium, Normal, Hard difficulty
 - **Games per entry**: Minimum 10 games per configuration
 - **Metrics**: Win rate, composite score, K/D ratio, economy
 
@@ -213,15 +334,30 @@ The benchmark score combines three components:
 """
 
 SUBMIT_MD = """
-## How to Submit Results
+---
 
-### Option A: Watch AI Play (no setup needed)
+## Other Submission Methods
 
-Visit the [OpenRA-RL Space](https://huggingface.co/spaces/openra-rl/openra-rl)
-and click **Try** to watch a pre-configured LLM agent play Red Alert
-directly in your browser. No API keys or setup required.
+### CLI Auto-Upload
 
-### Option B: CLI with HuggingFace-hosted server (no Docker needed)
+Set `BENCH_URL` in your OpenRA-RL config and results upload automatically
+after each game:
+
+```yaml
+# config.yaml
+agent:
+  bench_url: "https://openra-rl-openra-bench.hf.space"
+```
+
+### CLI Manual Upload
+
+Upload a previously exported bench JSON:
+
+```bash
+python -m openra_env.bench_submit ~/.openra-rl/bench-exports/bench-*.json
+```
+
+### Batch Evaluation (10+ games)
 
 ```bash
 git clone https://github.com/yxc20089/OpenRA-Bench.git
@@ -235,33 +371,8 @@ python evaluate.py \\
     --agent-type Scripted \\
     --opponent Normal \\
     --games 10 \\
-    --server https://openra-rl-openra-rl.hf.space
-```
-
-### Option C: Local server (Docker)**
-
-```bash
-git clone --recursive https://github.com/yxc20089/OpenRA-RL.git
-cd OpenRA-RL && pip install -e . && docker compose up openra-rl
-cd /path/to/OpenRA-Bench
-
-python evaluate.py \\
-    --agent scripted \\
-    --agent-name "MyBot-v1" \\
-    --agent-type Scripted \\
-    --opponent Normal \\
-    --games 10 \\
     --server http://localhost:8000
 ```
-
-### 3. Submit via Pull Request
-
-1. Fork [OpenRA-Bench](https://github.com/yxc20089/OpenRA-Bench)
-2. Run the evaluation (results append to `data/results.csv`)
-3. Commit and open a PR with:
-   - Your updated `data/results.csv`
-   - A description of your agent
-   - (Optional) Replay files in `replays/`
 
 ### Evaluation Parameters
 
@@ -270,19 +381,19 @@ python evaluate.py \\
 | `--agent` | Agent type: `scripted`, `llm`, `mcp`, `custom` |
 | `--agent-name` | Display name on the leaderboard |
 | `--agent-type` | Category: `Scripted`, `LLM`, `RL` |
-| `--opponent` | AI difficulty: `Easy`, `Normal`, `Hard` |
+| `--opponent` | AI difficulty: `Beginner`, `Easy`, `Medium`, `Normal`, `Hard` |
 | `--games` | Number of games (minimum 10) |
 | `--server` | OpenRA-RL server URL (local or HuggingFace-hosted) |
 
 ### Custom Agents
 
-For custom agents, implement the standard `reset/step` loop:
+Implement the standard `reset/step` loop:
 
 ```python
 from openra_env.client import OpenRAEnv
 from openra_env.models import OpenRAAction
 
-async with OpenRAEnv("https://openra-rl-openra-rl.hf.space") as env:
+async with OpenRAEnv("http://localhost:8000") as env:
     obs = await env.reset()
     while not obs.done:
         action = your_agent.decide(obs)
@@ -320,7 +431,7 @@ def build_app() -> gr.Blocks:
                         scale=2,
                     )
                     opponent_filter = gr.Dropdown(
-                        choices=["All", "Easy", "Normal", "Hard"],
+                        choices=["All", "Beginner", "Easy", "Medium", "Normal", "Hard"],
                         value="All",
                         label="Opponent",
                         scale=1,
@@ -361,6 +472,43 @@ def build_app() -> gr.Blocks:
 
             # ── Submit Tab ────────────────────────────────────────────────
             with gr.Tab("Submit"):
+                gr.Markdown(
+                    "## Upload Results\n\n"
+                    "Upload a bench export JSON from your OpenRA-RL game. "
+                    "After each game, the agent saves a JSON file to "
+                    "`~/.openra-rl/bench-exports/`."
+                )
+                with gr.Row():
+                    json_upload = gr.File(
+                        label="Bench export JSON",
+                        file_types=[".json"],
+                        scale=3,
+                    )
+                    replay_upload = gr.File(
+                        label="Replay file (optional)",
+                        file_types=[".orarep"],
+                        scale=2,
+                    )
+                submit_btn = gr.Button("Submit Results", variant="primary")
+                submit_output = gr.Markdown()
+
+                submit_btn.click(
+                    fn=handle_upload,
+                    inputs=[json_upload, replay_upload],
+                    outputs=[submit_output, leaderboard],
+                )
+
+                # API endpoint for CLI auto-upload
+                api_json_input = gr.Textbox(visible=False)
+                api_result = gr.Textbox(visible=False)
+                api_btn = gr.Button(visible=False)
+                api_btn.click(
+                    fn=handle_api_submit,
+                    inputs=[api_json_input],
+                    outputs=[api_result],
+                    api_name="submit",
+                )
+
                 gr.Markdown(SUBMIT_MD)
 
     return app

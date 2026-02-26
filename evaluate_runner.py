@@ -128,7 +128,7 @@ async def run_evaluation(
 
     Args:
         agent_name: Display name for the leaderboard.
-        opponent: AI difficulty (Easy/Normal/Hard).
+        opponent: AI difficulty (Beginner/Easy/Medium/Normal/Hard).
         num_games: Number of games to play.
         server_url: OpenRA-RL server URL.
         on_game_done: Optional callback(game_num, total, metrics) after each game.

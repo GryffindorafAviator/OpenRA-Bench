@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--opponent",
-        choices=["Easy", "Normal", "Hard"],
+        choices=["Beginner", "Easy", "Medium", "Normal", "Hard"],
         default="Normal",
         help="AI opponent difficulty (default: Normal)",
     )
