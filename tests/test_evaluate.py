@@ -154,24 +154,24 @@ class TestAppendResults:
         assert len(RESULTS_COLUMNS) == 13
 
 
-class TestScoringUsesUtil:
-    """Verify scoring uses the single source of truth from openra-rl-util."""
+class TestScoringSource:
+    """Verify scoring uses the inlined functions from evaluate_runner."""
 
-    def test_rubrics_re_exports_util(self):
-        """rubrics.py should re-export from openra_rl_util."""
-        from rubrics import compute_composite_score_from_games
-        from openra_rl_util.rubrics import (
-            compute_composite_score_from_games as util_fn,
-        )
-        assert compute_composite_score_from_games is util_fn
+    def test_evaluate_imports_from_runner(self):
+        """evaluate.py should import scoring from evaluate_runner."""
+        from evaluate import compute_composite_score_from_games
+        from evaluate_runner import compute_composite_score
+        assert compute_composite_score_from_games is compute_composite_score
 
-    def test_evaluate_uses_util_scoring(self):
-        """evaluate.py should not have its own compute_composite_score."""
-        import evaluate
-        assert not hasattr(evaluate, "compute_composite_score"), \
-            "evaluate.py should use compute_composite_score_from_games from Util"
+    def test_compute_game_metrics_from_runner(self):
+        """evaluate.py should import compute_game_metrics from evaluate_runner."""
+        from evaluate import compute_game_metrics
+        from evaluate_runner import compute_game_metrics as runner_fn
+        assert compute_game_metrics is runner_fn
 
-    def test_compute_game_metrics_re_exported(self):
-        from rubrics import compute_game_metrics
-        from openra_rl_util.rubrics import compute_game_metrics as util_fn
-        assert compute_game_metrics is util_fn
+    def test_score_calculation_basic(self):
+        """Inlined compute_composite_score should produce valid scores."""
+        from evaluate_runner import compute_composite_score
+        games = [{"win": True, "kills_cost": 3000, "deaths_cost": 1000, "assets_value": 8000}]
+        score = compute_composite_score(games)
+        assert 0 < score <= 100

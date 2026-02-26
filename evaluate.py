@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 from urllib.request import urlopen
 
-from openra_rl_util.rubrics import compute_composite_score_from_games, compute_game_metrics
+from evaluate_runner import compute_composite_score as compute_composite_score_from_games, compute_game_metrics
 
 # Evaluation results file
 RESULTS_FILE = Path(__file__).parent / "data" / "results.csv"
