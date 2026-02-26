@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--opponent",
-        choices=["Easy", "Normal", "Hard"],
+        choices=["Beginner", "Easy", "Medium", "Normal", "Hard"],
         default="Normal",
         help="AI opponent difficulty (default: Normal)",
     )
@@ -149,16 +149,10 @@ async def run_game(env: Any, agent_fn: Any, max_steps: int) -> Dict[str, Any]:
 def get_agent_fn(agent_type: str) -> Any:
     """Get the agent decision function for the specified type.
 
-    Returns a callable that takes an observation and returns an action.
+    Returns a callable that takes an observation and returns an action dict.
     """
-    if agent_type == "scripted":
-        from openra_env.models import OpenRAAction
-        # Simple no-op agent for evaluation framework testing
-        # TODO: Wire to openra_env.agents.scripted.ScriptedBot when extracted
-        return lambda obs: OpenRAAction(commands=[])
-    else:
-        from openra_env.models import OpenRAAction
-        return lambda obs: OpenRAAction(commands=[])
+    # No-op agent: sends empty commands each step
+    return lambda obs: {"commands": []}
 
 
 def _wake_hf_space(server_url: str, max_wait: int = 120) -> None:

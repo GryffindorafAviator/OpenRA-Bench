@@ -12,10 +12,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app import (
     AGENT_TYPE_COLORS,
     DISPLAY_COLUMNS,
+    VALID_OPPONENTS,
     add_type_badges,
     build_app,
     filter_leaderboard,
+    handle_api_submit,
     load_data,
+    validate_submission,
 )
 
 
@@ -80,16 +83,19 @@ class TestFilter:
         assert isinstance(df, pd.DataFrame)
 
     def test_search_filters_by_name(self):
-        df = filter_leaderboard("ScriptedBot", [], "All")
-        # If there are results, they should contain "ScriptedBot"
+        df = filter_leaderboard("qwen", [], "All")
         if len(df) > 0:
-            # Badges are in the Type column, not Agent
-            assert all("ScriptedBot" in str(row) for row in df["Agent"])
+            assert all("qwen" in str(row).lower() for row in df["Agent"])
 
     def test_opponent_filter(self):
-        df = filter_leaderboard("", [], "Hard")
+        df = filter_leaderboard("", [], "Beginner")
         if len(df) > 0:
-            assert all(df["Opponent"] == "Hard")
+            assert all(df["Opponent"] == "Beginner")
+
+    def test_opponent_filter_hard(self):
+        df = filter_leaderboard("", [], "Hard")
+        # May be empty if no Hard entries exist
+        assert isinstance(df, pd.DataFrame)
 
 
 class TestBuildApp:
@@ -98,3 +104,94 @@ class TestBuildApp:
     def test_builds_without_error(self):
         app = build_app()
         assert app is not None
+
+
+class TestValidateSubmission:
+    """Test submission validation."""
+
+    def _valid_data(self):
+        return {
+            "agent_name": "TestBot",
+            "agent_type": "LLM",
+            "opponent": "Beginner",
+            "result": "loss",
+            "ticks": 27000,
+            "kills_cost": 1000,
+            "deaths_cost": 2900,
+            "assets_value": 9050,
+        }
+
+    def test_valid_submission(self):
+        valid, err = validate_submission(self._valid_data())
+        assert valid
+        assert err == ""
+
+    def test_missing_field(self):
+        data = {"agent_name": "Bot"}
+        valid, err = validate_submission(data)
+        assert not valid
+        assert "Missing required field" in err
+
+    def test_invalid_opponent(self):
+        data = self._valid_data()
+        data["opponent"] = "Brutal"
+        valid, err = validate_submission(data)
+        assert not valid
+        assert "Invalid opponent" in err
+
+    def test_invalid_agent_type(self):
+        data = self._valid_data()
+        data["agent_type"] = "MCTS"
+        valid, err = validate_submission(data)
+        assert not valid
+        assert "Invalid agent_type" in err
+
+    def test_all_opponents_accepted(self):
+        for opp in VALID_OPPONENTS:
+            data = self._valid_data()
+            data["opponent"] = opp
+            valid, _ = validate_submission(data)
+            assert valid, f"Opponent '{opp}' should be valid"
+
+    def test_all_agent_types_accepted(self):
+        for at in ["Scripted", "LLM", "RL"]:
+            data = self._valid_data()
+            data["agent_type"] = at
+            valid, _ = validate_submission(data)
+            assert valid, f"Agent type '{at}' should be valid"
+
+
+class TestApiSubmit:
+    """Test API submission handler."""
+
+    def test_valid_json(self):
+        import json
+        data = {
+            "agent_name": "TestBot",
+            "agent_type": "LLM",
+            "opponent": "Easy",
+            "result": "win",
+            "win": True,
+            "ticks": 5000,
+            "kills_cost": 3000,
+            "deaths_cost": 1000,
+            "assets_value": 8000,
+        }
+        # Use a temp CSV to avoid polluting real data
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            temp_path = Path(f.name)
+        with patch("app.DATA_PATH", temp_path):
+            result = handle_api_submit(json.dumps(data))
+            assert "OK" in result
+            assert "TestBot" in result
+        temp_path.unlink(missing_ok=True)
+
+    def test_invalid_json(self):
+        result = handle_api_submit("not json")
+        assert "Invalid JSON" in result
+
+    def test_missing_fields(self):
+        import json
+        result = handle_api_submit(json.dumps({"agent_name": "Bot"}))
+        assert "Validation error" in result

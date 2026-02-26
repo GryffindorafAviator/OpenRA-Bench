@@ -72,6 +72,20 @@ class TestParseArgs:
             args = parse_args()
             assert args.agent_type == "RL"
 
+    def test_beginner_opponent_accepted(self):
+        with patch("sys.argv", [
+            "evaluate.py", "--agent-name", "T", "--opponent", "Beginner",
+        ]):
+            args = parse_args()
+            assert args.opponent == "Beginner"
+
+    def test_medium_opponent_accepted(self):
+        with patch("sys.argv", [
+            "evaluate.py", "--agent-name", "T", "--opponent", "Medium",
+        ]):
+            args = parse_args()
+            assert args.opponent == "Medium"
+
 
 class TestGetAgentFn:
     """Test agent factory."""
