@@ -45,6 +45,7 @@ DISPLAY_COLUMNS = [
     "Avg Economy",
     "Avg Game Length",
     "Date",
+    "Replay",
 ]
 
 
@@ -57,9 +58,33 @@ def load_data() -> pd.DataFrame:
     df = df.sort_values("score", ascending=False).reset_index(drop=True)
     df.insert(0, "Rank", range(1, len(df) + 1))
 
+    # Build agent name with optional hyperlink
+    if "agent_url" in df.columns:
+        df["Agent"] = df.apply(
+            lambda r: (
+                f'<a href="{r["agent_url"]}" target="_blank">{r["agent_name"]}</a>'
+                if pd.notna(r.get("agent_url")) and str(r["agent_url"]).strip()
+                else r["agent_name"]
+            ),
+            axis=1,
+        )
+    else:
+        df["Agent"] = df["agent_name"]
+
+    # Build replay download link
+    if "replay_url" in df.columns:
+        df["Replay"] = df["replay_url"].apply(
+            lambda u: (
+                f'<a href="/replays/{u}" download title="Download replay">&#11015;</a>'
+                if pd.notna(u) and str(u).strip()
+                else ""
+            )
+        )
+    else:
+        df["Replay"] = ""
+
     # Rename for display
     df = df.rename(columns={
-        "agent_name": "Agent",
         "agent_type": "Type",
         "opponent": "Opponent",
         "games": "Games",
@@ -161,7 +186,7 @@ def save_submission(results: dict) -> None:
     fieldnames = [
         "agent_name", "agent_type", "opponent", "games", "win_rate",
         "score", "avg_kills", "avg_deaths", "kd_ratio", "avg_economy",
-        "avg_game_length", "timestamp", "replay_url",
+        "avg_game_length", "timestamp", "replay_url", "agent_url",
     ]
     with open(csv_path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -235,6 +260,7 @@ def _score_from_submission(data: dict) -> dict:
         "avg_game_length": data.get("ticks", 0),
         "timestamp": data.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%d"))[:10],
         "replay_url": "",
+        "agent_url": data.get("agent_url", ""),
     }
 
 
@@ -283,6 +309,39 @@ def handle_api_submit(json_data: str) -> str:
         return f"Validation error: {error}"
 
     results_row = _score_from_submission(data)
+    save_submission(results_row)
+
+    return (
+        f"OK: {data['agent_name']} ({data['agent_type']}) "
+        f"vs {data['opponent']}: score {results_row['score']}"
+    )
+
+
+def handle_api_submit_with_replay(json_data: str, replay_file) -> str:
+    """API endpoint: accept JSON + replay file. Used by CLI with --replay."""
+    try:
+        data = json.loads(json_data)
+    except (json.JSONDecodeError, Exception) as e:
+        return f"Invalid JSON: {e}"
+
+    is_valid, error = validate_submission(data)
+    if not is_valid:
+        return f"Validation error: {error}"
+
+    results_row = _score_from_submission(data)
+
+    # Save replay if provided
+    if replay_file is not None:
+        import shutil
+        from datetime import datetime, timezone
+
+        orig = Path(replay_file) if isinstance(replay_file, str) else Path(replay_file.name)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        slug = data["agent_name"].replace("/", "_").replace(" ", "_")[:30]
+        replay_name = f"replay-{slug}-{ts}.orarep"
+        shutil.copy2(str(orig), SUBMISSIONS_DIR / replay_name)
+        results_row["replay_url"] = replay_name
+
     save_submission(results_row)
 
     return (
@@ -441,7 +500,7 @@ def build_app() -> gr.Blocks:
                     value=initial_df,
                     datatype=[
                         "number",    # Rank
-                        "str",       # Agent
+                        "html",      # Agent (may contain hyperlink)
                         "html",      # Type (badge)
                         "str",       # Opponent
                         "number",    # Games
@@ -453,6 +512,7 @@ def build_app() -> gr.Blocks:
                         "number",    # Avg Economy
                         "number",    # Avg Game Length
                         "str",       # Date
+                        "html",      # Replay (download link)
                     ],
                     interactive=False,
                     show_label=False,
@@ -498,7 +558,7 @@ def build_app() -> gr.Blocks:
                     outputs=[submit_output, leaderboard],
                 )
 
-                # API endpoint for CLI auto-upload
+                # API endpoint for CLI auto-upload (JSON only)
                 api_json_input = gr.Textbox(visible=False)
                 api_result = gr.Textbox(visible=False)
                 api_btn = gr.Button(visible=False)
@@ -509,6 +569,18 @@ def build_app() -> gr.Blocks:
                     api_name="submit",
                 )
 
+                # API endpoint for CLI upload with replay
+                api_json_input2 = gr.Textbox(visible=False)
+                api_replay_input = gr.File(visible=False)
+                api_result2 = gr.Textbox(visible=False)
+                api_btn2 = gr.Button(visible=False)
+                api_btn2.click(
+                    fn=handle_api_submit_with_replay,
+                    inputs=[api_json_input2, api_replay_input],
+                    outputs=[api_result2],
+                    api_name="submit_with_replay",
+                )
+
                 gr.Markdown(SUBMIT_MD)
 
     return app
@@ -516,4 +588,4 @@ def build_app() -> gr.Blocks:
 
 if __name__ == "__main__":
     app = build_app()
-    app.launch()
+    app.launch(allowed_paths=[str(SUBMISSIONS_DIR)])

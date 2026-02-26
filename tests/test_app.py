@@ -17,6 +17,7 @@ from app import (
     build_app,
     filter_leaderboard,
     handle_api_submit,
+    handle_api_submit_with_replay,
     load_data,
     validate_submission,
 )
@@ -195,3 +196,115 @@ class TestApiSubmit:
         import json
         result = handle_api_submit(json.dumps({"agent_name": "Bot"}))
         assert "Validation error" in result
+
+
+class TestDisplayColumns:
+    """Test display column configuration."""
+
+    def test_replay_in_display_columns(self):
+        assert "Replay" in DISPLAY_COLUMNS
+
+    def test_display_columns_count(self):
+        assert len(DISPLAY_COLUMNS) == 14
+
+
+class TestAgentUrl:
+    """Test agent URL hyperlink rendering."""
+
+    def test_agent_url_in_submission(self):
+        import json
+        import tempfile
+        data = {
+            "agent_name": "DeathBot",
+            "agent_type": "RL",
+            "agent_url": "https://github.com/user/deathbot",
+            "opponent": "Normal",
+            "result": "win",
+            "ticks": 5000,
+            "kills_cost": 3000,
+            "deaths_cost": 1000,
+            "assets_value": 8000,
+        }
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            temp_path = Path(f.name)
+        with patch("app.DATA_PATH", temp_path):
+            result = handle_api_submit(json.dumps(data))
+            assert "OK" in result
+            assert "DeathBot" in result
+        temp_path.unlink(missing_ok=True)
+
+    def test_agent_url_renders_link(self):
+        """When agent_url is set, Agent column should be a hyperlink."""
+        import tempfile
+        csv_content = (
+            "agent_name,agent_type,opponent,games,win_rate,score,"
+            "avg_kills,avg_deaths,kd_ratio,avg_economy,avg_game_length,"
+            "timestamp,replay_url,agent_url\n"
+            "DeathBot,RL,Normal,10,50.0,60.0,"
+            "2000,1500,1.33,9000,15000,"
+            "2026-02-26,,https://github.com/user/deathbot\n"
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False
+        ) as f:
+            f.write(csv_content)
+            temp_path = Path(f.name)
+        with patch("app.DATA_PATH", temp_path):
+            df = load_data()
+            assert '<a href="https://github.com/user/deathbot"' in df["Agent"].iloc[0]
+        temp_path.unlink(missing_ok=True)
+
+    def test_no_url_renders_plain_name(self):
+        """When agent_url is empty, Agent column is plain text."""
+        import tempfile
+        csv_content = (
+            "agent_name,agent_type,opponent,games,win_rate,score,"
+            "avg_kills,avg_deaths,kd_ratio,avg_economy,avg_game_length,"
+            "timestamp,replay_url,agent_url\n"
+            "PlainBot,LLM,Easy,5,20.0,30.0,"
+            "1000,2000,0.5,5000,10000,"
+            "2026-02-26,,\n"
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False
+        ) as f:
+            f.write(csv_content)
+            temp_path = Path(f.name)
+        with patch("app.DATA_PATH", temp_path):
+            df = load_data()
+            assert df["Agent"].iloc[0] == "PlainBot"
+        temp_path.unlink(missing_ok=True)
+
+
+class TestReplayColumn:
+    """Test replay download link rendering."""
+
+    def test_replay_link_rendered(self):
+        """Replay column shows download link when replay_url is set."""
+        import tempfile
+        csv_content = (
+            "agent_name,agent_type,opponent,games,win_rate,score,"
+            "avg_kills,avg_deaths,kd_ratio,avg_economy,avg_game_length,"
+            "timestamp,replay_url,agent_url\n"
+            "TestBot,LLM,Easy,1,0.0,18.0,"
+            "1000,2000,0.5,5000,10000,"
+            "2026-02-26,replay-test-123.orarep,\n"
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False
+        ) as f:
+            f.write(csv_content)
+            temp_path = Path(f.name)
+        with patch("app.DATA_PATH", temp_path):
+            df = load_data()
+            assert "/replays/replay-test-123.orarep" in df["Replay"].iloc[0]
+            assert "download" in df["Replay"].iloc[0]
+        temp_path.unlink(missing_ok=True)
+
+    def test_empty_replay_no_link(self):
+        """Replay column is empty when no replay_url."""
+        df = load_data()
+        if len(df) > 0:
+            # The default test data has no replay
+            replay_val = df["Replay"].iloc[0]
+            assert replay_val == "" or not str(replay_val).strip()
