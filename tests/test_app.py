@@ -12,7 +12,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app import (
     AGENT_TYPE_COLORS,
     DISPLAY_COLUMNS,
+    MAX_SUBMITS_PER_HOUR,
     VALID_OPPONENTS,
+    _check_rate_limit,
+    _safe_agent_link,
+    _safe_replay_link,
+    _sanitize_csv_value,
+    _submit_times,
     add_type_badges,
     build_app,
     filter_leaderboard,
@@ -308,3 +314,165 @@ class TestReplayColumn:
             # The default test data has no replay
             replay_val = df["Replay"].iloc[0]
             assert replay_val == "" or not str(replay_val).strip()
+
+
+class TestXssPrevention:
+    """Test that user input is HTML-escaped to prevent XSS."""
+
+    def test_javascript_url_blocked(self):
+        """javascript: URLs should NOT produce a clickable link."""
+        result = _safe_agent_link("Bot", "javascript:alert(1)")
+        assert "javascript:" not in result
+        assert "Bot" in result
+
+    def test_data_url_blocked(self):
+        result = _safe_agent_link("Bot", "data:text/html,<script>alert(1)</script>")
+        assert "data:" not in result
+
+    def test_html_in_name_escaped(self):
+        result = _safe_agent_link('<script>alert("xss")</script>', "")
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result
+
+    def test_quote_injection_in_url_escaped(self):
+        result = _safe_agent_link("Bot", 'https://ok.com" onclick="alert(1)')
+        assert 'onclick' not in result or '&quot;' in result
+
+    def test_valid_https_url_works(self):
+        result = _safe_agent_link("Bot", "https://github.com/user/repo")
+        assert '<a href="https://github.com/user/repo"' in result
+        assert 'rel="noopener"' in result
+
+    def test_replay_link_sanitized(self):
+        result = _safe_replay_link('"><script>alert(1)</script>.orarep')
+        assert "<script>" not in result
+
+    def test_replay_path_traversal_stripped(self):
+        """Path traversal characters (/) are stripped from replay filenames."""
+        result = _safe_replay_link("replay/../../../etc/passwd")
+        # The href after /replays/ should have no slashes (traversal stripped)
+        href_part = result.split('href="')[1].split('"')[0]
+        filename = href_part.replace("/replays/", "")
+        assert "/" not in filename
+
+
+class TestInputValidation:
+    """Test stricter input validation."""
+
+    def _valid_data(self):
+        return {
+            "agent_name": "TestBot",
+            "agent_type": "LLM",
+            "opponent": "Beginner",
+            "result": "loss",
+            "ticks": 27000,
+            "kills_cost": 1000,
+            "deaths_cost": 2900,
+            "assets_value": 9050,
+        }
+
+    def test_string_ticks_rejected(self):
+        data = self._valid_data()
+        data["ticks"] = "not a number"
+        valid, err = validate_submission(data)
+        assert not valid
+        assert "must be a number" in err
+
+    def test_dict_kills_rejected(self):
+        data = self._valid_data()
+        data["kills_cost"] = {"nested": True}
+        valid, err = validate_submission(data)
+        assert not valid
+
+    def test_long_agent_name_rejected(self):
+        data = self._valid_data()
+        data["agent_name"] = "A" * 101
+        valid, err = validate_submission(data)
+        assert not valid
+        assert "100 characters" in err
+
+    def test_javascript_agent_url_rejected(self):
+        data = self._valid_data()
+        data["agent_url"] = "javascript:alert(1)"
+        valid, err = validate_submission(data)
+        assert not valid
+        assert "HTTP(S)" in err
+
+    def test_valid_agent_url_accepted(self):
+        data = self._valid_data()
+        data["agent_url"] = "https://github.com/user/repo"
+        valid, _ = validate_submission(data)
+        assert valid
+
+    def test_empty_agent_url_accepted(self):
+        data = self._valid_data()
+        data["agent_url"] = ""
+        valid, _ = validate_submission(data)
+        assert valid
+
+    def test_long_agent_url_rejected(self):
+        data = self._valid_data()
+        data["agent_url"] = "https://example.com/" + "a" * 500
+        valid, err = validate_submission(data)
+        assert not valid
+        assert "500 characters" in err
+
+
+class TestCsvSanitization:
+    """Test CSV injection prevention."""
+
+    def test_formula_trigger_stripped(self):
+        assert _sanitize_csv_value("=cmd|'/c calc'!A0") == "cmd|'/c calc'!A0"
+
+    def test_plus_trigger_stripped(self):
+        assert _sanitize_csv_value("+cmd") == "cmd"
+
+    def test_at_trigger_stripped(self):
+        assert _sanitize_csv_value("@SUM(A1)") == "SUM(A1)"
+
+    def test_newlines_replaced(self):
+        assert _sanitize_csv_value("line1\nline2\rline3") == "line1 line2 line3"
+
+    def test_normal_string_unchanged(self):
+        assert _sanitize_csv_value("DeathBot-9000") == "DeathBot-9000"
+
+    def test_numbers_unchanged(self):
+        assert _sanitize_csv_value(42) == 42
+        assert _sanitize_csv_value(3.14) == 3.14
+
+
+class TestRateLimiting:
+    """Test rate limiting on submissions."""
+
+    def test_rate_limit_allows_normal_usage(self):
+        _submit_times.clear()
+        allowed, _ = _check_rate_limit("test_normal")
+        assert allowed
+
+    def test_rate_limit_blocks_after_max(self):
+        _submit_times.clear()
+        key = "test_flood"
+        for _ in range(MAX_SUBMITS_PER_HOUR):
+            allowed, _ = _check_rate_limit(key)
+            assert allowed
+        allowed, err = _check_rate_limit(key)
+        assert not allowed
+        assert "Rate limit" in err
+
+    def test_rate_limit_resets_after_expiry(self):
+        import time as _time
+        _submit_times.clear()
+        key = "test_expiry"
+        # Fill with old timestamps
+        _submit_times[key] = [_time.time() - 3601] * MAX_SUBMITS_PER_HOUR
+        allowed, _ = _check_rate_limit(key)
+        assert allowed
+
+
+class TestSearchSafety:
+    """Test that malformed regex doesn't crash the search."""
+
+    def test_invalid_regex_falls_back(self):
+        """An invalid regex pattern should not raise an exception."""
+        df = filter_leaderboard("[invalid(regex", [], "All")
+        assert isinstance(df, pd.DataFrame)

@@ -11,8 +11,12 @@ Deploy on HuggingFace Spaces:
 """
 
 import csv
+import html
 import json
 import os
+import re
+import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,6 +53,29 @@ DISPLAY_COLUMNS = [
 ]
 
 
+def _safe_agent_link(name: str, url) -> str:
+    """Render agent name, optionally as a hyperlink. HTML-escaped to prevent XSS."""
+    safe_name = html.escape(str(name))
+    if pd.notna(url) and str(url).strip():
+        url_str = str(url).strip()
+        # Only allow http/https URLs — block javascript:, data:, etc.
+        if url_str.startswith(("http://", "https://")):
+            safe_url = html.escape(url_str, quote=True)
+            return f'<a href="{safe_url}" target="_blank" rel="noopener">{safe_name}</a>'
+    return safe_name
+
+
+def _safe_replay_link(url) -> str:
+    """Render replay download link. Filename is sanitized to prevent XSS."""
+    if pd.notna(url) and str(url).strip():
+        # Sanitize: only allow alphanumeric, dash, underscore, dot
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "", str(url).strip())
+        if safe_name:
+            escaped = html.escape(safe_name, quote=True)
+            return f'<a href="/replays/{escaped}" download title="Download replay">&#11015;</a>'
+    return ""
+
+
 def load_data() -> pd.DataFrame:
     """Load leaderboard data from CSV."""
     if not DATA_PATH.exists():
@@ -58,28 +85,18 @@ def load_data() -> pd.DataFrame:
     df = df.sort_values("score", ascending=False).reset_index(drop=True)
     df.insert(0, "Rank", range(1, len(df) + 1))
 
-    # Build agent name with optional hyperlink
+    # Build agent name with optional hyperlink (XSS-safe)
     if "agent_url" in df.columns:
         df["Agent"] = df.apply(
-            lambda r: (
-                f'<a href="{r["agent_url"]}" target="_blank">{r["agent_name"]}</a>'
-                if pd.notna(r.get("agent_url")) and str(r["agent_url"]).strip()
-                else r["agent_name"]
-            ),
+            lambda r: _safe_agent_link(r.get("agent_name", ""), r.get("agent_url", "")),
             axis=1,
         )
     else:
-        df["Agent"] = df["agent_name"]
+        df["Agent"] = df["agent_name"].apply(lambda n: html.escape(str(n)))
 
-    # Build replay download link
+    # Build replay download link (XSS-safe)
     if "replay_url" in df.columns:
-        df["Replay"] = df["replay_url"].apply(
-            lambda u: (
-                f'<a href="/replays/{u}" download title="Download replay">&#11015;</a>'
-                if pd.notna(u) and str(u).strip()
-                else ""
-            )
-        )
+        df["Replay"] = df["replay_url"].apply(_safe_replay_link)
     else:
         df["Replay"] = ""
 
@@ -136,12 +153,17 @@ def filter_leaderboard(
     if opponent and opponent != "All":
         df = df[df["Opponent"] == opponent]
 
-    # Search by agent name (regex)
+    # Search by agent name (regex with fallback to literal on invalid patterns)
     if search and search.strip():
         patterns = [p.strip() for p in search.split(",") if p.strip()]
         mask = pd.Series([False] * len(df), index=df.index)
         for pattern in patterns:
-            mask |= df["Agent"].str.contains(pattern, case=False, regex=True, na=False)
+            try:
+                mask |= df["Agent"].str.contains(pattern, case=False, regex=True, na=False)
+            except re.error:
+                mask |= df["Agent"].str.contains(
+                    re.escape(pattern), case=False, regex=True, na=False
+                )
         df = df[mask]
 
     # Re-rank after filtering
@@ -173,6 +195,32 @@ if os.environ.get("HF_TOKEN") and os.environ.get("SPACE_ID"):
         pass  # Running locally without HF token — skip
 
 
+def _sanitize_csv_value(val):
+    """Strip leading characters that trigger formula execution in spreadsheets."""
+    if isinstance(val, str):
+        while val and val[0] in ("=", "+", "-", "@", "\t", "\r", "\n"):
+            val = val[1:]
+        val = val.replace("\n", " ").replace("\r", " ")
+    return val
+
+
+# ── Rate Limiting ────────────────────────────────────────────────────────────
+
+_submit_times: dict[str, list[float]] = defaultdict(list)
+MAX_SUBMITS_PER_HOUR = 20
+
+
+def _check_rate_limit(identifier: str = "global") -> tuple[bool, str]:
+    """Simple in-memory rate limiter. Returns (allowed, error_message)."""
+    now = time.time()
+    times = _submit_times[identifier]
+    _submit_times[identifier] = [t for t in times if now - t < 3600]
+    if len(_submit_times[identifier]) >= MAX_SUBMITS_PER_HOUR:
+        return False, "Rate limit exceeded (max 20 submissions per hour). Try again later."
+    _submit_times[identifier].append(now)
+    return True, ""
+
+
 def save_submission(results: dict) -> None:
     """Append results to local JSONL and CSV."""
     # JSONL for CommitScheduler → HF dataset
@@ -188,14 +236,17 @@ def save_submission(results: dict) -> None:
         "score", "avg_kills", "avg_deaths", "kd_ratio", "avg_economy",
         "avg_game_length", "timestamp", "replay_url", "agent_url",
     ]
+    safe_results = {k: _sanitize_csv_value(v) for k, v in results.items()}
     with open(csv_path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not file_exists:
             writer.writeheader()
-        writer.writerow(results)
+        writer.writerow(safe_results)
 
 
 # ── Submission Handling ───────────────────────────────────────────────────────
+
+MAX_REPLAY_SIZE = 10 * 1024 * 1024  # 10 MB
 
 VALID_OPPONENTS = {"Beginner", "Easy", "Medium", "Normal", "Hard"}
 VALID_AGENT_TYPES = {"Scripted", "LLM", "RL"}
@@ -225,6 +276,22 @@ def validate_submission(data: dict) -> tuple[bool, str]:
             f"Invalid opponent: {data['opponent']}. "
             f"Must be one of: {', '.join(sorted(VALID_OPPONENTS))}"
         )
+
+    # Type checks for numeric fields
+    for field in ("ticks", "kills_cost", "deaths_cost", "assets_value"):
+        if not isinstance(data[field], (int, float)):
+            return False, f"Field '{field}' must be a number"
+
+    # String length limits
+    if len(str(data["agent_name"])) > 100:
+        return False, "agent_name must be 100 characters or fewer"
+
+    # agent_url: optional, but must be http(s) if provided
+    agent_url = str(data.get("agent_url", "")).strip()
+    if agent_url and not agent_url.startswith(("http://", "https://")):
+        return False, "agent_url must be an HTTP(S) URL"
+    if len(agent_url) > 500:
+        return False, "agent_url must be 500 characters or fewer"
 
     return True, ""
 
@@ -269,6 +336,10 @@ def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
     if json_file is None:
         return "Please upload a JSON file.", add_type_badges(load_data())
 
+    allowed, err = _check_rate_limit()
+    if not allowed:
+        return err, add_type_badges(load_data())
+
     try:
         with open(json_file.name) as f:
             data = json.load(f)
@@ -284,8 +355,14 @@ def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
     # Save replay if provided
     if replay_file is not None:
         import shutil
-        replay_name = Path(replay_file.name).name
-        shutil.copy2(replay_file.name, SUBMISSIONS_DIR / replay_name)
+
+        orig = Path(replay_file.name)
+        if orig.stat().st_size > MAX_REPLAY_SIZE:
+            return "Replay file too large (max 10 MB).", add_type_badges(load_data())
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        slug = re.sub(r"[^a-zA-Z0-9_-]", "", data["agent_name"].replace("/", "_").replace(" ", "_"))[:30]
+        replay_name = f"replay-{slug}-{ts}.orarep"
+        shutil.copy2(str(orig), SUBMISSIONS_DIR / replay_name)
         results_row["replay_url"] = replay_name
 
     save_submission(results_row)
@@ -299,6 +376,10 @@ def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
 
 def handle_api_submit(json_data: str) -> str:
     """API endpoint: accept JSON string submission. Used by CLI auto-upload."""
+    allowed, err = _check_rate_limit()
+    if not allowed:
+        return err
+
     try:
         data = json.loads(json_data)
     except (json.JSONDecodeError, Exception) as e:
@@ -319,6 +400,10 @@ def handle_api_submit(json_data: str) -> str:
 
 def handle_api_submit_with_replay(json_data: str, replay_file) -> str:
     """API endpoint: accept JSON + replay file. Used by CLI with --replay."""
+    allowed, err = _check_rate_limit()
+    if not allowed:
+        return err
+
     try:
         data = json.loads(json_data)
     except (json.JSONDecodeError, Exception) as e:
@@ -333,11 +418,12 @@ def handle_api_submit_with_replay(json_data: str, replay_file) -> str:
     # Save replay if provided
     if replay_file is not None:
         import shutil
-        from datetime import datetime, timezone
 
         orig = Path(replay_file) if isinstance(replay_file, str) else Path(replay_file.name)
+        if orig.exists() and orig.stat().st_size > MAX_REPLAY_SIZE:
+            return "Replay file too large (max 10 MB)"
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        slug = data["agent_name"].replace("/", "_").replace(" ", "_")[:30]
+        slug = re.sub(r"[^a-zA-Z0-9_-]", "", data["agent_name"].replace("/", "_").replace(" ", "_"))[:30]
         replay_name = f"replay-{slug}-{ts}.orarep"
         shutil.copy2(str(orig), SUBMISSIONS_DIR / replay_name)
         results_row["replay_url"] = replay_name
