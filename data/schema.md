@@ -14,4 +14,5 @@
 | `avg_economy` | float | Average final assets_value per game |
 | `avg_game_length` | int | Average game duration in ticks |
 | `timestamp` | str | Evaluation date (ISO 8601, YYYY-MM-DD) |
-| `replay_url` | str | URL to replay file(s), empty if none |
+| `replay_url` | str | Replay filename in submissions/, empty if none |
+| `agent_url` | str | GitHub/project URL for the agent, empty if none |

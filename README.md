@@ -54,9 +54,45 @@ python evaluate.py \
 
 ### Submit results
 
+**Via CLI (recommended):**
+
+```bash
+pip install openra-rl
+openra-rl bench submit result.json
+openra-rl bench submit result.json --replay game.orarep --agent-name "MyBot" --agent-url "https://github.com/user/mybot"
+```
+
+Results from `openra-rl play` are auto-submitted after each game.
+
+**Via PR:**
+
 1. Fork this repo
 2. Run evaluation (appends to `data/results.csv`)
 3. Open a PR with your results
+
+### Agent identity
+
+Customize your leaderboard entry:
+
+| Field | Description |
+|-------|-------------|
+| `agent_name` | Display name (e.g. "DeathBot-9000") |
+| `agent_type` | `Scripted`, `LLM`, or `RL` |
+| `agent_url` | GitHub/project URL — renders as a clickable link on the leaderboard |
+
+### Replay downloads
+
+Entries submitted with a `.orarep` replay file show a download link in the Replay column. Replays are stored on the Space and served at `/replays/<filename>`.
+
+### API endpoints
+
+The Gradio app exposes these API endpoints (Gradio 5+ SSE protocol):
+
+| Endpoint | Description |
+|----------|-------------|
+| `submit` | Submit JSON results (no replay) |
+| `submit_with_replay` | Submit JSON + replay file |
+| `filter_leaderboard` | Query/filter leaderboard data |
 
 ## Scoring
 
