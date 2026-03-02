@@ -13,6 +13,7 @@ Deploy on HuggingFace Spaces:
 import csv
 import html
 import json
+import logging
 import os
 import re
 import time
@@ -24,6 +25,8 @@ import gradio as gr
 import pandas as pd
 
 from evaluate_runner import DIFFICULTY_MULTIPLIER, DEFAULT_SERVER, compute_composite_score, compute_game_metrics
+
+logger = logging.getLogger(__name__)
 
 # ── Data Loading ──────────────────────────────────────────────────────────────
 
@@ -39,6 +42,7 @@ DISPLAY_COLUMNS = [
     "Rank",
     "Agent",
     "Type",
+    "Status",
     "Opponent",
     "Games",
     "Win Rate (%)",
@@ -63,6 +67,23 @@ def _safe_agent_link(name: str, url) -> str:
             safe_url = html.escape(url_str, quote=True)
             return f'<a href="{safe_url}" target="_blank" rel="noopener">{safe_name}</a>'
     return safe_name
+
+
+def _verified_badge(verified) -> str:
+    """Render a Verified/Unverified HTML badge."""
+    if isinstance(verified, str):
+        verified = verified.lower() in ("true", "1", "yes")
+    if verified:
+        return (
+            '<span style="background:#4caf50;color:#fff;'
+            'padding:2px 8px;border-radius:4px;font-size:0.85em">'
+            'Verified</span>'
+        )
+    return (
+        '<span style="background:#ff9800;color:#fff;'
+        'padding:2px 8px;border-radius:4px;font-size:0.85em">'
+        'Unverified</span>'
+    )
 
 
 def _safe_replay_link(url) -> str:
@@ -99,6 +120,12 @@ def load_data() -> pd.DataFrame:
         df["Replay"] = df["replay_url"].apply(_safe_replay_link)
     else:
         df["Replay"] = ""
+
+    # Verified/Unverified badge
+    if "verified" in df.columns:
+        df["Status"] = df["verified"].apply(_verified_badge)
+    else:
+        df["Status"] = _verified_badge(True)  # Legacy data = verified
 
     # Rename for display
     df = df.rename(columns={
@@ -141,9 +168,15 @@ def filter_leaderboard(
     search: str,
     agent_types: list[str],
     opponent: str,
+    show_unverified: bool = True,
 ) -> pd.DataFrame:
-    """Filter leaderboard by search, agent type, and opponent."""
+    """Filter leaderboard by search, agent type, opponent, and verification status."""
     df = load_data()
+
+    # Filter by verification status
+    if not show_unverified:
+        df = df[df["Status"].str.contains("Verified</span>", na=False)
+               & ~df["Status"].str.contains("Unverified", na=False)]
 
     # Filter by agent type
     if agent_types:
@@ -224,17 +257,46 @@ def _check_rate_limit(identifier: str = "global") -> tuple[bool, str]:
     return True, ""
 
 
+# ── HF Identity Verification ─────────────────────────────────────────────────
+
+
+def _verify_hf_token(token: str) -> tuple[str, str]:
+    """Verify a HuggingFace token and return the username.
+
+    Returns (hf_username, error_message).
+    On success: ("username", "").
+    On failure: ("", "reason").
+    """
+    if not token or not token.strip():
+        return "", "no token provided"
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        info = api.whoami(token=token.strip())
+        username = info.get("name", "")
+        if not username:
+            return "", "token valid but no username found"
+        return username, ""
+    except Exception as e:
+        logger.debug("HF token verification failed: %s", e)
+        return "", f"invalid token: {e}"
+
+
 # ── Raw Game Storage & Aggregation ────────────────────────────────────────────
 
 
 def _save_raw_game(data: dict) -> None:
-    """Append a single game result to the raw games log."""
+    """Append a single game result to the raw games log.
+
+    Strips ``hf_token`` before writing (only ``hf_username`` is persisted).
+    """
+    safe = {k: v for k, v in data.items() if k != "hf_token"}
     with open(GAMES_JSONL, "a") as f:
-        f.write(json.dumps(data) + "\n")
+        f.write(json.dumps(safe) + "\n")
     # Also save to results.jsonl for CommitScheduler → HF dataset
     jsonl_path = SUBMISSIONS_DIR / "results.jsonl"
     with open(jsonl_path, "a") as f:
-        f.write(json.dumps(data) + "\n")
+        f.write(json.dumps(safe) + "\n")
 
 
 def _load_raw_games() -> list[dict]:
@@ -254,8 +316,13 @@ def _load_raw_games() -> list[dict]:
 def _aggregate_agent_games(
     agent_name: str, agent_type: str, opponent: str,
     all_games: list[dict] | None = None,
+    hf_username: str = "",
 ) -> tuple[int, dict | None]:
     """Aggregate all games for a specific agent+opponent pair.
+
+    When *hf_username* is non-empty, only games with a matching
+    ``hf_username`` are included. Anonymous games (empty hf_username)
+    are never aggregated.
 
     Returns (game_count, aggregated_row_or_None).
     aggregated_row is None if game_count < MIN_GAMES_FOR_LEADERBOARD.
@@ -263,11 +330,16 @@ def _aggregate_agent_games(
     if all_games is None:
         all_games = _load_raw_games()
 
+    if not hf_username:
+        # Anonymous games are not aggregated
+        return 0, None
+
     matching = [
         g for g in all_games
         if g.get("agent_name") == agent_name
         and g.get("agent_type") == agent_type
         and g.get("opponent") == opponent
+        and g.get("hf_username") == hf_username
     ]
     count = len(matching)
     if count < MIN_GAMES_FOR_LEADERBOARD:
@@ -311,41 +383,98 @@ def _aggregate_agent_games(
             (g.get("agent_url", "") for g in reversed(matching) if g.get("agent_url")),
             "",
         ),
+        "hf_username": hf_username,
+        "verified": True,
+    }
+
+
+def _single_game_row(game: dict) -> dict:
+    """Build a leaderboard row from a single anonymous game."""
+    game_results = [{
+        "win": game.get("win", game.get("result") == "win"),
+        "kills_cost": game.get("kills_cost", 0),
+        "deaths_cost": game.get("deaths_cost", 0),
+        "assets_value": game.get("assets_value", 0),
+        "ticks": game.get("ticks", 0),
+    }]
+    raw_score = compute_composite_score(game_results)
+    opponent = game.get("opponent", "Normal")
+    multiplier = DIFFICULTY_MULTIPLIER.get(opponent, 1.0)
+    kills = game.get("kills_cost", 0)
+    deaths = game.get("deaths_cost", 0)
+
+    return {
+        "agent_name": game.get("agent_name", ""),
+        "agent_type": game.get("agent_type", ""),
+        "opponent": opponent,
+        "difficulty": opponent,
+        "games": 1,
+        "win_rate": round(100.0 * int(game_results[0]["win"]), 1),
+        "score": round(raw_score * multiplier, 1),
+        "avg_kills": kills,
+        "avg_deaths": deaths,
+        "kd_ratio": round(kills / max(deaths, 1), 2),
+        "avg_economy": game.get("assets_value", 0),
+        "avg_game_length": game.get("ticks", 0),
+        "timestamp": game.get("timestamp", "")[:10],
+        "replay_url": game.get("replay_url", ""),
+        "agent_url": game.get("agent_url", ""),
+        "hf_username": "",
+        "verified": False,
     }
 
 
 def _rebuild_leaderboard() -> None:
-    """Rebuild leaderboard CSV from raw games (only agents with >= 5 games)."""
+    """Rebuild leaderboard CSV from raw games.
+
+    Verified users (non-empty hf_username) are aggregated by
+    (hf_username, agent_name, agent_type, opponent) with a minimum of
+    5 games to appear. Anonymous games (empty hf_username) appear as
+    individual rows marked as unverified.
+    """
     all_games = _load_raw_games()
     if not all_games:
         return  # No games yet, keep existing CSV as-is
 
-    groups = set()
-    for g in all_games:
-        key = (g.get("agent_name", ""), g.get("agent_type", ""), g.get("opponent", ""))
-        groups.add(key)
-
     rows = []
-    for name, atype, opp in groups:
-        count, agg = _aggregate_agent_games(name, atype, opp, all_games)
+
+    # 1. Aggregate verified games
+    verified_groups = set()
+    for g in all_games:
+        hf_user = g.get("hf_username", "")
+        if hf_user:
+            key = (hf_user, g.get("agent_name", ""), g.get("agent_type", ""), g.get("opponent", ""))
+            verified_groups.add(key)
+
+    for hf_user, name, atype, opp in verified_groups:
+        count, agg = _aggregate_agent_games(name, atype, opp, all_games, hf_username=hf_user)
         if agg is not None:
             rows.append(agg)
 
+    # 2. Add anonymous games as individual rows
+    for g in all_games:
+        if not g.get("hf_username"):
+            rows.append(_single_game_row(g))
+
     if not rows:
-        return  # No agents with enough games yet
+        return  # No qualifying entries
 
     rows.sort(key=lambda r: r.get("score", 0), reverse=True)
 
-    fieldnames = [
-        "agent_name", "agent_type", "opponent", "difficulty", "games",
-        "win_rate", "score", "avg_kills", "avg_deaths", "kd_ratio",
-        "avg_economy", "avg_game_length", "timestamp", "replay_url", "agent_url",
-    ]
+    fieldnames = LEADERBOARD_FIELDNAMES
     with open(DATA_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: _sanitize_csv_value(v) for k, v in row.items()})
+            writer.writerow({k: _sanitize_csv_value(row.get(k, "")) for k in fieldnames})
+
+
+LEADERBOARD_FIELDNAMES = [
+    "agent_name", "agent_type", "opponent", "difficulty", "games",
+    "win_rate", "score", "avg_kills", "avg_deaths", "kd_ratio",
+    "avg_economy", "avg_game_length", "timestamp", "replay_url", "agent_url",
+    "hf_username", "verified",
+]
 
 
 # ── Submission Handling ───────────────────────────────────────────────────────
@@ -419,6 +548,8 @@ def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
     if not is_valid:
         return f"Validation error: {error}", add_type_badges(load_data())
 
+    hf_username, anon_warning = _process_identity(data)
+
     # Save replay if provided
     if replay_file is not None:
         import shutil
@@ -437,23 +568,88 @@ def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
 
     agent_name = data["agent_name"]
     opponent = data["opponent"]
-    count, agg = _aggregate_agent_games(agent_name, data["agent_type"], opponent)
+
+    if not hf_username:
+        msg = (
+            f"Recorded anonymous game for **{agent_name}** vs {opponent}. "
+            f"Add an HF token to aggregate games and track progress."
+        )
+        if anon_warning:
+            msg = f"{anon_warning} {msg}"
+    else:
+        count, agg = _aggregate_agent_games(
+            agent_name, data["agent_type"], opponent, hf_username=hf_username,
+        )
+        if count < MIN_GAMES_FOR_LEADERBOARD:
+            remaining = MIN_GAMES_FOR_LEADERBOARD - count
+            msg = (
+                f"Recorded game {count}/{MIN_GAMES_FOR_LEADERBOARD} for "
+                f"**{agent_name}** vs {opponent}. "
+                f"Play {remaining} more game{'s' if remaining != 1 else ''} "
+                f"to appear on the leaderboard!"
+            )
+        else:
+            msg = (
+                f"**{agent_name}** vs {opponent} updated \u2014 "
+                f"{count} games, score **{agg['score']}** (win rate {agg['win_rate']}%)"
+            )
+
+    return msg, add_type_badges(load_data())
+
+
+def _process_identity(data: dict) -> tuple[str, str]:
+    """Verify HF token if present, set hf_username on data.
+
+    Returns (hf_username, warning_message).
+    """
+    token = data.pop("hf_token", "")
+    if token:
+        hf_username, err = _verify_hf_token(token)
+        if hf_username:
+            data["hf_username"] = hf_username
+            return hf_username, ""
+        else:
+            data["hf_username"] = ""
+            return "", f"HF token verification failed ({err}). Submitted as anonymous."
+    data.setdefault("hf_username", "")
+    return "", ""
+
+
+def _build_response(agent_name: str, agent_type: str, opponent: str,
+                    hf_username: str, anonymous_warning: str,
+                    all_games: list[dict] | None = None) -> str:
+    """Build a response message after saving a game."""
+    parts = []
+    if anonymous_warning:
+        parts.append(anonymous_warning)
+
+    if not hf_username:
+        # Anonymous: not aggregated
+        parts.append(
+            f"OK: recorded anonymous game for {agent_name} vs {opponent}. "
+            f"Add an HF token to aggregate games and track progress."
+        )
+        return " ".join(parts)
+
+    count, agg = _aggregate_agent_games(
+        agent_name, agent_type, opponent,
+        all_games=all_games, hf_username=hf_username,
+    )
 
     if count < MIN_GAMES_FOR_LEADERBOARD:
         remaining = MIN_GAMES_FOR_LEADERBOARD - count
-        msg = (
-            f"Recorded game {count}/{MIN_GAMES_FOR_LEADERBOARD} for "
-            f"**{agent_name}** vs {opponent}. "
+        parts.append(
+            f"OK: recorded game {count}/{MIN_GAMES_FOR_LEADERBOARD} for "
+            f"{agent_name} vs {opponent}. "
             f"Play {remaining} more game{'s' if remaining != 1 else ''} "
             f"to appear on the leaderboard!"
         )
     else:
-        msg = (
-            f"**{agent_name}** vs {opponent} updated \u2014 "
-            f"{count} games, score **{agg['score']}** (win rate {agg['win_rate']}%)"
+        parts.append(
+            f"OK: {agent_name} vs {opponent} updated \u2014 "
+            f"{count} games, score {agg['score']} (win rate {agg['win_rate']}%)"
         )
-
-    return msg, add_type_badges(load_data())
+    return " ".join(parts)
 
 
 def handle_api_submit(json_data: str) -> str:
@@ -471,25 +667,14 @@ def handle_api_submit(json_data: str) -> str:
     if not is_valid:
         return f"Validation error: {error}"
 
+    hf_username, anon_warning = _process_identity(data)
+
     _save_raw_game(data)
     _rebuild_leaderboard()
 
-    agent_name = data["agent_name"]
-    opponent = data["opponent"]
-    count, agg = _aggregate_agent_games(agent_name, data["agent_type"], opponent)
-
-    if count < MIN_GAMES_FOR_LEADERBOARD:
-        remaining = MIN_GAMES_FOR_LEADERBOARD - count
-        return (
-            f"OK: recorded game {count}/{MIN_GAMES_FOR_LEADERBOARD} for "
-            f"{agent_name} vs {opponent}. "
-            f"Play {remaining} more game{'s' if remaining != 1 else ''} "
-            f"to appear on the leaderboard!"
-        )
-
-    return (
-        f"OK: {agent_name} vs {opponent} updated \u2014 "
-        f"{count} games, score {agg['score']} (win rate {agg['win_rate']}%)"
+    return _build_response(
+        data["agent_name"], data["agent_type"], data["opponent"],
+        hf_username, anon_warning,
     )
 
 
@@ -508,6 +693,8 @@ def handle_api_submit_with_replay(json_data: str, replay_file) -> str:
     if not is_valid:
         return f"Validation error: {error}"
 
+    hf_username, anon_warning = _process_identity(data)
+
     # Save replay if provided
     if replay_file is not None:
         import shutil
@@ -524,22 +711,9 @@ def handle_api_submit_with_replay(json_data: str, replay_file) -> str:
     _save_raw_game(data)
     _rebuild_leaderboard()
 
-    agent_name = data["agent_name"]
-    opponent = data["opponent"]
-    count, agg = _aggregate_agent_games(agent_name, data["agent_type"], opponent)
-
-    if count < MIN_GAMES_FOR_LEADERBOARD:
-        remaining = MIN_GAMES_FOR_LEADERBOARD - count
-        return (
-            f"OK: recorded game {count}/{MIN_GAMES_FOR_LEADERBOARD} for "
-            f"{agent_name} vs {opponent}. "
-            f"Play {remaining} more game{'s' if remaining != 1 else ''} "
-            f"to appear on the leaderboard!"
-        )
-
-    return (
-        f"OK: {agent_name} vs {opponent} updated \u2014 "
-        f"{count} games, score {agg['score']} (win rate {agg['win_rate']}%)"
+    return _build_response(
+        data["agent_name"], data["agent_type"], data["opponent"],
+        hf_username, anon_warning,
     )
 
 
@@ -573,7 +747,14 @@ The benchmark score combines four components, scaled by opponent difficulty:
 
 **Difficulty multiplier**: Beginner (0.5x), Easy (0.7x), Medium (0.85x), Normal (1.0x), Hard (1.2x)
 
-**Minimum games**: 5 games required per agent+opponent to appear on the leaderboard.
+**Minimum games**: 5 games required per agent+opponent to appear on the leaderboard (verified users only).
+
+### Identity & Verification
+
+- **Verified**: Include your HuggingFace token (`hf_token`) in submissions.
+  Games are aggregated by HF username + agent name + opponent.
+- **Anonymous**: No token required. Games appear individually with an
+  "Unverified" badge and are not aggregated across sessions.
 
 ### Agent Types
 
@@ -597,13 +778,15 @@ SUBMIT_MD = """
 
 ### CLI Auto-Upload
 
-Set `BENCH_URL` in your OpenRA-RL config and results upload automatically
-after each game:
+Set `BENCH_URL` and optionally `HF_TOKEN` in your OpenRA-RL config. Results
+upload automatically after each game. With a HF token, games are aggregated
+under your verified username:
 
 ```yaml
 # config.yaml
 agent:
   bench_url: "https://openra-rl-openra-bench.hf.space"
+  hf_token: "hf_..."  # Optional: enables verified aggregation
 ```
 
 ### CLI Manual Upload
@@ -693,6 +876,11 @@ def build_app() -> gr.Blocks:
                         label="Opponent",
                         scale=1,
                     )
+                    show_unverified = gr.Checkbox(
+                        label="Show unverified",
+                        value=True,
+                        scale=1,
+                    )
 
                 leaderboard = gr.Dataframe(
                     value=initial_df,
@@ -700,6 +888,7 @@ def build_app() -> gr.Blocks:
                         "number",    # Rank
                         "html",      # Agent (may contain hyperlink)
                         "html",      # Type (badge)
+                        "html",      # Status (verified badge)
                         "str",       # Opponent
                         "number",    # Games
                         "number",    # Win Rate
@@ -717,10 +906,11 @@ def build_app() -> gr.Blocks:
                 )
 
                 # Wire up filters
-                for component in [search_box, type_filter, opponent_filter]:
+                filter_inputs = [search_box, type_filter, opponent_filter, show_unverified]
+                for component in filter_inputs:
                     component.change(
                         fn=filter_leaderboard,
-                        inputs=[search_box, type_filter, opponent_filter],
+                        inputs=filter_inputs,
                         outputs=leaderboard,
                     )
 

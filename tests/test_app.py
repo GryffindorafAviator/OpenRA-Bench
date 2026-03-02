@@ -18,14 +18,19 @@ from app import (
     MIN_GAMES_FOR_LEADERBOARD,
     VALID_OPPONENTS,
     _aggregate_agent_games,
+    _build_response,
     _check_rate_limit,
     _load_raw_games,
+    _process_identity,
     _rebuild_leaderboard,
     _safe_agent_link,
     _safe_replay_link,
     _sanitize_csv_value,
     _save_raw_game,
+    _single_game_row,
     _submit_times,
+    _verified_badge,
+    _verify_hf_token,
     add_type_badges,
     build_app,
     filter_leaderboard,
@@ -201,6 +206,36 @@ class TestApiSubmit:
             assert "OK" in result
             assert "TestBot" in result
 
+    def test_valid_json_with_hf_token(self, tmp_path):
+        data = {
+            "agent_name": "TestBot",
+            "agent_type": "LLM",
+            "opponent": "Easy",
+            "result": "win",
+            "win": True,
+            "ticks": 5000,
+            "kills_cost": 3000,
+            "deaths_cost": 1000,
+            "assets_value": 8000,
+            "hf_token": "hf_test",
+        }
+        games_path = tmp_path / "games.jsonl"
+        data_path = tmp_path / "results.csv"
+        _submit_times.clear()
+        with patch("app.GAMES_JSONL", games_path), \
+             patch("app.DATA_PATH", data_path), \
+             patch("app.SUBMISSIONS_DIR", tmp_path), \
+             patch("app._verify_hf_token", return_value=("testuser", "")):
+            result = handle_api_submit(json.dumps(data))
+            assert "OK" in result
+            assert "TestBot" in result
+            assert "1/5" in result
+
+        # Verify token is not in stored data
+        saved = json.loads(games_path.read_text().strip())
+        assert "hf_token" not in saved
+        assert saved["hf_username"] == "testuser"
+
     def test_invalid_json(self):
         _submit_times.clear()
         result = handle_api_submit("not json")
@@ -219,7 +254,7 @@ class TestDisplayColumns:
         assert "Replay" in DISPLAY_COLUMNS
 
     def test_display_columns_count(self):
-        assert len(DISPLAY_COLUMNS) == 14
+        assert len(DISPLAY_COLUMNS) == 15
 
 
 class TestAgentUrl:
@@ -563,7 +598,8 @@ class TestLoadRawGames:
 class TestAggregation:
     """Test game aggregation logic."""
 
-    def _make_game(self, agent="Bot", opponent="Normal", win=True, kills=1000, deaths=500, assets=5000, ticks=2000):
+    def _make_game(self, agent="Bot", opponent="Normal", win=True, kills=1000,
+                   deaths=500, assets=5000, ticks=2000, hf_username="testuser"):
         return {
             "agent_name": agent,
             "agent_type": "RL",
@@ -575,17 +611,18 @@ class TestAggregation:
             "assets_value": assets,
             "ticks": ticks,
             "timestamp": "2026-03-02",
+            "hf_username": hf_username,
         }
 
     def test_below_threshold_returns_none(self):
         games = [self._make_game() for _ in range(MIN_GAMES_FOR_LEADERBOARD - 1)]
-        count, agg = _aggregate_agent_games("Bot", "RL", "Normal", games)
+        count, agg = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="testuser")
         assert count == MIN_GAMES_FOR_LEADERBOARD - 1
         assert agg is None
 
     def test_at_threshold_returns_row(self):
         games = [self._make_game() for _ in range(MIN_GAMES_FOR_LEADERBOARD)]
-        count, agg = _aggregate_agent_games("Bot", "RL", "Normal", games)
+        count, agg = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="testuser")
         assert count == MIN_GAMES_FOR_LEADERBOARD
         assert agg is not None
         assert agg["games"] == MIN_GAMES_FOR_LEADERBOARD
@@ -594,8 +631,8 @@ class TestAggregation:
     def test_applies_difficulty_multiplier(self):
         games_normal = [self._make_game(opponent="Normal") for _ in range(5)]
         games_hard = [self._make_game(opponent="Hard") for _ in range(5)]
-        _, agg_normal = _aggregate_agent_games("Bot", "RL", "Normal", games_normal)
-        _, agg_hard = _aggregate_agent_games("Bot", "RL", "Hard", games_hard)
+        _, agg_normal = _aggregate_agent_games("Bot", "RL", "Normal", games_normal, hf_username="testuser")
+        _, agg_hard = _aggregate_agent_games("Bot", "RL", "Hard", games_hard, hf_username="testuser")
         assert agg_hard["score"] > agg_normal["score"]
 
     def test_filters_by_agent_and_opponent(self):
@@ -604,9 +641,9 @@ class TestAggregation:
             + [self._make_game(agent="Bot2", opponent="Normal") for _ in range(3)]
             + [self._make_game(agent="Bot1", opponent="Hard") for _ in range(2)]
         )
-        count1, agg1 = _aggregate_agent_games("Bot1", "RL", "Normal", games)
-        count2, _ = _aggregate_agent_games("Bot2", "RL", "Normal", games)
-        count3, _ = _aggregate_agent_games("Bot1", "RL", "Hard", games)
+        count1, agg1 = _aggregate_agent_games("Bot1", "RL", "Normal", games, hf_username="testuser")
+        count2, _ = _aggregate_agent_games("Bot2", "RL", "Normal", games, hf_username="testuser")
+        count3, _ = _aggregate_agent_games("Bot1", "RL", "Hard", games, hf_username="testuser")
         assert count1 == 5
         assert agg1 is not None
         assert count2 == 3  # Below threshold
@@ -620,7 +657,7 @@ class TestAggregation:
             self._make_game(win=True, kills=4000, deaths=1500),
             self._make_game(win=False, kills=2000, deaths=3000),
         ]
-        count, agg = _aggregate_agent_games("Bot", "RL", "Normal", games)
+        count, agg = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="testuser")
         assert count == 5
         assert agg["win_rate"] == 60.0
         assert agg["avg_kills"] == 3000  # (5000+3000+1000+4000+2000)/5
@@ -628,22 +665,24 @@ class TestAggregation:
 
     def test_kd_ratio_computed(self):
         games = [self._make_game(kills=2000, deaths=1000) for _ in range(5)]
-        _, agg = _aggregate_agent_games("Bot", "RL", "Normal", games)
+        _, agg = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="testuser")
         assert agg["kd_ratio"] == 2.0
 
     def test_zero_deaths_kd_ratio(self):
         games = [self._make_game(kills=1000, deaths=0) for _ in range(5)]
-        _, agg = _aggregate_agent_games("Bot", "RL", "Normal", games)
+        _, agg = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="testuser")
         assert agg["kd_ratio"] == 5000.0  # 5000 total kills / max(0, 1)
 
     def test_aggregation_includes_metadata(self):
         games = [self._make_game() for _ in range(5)]
         games[-1]["agent_url"] = "https://github.com/user/bot"
         games[-1]["replay_url"] = "replay-bot.orarep"
-        _, agg = _aggregate_agent_games("Bot", "RL", "Normal", games)
+        _, agg = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="testuser")
         assert agg["agent_url"] == "https://github.com/user/bot"
         assert agg["replay_url"] == "replay-bot.orarep"
         assert agg["difficulty"] == "Normal"
+        assert agg["verified"] is True
+        assert agg["hf_username"] == "testuser"
 
     def test_filters_by_agent_type(self):
         """Different agent_types for the same name should not mix."""
@@ -651,7 +690,7 @@ class TestAggregation:
             [self._make_game(agent="Bot") for _ in range(5)]  # agent_type="RL"
         )
         # Query with wrong agent_type
-        count, agg = _aggregate_agent_games("Bot", "LLM", "Normal", games)
+        count, agg = _aggregate_agent_games("Bot", "LLM", "Normal", games, hf_username="testuser")
         assert count == 0
         assert agg is None
 
@@ -663,8 +702,28 @@ class TestAggregation:
             del g["win"]
             g["result"] = "win"
             games.append(g)
-        _, agg = _aggregate_agent_games("Bot", "RL", "Normal", games)
+        _, agg = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="testuser")
         assert agg["win_rate"] == 100.0
+
+    def test_anonymous_not_aggregated(self):
+        """Games without hf_username should never be aggregated."""
+        games = [self._make_game(hf_username="") for _ in range(10)]
+        count, agg = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="")
+        assert count == 0
+        assert agg is None
+
+    def test_different_hf_users_not_mixed(self):
+        """Games from different HF users should not be mixed."""
+        games = (
+            [self._make_game(hf_username="user_a") for _ in range(5)]
+            + [self._make_game(hf_username="user_b") for _ in range(5)]
+        )
+        count_a, agg_a = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="user_a")
+        count_b, agg_b = _aggregate_agent_games("Bot", "RL", "Normal", games, hf_username="user_b")
+        assert count_a == 5
+        assert count_b == 5
+        assert agg_a is not None
+        assert agg_b is not None
 
 
 class TestRebuildLeaderboard:
@@ -677,29 +736,31 @@ class TestRebuildLeaderboard:
         with patch("app.DATA_PATH", data_path), \
              patch("app.GAMES_JSONL", games_path), \
              patch("app.SUBMISSIONS_DIR", tmp_path):
-            # Save 3 games for Bot1 (below threshold)
+            # Save 3 verified games for Bot1 (below threshold)
             for _ in range(3):
                 _save_raw_game({
                     "agent_name": "Bot1", "agent_type": "RL", "opponent": "Normal",
                     "result": "win", "win": True, "kills_cost": 1000,
                     "deaths_cost": 500, "assets_value": 5000, "ticks": 2000,
-                    "timestamp": "2026-03-02",
+                    "timestamp": "2026-03-02", "hf_username": "user1",
                 })
-            # Save 5 games for Bot2 (at threshold)
+            # Save 5 verified games for Bot2 (at threshold)
             for _ in range(5):
                 _save_raw_game({
                     "agent_name": "Bot2", "agent_type": "RL", "opponent": "Normal",
                     "result": "win", "win": True, "kills_cost": 2000,
                     "deaths_cost": 1000, "assets_value": 8000, "ticks": 1500,
-                    "timestamp": "2026-03-02",
+                    "timestamp": "2026-03-02", "hf_username": "user2",
                 })
 
             _rebuild_leaderboard()
 
         df = pd.read_csv(data_path)
-        assert len(df) == 1  # Only Bot2 appears
-        assert df.iloc[0]["agent_name"] == "Bot2"
-        assert df.iloc[0]["games"] == 5
+        # Only Bot2 aggregated (5 games). Bot1 below threshold (3 verified games).
+        verified_rows = df[df["verified"] == True]
+        assert len(verified_rows) == 1
+        assert verified_rows.iloc[0]["agent_name"] == "Bot2"
+        assert verified_rows.iloc[0]["games"] == 5
 
     def test_rebuild_sorts_by_score(self, tmp_path):
         data_path = tmp_path / "results.csv"
@@ -714,7 +775,7 @@ class TestRebuildLeaderboard:
                     "agent_name": "WeakBot", "agent_type": "RL", "opponent": "Normal",
                     "result": "lose", "win": False, "kills_cost": 100,
                     "deaths_cost": 5000, "assets_value": 1000, "ticks": 5000,
-                    "timestamp": "2026-03-02",
+                    "timestamp": "2026-03-02", "hf_username": "user1",
                 })
             # Bot with better stats
             for _ in range(5):
@@ -722,15 +783,16 @@ class TestRebuildLeaderboard:
                     "agent_name": "StrongBot", "agent_type": "RL", "opponent": "Normal",
                     "result": "win", "win": True, "kills_cost": 5000,
                     "deaths_cost": 500, "assets_value": 20000, "ticks": 1000,
-                    "timestamp": "2026-03-02",
+                    "timestamp": "2026-03-02", "hf_username": "user2",
                 })
 
             _rebuild_leaderboard()
 
         df = pd.read_csv(data_path)
-        assert len(df) == 2
-        assert df.iloc[0]["agent_name"] == "StrongBot"
-        assert df.iloc[1]["agent_name"] == "WeakBot"
+        verified = df[df["verified"] == True]
+        assert len(verified) == 2
+        assert verified.iloc[0]["agent_name"] == "StrongBot"
+        assert verified.iloc[1]["agent_name"] == "WeakBot"
 
     def test_rebuild_no_games_preserves_csv(self, tmp_path):
         data_path = tmp_path / "results.csv"
@@ -746,28 +808,27 @@ class TestRebuildLeaderboard:
         # File should be unchanged (no games.jsonl = no rebuild)
         assert "OldBot" in data_path.read_text()
 
-    def test_rebuild_no_qualifying_agents_preserves_csv(self, tmp_path):
+    def test_rebuild_no_qualifying_agents_with_anonymous(self, tmp_path):
+        """Anonymous-only games still produce rows (unverified)."""
         data_path = tmp_path / "results.csv"
         games_path = tmp_path / "games.jsonl"
-
-        data_path.write_text("agent_name,score\nOldBot,50\n")
 
         with patch("app.DATA_PATH", data_path), \
              patch("app.GAMES_JSONL", games_path), \
              patch("app.SUBMISSIONS_DIR", tmp_path):
-            # Only 2 games — no one qualifies
             for _ in range(2):
                 _save_raw_game({
                     "agent_name": "Bot1", "agent_type": "RL", "opponent": "Normal",
                     "result": "win", "win": True, "kills_cost": 1000,
                     "deaths_cost": 500, "assets_value": 5000, "ticks": 2000,
-                    "timestamp": "2026-03-02",
+                    "timestamp": "2026-03-02", "hf_username": "",
                 })
 
             _rebuild_leaderboard()
 
-        # CSV still has old data
-        assert "OldBot" in data_path.read_text()
+        df = pd.read_csv(data_path)
+        assert len(df) == 2  # 2 anonymous individual rows
+        assert all(df["verified"] == False)
 
     def test_rebuild_includes_difficulty_column(self, tmp_path):
         data_path = tmp_path / "results.csv"
@@ -781,17 +842,56 @@ class TestRebuildLeaderboard:
                     "agent_name": "Bot1", "agent_type": "RL", "opponent": "Hard",
                     "result": "win", "win": True, "kills_cost": 1000,
                     "deaths_cost": 500, "assets_value": 5000, "ticks": 2000,
-                    "timestamp": "2026-03-02",
+                    "timestamp": "2026-03-02", "hf_username": "user1",
                 })
             _rebuild_leaderboard()
 
         df = pd.read_csv(data_path)
+        verified = df[df["verified"] == True]
         assert "difficulty" in df.columns
-        assert df.iloc[0]["difficulty"] == "Hard"
+        assert verified.iloc[0]["difficulty"] == "Hard"
+
+    def test_rebuild_includes_verified_column(self, tmp_path):
+        data_path = tmp_path / "results.csv"
+        games_path = tmp_path / "games.jsonl"
+
+        with patch("app.DATA_PATH", data_path), \
+             patch("app.GAMES_JSONL", games_path), \
+             patch("app.SUBMISSIONS_DIR", tmp_path):
+            # Verified games
+            for _ in range(5):
+                _save_raw_game({
+                    "agent_name": "VerifiedBot", "agent_type": "RL", "opponent": "Normal",
+                    "result": "win", "win": True, "kills_cost": 1000,
+                    "deaths_cost": 500, "assets_value": 5000, "ticks": 2000,
+                    "timestamp": "2026-03-02", "hf_username": "hfuser",
+                })
+            # Anonymous game
+            _save_raw_game({
+                "agent_name": "AnonBot", "agent_type": "LLM", "opponent": "Normal",
+                "result": "win", "win": True, "kills_cost": 2000,
+                "deaths_cost": 500, "assets_value": 5000, "ticks": 2000,
+                "timestamp": "2026-03-02", "hf_username": "",
+            })
+            _rebuild_leaderboard()
+
+        df = pd.read_csv(data_path)
+        assert "verified" in df.columns
+        assert "hf_username" in df.columns
+        verified_rows = df[df["verified"] == True]
+        anon_rows = df[df["verified"] == False]
+        assert len(verified_rows) == 1
+        assert verified_rows.iloc[0]["agent_name"] == "VerifiedBot"
+        assert len(anon_rows) == 1
+        assert anon_rows.iloc[0]["agent_name"] == "AnonBot"
 
 
 class TestFriendlyMessages:
     """Test submission response messages."""
+
+    def _mock_hf_verify(self, username="testuser"):
+        """Return a patcher that makes _verify_hf_token return the given username."""
+        return patch("app._verify_hf_token", return_value=(username, ""))
 
     def test_below_threshold_message(self, tmp_path):
         games_path = tmp_path / "games.jsonl"
@@ -800,11 +900,13 @@ class TestFriendlyMessages:
         _submit_times.clear()
         with patch("app.GAMES_JSONL", games_path), \
              patch("app.DATA_PATH", data_path), \
-             patch("app.SUBMISSIONS_DIR", tmp_path):
+             patch("app.SUBMISSIONS_DIR", tmp_path), \
+             self._mock_hf_verify():
             data = {
                 "agent_name": "TestBot", "agent_type": "RL", "opponent": "Normal",
                 "result": "win", "ticks": 2000, "kills_cost": 1000,
                 "deaths_cost": 500, "assets_value": 5000,
+                "hf_token": "hf_test",
             }
             result = handle_api_submit(json.dumps(data))
 
@@ -819,11 +921,13 @@ class TestFriendlyMessages:
         _submit_times.clear()
         with patch("app.GAMES_JSONL", games_path), \
              patch("app.DATA_PATH", data_path), \
-             patch("app.SUBMISSIONS_DIR", tmp_path):
+             patch("app.SUBMISSIONS_DIR", tmp_path), \
+             self._mock_hf_verify():
             data = {
                 "agent_name": "TestBot", "agent_type": "RL", "opponent": "Normal",
                 "result": "win", "ticks": 2000, "kills_cost": 1000,
                 "deaths_cost": 500, "assets_value": 5000,
+                "hf_token": "hf_test",
             }
             # Submit 5 games
             for _ in range(4):
@@ -842,11 +946,13 @@ class TestFriendlyMessages:
         _submit_times.clear()
         with patch("app.GAMES_JSONL", games_path), \
              patch("app.DATA_PATH", data_path), \
-             patch("app.SUBMISSIONS_DIR", tmp_path):
+             patch("app.SUBMISSIONS_DIR", tmp_path), \
+             self._mock_hf_verify():
             data = {
                 "agent_name": "TestBot", "agent_type": "RL", "opponent": "Normal",
                 "result": "win", "ticks": 2000, "kills_cost": 1000,
                 "deaths_cost": 500, "assets_value": 5000,
+                "hf_token": "hf_test",
             }
             # Submit 4 games
             for _ in range(3):
@@ -864,11 +970,13 @@ class TestFriendlyMessages:
         _submit_times.clear()
         with patch("app.GAMES_JSONL", games_path), \
              patch("app.DATA_PATH", data_path), \
-             patch("app.SUBMISSIONS_DIR", tmp_path):
+             patch("app.SUBMISSIONS_DIR", tmp_path), \
+             self._mock_hf_verify():
             data = {
                 "agent_name": "TestBot", "agent_type": "RL", "opponent": "Normal",
                 "result": "win", "ticks": 2000, "kills_cost": 1000,
                 "deaths_cost": 500, "assets_value": 5000,
+                "hf_token": "hf_test",
             }
             r1 = handle_api_submit(json.dumps(data))
             r2 = handle_api_submit(json.dumps(data))
@@ -878,12 +986,32 @@ class TestFriendlyMessages:
         assert "2/5" in r2
         assert "3/5" in r3
 
+    def test_anonymous_message(self, tmp_path):
+        """No hf_token → anonymous message."""
+        games_path = tmp_path / "games.jsonl"
+        data_path = tmp_path / "results.csv"
+
+        _submit_times.clear()
+        with patch("app.GAMES_JSONL", games_path), \
+             patch("app.DATA_PATH", data_path), \
+             patch("app.SUBMISSIONS_DIR", tmp_path):
+            data = {
+                "agent_name": "AnonBot", "agent_type": "RL", "opponent": "Normal",
+                "result": "win", "ticks": 2000, "kills_cost": 1000,
+                "deaths_cost": 500, "assets_value": 5000,
+            }
+            result = handle_api_submit(json.dumps(data))
+
+        assert "anonymous" in result.lower()
+        assert "AnonBot" in result
+        assert "HF token" in result
+
 
 class TestHandleUploadAggregation:
     """Test the UI upload handler with aggregation."""
 
-    def _valid_data(self):
-        return {
+    def _valid_data(self, hf_token="hf_test"):
+        d = {
             "agent_name": "UploadBot",
             "agent_type": "LLM",
             "opponent": "Easy",
@@ -893,6 +1021,12 @@ class TestHandleUploadAggregation:
             "deaths_cost": 800,
             "assets_value": 7000,
         }
+        if hf_token:
+            d["hf_token"] = hf_token
+        return d
+
+    def _mock_hf_verify(self, username="testuser"):
+        return patch("app._verify_hf_token", return_value=(username, ""))
 
     def test_upload_below_threshold_message(self, tmp_path):
         """Upload handler should show progress message below threshold."""
@@ -910,7 +1044,8 @@ class TestHandleUploadAggregation:
         _submit_times.clear()
         with patch("app.GAMES_JSONL", games_path), \
              patch("app.DATA_PATH", data_path), \
-             patch("app.SUBMISSIONS_DIR", tmp_path):
+             patch("app.SUBMISSIONS_DIR", tmp_path), \
+             self._mock_hf_verify():
             msg, df = handle_upload(FakeFile(json_path), None)
 
         assert "1/5" in msg
@@ -923,10 +1058,12 @@ class TestHandleUploadAggregation:
         data_path = tmp_path / "results.csv"
         data = self._valid_data()
 
-        # Pre-seed 4 games
+        # Pre-seed 4 verified games
         for _ in range(4):
+            safe = {k: v for k, v in data.items() if k != "hf_token"}
+            safe["hf_username"] = "testuser"
             with open(games_path, "a") as f:
-                f.write(json.dumps(data) + "\n")
+                f.write(json.dumps(safe) + "\n")
 
         json_path = tmp_path / "upload.json"
         json_path.write_text(json.dumps(data))
@@ -938,9 +1075,208 @@ class TestHandleUploadAggregation:
         _submit_times.clear()
         with patch("app.GAMES_JSONL", games_path), \
              patch("app.DATA_PATH", data_path), \
-             patch("app.SUBMISSIONS_DIR", tmp_path):
+             patch("app.SUBMISSIONS_DIR", tmp_path), \
+             self._mock_hf_verify():
             msg, df = handle_upload(FakeFile(json_path), None)
 
         assert "updated" in msg
         assert "5 games" in msg
         assert "score" in msg
+
+    def test_upload_anonymous_message(self, tmp_path):
+        """Upload without HF token should show anonymous message."""
+        games_path = tmp_path / "games.jsonl"
+        data_path = tmp_path / "results.csv"
+
+        json_path = tmp_path / "upload.json"
+        json_path.write_text(json.dumps(self._valid_data(hf_token="")))
+
+        class FakeFile:
+            def __init__(self, p):
+                self.name = str(p)
+
+        _submit_times.clear()
+        with patch("app.GAMES_JSONL", games_path), \
+             patch("app.DATA_PATH", data_path), \
+             patch("app.SUBMISSIONS_DIR", tmp_path):
+            msg, df = handle_upload(FakeFile(json_path), None)
+
+        assert "anonymous" in msg.lower()
+        assert "UploadBot" in msg
+
+
+# ── HF Identity & Verification Tests ────────────────────────────────────────
+
+
+class TestVerifyHfToken:
+    """Test HF token verification."""
+
+    def test_empty_token_returns_empty(self):
+        username, err = _verify_hf_token("")
+        assert username == ""
+        assert "no token" in err
+
+    def test_none_token_returns_empty(self):
+        username, err = _verify_hf_token(None)
+        assert username == ""
+
+    def test_valid_token_returns_username(self):
+        mock_api = type("MockHfApi", (), {
+            "whoami": lambda self, token: {"name": "alice"},
+        })()
+        with patch("huggingface_hub.HfApi", return_value=mock_api):
+            username, err = _verify_hf_token("hf_valid_token")
+        assert username == "alice"
+        assert err == ""
+
+    def test_invalid_token_returns_error(self):
+        mock_api = type("MockHfApi", (), {
+            "whoami": lambda self, token: (_ for _ in ()).throw(Exception("401 Unauthorized")),
+        })()
+        with patch("huggingface_hub.HfApi", return_value=mock_api):
+            username, err = _verify_hf_token("hf_bad_token")
+        assert username == ""
+        assert "invalid token" in err
+
+
+class TestProcessIdentity:
+    """Test the identity processing helper."""
+
+    def test_with_valid_token(self):
+        data = {"agent_name": "Bot", "hf_token": "hf_test"}
+        with patch("app._verify_hf_token", return_value=("alice", "")):
+            username, warning = _process_identity(data)
+        assert username == "alice"
+        assert warning == ""
+        assert data["hf_username"] == "alice"
+        assert "hf_token" not in data  # Token should be popped
+
+    def test_with_invalid_token(self):
+        data = {"agent_name": "Bot", "hf_token": "hf_bad"}
+        with patch("app._verify_hf_token", return_value=("", "invalid")):
+            username, warning = _process_identity(data)
+        assert username == ""
+        assert "anonymous" in warning.lower() or "failed" in warning.lower()
+        assert data["hf_username"] == ""
+
+    def test_without_token(self):
+        data = {"agent_name": "Bot"}
+        username, warning = _process_identity(data)
+        assert username == ""
+        assert warning == ""
+        assert data["hf_username"] == ""
+
+
+class TestVerifiedBadge:
+    """Test the verified/unverified badge rendering."""
+
+    def test_verified_badge_green(self):
+        badge = _verified_badge(True)
+        assert "#4caf50" in badge
+        assert "Verified" in badge
+
+    def test_unverified_badge_orange(self):
+        badge = _verified_badge(False)
+        assert "#ff9800" in badge
+        assert "Unverified" in badge
+
+    def test_string_true(self):
+        badge = _verified_badge("True")
+        assert "Verified" in badge
+        assert "Unverified" not in badge
+
+    def test_string_false(self):
+        badge = _verified_badge("False")
+        assert "Unverified" in badge
+
+
+class TestSingleGameRow:
+    """Test anonymous single game row creation."""
+
+    def test_creates_unverified_row(self):
+        game = {
+            "agent_name": "AnonBot",
+            "agent_type": "LLM",
+            "opponent": "Normal",
+            "result": "win",
+            "win": True,
+            "kills_cost": 3000,
+            "deaths_cost": 1000,
+            "assets_value": 8000,
+            "ticks": 2000,
+            "timestamp": "2026-03-02T10:00:00Z",
+            "hf_username": "",
+        }
+        row = _single_game_row(game)
+        assert row["agent_name"] == "AnonBot"
+        assert row["verified"] is False
+        assert row["hf_username"] == ""
+        assert row["games"] == 1
+        assert row["win_rate"] == 100.0
+        assert row["score"] > 0
+
+    def test_loss_row(self):
+        game = {
+            "agent_name": "Bot",
+            "agent_type": "RL",
+            "opponent": "Hard",
+            "result": "lose",
+            "win": False,
+            "kills_cost": 500,
+            "deaths_cost": 3000,
+            "assets_value": 2000,
+            "ticks": 5000,
+            "timestamp": "2026-03-02",
+            "hf_username": "",
+        }
+        row = _single_game_row(game)
+        assert row["win_rate"] == 0.0
+        assert row["difficulty"] == "Hard"
+
+
+class TestSaveRawGameStripsToken:
+    """Verify hf_token is NOT persisted in games.jsonl."""
+
+    def test_token_stripped(self, tmp_path):
+        games_path = tmp_path / "games.jsonl"
+        with patch("app.GAMES_JSONL", games_path), \
+             patch("app.SUBMISSIONS_DIR", tmp_path):
+            _save_raw_game({
+                "agent_name": "Bot",
+                "hf_token": "hf_secret_token_123",
+                "hf_username": "alice",
+            })
+
+        saved = json.loads(games_path.read_text().strip())
+        assert "hf_token" not in saved
+        assert saved["hf_username"] == "alice"
+
+
+class TestBuildResponse:
+    """Test response message builder."""
+
+    def test_anonymous_response(self):
+        msg = _build_response("Bot", "RL", "Normal", "", "")
+        assert "anonymous" in msg.lower()
+        assert "HF token" in msg
+
+    def test_anonymous_with_warning(self):
+        msg = _build_response("Bot", "RL", "Normal", "", "Token failed.")
+        assert "Token failed" in msg
+        assert "anonymous" in msg.lower()
+
+    def test_verified_below_threshold(self, tmp_path):
+        games_path = tmp_path / "games.jsonl"
+        # Pre-seed 2 games
+        for _ in range(2):
+            with open(games_path, "a") as f:
+                f.write(json.dumps({
+                    "agent_name": "Bot", "agent_type": "RL", "opponent": "Normal",
+                    "hf_username": "alice", "win": True, "kills_cost": 1000,
+                    "deaths_cost": 500, "assets_value": 5000, "ticks": 2000,
+                }) + "\n")
+
+        with patch("app.GAMES_JSONL", games_path):
+            msg = _build_response("Bot", "RL", "Normal", "alice", "")
+        assert "2/5" in msg
+        assert "Play 3 more" in msg
