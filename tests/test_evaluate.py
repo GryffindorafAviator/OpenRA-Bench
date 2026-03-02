@@ -151,7 +151,7 @@ class TestAppendResults:
         assert "score" in RESULTS_COLUMNS
         assert "win_rate" in RESULTS_COLUMNS
         assert "replay_url" in RESULTS_COLUMNS
-        assert len(RESULTS_COLUMNS) == 13
+        assert len(RESULTS_COLUMNS) == 14
 
 
 class TestScoringUsesUtil:
@@ -175,3 +175,51 @@ class TestScoringUsesUtil:
         from rubrics import compute_game_metrics
         from openra_rl_util.rubrics import compute_game_metrics as util_fn
         assert compute_game_metrics is util_fn
+
+
+class TestMinGames:
+    """Minimum game count validation."""
+
+    def test_evaluate_runner_rejects_few_games(self):
+        """run_evaluation should reject num_games < 5."""
+        import pytest
+        from evaluate_runner import run_evaluation
+        with pytest.raises(ValueError, match="Minimum 5 games"):
+            import asyncio
+            asyncio.run(run_evaluation("test", "Normal", 3, "http://fake"))
+
+
+class TestDifficultyMultiplier:
+    """Difficulty scaling for benchmark scores."""
+
+    def test_hard_scores_higher(self):
+        from evaluate_runner import DIFFICULTY_MULTIPLIER
+        assert DIFFICULTY_MULTIPLIER["Hard"] > DIFFICULTY_MULTIPLIER["Normal"]
+
+    def test_beginner_scores_lower(self):
+        from evaluate_runner import DIFFICULTY_MULTIPLIER
+        assert DIFFICULTY_MULTIPLIER["Beginner"] < DIFFICULTY_MULTIPLIER["Normal"]
+
+    def test_normal_is_baseline(self):
+        from evaluate_runner import DIFFICULTY_MULTIPLIER
+        assert DIFFICULTY_MULTIPLIER["Normal"] == 1.0
+
+
+class TestCompositeScoreUpdate:
+    """Updated composite score formula."""
+
+    def test_no_combat_military_is_zero(self):
+        from evaluate_runner import compute_composite_score
+        games = [
+            {"win": True, "kills_cost": 0, "deaths_cost": 0, "assets_value": 10000, "ticks": 2000},
+        ]
+        score = compute_composite_score(games)
+        # 50%*1.0 + 20%*0.0 + 20%*0.5 + 10%*(1/(1+2/3))
+        # = 50 + 0 + 10 + 6.0 = 66.0
+        assert abs(score - 66.0) < 1.0
+
+    def test_speed_bonus_for_fast_games(self):
+        from evaluate_runner import compute_composite_score
+        fast = [{"win": True, "kills_cost": 5000, "deaths_cost": 1000, "assets_value": 10000, "ticks": 500}]
+        slow = [{"win": True, "kills_cost": 5000, "deaths_cost": 1000, "assets_value": 10000, "ticks": 10000}]
+        assert compute_composite_score(fast) > compute_composite_score(slow)

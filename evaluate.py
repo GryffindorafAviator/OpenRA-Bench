@@ -46,6 +46,7 @@ RESULTS_COLUMNS = [
     "agent_name",
     "agent_type",
     "opponent",
+    "difficulty",
     "games",
     "win_rate",
     "score",
@@ -57,6 +58,14 @@ RESULTS_COLUMNS = [
     "timestamp",
     "replay_url",
 ]
+
+DIFFICULTY_MULTIPLIER = {
+    "Beginner": 0.5,
+    "Easy": 0.7,
+    "Medium": 0.85,
+    "Normal": 1.0,
+    "Hard": 1.2,
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -115,6 +124,9 @@ def parse_args() -> argparse.Namespace:
         help=f"Output CSV path (default: {RESULTS_FILE})",
     )
     args = parser.parse_args()
+
+    if args.games < 5:
+        parser.error("Minimum 5 games required for benchmark validity")
 
     # Auto-detect agent type
     if args.agent_type is None:
@@ -205,7 +217,12 @@ async def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
         "opponent": args.opponent,
         "games": total,
         "win_rate": round(100.0 * wins / max(total, 1), 1),
-        "score": round(compute_composite_score_from_games(game_results), 1),
+        "score": round(
+            compute_composite_score_from_games(game_results)
+            * DIFFICULTY_MULTIPLIER.get(args.opponent, 1.0),
+            1,
+        ),
+        "difficulty": args.opponent,
         "avg_kills": round(sum(g["kills_cost"] for g in game_results) / max(total, 1)),
         "avg_deaths": round(sum(g["deaths_cost"] for g in game_results) / max(total, 1)),
         "kd_ratio": round(

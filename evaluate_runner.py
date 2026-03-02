@@ -17,6 +17,14 @@ DEFAULT_SERVER = "https://openra-rl-openra-rl.hf.space"
 MAX_STEPS_PER_GAME = 5000
 STEP_TIMEOUT = 60.0
 
+DIFFICULTY_MULTIPLIER = {
+    "Beginner": 0.5,
+    "Easy": 0.7,
+    "Medium": 0.85,
+    "Normal": 1.0,
+    "Hard": 1.2,
+}
+
 
 # ── Scoring (inlined from openra_rl_util/rubrics.py) ────────────────────────
 
@@ -46,7 +54,7 @@ def compute_game_metrics(obs: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def compute_composite_score(game_results: List[Dict[str, Any]]) -> float:
-    """Compute OpenRA-Bench composite score: 50% win + 25% military + 25% economy."""
+    """Compute OpenRA-Bench composite score: 50% win + 20% military + 20% economy + 10% speed."""
     total = len(game_results)
     if total == 0:
         return 0.0
@@ -57,7 +65,7 @@ def compute_composite_score(game_results: List[Dict[str, Any]]) -> float:
     for g in game_results:
         kills, deaths = g["kills_cost"], g["deaths_cost"]
         total_cost = kills + deaths
-        mil_scores.append(kills / total_cost if total_cost > 0 else 0.5)
+        mil_scores.append(kills / total_cost if total_cost > 0 else 0.0)
     avg_mil = sum(mil_scores) / total
 
     econ_scores = []
@@ -66,7 +74,13 @@ def compute_composite_score(game_results: List[Dict[str, Any]]) -> float:
         econ_scores.append(assets / (assets + 10000) if assets >= 0 else 0.0)
     avg_econ = sum(econ_scores) / total
 
-    return 100.0 * (0.5 * win_rate + 0.25 * avg_mil + 0.25 * avg_econ)
+    speed_scores = []
+    for g in game_results:
+        ticks = g.get("ticks", 0)
+        speed_scores.append(1.0 / (1.0 + ticks / 3000))
+    avg_speed = sum(speed_scores) / total
+
+    return 100.0 * (0.5 * win_rate + 0.20 * avg_mil + 0.20 * avg_econ + 0.10 * avg_speed)
 
 
 # ── Server communication ────────────────────────────────────────────────────
@@ -136,6 +150,9 @@ async def run_evaluation(
     Returns:
         Dict with all fields needed for results.csv.
     """
+    if num_games < 5:
+        raise ValueError("Minimum 5 games required for benchmark validity")
+
     game_results: List[Dict[str, Any]] = []
 
     async with httpx.AsyncClient(timeout=STEP_TIMEOUT) as client:
@@ -154,7 +171,12 @@ async def run_evaluation(
         "opponent": opponent,
         "games": total,
         "win_rate": round(100.0 * wins / max(total, 1), 1),
-        "score": round(compute_composite_score(game_results), 1),
+        "score": round(
+            compute_composite_score(game_results)
+            * DIFFICULTY_MULTIPLIER.get(opponent, 1.0),
+            1,
+        ),
+        "difficulty": opponent,
         "avg_kills": round(sum(g["kills_cost"] for g in game_results) / max(total, 1)),
         "avg_deaths": round(sum(g["deaths_cost"] for g in game_results) / max(total, 1)),
         "kd_ratio": round(
