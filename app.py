@@ -23,7 +23,7 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 
-from evaluate_runner import DEFAULT_SERVER, compute_composite_score, compute_game_metrics
+from evaluate_runner import DIFFICULTY_MULTIPLIER, DEFAULT_SERVER, compute_composite_score, compute_game_metrics
 
 # ── Data Loading ──────────────────────────────────────────────────────────────
 
@@ -178,6 +178,9 @@ def filter_leaderboard(
 SUBMISSIONS_DIR = Path(__file__).parent / "submissions"
 SUBMISSIONS_DIR.mkdir(exist_ok=True)
 
+GAMES_JSONL = SUBMISSIONS_DIR / "games.jsonl"
+MIN_GAMES_FOR_LEADERBOARD = 5
+
 # CommitScheduler pushes submissions to HF dataset (only on HF Spaces)
 _scheduler = None
 if os.environ.get("HF_TOKEN") and os.environ.get("SPACE_ID"):
@@ -221,27 +224,128 @@ def _check_rate_limit(identifier: str = "global") -> tuple[bool, str]:
     return True, ""
 
 
-def save_submission(results: dict) -> None:
-    """Append results to local JSONL and CSV."""
-    # JSONL for CommitScheduler → HF dataset
+# ── Raw Game Storage & Aggregation ────────────────────────────────────────────
+
+
+def _save_raw_game(data: dict) -> None:
+    """Append a single game result to the raw games log."""
+    with open(GAMES_JSONL, "a") as f:
+        f.write(json.dumps(data) + "\n")
+    # Also save to results.jsonl for CommitScheduler → HF dataset
     jsonl_path = SUBMISSIONS_DIR / "results.jsonl"
     with open(jsonl_path, "a") as f:
-        f.write(json.dumps(results) + "\n")
+        f.write(json.dumps(data) + "\n")
 
-    # Also append to data/results.csv for the leaderboard
-    csv_path = DATA_PATH
-    file_exists = csv_path.exists() and csv_path.stat().st_size > 0
-    fieldnames = [
-        "agent_name", "agent_type", "opponent", "games", "win_rate",
-        "score", "avg_kills", "avg_deaths", "kd_ratio", "avg_economy",
-        "avg_game_length", "timestamp", "replay_url", "agent_url",
+
+def _load_raw_games() -> list[dict]:
+    """Load all raw games from games.jsonl."""
+    if not GAMES_JSONL.exists():
+        return []
+    games = []
+    for line in GAMES_JSONL.read_text().splitlines():
+        if line.strip():
+            try:
+                games.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return games
+
+
+def _aggregate_agent_games(
+    agent_name: str, agent_type: str, opponent: str,
+    all_games: list[dict] | None = None,
+) -> tuple[int, dict | None]:
+    """Aggregate all games for a specific agent+opponent pair.
+
+    Returns (game_count, aggregated_row_or_None).
+    aggregated_row is None if game_count < MIN_GAMES_FOR_LEADERBOARD.
+    """
+    if all_games is None:
+        all_games = _load_raw_games()
+
+    matching = [
+        g for g in all_games
+        if g.get("agent_name") == agent_name
+        and g.get("agent_type") == agent_type
+        and g.get("opponent") == opponent
     ]
-    safe_results = {k: _sanitize_csv_value(v) for k, v in results.items()}
-    with open(csv_path, "a", newline="") as f:
+    count = len(matching)
+    if count < MIN_GAMES_FOR_LEADERBOARD:
+        return count, None
+
+    game_results = []
+    for g in matching:
+        game_results.append({
+            "win": g.get("win", g.get("result") == "win"),
+            "kills_cost": g.get("kills_cost", 0),
+            "deaths_cost": g.get("deaths_cost", 0),
+            "assets_value": g.get("assets_value", 0),
+            "ticks": g.get("ticks", 0),
+        })
+
+    raw_score = compute_composite_score(game_results)
+    multiplier = DIFFICULTY_MULTIPLIER.get(opponent, 1.0)
+
+    total_kills = sum(g["kills_cost"] for g in game_results)
+    total_deaths = sum(g["deaths_cost"] for g in game_results)
+
+    return count, {
+        "agent_name": agent_name,
+        "agent_type": agent_type,
+        "opponent": opponent,
+        "difficulty": opponent,
+        "games": count,
+        "win_rate": round(100.0 * sum(1 for g in game_results if g["win"]) / count, 1),
+        "score": round(raw_score * multiplier, 1),
+        "avg_kills": round(total_kills / count),
+        "avg_deaths": round(total_deaths / count),
+        "kd_ratio": round(total_kills / max(total_deaths, 1), 2),
+        "avg_economy": round(sum(g["assets_value"] for g in game_results) / count),
+        "avg_game_length": round(sum(g["ticks"] for g in game_results) / count),
+        "timestamp": max((g.get("timestamp", "")[:10] for g in matching), default=""),
+        "replay_url": next(
+            (g.get("replay_url", "") for g in reversed(matching) if g.get("replay_url")),
+            "",
+        ),
+        "agent_url": next(
+            (g.get("agent_url", "") for g in reversed(matching) if g.get("agent_url")),
+            "",
+        ),
+    }
+
+
+def _rebuild_leaderboard() -> None:
+    """Rebuild leaderboard CSV from raw games (only agents with >= 5 games)."""
+    all_games = _load_raw_games()
+    if not all_games:
+        return  # No games yet, keep existing CSV as-is
+
+    groups = set()
+    for g in all_games:
+        key = (g.get("agent_name", ""), g.get("agent_type", ""), g.get("opponent", ""))
+        groups.add(key)
+
+    rows = []
+    for name, atype, opp in groups:
+        count, agg = _aggregate_agent_games(name, atype, opp, all_games)
+        if agg is not None:
+            rows.append(agg)
+
+    if not rows:
+        return  # No agents with enough games yet
+
+    rows.sort(key=lambda r: r.get("score", 0), reverse=True)
+
+    fieldnames = [
+        "agent_name", "agent_type", "opponent", "difficulty", "games",
+        "win_rate", "score", "avg_kills", "avg_deaths", "kd_ratio",
+        "avg_economy", "avg_game_length", "timestamp", "replay_url", "agent_url",
+    ]
+    with open(DATA_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(safe_results)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: _sanitize_csv_value(v) for k, v in row.items()})
 
 
 # ── Submission Handling ───────────────────────────────────────────────────────
@@ -296,41 +400,6 @@ def validate_submission(data: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _score_from_submission(data: dict) -> dict:
-    """Build a CSV-ready results dict from a validated submission."""
-    game_result = {
-        "result": data.get("result", ""),
-        "win": data.get("win", data.get("result") == "win"),
-        "ticks": data.get("ticks", 0),
-        "kills_cost": data.get("kills_cost", 0),
-        "deaths_cost": data.get("deaths_cost", 0),
-        "kd_ratio": data.get("kd_ratio", 0),
-        "assets_value": data.get("assets_value", 0),
-        "cash": data.get("cash", 0),
-    }
-    score = compute_composite_score([game_result])
-    kills = data.get("kills_cost", 0)
-    deaths = data.get("deaths_cost", 0)
-    games = data.get("games", 1)
-
-    return {
-        "agent_name": data["agent_name"],
-        "agent_type": data["agent_type"],
-        "opponent": data["opponent"],
-        "games": games,
-        "win_rate": round(100.0 * (1 if data.get("win") else 0) / max(games, 1), 1),
-        "score": round(score, 1),
-        "avg_kills": kills,
-        "avg_deaths": deaths,
-        "kd_ratio": round(kills / max(deaths, 1), 2),
-        "avg_economy": data.get("assets_value", 0),
-        "avg_game_length": data.get("ticks", 0),
-        "timestamp": data.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%d"))[:10],
-        "replay_url": "",
-        "agent_url": data.get("agent_url", ""),
-    }
-
-
 def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
     """Process an uploaded bench submission JSON + optional replay."""
     if json_file is None:
@@ -350,8 +419,6 @@ def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
     if not is_valid:
         return f"Validation error: {error}", add_type_badges(load_data())
 
-    results_row = _score_from_submission(data)
-
     # Save replay if provided
     if replay_file is not None:
         import shutil
@@ -363,15 +430,30 @@ def handle_upload(json_file, replay_file) -> tuple[str, pd.DataFrame]:
         slug = re.sub(r"[^a-zA-Z0-9_-]", "", data["agent_name"].replace("/", "_").replace(" ", "_"))[:30]
         replay_name = f"replay-{slug}-{ts}.orarep"
         shutil.copy2(str(orig), SUBMISSIONS_DIR / replay_name)
-        results_row["replay_url"] = replay_name
+        data["replay_url"] = replay_name
 
-    save_submission(results_row)
+    _save_raw_game(data)
+    _rebuild_leaderboard()
 
-    return (
-        f"Submitted! **{data['agent_name']}** ({data['agent_type']}) "
-        f"vs {data['opponent']}: score **{results_row['score']}**",
-        add_type_badges(load_data()),
-    )
+    agent_name = data["agent_name"]
+    opponent = data["opponent"]
+    count, agg = _aggregate_agent_games(agent_name, data["agent_type"], opponent)
+
+    if count < MIN_GAMES_FOR_LEADERBOARD:
+        remaining = MIN_GAMES_FOR_LEADERBOARD - count
+        msg = (
+            f"Recorded game {count}/{MIN_GAMES_FOR_LEADERBOARD} for "
+            f"**{agent_name}** vs {opponent}. "
+            f"Play {remaining} more game{'s' if remaining != 1 else ''} "
+            f"to appear on the leaderboard!"
+        )
+    else:
+        msg = (
+            f"**{agent_name}** vs {opponent} updated \u2014 "
+            f"{count} games, score **{agg['score']}** (win rate {agg['win_rate']}%)"
+        )
+
+    return msg, add_type_badges(load_data())
 
 
 def handle_api_submit(json_data: str) -> str:
@@ -389,12 +471,25 @@ def handle_api_submit(json_data: str) -> str:
     if not is_valid:
         return f"Validation error: {error}"
 
-    results_row = _score_from_submission(data)
-    save_submission(results_row)
+    _save_raw_game(data)
+    _rebuild_leaderboard()
+
+    agent_name = data["agent_name"]
+    opponent = data["opponent"]
+    count, agg = _aggregate_agent_games(agent_name, data["agent_type"], opponent)
+
+    if count < MIN_GAMES_FOR_LEADERBOARD:
+        remaining = MIN_GAMES_FOR_LEADERBOARD - count
+        return (
+            f"OK: recorded game {count}/{MIN_GAMES_FOR_LEADERBOARD} for "
+            f"{agent_name} vs {opponent}. "
+            f"Play {remaining} more game{'s' if remaining != 1 else ''} "
+            f"to appear on the leaderboard!"
+        )
 
     return (
-        f"OK: {data['agent_name']} ({data['agent_type']}) "
-        f"vs {data['opponent']}: score {results_row['score']}"
+        f"OK: {agent_name} vs {opponent} updated \u2014 "
+        f"{count} games, score {agg['score']} (win rate {agg['win_rate']}%)"
     )
 
 
@@ -413,8 +508,6 @@ def handle_api_submit_with_replay(json_data: str, replay_file) -> str:
     if not is_valid:
         return f"Validation error: {error}"
 
-    results_row = _score_from_submission(data)
-
     # Save replay if provided
     if replay_file is not None:
         import shutil
@@ -426,13 +519,27 @@ def handle_api_submit_with_replay(json_data: str, replay_file) -> str:
         slug = re.sub(r"[^a-zA-Z0-9_-]", "", data["agent_name"].replace("/", "_").replace(" ", "_"))[:30]
         replay_name = f"replay-{slug}-{ts}.orarep"
         shutil.copy2(str(orig), SUBMISSIONS_DIR / replay_name)
-        results_row["replay_url"] = replay_name
+        data["replay_url"] = replay_name
 
-    save_submission(results_row)
+    _save_raw_game(data)
+    _rebuild_leaderboard()
+
+    agent_name = data["agent_name"]
+    opponent = data["opponent"]
+    count, agg = _aggregate_agent_games(agent_name, data["agent_type"], opponent)
+
+    if count < MIN_GAMES_FOR_LEADERBOARD:
+        remaining = MIN_GAMES_FOR_LEADERBOARD - count
+        return (
+            f"OK: recorded game {count}/{MIN_GAMES_FOR_LEADERBOARD} for "
+            f"{agent_name} vs {opponent}. "
+            f"Play {remaining} more game{'s' if remaining != 1 else ''} "
+            f"to appear on the leaderboard!"
+        )
 
     return (
-        f"OK: {data['agent_name']} ({data['agent_type']}) "
-        f"vs {data['opponent']}: score {results_row['score']}"
+        f"OK: {agent_name} vs {opponent} updated \u2014 "
+        f"{count} games, score {agg['score']} (win rate {agg['win_rate']}%)"
     )
 
 
@@ -450,18 +557,23 @@ ABOUT_MD = """
 - **Game**: Red Alert (OpenRA engine)
 - **Format**: 1v1 agent vs built-in AI
 - **Opponents**: Beginner, Easy, Medium, Normal, Hard difficulty
-- **Games per entry**: Minimum 10 games per configuration
+- **Games per entry**: Minimum 5 games per configuration
 - **Metrics**: Win rate, composite score, K/D ratio, economy
 
 ### Composite Score
 
-The benchmark score combines three components:
+The benchmark score combines four components, scaled by opponent difficulty:
 
 | Component | Weight | Description |
 |-----------|--------|-------------|
 | Win Rate | 50% | Percentage of games won |
-| Military Efficiency | 25% | Kill/death cost ratio (normalized) |
-| Economy | 25% | Final asset value (normalized) |
+| Military Efficiency | 20% | Kill/death cost ratio (0 if no combat) |
+| Economy | 20% | Final asset value (normalized) |
+| Speed | 10% | Faster decisive games score higher |
+
+**Difficulty multiplier**: Beginner (0.5x), Easy (0.7x), Medium (0.85x), Normal (1.0x), Hard (1.2x)
+
+**Minimum games**: 5 games required per agent+opponent to appear on the leaderboard.
 
 ### Agent Types
 
@@ -502,7 +614,7 @@ Upload a previously exported bench JSON:
 python -m openra_env.bench_submit ~/.openra-rl/bench-exports/bench-*.json
 ```
 
-### Batch Evaluation (10+ games)
+### Batch Evaluation (5+ games)
 
 ```bash
 git clone https://github.com/yxc20089/OpenRA-Bench.git
@@ -527,7 +639,7 @@ python evaluate.py \\
 | `--agent-name` | Display name on the leaderboard |
 | `--agent-type` | Category: `Scripted`, `LLM`, `RL` |
 | `--opponent` | AI difficulty: `Beginner`, `Easy`, `Medium`, `Normal`, `Hard` |
-| `--games` | Number of games (minimum 10) |
+| `--games` | Number of games (minimum 5) |
 | `--server` | OpenRA-RL server URL (local or HuggingFace-hosted) |
 
 ### Custom Agents
