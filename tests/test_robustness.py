@@ -140,3 +140,33 @@ def test_bad_model_commands_do_not_crash_or_win():
     assert res.outcome in {"draw", "loss"}, "garbage play must not win"
     assert res.turns >= 1 and len(res.trace) == res.turns
     assert res.signals.game_tick > 0
+
+
+@pytest.mark.skipif(not _HAS_RUST, reason="Rust env wheel not installed")
+def test_custom_map_no_enemy_scenario_runs_from_yaml():
+    """Engine fix: a no-enemy scenario on a custom map must NOT instantly
+    terminate (enemy-elimination is not a victory condition when the
+    scenario placed no enemy). Everything is read from the pack YAML."""
+    from openra_bench.eval_core import run_level
+    from openra_bench.scenarios.loader import compile_level, resolve_map_path
+
+    pk = load_pack(PACKS_DIR / "custom-map-no-enemy.yaml")
+    c = compile_level(pk, "easy")
+    # Custom terrain actually resolved (not the rush-hour fallback).
+    mp = resolve_map_path(c.scenario.base_map)
+    assert mp is not None and mp.name == "singles-maginot.oramap"
+
+    # Idle agent: with no enemy the run must survive past tick 0 (the
+    # bug) and only end on win_condition / max_turns.
+    idle = run_level(c, lambda rs, C: [C.observe()], seed=1)
+    assert idle.signals.game_tick > 50, "no-enemy scenario terminated instantly"
+    assert idle.turns >= 1
+
+    # A scout that drives to the YAML-declared region wins via the
+    # declarative win_condition alone (no combat involved).
+    def scout(rs, C):
+        ids = [str(u["id"]) for u in rs.get("units_summary", [])]
+        return [C.move_units(ids, 30, 16)] if ids else [C.observe()]
+
+    won = run_level(c, scout, seed=1)
+    assert won.outcome == "win", f"YAML reach_region should win, got {won.outcome}"
