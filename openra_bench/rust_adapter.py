@@ -198,11 +198,14 @@ class RustObsAdapter:
 
     # -- render schema ----------------------------------------------------
     def grid_dims(self, margin: int = 4) -> tuple[int, int]:
-        """Derive a working (width, height) from observed extents.
-
-        Phase 0: the Rust env exposes no map_info; bound from observed
-        cells. Phase 3 will plumb true map dims through the adapter.
-        """
+        """True map (width, height) from the engine's map_info when
+        available (S9), else bound from observed extents (legacy
+        fallback for envs that don't emit map_info)."""
+        mi = self._raw.get("map_info") or {}
+        if isinstance(mi, dict) and int(mi.get("width", 0)) > 0 and int(
+            mi.get("height", 0)
+        ) > 0:
+            return int(mi["width"]), int(mi["height"])
         xs, ys = [0], [0]
         for src in (self._explored, _cells(self._raw.get("explored_cells"))):
             for x, y in src:
