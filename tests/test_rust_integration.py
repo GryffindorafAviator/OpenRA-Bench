@@ -104,7 +104,10 @@ class TestRustEngineTools:
         ):
             assert key in obs, f"missing obs key {key!r}"
         assert obs["unit_positions"], "agent should own units at reset"
-        assert obs["explored_percent"] == pytest.approx(0.0, abs=1e-6)
+        # OpenRA reveals sight around starting units at game start, so
+        # explored_percent must be > 0 at reset (engine fix) but well
+        # below full-map coverage.
+        assert 0.0 < obs["explored_percent"] < 100.0, obs["explored_percent"]
         assert obs["units_killed"] == 0
         assert obs["game_tick"] < 50
 
