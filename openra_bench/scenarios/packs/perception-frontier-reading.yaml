@@ -1,0 +1,101 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/perception-frontier-reading.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# PERCEPTION focus: can the model correctly READ the fog frontier — i.e.
+# tell which cells are still unrevealed and steer scouts INTO them — as
+# opposed to re-treading already-seen ground or stalling against decoys?
+# The win is a raw map-coverage threshold within a deadline, so the only
+# way to pass is to perceive where the unexplored mass is and commit
+# movement toward it. Difficulty rises by hiding the frontier farther
+# from spawn, splitting it across the map, adding decoy enemies that bait
+# attention to already-explored zones, and tightening the clock.
+
+meta:
+  id: perception-frontier-reading
+  title: "Reading the Fog Frontier"
+  capability: perception
+  real_world_meaning: >
+    Path planning is solved; the hard part is reading an occupancy grid
+    correctly to tell explored cells from the unknown frontier and
+    pushing sensors into the unknown instead of re-scanning known space.
+  robotics_analogue: "SLAM frontier detection — picking the next unexplored cell to drive a scout robot toward"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 10000}
+  actors:
+    # Fast, fragile scouts spawned in the bottom-left pocket (x<25).
+    - {type: jeep, owner: agent, position: [5, 33], count: 3}
+    - {type: jeep, owner: agent, position: [7, 30], count: 2}
+
+levels:
+  easy:
+    description: >
+      One contiguous unexplored mass directly east of spawn along the
+      open lane. The frontier is obvious and reachable; generous clock.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [5, 33], count: 3}
+        - {type: jeep, owner: agent, position: [7, 30], count: 2}
+        # A single static building parked deep east — incidentally seen
+        # by any honest eastward sweep.
+        - {type: proc, owner: enemy, position: [100, 20]}
+    win_condition:
+      all_of:
+        - {explored_pct_gte: 45}
+        - {within_ticks: 8000}
+    max_turns: 30
+
+  medium:
+    description: >
+      Unexplored area is split: a near pocket bottom-left already partly
+      visible, and the real bulk of the frontier lies far NE. A decoy
+      enemy squad sits inside the ALREADY-explored band to bait the
+      scouts into re-treading seen ground. Tighter clock, fewer scouts.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [5, 33], count: 3}
+        # Decoy: enemy infantry near spawn, inside soon-to-be-seen cells.
+        - {type: e1, owner: enemy, position: [20, 34], stance: 2, count: 2}
+        - {type: dog, owner: enemy, position: [22, 30], stance: 2}
+        # Real frontier mass: far NE, only reachable by a deliberate push.
+        - {type: powr, owner: enemy, position: [115, 6]}
+        - {type: proc, owner: enemy, position: [108, 12]}
+    win_condition:
+      all_of:
+        - {explored_pct_gte: 55}
+        - {within_ticks: 6000}
+    max_turns: 35
+
+  hard:
+    description: >
+      Frontier is fragmented across three corners (far NE, far SE, and a
+      thin NW strip). Two decoy squads sit in the explored center to pull
+      scouts off the true frontier, attrition is real (must keep >=4 of 5
+      scouts), and the deadline is short — only correct, simultaneous
+      reading of all three fog pockets clears the coverage bar in time.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [5, 33], count: 3}
+        - {type: jeep, owner: agent, position: [7, 30], count: 2}
+        # Center decoys (already-explored zone) — combat bait.
+        - {type: e1, owner: enemy, position: [55, 20], stance: 2, count: 3}
+        - {type: e3, owner: enemy, position: [58, 22], stance: 2}
+        - {type: dog, owner: enemy, position: [50, 18], stance: 2, count: 2}
+        # Three separated frontier markers forcing a full-map read.
+        - {type: powr, owner: enemy, position: [122, 4]}
+        - {type: proc, owner: enemy, position: [120, 36]}
+        - {type: gun,  owner: enemy, position: [10, 4]}
+    win_condition:
+      all_of:
+        - {explored_pct_gte: 62}
+        - {within_ticks: 4800}
+        - {units_lost_lte: 1}
+    max_turns: 40

@@ -1,0 +1,107 @@
+# Validate: python -m openra_bench.scenarios.validate packs/action-sequenced-execution.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ACTION focus: the route is given as an ordered plan — waypoint W1, then
+# W2, then the final objective. The model is not asked to *find* the order;
+# it is asked to *execute* it without stalling. The win condition encodes
+# the sequence via after_ticks gates: the final region must be reached only
+# after enough ticks that an idle / dithering agent runs out the clock,
+# while a decisive agent that keeps the column moving clears each leg in
+# time. Each level lengthens the route and tightens the budget so stalling
+# between legs becomes the dominant failure mode.
+
+meta:
+  id: action-sequenced-execution
+  title: "Ordered Route Execution Without Stalling"
+  capability: action
+  real_world_meaning: >
+    The route is already planned; the open problem is faithful, non-stalling
+    execution of an ordered objective sequence — issuing the next move the
+    instant a leg completes rather than idling, re-deliberating, or skipping
+    a waypoint, which is what makes long autonomous missions fail.
+  robotics_analogue: >
+    Manipulator / mobile-base task sequencing: a robot must hit a fixed
+    ordered set of stations (pick, transit, place) within a cycle-time
+    budget; pausing or reordering between steps misses the takt time.
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 8000}
+  actors:
+    # One cohesive column that must traverse an ordered route.
+    - {type: 2tnk, owner: agent, position: [5, 8],  count: 2}
+    - {type: 1tnk, owner: agent, position: [7, 12], count: 2}
+    # Waypoint / terminal markers as static enemy buildings.
+    - {type: powr, owner: enemy, position: [45, 30]}   # W1
+    - {type: proc, owner: enemy, position: [90, 10]}    # W2
+    - {type: fact, owner: enemy, position: [118, 33]}   # final
+
+levels:
+  easy:
+    description: >
+      Two-leg route: go to waypoint W1 (SW-mid), then the final objective
+      (far SE). The after_ticks gate means the agent must already be
+      moving; arriving at the end only counts once W1's leg time has
+      elapsed, and the overall deadline punishes any stall.
+    overrides: {}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 118, y: 33, radius: 8}}
+        - {after_ticks: 1200}
+        - {within_ticks: 6000}
+    max_turns: 30
+
+  medium:
+    description: >
+      Three-leg route W1 -> W2 -> final with a contested first leg and an
+      attrition cap. A model that stalls to re-plan between legs cannot
+      clear all three before the tighter deadline.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 8],  count: 2}
+        - {type: 1tnk, owner: agent, position: [7, 12], count: 2}
+        - {type: jeep, owner: agent, position: [5, 16]}
+        - {type: powr, owner: enemy, position: [45, 31]}
+        - {type: proc, owner: enemy, position: [92, 9]}
+        - {type: fact, owner: enemy, position: [120, 34]}
+        - {type: e1,   owner: enemy, position: [40, 25], stance: 2, count: 2}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 120, y: 34, radius: 7}}
+        - {after_ticks: 2200}
+        - {within_ticks: 5000}
+        - {units_lost_lte: 1}
+    max_turns: 36
+
+  hard:
+    description: >
+      Four-leg serpentine route across the full arena with defended
+      waypoints, a strict attrition cap and a tight budget. Every leg must
+      be executed back-to-back; any idling, re-deliberation, or skipped
+      leg overruns the clock or loses too many units.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 8],  count: 2}
+        - {type: 1tnk, owner: agent, position: [7, 12], count: 2}
+        - {type: jeep, owner: agent, position: [5, 16]}
+        - {type: apc,  owner: agent, position: [9, 20]}
+        - {type: powr, owner: enemy, position: [45, 33]}    # W1
+        - {type: proc, owner: enemy, position: [80, 6]}      # W2
+        - {type: tsla, owner: enemy, position: [110, 30]}    # W3
+        - {type: fact, owner: enemy, position: [122, 6]}     # final
+        - {type: e3,   owner: enemy, position: [42, 27], stance: 2, count: 2}
+        - {type: e1,   owner: enemy, position: [78, 12], stance: 2, count: 2}
+        - {type: gun,  owner: enemy, position: [108, 25]}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 122, y: 6, radius: 7}}
+        - {after_ticks: 3400}
+        - {within_ticks: 4400}
+        - {units_lost_lte: 1}
+    max_turns: 46

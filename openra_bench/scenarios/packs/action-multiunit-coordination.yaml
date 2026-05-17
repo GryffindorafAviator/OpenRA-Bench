@@ -1,0 +1,110 @@
+# Validate: python -m openra_bench.scenarios.validate packs/action-multiunit-coordination.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ACTION focus: the plan is trivial and stated outright — "split the force,
+# send one group to region A and another to region B, arrive at both before
+# the deadline". The hard part is EXECUTION: a model that controls only one
+# group at a time, or marches everyone to a single objective, fails. Each
+# level adds another simultaneous objective / a tighter window so a single
+# serialized column can no longer satisfy the win condition in time.
+
+meta:
+  id: action-multiunit-coordination
+  title: "Split-Force Simultaneous Objectives"
+  capability: action
+  real_world_meaning: >
+    Multi-region task allocation under a shared deadline is not a planning
+    problem here — the split is obvious. It tests whether the controller can
+    actually drive several effector groups in parallel instead of completing
+    one objective then the next, which serialized control fails to do in
+    time.
+  robotics_analogue: >
+    Coordinated multi-robot fleet dispatch: a logistics swarm must place
+    distinct sub-teams at separate depots within one delivery window;
+    one-at-a-time control blows the schedule.
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 8000}
+  actors:
+    # Two distinct agent groups in the spawn corner (x < 25) that must be
+    # split and driven to two separate regions at the same time.
+    - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
+    - {type: 1tnk, owner: agent, position: [7, 10], count: 3}
+    # Static enemy buildings act as the destination markers / targets.
+    - {type: fact, owner: enemy, position: [110, 6]}
+    - {type: proc, owner: enemy, position: [110, 33]}
+
+levels:
+  easy:
+    description: >
+      Two objectives, generous window. Split the 2tnk group to the
+      north-east region and the 1tnk group to the south-east region;
+      both groups must be on station before the deadline.
+    overrides: {}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 6,  radius: 8}}
+        - {reach_region: {x: 110, y: 33, radius: 8}}
+        - {within_ticks: 6000}
+    max_turns: 30
+
+  medium:
+    description: >
+      Three simultaneous regions and an attrition cap. The force splits
+      three ways (NE, SE, mid-east); enemy infantry contest the lanes so
+      sloppy serialized movement bleeds units and misses the tighter
+      deadline.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
+        - {type: 1tnk, owner: agent, position: [7, 10], count: 3}
+        - {type: jeep, owner: agent, position: [5, 14], count: 2}
+        - {type: fact, owner: enemy, position: [110, 5]}
+        - {type: proc, owner: enemy, position: [110, 34]}
+        - {type: powr, owner: enemy, position: [112, 20]}
+        - {type: e1,   owner: enemy, position: [60, 8],  stance: 2, count: 2}
+        - {type: e1,   owner: enemy, position: [60, 31], stance: 2, count: 2}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 5,  radius: 7}}
+        - {reach_region: {x: 110, y: 34, radius: 7}}
+        - {reach_region: {x: 112, y: 20, radius: 7}}
+        - {within_ticks: 5000}
+        - {units_lost_lte: 2}
+    max_turns: 36
+
+  hard:
+    description: >
+      Three contested regions, the full force must arrive (every unit in
+      one of the three zones — checked as occupied corners), defenders
+      have turrets, the deadline is tight and attrition is strict. Only
+      genuine parallel multi-group control can satisfy all clauses.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
+        - {type: 1tnk, owner: agent, position: [7, 10], count: 3}
+        - {type: jeep, owner: agent, position: [5, 14], count: 2}
+        - {type: apc,  owner: agent, position: [9, 18], count: 2}
+        - {type: fact, owner: enemy, position: [112, 5]}
+        - {type: proc, owner: enemy, position: [112, 35]}
+        - {type: powr, owner: enemy, position: [115, 20]}
+        - {type: gun,  owner: enemy, position: [100, 6]}
+        - {type: gun,  owner: enemy, position: [100, 34]}
+        - {type: e3,   owner: enemy, position: [55, 9],  stance: 2, count: 2}
+        - {type: e3,   owner: enemy, position: [55, 31], stance: 2, count: 2}
+        - {type: e1,   owner: enemy, position: [58, 20], stance: 2, count: 2}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 112, y: 5,  radius: 7}}
+        - {reach_region: {x: 112, y: 35, radius: 7}}
+        - {reach_region: {x: 115, y: 20, radius: 7}}
+        - {within_ticks: 4200}
+        - {units_lost_lte: 2}
+    max_turns: 44

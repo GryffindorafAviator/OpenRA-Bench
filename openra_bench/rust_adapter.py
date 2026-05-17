@@ -1,0 +1,238 @@
+"""Rust env -> Training-component schema adapter.
+
+The Rust env (`openra_train.OpenRAEnv`) emits a lean observation:
+
+    keys = unit_positions, unit_hp, enemy_positions, enemy_hp,
+           enemy_buildings_summary, explored_cells, explored_percent,
+           game_tick, units_killed
+    step() -> (obs, reward=0.0 (hardcoded), done: bool,
+               info={game_tick, warnings})
+
+`minimap_renderer.render_minimap()` and the prompt builders in
+OpenRA-RL-Training expect a different shape (`units_summary`,
+`enemy_summary`, an ASCII `minimap`, `terrain_png`). And because the
+Rust env hardcodes reward to 0.0, all scoring/diagnostic signals must be
+derived here from observation deltas.
+
+This module is the single translation point. It is intentionally pure
+(no model / network / file I/O beyond optional terrain load) so it can
+be unit-tested against captured Rust observations.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+def _cells(obj: Any) -> list[tuple[int, int]]:
+    """Normalize explored_cells / position lists to [(x, y), ...]."""
+    out: list[tuple[int, int]] = []
+    if not obj:
+        return out
+    for c in obj:
+        if isinstance(c, dict):
+            out.append((int(c.get("cell_x", 0)), int(c.get("cell_y", 0))))
+        elif isinstance(c, (list, tuple)) and len(c) >= 2:
+            out.append((int(c[0]), int(c[1])))
+    return out
+
+
+def _units_to_render_list(
+    positions: dict[str, Any],
+    hp: dict[str, Any] | None,
+    type_by_id: dict[str, str] | None = None,
+) -> list[dict]:
+    """unit_positions {id: {cell_x, cell_y, ...}} -> [{cell_x, cell_y, type, id, hp}]."""
+    hp = hp or {}
+    type_by_id = type_by_id or {}
+    out: list[dict] = []
+    for uid, p in (positions or {}).items():
+        if isinstance(p, dict):
+            cx, cy = int(p.get("cell_x", 0)), int(p.get("cell_y", 0))
+            activity = p.get("activity")
+        elif isinstance(p, (list, tuple)) and len(p) >= 2:
+            cx, cy, activity = int(p[0]), int(p[1]), None
+        else:
+            continue
+        out.append(
+            {
+                "id": str(uid),
+                "cell_x": cx,
+                "cell_y": cy,
+                "type": type_by_id.get(str(uid)),
+                "hp": float(hp.get(uid, hp.get(str(uid), 1.0)) or 0.0),
+                "activity": activity,
+            }
+        )
+    return out
+
+
+@dataclass
+class EpisodeSignals:
+    """Cumulative + per-step signals derived from Rust obs deltas.
+
+    Drives both `reward_funcs` inputs and the P/R/A diagnostic rubrics
+    (task #2). Rust gives no reward/result, so every signal lives here.
+    """
+
+    units_killed: int = 0
+    units_killed_delta: int = 0
+    units_lost: int = 0
+    explored_percent: float = 0.0
+    explored_delta: float = 0.0
+    enemies_seen_ids: set[str] = field(default_factory=set)
+    enemy_buildings_seen_ids: set[str] = field(default_factory=set)
+    new_enemies_this_step: int = 0
+    new_buildings_this_step: int = 0
+    game_tick: int = 0
+    done: bool = False
+    # Outcome is synthesized (Rust has no result field): a scenario is
+    # "won" when all enemy buildings have been discovered AND/OR all
+    # enemy units neutralized — refined per-scenario in Phase 2 rubrics.
+    outcome: float = 0.0
+
+    def as_reward_kwargs(self) -> dict[str, Any]:
+        """Shape expected by OpenRA-RL-Training reward_funcs (game signals)."""
+        return {
+            "units_killed": self.units_killed,
+            "units_lost": self.units_lost,
+            "explored_percent": self.explored_percent,
+            "enemies_discovered": len(self.enemies_seen_ids),
+            "buildings_discovered": len(self.enemy_buildings_seen_ids),
+            "outcome": self.outcome,
+            "game_tick": self.game_tick,
+            "done": self.done,
+        }
+
+
+class RustObsAdapter:
+    """Stateful per-episode adapter. One instance per episode.
+
+    Usage:
+        ad = RustObsAdapter(scenario_def)
+        ad.observe(reset_obs)
+        ...loop: ad.observe(step_obs, done=done)
+        render_state = ad.render_state()        # for minimap_renderer
+        sig = ad.signals                        # for scoring / diagnostics
+    """
+
+    def __init__(self, scenario: Any = None, type_by_id: dict[str, str] | None = None):
+        self.scenario = scenario
+        self.type_by_id = type_by_id or {}
+        self.signals = EpisodeSignals()
+        self._explored: set[tuple[int, int]] = set()
+        self._prev_own_ids: set[str] = set()
+        self._raw: dict[str, Any] = {}
+        self._first_own_count: int | None = None
+
+    # -- ingestion --------------------------------------------------------
+    def observe(self, obs: dict[str, Any], done: bool = False) -> None:
+        self._raw = obs or {}
+        s = self.signals
+
+        own = self._raw.get("unit_positions", {}) or {}
+        own_ids = {str(k) for k in own}
+        if self._first_own_count is None:
+            self._first_own_count = len(own_ids)
+        # Lost = units that disappeared from our roster.
+        s.units_lost = max(0, (self._first_own_count or 0) - len(own_ids))
+        self._prev_own_ids = own_ids
+
+        prev_kills = s.units_killed
+        s.units_killed = int(self._raw.get("units_killed", s.units_killed) or 0)
+        s.units_killed_delta = max(0, s.units_killed - prev_kills)
+
+        prev_expl = s.explored_percent
+        s.explored_percent = float(self._raw.get("explored_percent", prev_expl) or 0.0)
+        s.explored_delta = max(0.0, s.explored_percent - prev_expl)
+        self._explored.update(_cells(self._raw.get("explored_cells")))
+
+        before_e = len(s.enemies_seen_ids)
+        for e in self._raw.get("enemy_positions", []) or []:
+            if isinstance(e, dict) and e.get("id") is not None:
+                s.enemies_seen_ids.add(str(e["id"]))
+        s.new_enemies_this_step = len(s.enemies_seen_ids) - before_e
+
+        before_b = len(s.enemy_buildings_seen_ids)
+        for b in self._raw.get("enemy_buildings_summary", []) or []:
+            if isinstance(b, dict) and b.get("id") is not None:
+                s.enemy_buildings_seen_ids.add(str(b["id"]))
+        s.new_buildings_this_step = len(s.enemy_buildings_seen_ids) - before_b
+
+        s.game_tick = int(self._raw.get("game_tick", s.game_tick) or 0)
+        s.done = bool(done)
+
+    # -- render schema ----------------------------------------------------
+    def grid_dims(self, margin: int = 4) -> tuple[int, int]:
+        """Derive a working (width, height) from observed extents.
+
+        Phase 0: the Rust env exposes no map_info; bound from observed
+        cells. Phase 3 will plumb true map dims through the adapter.
+        """
+        xs, ys = [0], [0]
+        for src in (self._explored, _cells(self._raw.get("explored_cells"))):
+            for x, y in src:
+                xs.append(x)
+                ys.append(y)
+        for coll in (
+            self._raw.get("unit_positions", {}) or {},
+            self._raw.get("enemy_positions", []) or [],
+            self._raw.get("enemy_buildings_summary", []) or [],
+        ):
+            items = coll.values() if isinstance(coll, dict) else coll
+            for p in items:
+                if isinstance(p, dict):
+                    xs.append(int(p.get("cell_x", 0)))
+                    ys.append(int(p.get("cell_y", 0)))
+        return max(xs) + margin, max(ys) + margin
+
+    def ascii_minimap(self) -> str:
+        """Synthesize the ASCII grid the renderer parses for the explored
+        mask: '#' = unexplored, '.' = explored. Faithful to
+        minimap_renderer._parse_ascii_minimap (anything != '#' = explored).
+        """
+        w, h = self.grid_dims()
+        explored = set(self._explored) | set(_cells(self._raw.get("explored_cells")))
+        rows = []
+        for y in range(h):
+            rows.append("".join("." if (x, y) in explored else "#" for x in range(w)))
+        return "\n".join(rows)
+
+    def render_state(self) -> dict[str, Any]:
+        """State dict shaped for minimap_renderer.render_minimap()/prompts."""
+        w, h = self.grid_dims()
+        own = _units_to_render_list(
+            self._raw.get("unit_positions", {}),
+            self._raw.get("unit_hp"),
+            self.type_by_id,
+        )
+        enemy = _units_to_render_list(
+            {
+                str(e.get("id", i)): e
+                for i, e in enumerate(self._raw.get("enemy_positions", []) or [])
+            },
+            self._raw.get("enemy_hp"),
+        )
+        enemy += [
+            {
+                "id": str(b.get("id", f"bldg{i}")),
+                "cell_x": int(b.get("cell_x", 0)),
+                "cell_y": int(b.get("cell_y", 0)),
+                "type": b.get("kind") or b.get("type"),
+                "hp": float(b.get("hp_pct", 1.0) or 0.0),
+                "is_building": True,
+            }
+            for i, b in enumerate(self._raw.get("enemy_buildings_summary", []) or [])
+        ]
+        return {
+            "units_summary": own,
+            "enemy_summary": enemy,
+            "minimap": self.ascii_minimap(),
+            "map_width": w,
+            "map_height": h,
+            "bounds_x": 0,
+            "bounds_y": 0,
+            "game_tick": self.signals.game_tick,
+            "explored_percent": self.signals.explored_percent,
+        }

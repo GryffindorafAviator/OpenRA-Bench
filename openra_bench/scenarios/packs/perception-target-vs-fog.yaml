@@ -1,0 +1,111 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/perception-target-vs-fog.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# PERCEPTION focus, targeting a KNOWN failure mode: the model treats
+# "unexplored region" and "where the target is" as unrelated facts. It
+# explores the nearest fog patch, sees nothing, and never connects that
+# the target building must therefore be in the OTHER unexplored region.
+# Here the win requires discovering the actual target building (not just
+# map coverage), and there is always a nearer-but-empty fog pocket plus a
+# farther fog pocket that genuinely contains the target. Passing means
+# the model spatially reasoned about WHERE the unexplored mass is
+# relative to WHERE the target must be — not just that fog exists.
+
+meta:
+  id: perception-target-vs-fog
+  title: "Where the Target Hides in the Fog"
+  capability: perception
+  real_world_meaning: >
+    The real search problem is not "go to fog" but inferring which of
+    several unexplored regions could actually contain the target given
+    what the empty regions rule out, then committing sensors there.
+  robotics_analogue: "Search-and-rescue: choosing which unexplored room can still hold the victim after clearing the near ones"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 10000}
+  actors:
+    # Scouts spawn top-left (x<25, y<10).
+    - {type: jeep, owner: agent, position: [6, 5], count: 3}
+    - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+
+levels:
+  easy:
+    description: >
+      One target building, one unexplored region — both far east. The
+      near area is already open (no decoy fog). Reading "fog is east,
+      therefore the target is east" is direct. Generous clock.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 5], count: 3}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+        # Target building in the single eastern fog mass.
+        - {type: fact, owner: enemy, position: [105, 20]}
+        # Light guard so it reads as a real objective, not a stray actor.
+        - {type: e1, owner: enemy, position: [102, 22], stance: 2}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 8000}
+    max_turns: 30
+
+  medium:
+    description: >
+      Two unexplored regions: a NEAR one (NE, closer to spawn) that is
+      EMPTY, and a FAR one (SE, opposite corner) that holds the real
+      target. The model must not stop after clearing the near fog and
+      finding nothing — it must infer the target is in the remaining
+      unexplored region. Decoy enemy units sit in the empty near region.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 5], count: 3}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+        # Near (NE) decoy region: enemy units but NO building (a trap
+        # that satisfies curiosity but not the win condition).
+        - {type: e1,  owner: enemy, position: [70, 6], stance: 2, count: 2}
+        - {type: jeep, owner: enemy, position: [74, 9], stance: 2}
+        # Far (SE) region: the actual target building.
+        - {type: fact, owner: enemy, position: [118, 35]}
+        - {type: e2,   owner: enemy, position: [114, 33], stance: 2}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 6000}
+    max_turns: 35
+
+  hard:
+    description: >
+      Three unexplored regions. Two are decoys: a NEAR-NE pocket with a
+      noisy enemy squad (pure bait) and a MID-SOUTH pocket with a single
+      enemy *building of the wrong kind already implicitly elsewhere* —
+      both contain no usable target. The real target is a lone building
+      tucked in the far-NW strip, the LEAST intuitive direction from a
+      spawn that naturally pushes east. Short deadline and attrition:
+      only a correct read of which fog pocket can still hold the target
+      — after the near ones are ruled out — discovers it in time.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 5], count: 3}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+        # Decoy A — near NE, loud enemy squad, no target building.
+        - {type: e1,  owner: enemy, position: [60, 6],  stance: 2, count: 3}
+        - {type: dog, owner: enemy, position: [64, 9],  stance: 2, count: 2}
+        # Decoy B — mid-south, enemy units only, no target building.
+        - {type: e3,  owner: enemy, position: [70, 34], stance: 2, count: 2}
+        - {type: apc, owner: enemy, position: [66, 31], stance: 2}
+        # The real target: a single building in the far-NW strip, the
+        # counter-intuitive corner relative to an eastward spawn bias.
+        - {type: tsla, owner: enemy, position: [118, 4]}
+        - {type: e1,   owner: enemy, position: [115, 6], stance: 2}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 4800}
+        - {units_lost_lte: 1}
+    max_turns: 40

@@ -1,0 +1,111 @@
+# reasoning-frontier-commit.yaml
+#
+# REASONING-link scenario. Perception is trivially correct (the map is
+# fog-of-war and a single scout discovers whatever it drives into); the
+# hard part is the *decision*: given partial information and a finite
+# tick budget, WHICH unexplored region do you commit your scout to?
+# Multiple regions look equally plausible from the corner; only one
+# holds the survivor (the objective marker). Wrong commitment burns the
+# clock and you draw.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/reasoning-frontier-commit.yaml
+
+meta:
+  id: reasoning-frontier-commit
+  title: "Frontier Commitment Under Partial Information"
+  capability: reasoning
+  real_world_meaning: >
+    Path planning to any point is solved. The unsolved problem is
+    deciding which of several unexplored regions to commit a
+    time/fuel-limited searcher to when only one hides the target and
+    going to the wrong one first means you never reach the right one in
+    time. That commitment-under-uncertainty step is the real
+    search-and-rescue problem, not the navigation.
+  robotics_analogue: >
+    UAV/UGV search-and-rescue frontier selection: with limited
+    endurance and several candidate search cells, choose the cell most
+    likely to contain the survivor before the battery dies.
+  author: "berta"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 8000}
+  actors:
+    # Single fast scout in the NW corner (x<25). One body, one
+    # commitment — the decision cannot be hedged by splitting forces.
+    - {type: jeep, owner: agent, position: [6, 6], count: 1}
+    # The survivor: a static building marker, the only thing that
+    # satisfies the win condition. NE region.
+    - {type: gun, owner: enemy, position: [112, 6], stance: 0}
+
+levels:
+  easy:
+    description: >
+      One survivor, one plausible region. The objective marker sits in
+      the far-NE region and nothing else does — perception is honest,
+      the only task is to plan a direct commitment within the deadline.
+    overrides: {}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 6500}
+    max_turns: 30
+
+  medium:
+    description: >
+      Two candidate regions, one decoy. A decoy marker sits in the
+      far-SE region; the real survivor is in the far-NE. From the
+      corner both are equidistant-looking, but only the NE building
+      counts toward 'buildings_discovered'. Committing to the SE decoy
+      first wastes enough ticks to miss the deadline — the model must
+      reason about which to commit to, not just navigate.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 6], count: 1}
+        # Decoy: an enemy *unit* in SE — discovering it does NOT satisfy
+        # the buildings-based win condition. Pure distractor.
+        - {type: e1, owner: enemy, position: [112, 34], stance: 0, count: 2}
+        # Real survivor marker: NE building.
+        - {type: gun, owner: enemy, position: [112, 6], stance: 0}
+      termination: {max_ticks: 7000}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 5200}
+    max_turns: 34
+
+  hard:
+    description: >
+      Three candidate regions, two decoys, a tighter deadline, and an
+      attrition constraint. Decoy unit clusters sit in the SE and
+      mid-S regions; the real survivor marker is in the far-NE. One
+      decoy cluster is hostile (stance 2) so a careless route into it
+      can get the lone scout killed — the model must pick the
+      commitment that finds the building, fits the clock, AND avoids
+      the lethal frontier. Reasoning must trade route safety against
+      time without splitting (only one unit).
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 6], count: 1}
+        # Decoy A (SE) — hostile cluster; a route through it risks the
+        # lone scout (units_lost_lte: 0 constraint below).
+        - {type: e3, owner: enemy, position: [110, 34], stance: 2, count: 3}
+        # Decoy B (mid-S) — passive distractor unit.
+        - {type: e1, owner: enemy, position: [62, 36], stance: 0, count: 2}
+        # Real survivor marker: far-NE building.
+        - {type: gun, owner: enemy, position: [118, 5], stance: 0}
+      termination: {max_ticks: 6000}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 4200}
+        - {units_lost_lte: 0}
+    max_turns: 38

@@ -1,0 +1,132 @@
+# reasoning-risk-route.yaml
+#
+# REASONING-link scenario. Perception is correct (defenses are visible
+# once approached and the layout is fixed); the hard part is the
+# *plan*: there are two ways to the objective region — a short corridor
+# straight through lethal defenses, and a longer detour along a map
+# edge that avoids them. The short route is faster but kills a
+# light-unit scout; the safe route is slower but survivable. The model
+# must reason about the risk/route tradeoff and choose the longer,
+# safer plan under an attrition constraint and a deadline that still
+# permits the detour.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/reasoning-risk-route.yaml
+
+meta:
+  id: reasoning-risk-route
+  title: "Risk vs Route: Safe-but-Long over Short-but-Deadly"
+  capability: reasoning
+  real_world_meaning: >
+    Shortest-path is solved. The unsolved decision is whether the
+    shortest path is the right path: a direct corridor may pass through
+    a hazard that destroys the vehicle, while a longer perimeter route
+    completes the mission intact. Choosing the survivable plan over the
+    fastest one, given a deadline that the detour still satisfies, is
+    the actual mission-planning problem.
+  robotics_analogue: >
+    Field-robot route selection under hazard: a delivery/inspection
+    robot must reject the shortest path when it crosses a no-go hazard
+    zone and instead commit to a longer but survivable route that still
+    meets the time window.
+  author: "berta"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 9000}
+  actors:
+    # Lone light scout, NW corner (x<25). Fragile — cannot trade fire
+    # with turrets, so the route choice is the whole game.
+    - {type: jeep, owner: agent, position: [6, 20], count: 1}
+    # Objective marker on the far (east) side of the map.
+    - {type: gun, owner: enemy, position: [120, 20], stance: 0}
+    # Mid-map central choke "short route" defenses (lethal). The detour
+    # is along the top edge (low y) or bottom edge (high y), which is
+    # longer but clear in easy/medium.
+    - {type: tsla, owner: enemy, position: [62, 20], stance: 0}
+    - {type: e3,   owner: enemy, position: [60, 19], stance: 2, count: 3}
+    - {type: e3,   owner: enemy, position: [64, 21], stance: 2, count: 3}
+
+levels:
+  easy:
+    description: >
+      One central hazard, one obvious safe detour. The direct line
+      x-axis route passes through a tesla coil + rocket infantry that
+      shred the jeep; the top and bottom edges are completely open.
+      Generous deadline: any safe detour wins. The model only has to
+      recognise the corridor is lethal and not drive into it.
+    overrides: {}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 120, y: 20, radius: 7}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 7500}
+    max_turns: 32
+
+  medium:
+    description: >
+      The bottom detour is now also guarded, so only the top-edge route
+      is safe — a longer commitment that the deadline still allows but
+      with less slack. The model must reason that the shortest route is
+      lethal, the bottom route is also lethal, and the top route,
+      though longest, is the only plan that satisfies both the
+      no-loss constraint and the tighter clock.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 20], count: 1}
+        - {type: gun,  owner: enemy, position: [120, 20], stance: 0}
+        # Central short-route hazard.
+        - {type: tsla, owner: enemy, position: [62, 20], stance: 0}
+        - {type: e3,   owner: enemy, position: [60, 19], stance: 2, count: 3}
+        - {type: e3,   owner: enemy, position: [64, 21], stance: 2, count: 3}
+        # Bottom-edge route now blocked too (lethal cluster, high y).
+        - {type: e3,   owner: enemy, position: [62, 36], stance: 2, count: 4}
+        - {type: gun,  owner: enemy, position: [62, 38], stance: 0}
+      termination: {max_ticks: 8000}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 120, y: 20, radius: 7}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 6000}
+    max_turns: 36
+
+  hard:
+    description: >
+      Both edges are partly contested and the deadline is tight enough
+      that the longest fully-safe path is too slow — the model must
+      reason about a graduated tradeoff: the top edge is fastest but
+      grazes a defended pocket, the bottom edge is fully safe but too
+      long for the clock, so the only winning plan threads the
+      narrow safe seam near the top while staying out of weapon range.
+      Risk and route must be traded against the deadline, not avoided
+      outright.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 20], count: 1}
+        - {type: gun,  owner: enemy, position: [122, 20], stance: 0}
+        # Central short-route hazard (still lethal).
+        - {type: tsla, owner: enemy, position: [62, 20], stance: 0}
+        - {type: e3,   owner: enemy, position: [60, 19], stance: 2, count: 3}
+        - {type: e3,   owner: enemy, position: [64, 21], stance: 2, count: 3}
+        # Top-edge defended pocket — must skirt it precisely, not
+        # plough through it.
+        - {type: e3,   owner: enemy, position: [70, 6], stance: 2, count: 2}
+        - {type: gun,  owner: enemy, position: [72, 4], stance: 0}
+        # Bottom-edge fully blocked (forces the top seam, but bottom
+        # detour would also be too slow for the clock anyway).
+        - {type: e3,   owner: enemy, position: [62, 36], stance: 2, count: 4}
+        - {type: tsla, owner: enemy, position: [62, 38], stance: 0}
+      termination: {max_ticks: 7000}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 122, y: 20, radius: 6}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4800}
+    max_turns: 40
