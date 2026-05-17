@@ -74,19 +74,49 @@ def test_missing_required_meaning_rejected():
         load_pack(_pack(y))
 
 
+def _bundled_pack_files():
+    return [
+        f
+        for f in sorted(PACKS_DIR.glob("*.yaml"))
+        if not f.name.startswith(("_", "TEMPLATE"))
+    ]
+
+
 def test_bundled_packs_all_valid():
     """Every shipped pack must load + compile all three levels — the
-    contributor-facing contract and a regression gate for the library."""
+    contributor-facing contract and a regression gate for the library
+    (the single source of truth: P/R/A, economy, building, rush-hour,
+    strategy)."""
     from openra_bench.scenarios.loader import compile_level
 
-    packs = list(PACKS_DIR.glob("*.yaml"))
-    assert packs, "no bundled packs found"
-    for f in packs:
-        if f.name.startswith(("_", "TEMPLATE")):
-            continue
+    files = _bundled_pack_files()
+    assert files, "no bundled packs found"
+    for f in files:
         pk = load_pack(f)
         for lvl in ("easy", "medium", "hard"):
-            compile_level(pk, lvl)  # raises on any broken level
+            compile_level(pk, lvl)
+
+
+@pytest.mark.skipif(not _HAS_RUST, reason="Rust env wheel not installed")
+@pytest.mark.parametrize("pack_file", _bundled_pack_files(), ids=lambda p: p.stem)
+def test_bundled_pack_runs_on_engine(pack_file):
+    """Single-source-of-truth gate: every shipped pack's easy level must
+    actually execute on the Rust engine (real map terrain resolves,
+    actors load, scores) — not merely validate."""
+    from openra_bench.eval_core import run_level
+    from openra_bench.scenarios.loader import compile_level
+
+    c = compile_level(load_pack(pack_file), "easy")
+    assert c.map_supported, f"{pack_file.stem}: map not Rust-loadable"
+
+    def go(rs, Command):
+        ids = [str(u["id"]) for u in rs.get("units_summary", [])]
+        return [Command.move_units(ids, 50, 20)] if ids else [Command.observe()]
+
+    res = run_level(c, go, seed=1)
+    assert res.outcome in {"win", "draw", "loss"}
+    assert res.turns >= 1 and len(res.trace) == res.turns
+    assert res.signals.game_tick > 0
 
 
 # ── Leaderboard store is corruption-tolerant ─────────────────────────
