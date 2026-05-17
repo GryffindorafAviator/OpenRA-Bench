@@ -80,9 +80,15 @@ cap) — never just bigger numbers (Procgen/SMACv2 rule).
 ≈ **201 levels / ~67 packs**, all runnable on the current engine.
 Economy categories are scoped as **spend/conservation** decisions
 (`starting_cash`), the discriminating choice today; an
-**Economy-Harvest** 13th category is deferred to engine task **#14**
-(S0 ore source + S1 silo storage) — earn-rate allocation is not
-discriminating with zero income.
+**Economy-Harvest** 13th category is **now RUNNABLE** — engine task
+**#14** (S0 ore-seeding + idempotent harvest, S1 capped resource pool
+from refineries/silos + `economy_value`) is done. Shipped packs:
+`economy-harvest-timebox` (earn max economic value in a time budget,
+keep harvesters productive) and `economy-harvest-investment` (split a
+budget between widening collection and silo storage so burst yield is
+not lost — the storage decision). Win = `economy_value_gte`
+(=cash+stored resources) / `harvesters_gte` / `has_building:silo`
+within `within_ticks`; integ-tested end-to-end (test_economy_harvest).
 
 ## Generation & integ-test strategy ("each run + validated")
 

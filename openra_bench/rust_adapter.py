@@ -279,6 +279,9 @@ class RustObsAdapter:
             "explored_percent": self.signals.explored_percent,
             # Economy/base state so agents can plan construction.
             "cash": self.signals.cash,
+            "resources": self.signals.resources,
+            "resource_capacity": self.signals.resource_capacity,
+            "economy_value": self.signals.cash + self.signals.resources,
             "power_provided": self.signals.power_provided,
             "power_drained": self.signals.power_drained,
             "own_buildings": [
