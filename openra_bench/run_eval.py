@@ -137,6 +137,13 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--base-url")
     ap.add_argument("--no-vision", action="store_true")
     ap.add_argument("--out", default="eval_stats.json")
+    ap.add_argument(
+        "--leaderboard",
+        nargs="?",
+        const="",
+        help="publish this run to the leaderboard store (optional path; "
+        "default data/leaderboard.jsonl)",
+    )
     a = ap.parse_args(argv[1:])
 
     cfg = None
@@ -165,6 +172,16 @@ def main(argv: list[str]) -> int:
         f"P={o.get('perception_mean', 0)} R={o.get('reasoning_mean', 0)} "
         f"A={o.get('action_mean', 0)} weakest={o.get('weakest_link_hist', {})}"
     )
+    if a.leaderboard is not None:
+        from .leaderboard import DEFAULT_STORE, ingest_run
+
+        store = a.leaderboard or DEFAULT_STORE
+        label = a.model if a.provider else "scripted-baseline"
+        rec = ingest_run(stats, label, store)
+        print(
+            f"published to leaderboard {store}: {label} "
+            f"composite={rec['composite']} (episodes={rec['episodes']})"
+        )
     for s in stats["skipped"]:
         print(f"  skipped: {s}")
     return 0

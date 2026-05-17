@@ -161,6 +161,24 @@ def add_type_badges(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def load_capability_leaderboard() -> pd.DataFrame:
+    """Ranked capability leaderboard from the run_eval JSONL store
+    (composite + Perception/Reasoning/Action + dominant weakest link)."""
+    try:
+        from openra_bench.leaderboard import build_table
+
+        rows = build_table()
+    except Exception:  # noqa: BLE001 — never break the UI on a bad store
+        rows = []
+    cols = [
+        "rank", "model", "episodes", "win_rate", "composite",
+        "perception", "reasoning", "action", "weakest_link",
+    ]
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame([{c: r.get(c) for c in cols} for r in rows])
+
+
 # ── Filtering ─────────────────────────────────────────────────────────────────
 
 
@@ -913,6 +931,23 @@ def build_app() -> gr.Blocks:
                         inputs=filter_inputs,
                         outputs=leaderboard,
                     )
+
+            # ── Capability Leaderboard Tab ────────────────────────────────
+            # run_eval reports (composite + Perception/Reasoning/Action +
+            # weakest link) published via `run_eval --leaderboard`.
+            with gr.Tab("Capability Leaderboard"):
+                gr.Markdown(
+                    "Models on customized scenarios, scored on the "
+                    "Perception→Reasoning→Action chain. **weakest_link** "
+                    "shows the dominant failure mode."
+                )
+                cap_df = gr.Dataframe(
+                    value=load_capability_leaderboard(),
+                    interactive=False,
+                    wrap=True,
+                )
+                refresh_cap = gr.Button("Refresh")
+                refresh_cap.click(load_capability_leaderboard, outputs=cap_df)
 
             # ── About Tab ─────────────────────────────────────────────────
             with gr.Tab("About"):
