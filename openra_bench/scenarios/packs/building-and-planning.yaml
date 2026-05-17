@@ -1,0 +1,123 @@
+meta:
+  id: building-and-planning
+  title: "Base Construction & Planning"
+  capability: reasoning
+  real_world_meaning: >
+    Construction planning under dependency and spatial constraints:
+    decide a build order that respects tech-tree prerequisites, place
+    structures where the objective requires (a defended direction), and
+    when needed relocate to found a new base in a designated region.
+    The decision is the plan — order, placement, and commitment — not
+    the motor control of any single build.
+  robotics_analogue: >
+    Autonomous construction / facility-layout planning: a task-graph
+    with prerequisites (B needs A) plus spatial goals (assemble in zone
+    Z, relocate the depot near region R) under a time budget.
+  author: autonomous-loop
+
+base_map: rush-hour-arena
+starting_cash: 6000
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - build
+    - place_building
+    - move_units
+    - deploy
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    - type: fact
+      owner: agent
+      position:
+      - 10
+      - 18
+    - type: powr
+      owner: agent
+      position:
+      - 14
+      - 18
+    - type: jeep
+      owner: agent
+      position:
+      - 8
+      - 16
+    - type: e1
+      owner: enemy
+      position:
+      - 114
+      - 34
+      stance: 2
+
+levels:
+  easy:
+    description: >
+      Base + budget given. Build the required structures — including a
+      barracks that depends on power (tech-tree prerequisite). Win =
+      reach the target building total AND the tech-dependent barracks.
+    starting_cash: 6000
+    win_condition:
+      all_of:
+        - building_total_gte: 4      # fact+powr (pre) + built powr + tent
+        - has_building: tent         # requires power → proves the tech dep
+        - within_ticks: 20000
+    max_turns: 60
+  medium:
+    description: >
+      Build a defensive line to the EAST (toward the enemy): place at
+      least two pillboxes inside the designated eastern region within
+      the deadline. Placement direction is the decision.
+    starting_cash: 5000
+    overrides:
+      actors:
+        - type: fact
+          owner: agent
+          position: [10, 18]
+        - type: powr
+          owner: agent
+          position: [14, 18]
+        - type: tent          # pre-placed so pbox prereq is satisfiable
+          owner: agent
+          position: [12, 21]
+        - type: jeep
+          owner: agent
+          position: [8, 16]
+        - type: e1
+          owner: enemy
+          position: [114, 34]
+          stance: 2
+    win_condition:
+      all_of:
+        - building_in_region: {type: pbox, x: 40, y: 20, radius: 9, count: 2}
+        - within_ticks: 22000
+    max_turns: 70
+  hard:
+    description: >
+      No starting base economy here — an MCV and a scout. Relocate to
+      the designated eastern region, deploy a construction yard there,
+      and stand up a power plant: found a new base near the region.
+    starting_cash: 4000
+    overrides:
+      actors:
+        - type: mcv
+          owner: agent
+          position: [10, 18]
+        - type: jeep
+          owner: agent
+          position: [8, 16]
+        - type: e1
+          owner: enemy
+          position: [120, 34]
+          stance: 2
+    win_condition:
+      all_of:
+        - building_in_region: {x: 60, y: 20, radius: 10, count: 2}
+        - within_ticks: 30000
+        - units_lost_lte: 1
+    max_turns: 90

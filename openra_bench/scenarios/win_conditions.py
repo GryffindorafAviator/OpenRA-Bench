@@ -72,6 +72,24 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
     >= int(v),
     "has_building": lambda c, v: str(v).lower() in c.signals.own_building_types,
     "buildings_owned_gte": lambda c, v: len(c.signals.own_building_types) >= int(v),
+    # Total agent buildings (counts duplicates, unlike buildings_owned_gte
+    # which counts distinct types). For "build exactly/at least N".
+    "building_total_gte": lambda c, v: len(c.signals.own_buildings) >= int(v),
+    # >= n agent buildings of a given type. {type: powr, n: 2}
+    "building_count_gte": lambda c, v: sum(
+        1 for (t, _, _) in c.signals.own_buildings if t == str(v["type"]).lower()
+    )
+    >= int(v.get("n", 1)),
+    # >= count agent buildings (optionally typed) within radius of (x,y):
+    # "defenses to the east", "found a base near the ridge".
+    "building_in_region": lambda c, v: sum(
+        1
+        for (t, bx, by) in c.signals.own_buildings
+        if (not v.get("type") or t == str(v["type"]).lower())
+        and (bx - int(v["x"])) ** 2 + (by - int(v["y"])) ** 2
+        <= float(v.get("radius", 5)) ** 2
+    )
+    >= int(v.get("count", 1)),
 }
 
 LEAF_KEYS = frozenset(_PREDICATES)

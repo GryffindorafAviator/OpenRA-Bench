@@ -203,6 +203,24 @@ def build_briefing(render_state: dict, objective: str = "") -> str:
             lines.append(f"  {e['id']} {kind} @({e['cell_x']},{e['cell_y']})")
     else:
         lines.append("\nVISIBLE ENEMIES: none (scout the fog)")
+    # Base / economy state (present on economy/building scenarios).
+    if "cash" in render_state:
+        net = render_state.get("power_provided", 0) - render_state.get(
+            "power_drained", 0
+        )
+        lines.append(
+            f"\nBASE: cash={render_state.get('cash', 0)} power_net={net}"
+        )
+        obs_b = render_state.get("own_buildings", []) or []
+        if obs_b:
+            lines.append(f"BUILDINGS ({len(obs_b)}):")
+            for b in obs_b:
+                lines.append(
+                    f"  {b.get('type','?')} @({b['cell_x']},{b['cell_y']})"
+                )
+        prod = render_state.get("production", []) or []
+        if prod:
+            lines.append(f"PRODUCING: {', '.join(prod)}")
     return "\n".join(lines)
 
 

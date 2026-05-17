@@ -93,6 +93,10 @@ class EpisodeSignals:
     power_drained: int = 0
     harvesters: int = 0
     own_building_types: set[str] = field(default_factory=set)
+    # Current agent buildings as (type, cell_x, cell_y) — positions needed
+    # for placement/region win-conditions (build defenses in a direction,
+    # found a new base near a region).
+    own_buildings: list[tuple[str, int, int]] = field(default_factory=list)
     production_items: list[str] = field(default_factory=list)
     # Outcome is synthesized (Rust has no result field): a scenario is
     # "won" when all enemy buildings have been discovered AND/OR all
@@ -176,9 +180,13 @@ class RustObsAdapter:
             s.power_provided = int(econ.get("power_provided", 0) or 0)
             s.power_drained = int(econ.get("power_drained", 0) or 0)
             s.harvesters = int(econ.get("harvesters", 0) or 0)
+        obls: list[tuple[str, int, int]] = []
         for b in self._raw.get("own_buildings", []) or []:
             if isinstance(b, dict) and b.get("type"):
-                s.own_building_types.add(str(b["type"]).lower())
+                t = str(b["type"]).lower()
+                s.own_building_types.add(t)
+                obls.append((t, int(b.get("cell_x", 0)), int(b.get("cell_y", 0))))
+        s.own_buildings = obls
         s.production_items = [
             str(p.get("item", "")).lower()
             for p in (self._raw.get("production", []) or [])
@@ -260,4 +268,13 @@ class RustObsAdapter:
             "bounds_y": 0,
             "game_tick": self.signals.game_tick,
             "explored_percent": self.signals.explored_percent,
+            # Economy/base state so agents can plan construction.
+            "cash": self.signals.cash,
+            "power_provided": self.signals.power_provided,
+            "power_drained": self.signals.power_drained,
+            "own_buildings": [
+                {"type": t, "cell_x": x, "cell_y": y}
+                for (t, x, y) in self.signals.own_buildings
+            ],
+            "production": list(self.signals.production_items),
         }
