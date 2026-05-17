@@ -87,6 +87,13 @@ class EpisodeSignals:
     new_buildings_this_step: int = 0
     game_tick: int = 0
     done: bool = False
+    # S9 economy/production (0/empty until the engine grounds them).
+    cash: int = 0
+    power_provided: int = 0
+    power_drained: int = 0
+    harvesters: int = 0
+    own_building_types: set[str] = field(default_factory=set)
+    production_items: list[str] = field(default_factory=list)
     # Outcome is synthesized (Rust has no result field): a scenario is
     # "won" when all enemy buildings have been discovered AND/OR all
     # enemy units neutralized — refined per-scenario in Phase 2 rubrics.
@@ -103,6 +110,9 @@ class EpisodeSignals:
             "outcome": self.outcome,
             "game_tick": self.game_tick,
             "done": self.done,
+            "cash": self.cash,
+            "harvesters": self.harvesters,
+            "buildings_owned": len(self.own_building_types),
         }
 
 
@@ -159,6 +169,21 @@ class RustObsAdapter:
             if isinstance(b, dict) and b.get("id") is not None:
                 s.enemy_buildings_seen_ids.add(str(b["id"]))
         s.new_buildings_this_step = len(s.enemy_buildings_seen_ids) - before_b
+
+        econ = self._raw.get("economy") or {}
+        if isinstance(econ, dict):
+            s.cash = int(econ.get("cash", s.cash) or 0)
+            s.power_provided = int(econ.get("power_provided", 0) or 0)
+            s.power_drained = int(econ.get("power_drained", 0) or 0)
+            s.harvesters = int(econ.get("harvesters", 0) or 0)
+        for b in self._raw.get("own_buildings", []) or []:
+            if isinstance(b, dict) and b.get("type"):
+                s.own_building_types.add(str(b["type"]).lower())
+        s.production_items = [
+            str(p.get("item", "")).lower()
+            for p in (self._raw.get("production", []) or [])
+            if isinstance(p, dict)
+        ]
 
         s.game_tick = int(self._raw.get("game_tick", s.game_tick) or 0)
         s.done = bool(done)

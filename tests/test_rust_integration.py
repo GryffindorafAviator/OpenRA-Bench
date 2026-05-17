@@ -122,7 +122,11 @@ class TestRustEngineTools:
         env = ot.OpenRAEnv(RUSH_HOUR, 7)
         obs = env.reset()
         uid, start = _first_unit(obs)
-        target = (start[0] + 25, start[1])
+        # Target an in-bounds interior cell: rush-hour is ~128x40 and the
+        # first unit may spawn at the east edge (x~120), so a blind +25
+        # would be off-map (the engine correctly refuses to path off-map).
+        tx = start[0] - 25 if start[0] > 64 else start[0] + 25
+        target = (tx, min(max(start[1], 3), 36))
         last = start
         for _ in range(15):
             obs, *_ = env.step([ot.Command.move_units([uid], target[0], target[1])])

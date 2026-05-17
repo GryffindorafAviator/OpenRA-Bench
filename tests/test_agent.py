@@ -45,11 +45,11 @@ def test_tool_schema_filtering():
     assert "move_units" in names
     assert "attack_unit" not in names
     assert "observe" in names, "a no-op must always be offered"
-    assert {t["function"]["name"] for t in _tool_schemas(None)} == {
-        "move_units",
-        "attack_unit",
-        "observe",
-    }
+    full = {t["function"]["name"] for t in _tool_schemas(None)}
+    # Core movement/combat always present.
+    assert {"move_units", "attack_unit", "observe"} <= full
+    # Economy/production/structure commands are exposed too (S9 wiring).
+    assert {"build", "harvest", "place_building", "stop", "deploy"} <= full
 
 
 def test_build_briefing_format():

@@ -61,6 +61,16 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
     "all_units_in_region": lambda c, v: len(_agent_units(c)) > 0
     and _in_radius(_agent_units(c), int(v["x"]), int(v["y"]), float(v.get("radius", 3)))
     == len(_agent_units(c)),
+    # S9 economy / production constraints (require the engine economy
+    # subsystem; 0/empty on movement-only scenarios).
+    "cash_gte": lambda c, v: c.signals.cash >= int(v),
+    "harvesters_gte": lambda c, v: c.signals.harvesters >= int(v),
+    "power_surplus_gte": lambda c, v: (
+        c.signals.power_provided - c.signals.power_drained
+    )
+    >= int(v),
+    "has_building": lambda c, v: str(v).lower() in c.signals.own_building_types,
+    "buildings_owned_gte": lambda c, v: len(c.signals.own_building_types) >= int(v),
 }
 
 LEAF_KEYS = frozenset(_PREDICATES)

@@ -73,8 +73,101 @@ _TOOL_SCHEMAS: dict[str, dict] = {
         },
     },
 }
+
+
+def _units_xy(name: str, desc: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": desc,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}},
+                    "target_x": {"type": "integer"},
+                    "target_y": {"type": "integer"},
+                },
+                "required": ["unit_ids", "target_x", "target_y"],
+            },
+        },
+    }
+
+
+def _units_only(name: str, desc: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": desc,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}}
+                },
+                "required": ["unit_ids"],
+            },
+        },
+    }
+
+
+def _item_only(name: str, desc: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": desc,
+            "parameters": {
+                "type": "object",
+                "properties": {"item": {"type": "string"}},
+                "required": ["item"],
+            },
+        },
+    }
+
+
+_TOOL_SCHEMAS.update(
+    {
+        "attack_move": _units_xy(
+            "attack_move", "Move toward a cell, engaging hostiles encountered."
+        ),
+        "harvest": _units_xy(
+            "harvest", "Send harvesters to collect ore at a resource cell."
+        ),
+        "set_rally_point": _units_xy(
+            "set_rally_point", "Set a production building's unit rally cell."
+        ),
+        "stop": _units_only("stop", "Cancel the units' current orders (go idle)."),
+        "deploy": _units_only("deploy", "Transform an MCV into a construction yard."),
+        "sell": _units_only("sell", "Sell a building for a partial refund."),
+        "repair": _units_only("repair", "Toggle repair on a damaged building."),
+        "power_down": _units_only("power_down", "Toggle a building's power."),
+        "build": _item_only(
+            "build", "Queue production of a unit/building by type (e.g. 'e1')."
+        ),
+        "cancel_production": _item_only(
+            "cancel_production", "Cancel the last queued item of this type (refund)."
+        ),
+        "place_building": {
+            "type": "function",
+            "function": {
+                "name": "place_building",
+                "description": "Place a completed building at a cell.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "item": {"type": "string"},
+                        "target_x": {"type": "integer"},
+                        "target_y": {"type": "integer"},
+                    },
+                    "required": ["item", "target_x", "target_y"],
+                },
+            },
+        },
+    }
+)
 # Aliases tolerated from models trained on slightly different names.
-_TOOL_ALIASES = {"attack_target": "attack_unit", "stop_units": "observe"}
+_TOOL_ALIASES = {"attack_target": "attack_unit", "stop_units": "stop"}
 
 
 def _tool_schemas(allowed: list[str] | None) -> list[dict]:
@@ -150,6 +243,21 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
                 cmds.append(Command.attack_unit(ids, str(args["target_id"])))
             elif name == "observe":
                 cmds.append(Command.observe())
+            elif name in ("attack_move", "harvest", "set_rally_point"):
+                ids = [str(i) for i in args["unit_ids"]]
+                fn = getattr(Command, name)
+                cmds.append(fn(ids, int(args["target_x"]), int(args["target_y"])))
+            elif name in ("stop", "deploy", "sell", "repair", "power_down"):
+                ids = [str(i) for i in args["unit_ids"]]
+                cmds.append(getattr(Command, name)(ids))
+            elif name in ("build", "cancel_production"):
+                cmds.append(getattr(Command, name)(str(args["item"])))
+            elif name == "place_building":
+                cmds.append(
+                    Command.place_building(
+                        str(args["item"]), int(args["target_x"]), int(args["target_y"])
+                    )
+                )
         except (KeyError, TypeError, ValueError) as e:
             logger.debug("dropping malformed tool call %s: %s", call, e)
     return cmds
