@@ -65,7 +65,11 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
     # subsystem; 0/empty on movement-only scenarios).
     "own_units_gte": lambda c, v: len(_agent_units(c)) >= int(v),
     "cash_gte": lambda c, v: c.signals.cash >= int(v),
-    "harvesters_gte": lambda c, v: c.signals.harvesters >= int(v),
+    "resources_gte": lambda c, v: c.signals.resources >= int(v),
+    # Final economy value = spendable cash + stored (uncashed) resources.
+    # The scoring target for the harvest/silo economy scenarios.
+    "economy_value_gte": lambda c, v: (c.signals.cash + c.signals.resources)
+    >= int(v),
     "power_surplus_gte": lambda c, v: (
         c.signals.power_provided - c.signals.power_drained
     )

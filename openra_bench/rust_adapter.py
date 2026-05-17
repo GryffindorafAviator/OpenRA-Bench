@@ -89,6 +89,8 @@ class EpisodeSignals:
     done: bool = False
     # S9 economy/production (0/empty until the engine grounds them).
     cash: int = 0
+    resources: int = 0  # S1 stored (harvested, not-yet-cashed)
+    resource_capacity: int = 0  # S1 storage cap (refineries/silos)
     power_provided: int = 0
     power_drained: int = 0
     harvesters: int = 0
@@ -115,6 +117,8 @@ class EpisodeSignals:
             "game_tick": self.game_tick,
             "done": self.done,
             "cash": self.cash,
+            "resources": self.resources,
+            "economy_value": self.cash + self.resources,
             "harvesters": self.harvesters,
             "buildings_owned": len(self.own_building_types),
         }
@@ -177,6 +181,8 @@ class RustObsAdapter:
         econ = self._raw.get("economy") or {}
         if isinstance(econ, dict):
             s.cash = int(econ.get("cash", s.cash) or 0)
+            s.resources = int(econ.get("resources", 0) or 0)
+            s.resource_capacity = int(econ.get("resource_capacity", 0) or 0)
             s.power_provided = int(econ.get("power_provided", 0) or 0)
             s.power_drained = int(econ.get("power_drained", 0) or 0)
             s.harvesters = int(econ.get("harvesters", 0) or 0)
