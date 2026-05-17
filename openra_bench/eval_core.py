@@ -47,6 +47,8 @@ class EpisodeResult:
     turns: int
     signals: EpisodeSignals
     outcome: str = "draw"  # "win" | "loss" | "draw"
+    actions_issued: int = 0
+    actions_warned: int = 0  # commands the engine rejected/warned on
     trace: list[dict] = field(default_factory=list)
 
 
@@ -92,11 +94,14 @@ def run_episode(
         adapter.observe(obs)
         trace: list[dict] = []
         turns = 0
+        issued = warned = 0
         for turns in range(1, max_turns + 1):
             rs = adapter.render_state()
             cmds = agent_fn(rs, env.Command) or [env.Command.observe()]
             obs, _reward, done, info = env.step(cmds)
             adapter.observe(obs, done=done)
+            issued += len(cmds)
+            warned += len(info.get("warnings", []) if isinstance(info, dict) else [])
             trace.append(
                 {
                     "turn": turns,
@@ -114,6 +119,8 @@ def run_episode(
             seed=seed,
             turns=turns,
             signals=adapter.signals,
+            actions_issued=issued,
+            actions_warned=warned,
             trace=trace,
         )
     finally:
@@ -145,11 +152,14 @@ def run_level(
         trace: list[dict] = []
         outcome = "draw"
         turns = 0
+        issued = warned = 0
         for turns in range(1, compiled.max_turns + 1):
             rs = adapter.render_state()
             cmds = agent_fn(rs, env.Command) or [env.Command.observe()]
-            obs, _r, done, _info = env.step(cmds)
+            obs, _r, done, info = env.step(cmds)
             adapter.observe(obs, done=done)
+            issued += len(cmds)
+            warned += len(info.get("warnings", []) if isinstance(info, dict) else [])
             ctx = WinContext(signals=adapter.signals, render_state=adapter.render_state())
             if evaluate(compiled.win_condition, ctx):
                 outcome = "win"
@@ -173,6 +183,8 @@ def run_level(
             turns=turns,
             signals=adapter.signals,
             outcome=outcome,
+            actions_issued=issued,
+            actions_warned=warned,
             trace=trace,
         )
     finally:

@@ -1,0 +1,174 @@
+"""`python -m openra_bench.run_eval` — run a model over scenario packs.
+
+Runs each (pack, level, seed), scores with `scoring.score_episode`, and
+writes an aggregate report (win-rate, mean composite, mean P/R/A, and a
+weakest-link histogram per pack/level + overall). The legacy
+`evaluate.py` is left untouched (its own tests depend on it); this is
+the Rust-stack entrypoint.
+
+Programmatic API (used by tests with an injected agent factory):
+
+    stats = evaluate(packs=[...], levels=["easy"], seeds=[1,2],
+                     agent_factory=lambda compiled: my_agent_fn)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import statistics
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Callable
+
+from .eval_core import run_level, scripted_explore_agent
+from .scenarios import load_pack
+from .scenarios.loader import PACKS_DIR, compile_level
+from .scenarios.schema import CompiledLevel
+from .scoring import score_episode
+
+# agent_factory: (CompiledLevel) -> agent_fn(render_state, Command)->[Command]
+AgentFactory = Callable[[CompiledLevel], Callable]
+
+
+def _default_agent_factory(provider_cfg) -> AgentFactory:
+    if provider_cfg is None:
+        return lambda _c: scripted_explore_agent
+    from .agent import ModelAgent
+
+    def factory(compiled: CompiledLevel):
+        agent = ModelAgent(
+            provider_cfg,
+            allowed_tools=compiled.scenario.tools,
+            objective=compiled.scenario.description,
+        )
+        return agent.agent_fn
+
+    return factory
+
+
+def _agg(scores: list) -> dict:
+    if not scores:
+        return {"n": 0}
+    comp = [s.composite for s in scores]
+    return {
+        "n": len(scores),
+        "win_rate": round(sum(s.outcome == "win" for s in scores) / len(scores), 4),
+        "composite_mean": round(statistics.fmean(comp), 4),
+        "composite_std": round(statistics.pstdev(comp), 4) if len(comp) > 1 else 0.0,
+        "perception_mean": round(statistics.fmean(s.perception for s in scores), 4),
+        "reasoning_mean": round(statistics.fmean(s.reasoning for s in scores), 4),
+        "action_mean": round(statistics.fmean(s.action for s in scores), 4),
+        "weakest_link_hist": dict(Counter(s.weakest_link for s in scores)),
+    }
+
+
+def evaluate(
+    packs: list[Path],
+    levels: list[str],
+    seeds: list[int],
+    provider_cfg=None,
+    agent_factory: AgentFactory | None = None,
+) -> dict:
+    factory = agent_factory or _default_agent_factory(provider_cfg)
+    by_cell: dict[str, list] = {}
+    episodes: list[dict] = []
+    skipped: list[str] = []
+
+    for pack_path in packs:
+        pack = load_pack(pack_path)
+        for level in levels:
+            compiled = compile_level(pack, level)
+            if not compiled.map_supported:
+                skipped.append(f"{pack.meta.id}:{level} (map not Rust-loadable)")
+                continue
+            cell = f"{pack.meta.id}:{level}"
+            for seed in seeds:
+                res = run_level(compiled, factory(compiled), seed=seed)
+                sc = score_episode(compiled, res)
+                by_cell.setdefault(cell, []).append(sc)
+                episodes.append(
+                    {
+                        "cell": cell,
+                        "capability": compiled.meta.capability,
+                        "seed": seed,
+                        "outcome": sc.outcome,
+                        "composite": sc.composite,
+                        "perception": sc.perception,
+                        "reasoning": sc.reasoning,
+                        "action": sc.action,
+                        "weakest_link": sc.weakest_link,
+                        "turns": res.turns,
+                        "notes": sc.notes,
+                    }
+                )
+
+    return {
+        "summary": {cell: _agg(scs) for cell, scs in by_cell.items()},
+        "overall": _agg([s for scs in by_cell.values() for s in scs]),
+        "episodes": episodes,
+        "skipped": skipped,
+    }
+
+
+def write_report(stats: dict, path: str | Path) -> None:
+    Path(path).write_text(json.dumps(stats, indent=2))
+
+
+def _resolve_packs(spec: str | None) -> list[Path]:
+    if not spec:
+        return [
+            p
+            for p in sorted(PACKS_DIR.glob("*.yaml"))
+            if not p.name.startswith(("_", "TEMPLATE"))
+        ]
+    p = Path(spec)
+    return sorted(p.glob("*.yaml")) if p.is_dir() else [p]
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description="Run a model over OpenRA-Bench scenario packs")
+    ap.add_argument("--packs", help="pack file or dir (default: bundled packs/)")
+    ap.add_argument("--levels", default="easy,medium,hard")
+    ap.add_argument("--seeds", default="1,2,3")
+    ap.add_argument("--provider", help="openrouter|vllm|openai (omit = scripted baseline)")
+    ap.add_argument("--model", default="anthropic/claude-3.5-sonnet")
+    ap.add_argument("--base-url")
+    ap.add_argument("--no-vision", action="store_true")
+    ap.add_argument("--out", default="eval_stats.json")
+    a = ap.parse_args(argv[1:])
+
+    cfg = None
+    if a.provider:
+        from .providers import ProviderConfig
+
+        cfg = ProviderConfig(
+            provider=a.provider,
+            model=a.model,
+            base_url=a.base_url,
+            vision=not a.no_vision,
+        )
+
+    stats = evaluate(
+        _resolve_packs(a.packs),
+        a.levels.split(","),
+        [int(s) for s in a.seeds.split(",")],
+        provider_cfg=cfg,
+    )
+    write_report(stats, a.out)
+    o = stats["overall"]
+    print(f"\nwrote {a.out}")
+    print(
+        f"overall: n={o.get('n', 0)} win_rate={o.get('win_rate', 0)} "
+        f"composite={o.get('composite_mean', 0)} "
+        f"P={o.get('perception_mean', 0)} R={o.get('reasoning_mean', 0)} "
+        f"A={o.get('action_mean', 0)} weakest={o.get('weakest_link_hist', {})}"
+    )
+    for s in stats["skipped"]:
+        print(f"  skipped: {s}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
