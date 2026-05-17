@@ -12,7 +12,15 @@ from __future__ import annotations
 import copy
 from typing import Any, Literal
 
+import openra_rl_training.scenario as _orts
 from openra_rl_training.scenario import ScenarioDefinition
+
+# S0: the Rust engine seeds ore patches around a `mine` actor
+# (world.rs: "Seed ore patches around mine actors"), but Training's
+# VALID_ACTOR_TYPES (from openra_env.game_data) omits the ore-source
+# map props since they aren't units/buildings. Extend the in-place set
+# so economy scenarios can place ore. Engine-supported only.
+_orts.VALID_ACTOR_TYPES |= {"mine", "gmine"}
 from pydantic import BaseModel, Field, field_validator
 
 from .win_conditions import WinCondition
