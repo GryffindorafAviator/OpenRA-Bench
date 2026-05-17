@@ -69,6 +69,12 @@ class Level(BaseModel):
     win_condition: WinCondition
     fail_condition: WinCondition | None = None
     max_turns: int = Field(default=40, ge=1, le=400)
+    starting_cash: int | None = Field(
+        default=None,
+        ge=0,
+        description="Per-level economy budget (overrides pack default; "
+        "engine default 5000 when unset everywhere).",
+    )
 
 
 class CompiledLevel(BaseModel):
@@ -83,6 +89,7 @@ class CompiledLevel(BaseModel):
     fail_condition: WinCondition | None
     max_turns: int
     meta: ScenarioMeta
+    starting_cash: int | None = None
     map_supported: bool = Field(
         ..., description="False => Rust lacks this map (Phase 3 gate)"
     )
@@ -98,6 +105,11 @@ class ScenarioPack(BaseModel):
     )
     base: dict[str, Any] = Field(
         ..., description="Shared ScenarioDefinition fields (actors, factions, tools…)"
+    )
+    starting_cash: int | None = Field(
+        default=None,
+        ge=0,
+        description="Pack-wide economy budget; a level may override it.",
     )
     levels: dict[LevelName, Level]
 
@@ -126,5 +138,8 @@ class ScenarioPack(BaseModel):
             fail_condition=lvl.fail_condition,
             max_turns=lvl.max_turns,
             meta=self.meta,
+            starting_cash=lvl.starting_cash
+            if lvl.starting_cash is not None
+            else self.starting_cash,
             map_supported=map_supported,
         )

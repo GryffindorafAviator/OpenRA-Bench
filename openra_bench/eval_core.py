@@ -32,6 +32,11 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     Rust env can load (it reads actors from the given scenario path; the
     map geometry is the Rust-supported base map)."""
     data = compiled.scenario.model_dump(mode="json", exclude_none=True)
+    # Training's ScenarioDefinition has no economy field; inject the
+    # pack's designed `starting_cash` constraint as a top-level key the
+    # Rust scenario parser reads (default 5000 when unset).
+    if compiled.starting_cash is not None:
+        data["starting_cash"] = compiled.starting_cash
     fd = tempfile.NamedTemporaryFile(
         "w", suffix=f"_{compiled.pack_id}_{compiled.level}.yaml", delete=False
     )

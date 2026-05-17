@@ -63,6 +63,7 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
     == len(_agent_units(c)),
     # S9 economy / production constraints (require the engine economy
     # subsystem; 0/empty on movement-only scenarios).
+    "own_units_gte": lambda c, v: len(_agent_units(c)) >= int(v),
     "cash_gte": lambda c, v: c.signals.cash >= int(v),
     "harvesters_gte": lambda c, v: c.signals.harvesters >= int(v),
     "power_surplus_gte": lambda c, v: (
