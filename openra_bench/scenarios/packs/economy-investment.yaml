@@ -1,0 +1,105 @@
+meta:
+  id: economy-investment
+  title: "Economy Investment: Capital Allocation Under One Budget"
+  capability: reasoning
+  real_world_meaning: >
+    A capital-allocation decision under a single indivisible budget:
+    the same cash buys EITHER a wide economy (a second refinery plus
+    supporting power — depot/throughput capacity) OR a deep one (one
+    refinery plus a larger forward force — collection/utilisation). The
+    budget covers exactly one coherent path; splitting it builds
+    neither. The test is committing to and completing one allocation,
+    not the mechanics of either build.
+  robotics_analogue: >
+    Fleet capital allocation: a fixed budget that buys either added
+    depot/processing capacity or added collector/worker agents — the
+    classic throughput-versus-collection trade in an autonomous
+    foraging fleet, where indecision (a split budget) yields neither.
+  author: autonomous-loop
+
+# ENGINE NOTE (verified): harvest income is 0 in a runnable pack today
+# (no schema-valid ore source; .oramap files embed no resource tiles;
+# `silo` is schema-valid but `resource_capacity` is hardcoded 0 so
+# silos have no effect). This runnable variant therefore tests the
+# ALLOCATION decision over a fixed `starting_cash`, verified by build
+# predicates. The full harvest-throughput version (2 proc vs 1 proc +
+# extra harv, scored by harvested cash, plus silo storage cap) is
+# specified in SCENARIO_BRAINSTORM.md and gated on engine-prereqs
+# S0 (schema-valid ore source) and S1 (silo storage modeling).
+base_map: rush-hour-arena
+starting_cash: 4500
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - build
+    - place_building
+    - move_units
+    - deploy
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    - type: fact
+      owner: agent
+      position: [10, 18]
+    - type: powr
+      owner: agent
+      position: [14, 18]
+    - type: proc
+      owner: agent
+      position: [10, 22]
+    - type: barr
+      owner: agent
+      position: [14, 22]
+    - type: e1
+      owner: enemy
+      position: [118, 34]
+      stance: 0
+
+levels:
+  easy:
+    description: >
+      Wide-economy path, generous clock: invest the budget into a
+      second refinery plus supporting power (added throughput
+      capacity). Splitting the budget into scattered units instead
+      fails the building bar.
+    starting_cash: 4500
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 2}
+        - building_count_gte: {type: powr, n: 2}
+        - within_ticks: 22000
+    max_turns: 70
+  medium:
+    description: >
+      Budget covers exactly one coherent path. The wide-economy
+      allocation is scored here (second refinery + power + a small
+      utilising force) under a tighter clock; the deep alternative is
+      the hard level.
+    starting_cash: 3200
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 2}
+        - building_count_gte: {type: powr, n: 2}
+        - own_units_gte: 3
+        - within_ticks: 16000
+    max_turns: 80
+  hard:
+    description: >
+      Lean budget forces the DEEP allocation: keep the single refinery
+      and instead convert the budget into a larger forward force under
+      a short clock with an attrition cap. Only a committed (unsplit)
+      allocation clears the bar in time.
+    starting_cash: 2600
+    win_condition:
+      all_of:
+        - own_units_gte: 6
+        - building_count_gte: {type: proc, n: 1}
+        - units_lost_lte: 0
+        - within_ticks: 14000
+    max_turns: 90
