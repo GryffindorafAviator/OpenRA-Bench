@@ -70,11 +70,21 @@ def evaluate(
     seeds: list[int],
     provider_cfg=None,
     agent_factory: AgentFactory | None = None,
+    held_out_seeds: list[int] | None = None,
 ) -> dict:
+    """Run packs×levels×seeds. If `held_out_seeds` is given, those are
+    run too and tagged split='held_out'; the report adds
+    `overall_held_out` and `generalization_gap` (public composite −
+    held-out composite) — the anti-memorization metric the
+    generalization literature (Procgen/SMACv2/lmgame-Bench) requires.
+    """
     factory = agent_factory or _default_agent_factory(provider_cfg)
     by_cell: dict[str, list] = {}
     episodes: list[dict] = []
     skipped: list[str] = []
+    public_scores: list = []
+    held_scores: list = []
+    held_out_seeds = held_out_seeds or []
 
     for pack_path in packs:
         pack = load_pack(pack_path)
@@ -84,32 +94,47 @@ def evaluate(
                 skipped.append(f"{pack.meta.id}:{level} (map not Rust-loadable)")
                 continue
             cell = f"{pack.meta.id}:{level}"
-            for seed in seeds:
-                res = run_level(compiled, factory(compiled), seed=seed)
-                sc = score_episode(compiled, res)
-                by_cell.setdefault(cell, []).append(sc)
-                episodes.append(
-                    {
-                        "cell": cell,
-                        "capability": compiled.meta.capability,
-                        "seed": seed,
-                        "outcome": sc.outcome,
-                        "composite": sc.composite,
-                        "perception": sc.perception,
-                        "reasoning": sc.reasoning,
-                        "action": sc.action,
-                        "weakest_link": sc.weakest_link,
-                        "turns": res.turns,
-                        "notes": sc.notes,
-                    }
-                )
+            for split, slist in (("public", seeds), ("held_out", held_out_seeds)):
+                for seed in slist:
+                    res = run_level(compiled, factory(compiled), seed=seed)
+                    sc = score_episode(compiled, res)
+                    if split == "public":
+                        by_cell.setdefault(cell, []).append(sc)
+                        public_scores.append(sc)
+                    else:
+                        held_scores.append(sc)
+                    episodes.append(
+                        {
+                            "cell": cell,
+                            "capability": compiled.meta.capability,
+                            "split": split,
+                            "seed": seed,
+                            "outcome": sc.outcome,
+                            "composite": sc.composite,
+                            "perception": sc.perception,
+                            "reasoning": sc.reasoning,
+                            "action": sc.action,
+                            "weakest_link": sc.weakest_link,
+                            "turns": res.turns,
+                            "notes": sc.notes,
+                        }
+                    )
 
-    return {
+    out = {
         "summary": {cell: _agg(scs) for cell, scs in by_cell.items()},
-        "overall": _agg([s for scs in by_cell.values() for s in scs]),
+        "overall": _agg(public_scores),
         "episodes": episodes,
         "skipped": skipped,
     }
+    if held_scores:
+        ho = _agg(held_scores)
+        out["overall_held_out"] = ho
+        out["generalization_gap"] = round(
+            out["overall"].get("composite_mean", 0.0)
+            - ho.get("composite_mean", 0.0),
+            4,
+        )
+    return out
 
 
 def write_report(stats: dict, path: str | Path) -> None:
@@ -132,6 +157,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--packs", help="pack file or dir (default: bundled packs/)")
     ap.add_argument("--levels", default="easy,medium,hard")
     ap.add_argument("--seeds", default="1,2,3")
+    ap.add_argument(
+        "--held-out-seeds",
+        default="",
+        help="comma seeds run as a held-out split; reports the "
+        "generalization gap (anti-memorization metric)",
+    )
     ap.add_argument("--provider", help="openrouter|vllm|openai (omit = scripted baseline)")
     ap.add_argument("--model", default="anthropic/claude-3.5-sonnet")
     ap.add_argument("--base-url")
@@ -162,6 +193,7 @@ def main(argv: list[str]) -> int:
         a.levels.split(","),
         [int(s) for s in a.seeds.split(",")],
         provider_cfg=cfg,
+        held_out_seeds=[int(s) for s in a.held_out_seeds.split(",") if s.strip()],
     )
     write_report(stats, a.out)
     o = stats["overall"]

@@ -44,6 +44,47 @@ def test_evaluate_aggregates_and_reports(tmp_path):
     assert loaded["overall"]["n"] == 2
 
 
+def test_held_out_split_reports_generalization_gap(tmp_path):
+    stats = evaluate(
+        packs=[PACKS / "perception-frontier-reading.yaml"],
+        levels=["easy"],
+        seeds=[1, 2],
+        held_out_seeds=[7, 8],
+    )
+    assert "overall_held_out" in stats
+    assert stats["overall_held_out"]["n"] == 2
+    assert isinstance(stats["generalization_gap"], float)
+    splits = {e["split"] for e in stats["episodes"]}
+    assert splits == {"public", "held_out"}
+    assert sum(e["split"] == "held_out" for e in stats["episodes"]) == 2
+    # gap == public composite − held-out composite (sign can be ±).
+    g = round(
+        stats["overall"]["composite_mean"]
+        - stats["overall_held_out"]["composite_mean"],
+        4,
+    )
+    assert stats["generalization_gap"] == g
+
+    # Leaderboard captures the gap.
+    from openra_bench.leaderboard import build_table, ingest_run
+
+    s = tmp_path / "lb.jsonl"
+    ingest_run(stats, "m", s)
+    row = build_table(s, min_episodes=1)[0]
+    assert row["generalization_gap"] == stats["generalization_gap"]
+    assert row["held_out_composite"] == stats["overall_held_out"]["composite_mean"]
+
+
+def test_no_held_out_keeps_backward_compatible_shape():
+    stats = evaluate(
+        packs=[PACKS / "perception-frontier-reading.yaml"],
+        levels=["easy"],
+        seeds=[1],
+    )
+    assert "overall_held_out" not in stats and "generalization_gap" not in stats
+    assert all(e["split"] == "public" for e in stats["episodes"])
+
+
 def test_unsupported_map_is_skipped_not_crashed(tmp_path):
     """A pack on a non-Rust map must be reported as skipped, not raise."""
     pack = (PACKS / "perception-frontier-reading.yaml").read_text()

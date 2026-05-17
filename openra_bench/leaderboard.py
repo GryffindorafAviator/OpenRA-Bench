@@ -63,6 +63,12 @@ def ingest_run(
         "reasoning": overall.get("reasoning_mean", 0.0),
         "action": overall.get("action_mean", 0.0),
         "weakest_link_hist": overall.get("weakest_link_hist", {}),
+        # Anti-memorization: held-out composite + generalization gap
+        # (public − held-out). None when the run had no held-out split.
+        "held_out_composite": stats.get("overall_held_out", {}).get(
+            "composite_mean"
+        ),
+        "generalization_gap": stats.get("generalization_gap"),
         "by_capability": _capability_breakdown(eps),
         "cells": sorted(stats.get("summary", {}).keys()),
     }
