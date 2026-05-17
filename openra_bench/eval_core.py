@@ -32,6 +32,15 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     Rust env can load (it reads actors from the given scenario path; the
     map geometry is the Rust-supported base map)."""
     data = compiled.scenario.model_dump(mode="json", exclude_none=True)
+    # The Rust loader resolves base_map relative to the scenario file's
+    # dir; this temp file lives in /tmp, so a relative ref would silently
+    # fall back to rush-hour terrain. Pin it to the resolved absolute
+    # .oramap so the *declared* map's real terrain loads.
+    from .scenarios.loader import resolve_map_path
+
+    _mp = resolve_map_path(str(data.get("base_map", "")))
+    if _mp is not None:
+        data["base_map"] = str(_mp)
     # Training's ScenarioDefinition has no economy field; inject the
     # pack's designed `starting_cash` constraint as a top-level key the
     # Rust scenario parser reads (default 5000 when unset).

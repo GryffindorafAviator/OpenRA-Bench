@@ -17,14 +17,30 @@ import yaml
 
 from .schema import LevelName, ScenarioPack
 
-# Logical base_map id -> the Rust scenario alias the env actually loads.
-# Extend this as Phase 3 adds real map loading.
-SUPPORTED_MAPS: dict[str, str] = {
-    "rush-hour-arena": "scenarios/discovery/rush-hour.yaml",
-    "scout-maginot": "scenarios/strategy/scout-maginot.yaml",
-}
-
 PACKS_DIR = Path(__file__).parent / "packs"
+
+# Dirs scanned for `<base_map>.oramap` terrain files. The Rust engine
+# parses real .oramap terrain (map.bin) when handed an absolute path, so
+# any map present here is a usable custom map — not a 2-entry allowlist.
+_MAP_DIRS = [
+    Path.home() / "Projects/OpenRA-RL-Training/scenarios/maps",
+    Path.home() / "Projects/openra-rl/maps",
+]
+
+
+def resolve_map_path(base_map: str) -> Path | None:
+    """Resolve a logical `base_map` id (with or without `.oramap`) to an
+    absolute terrain-file path, or None if no such map exists."""
+    name = base_map if base_map.endswith(".oramap") else f"{base_map}.oramap"
+    # Allow `base_map` to be an explicit absolute/relative path too.
+    direct = Path(base_map)
+    if direct.suffix == ".oramap" and direct.is_file():
+        return direct.resolve()
+    for d in _MAP_DIRS:
+        p = d / name
+        if p.is_file():
+            return p.resolve()
+    return None
 
 
 def load_pack(path: str | Path) -> ScenarioPack:
@@ -53,12 +69,7 @@ def discover_packs(directory: str | Path | None = None) -> list[ScenarioPack]:
 
 
 def is_map_supported(base_map: str) -> bool:
-    return base_map in SUPPORTED_MAPS
-
-
-def rust_scenario_alias(base_map: str) -> str:
-    """The path/alias to hand the Rust env for this logical map."""
-    return SUPPORTED_MAPS[base_map]
+    return resolve_map_path(base_map) is not None
 
 
 def compile_level(pack: ScenarioPack, level: LevelName):
