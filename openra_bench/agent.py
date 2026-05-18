@@ -81,6 +81,37 @@ _TOOL_SCHEMAS: dict[str, dict] = {
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    "set_stance": {
+        "type": "function",
+        "function": {
+            "name": "set_stance",
+            "description": "Set engagement stance for units: 0=HoldFire, "
+            "1=ReturnFire, 2=Defend, 3=AttackAnything.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}},
+                    "stance": {"type": "integer", "minimum": 0, "maximum": 3},
+                },
+                "required": ["unit_ids", "stance"],
+            },
+        },
+    },
+    "patrol": {
+        "type": "function",
+        "function": {
+            "name": "patrol",
+            "description": "Patrol order (accepted; currently a no-op, "
+            "matching the reference engine).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}}
+                },
+                "required": ["unit_ids"],
+            },
+        },
+    },
 }
 
 
@@ -272,6 +303,11 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
                 cmds.append(Command.observe())
             elif name == "surrender":
                 cmds.append(Command.surrender())
+            elif name == "set_stance":
+                ids = [str(i) for i in args["unit_ids"]]
+                cmds.append(Command.set_stance(ids, int(args["stance"])))
+            elif name == "patrol":
+                cmds.append(Command.patrol([str(i) for i in args["unit_ids"]]))
             elif name in ("attack_move", "harvest", "set_rally_point"):
                 ids = [str(i) for i in args["unit_ids"]]
                 fn = getattr(Command, name)
