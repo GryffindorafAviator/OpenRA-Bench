@@ -64,6 +64,22 @@ _TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
+    "guard": {
+        "type": "function",
+        "function": {
+            "name": "guard",
+            "description": "Order the given units to guard (follow and stay "
+            "near) a friendly actor id, repositioning as it moves.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}},
+                    "target_id": {"type": "integer"},
+                },
+                "required": ["unit_ids", "target_id"],
+            },
+        },
+    },
     "observe": {
         "type": "function",
         "function": {
@@ -328,6 +344,9 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
             elif name == "attack_unit":
                 ids = [str(i) for i in args["unit_ids"]]
                 cmds.append(Command.attack_unit(ids, str(args["target_id"])))
+            elif name == "guard":
+                ids = [str(i) for i in args["unit_ids"]]
+                cmds.append(Command.guard(ids, str(args["target_id"])))
             elif name == "observe":
                 cmds.append(Command.observe())
             elif name == "surrender":
