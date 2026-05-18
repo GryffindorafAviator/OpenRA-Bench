@@ -40,11 +40,19 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
         return lambda _c: scripted_explore_agent
     from .agent import ModelAgent
 
+    from .game_knowledge import objective_brief, scenario_primer
+
     def factory(compiled: CompiledLevel):
         agent = ModelAgent(
             provider_cfg,
             allowed_tools=compiled.scenario.tools,
-            objective=compiled.scenario.description,
+            objective=objective_brief(
+                compiled.scenario.description,
+                compiled.win_condition,
+                compiled.fail_condition,
+                compiled.max_turns,
+            ),
+            system_extra=scenario_primer(compiled),
         )
         return agent.agent_fn
 
@@ -123,12 +131,20 @@ def evaluate(
             provider_cfg, rate_limiter=limiter, cost_meter=meter
         )
 
+        from .game_knowledge import objective_brief, scenario_primer
+
         def factory(compiled: CompiledLevel):
             return ModelAgent(
                 provider_cfg,
                 allowed_tools=compiled.scenario.tools,
-                objective=compiled.scenario.description,
+                objective=objective_brief(
+                    compiled.scenario.description,
+                    compiled.win_condition,
+                    compiled.fail_condition,
+                    compiled.max_turns,
+                ),
                 provider=shared,
+                system_extra=scenario_primer(compiled),
             ).agent_fn
 
     # Run/model identity so a single playback root can hold many runs

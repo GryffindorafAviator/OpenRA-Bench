@@ -474,12 +474,19 @@ class ModelAgent:
         allowed_tools: list[str] | None = None,
         objective: str = "",
         provider: ChatProvider | None = None,
+        system_extra: str = "",
     ):
         self.cfg = cfg
         self.objective = objective
         self.tools = _tool_schemas(allowed_tools)
         self.provider = provider or make_provider(cfg)
-        self.history: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        sys_content = SYSTEM_PROMPT
+        if system_extra:
+            # Deterministic scenario-scoped game knowledge (glossary,
+            # game model, tech) so every model is judged on reasoning,
+            # not on patchy Red Alert trivia.
+            sys_content = f"{SYSTEM_PROMPT}\n\n{system_extra}"
+        self.history: list[dict] = [{"role": "system", "content": sys_content}]
         self.stats = {"turns": 0, "tool_calls": 0, "empty_replies": 0}
 
     def _user_message(self, render_state: dict) -> dict:
