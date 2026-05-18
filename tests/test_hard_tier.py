@@ -31,7 +31,36 @@ UPGRADED = [
     "artofwar-indirect-approach",
     "artofwar-lure-the-tiger",
     "artofwar-sequenced-citadel",
+    "action-multiunit-coordination",
+    "action-sequenced-execution",
+    "strict-sequence",
+    "perception-frontier-reading",
+    "perception-target-vs-fog",
+    "reasoning-frontier-commit",
+    "rush-hour",
+    "custom-map-no-enemy",
 ]
+
+# Consciously NOT spawn-varied, with the reason (keeps the curation
+# exhaustive — every active pack is classified, see the coverage test).
+NOT_APPLICABLE = {
+    "economy-investment": "non-spatial: capital allocation, start pos irrelevant",
+    "economy-time-box": "non-spatial: budget-under-clock",
+    "economy-force-buildup": "non-spatial: production economy",
+    "building-and-planning": "non-spatial: build-order/tech, fixed base",
+    "strict-production-bom": "non-spatial: exact bill-of-materials spec",
+    "reasoning-risk-route": "rigor 5/5 from one tuned safe seam — varying "
+    "the start would break the single-solution tuning / seed parity",
+    "strategy-dilemma": "needs win-predicate redesign (gameable "
+    "buildings_discovered_gte:1), not spawn variation — separate rigor item",
+    "strategy-gauntlet": "dual-entry design + gameable win — separate item",
+    "strategy-twobody": "two simultaneously-controlled groups IS the task; "
+    "spawn-alternatives would break intent — separate item",
+}
+
+# No-adversary maps: spawn variation applies but a force-loss
+# fail_condition is impossible (nothing can destroy the force).
+_NO_ENEMY = {"strict-sequence", "custom-map-no-enemy"}
 
 
 def _agent_spawn_points(pack_id: str, level: str) -> set:
@@ -89,7 +118,31 @@ def test_curated_hard_still_compiles_and_runs(pid):
 
 def test_fail_condition_present_on_curated_hard():
     # Curated hard tiers must be able to emit a loss (no loss==draw
-    # degeneracy on the packs we've touched).
+    # degeneracy) — except no-adversary maps where force-loss is
+    # impossible by construction (documented in _NO_ENEMY).
     for pid in UPGRADED:
         c = compile_level(load_pack(PACKS / f"{pid}.yaml"), "hard")
+        if pid in _NO_ENEMY:
+            continue
         assert c.fail_condition is not None, f"{pid}:hard needs a fail_condition"
+
+
+def test_every_active_pack_is_classified():
+    """Curation is exhaustive: every active pack is either spawn-varied
+    (UPGRADED) or consciously NOT_APPLICABLE with a stated reason — no
+    pack silently skipped."""
+    import glob
+    import os
+
+    classified = set(UPGRADED) | set(NOT_APPLICABLE)
+    missing = []
+    for f in glob.glob(str(PACKS / "*.yaml")):
+        b = os.path.basename(f)
+        if b.startswith(("_", "TEMPLATE")):
+            continue
+        m = load_pack(f).meta
+        if m.status != "active":
+            continue
+        if m.id not in classified:
+            missing.append(m.id)
+    assert not missing, f"unclassified active packs (curate or mark N/A): {missing}"
