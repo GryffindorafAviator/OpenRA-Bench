@@ -64,6 +64,17 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
     # S9 economy / production constraints (require the engine economy
     # subsystem; 0/empty on movement-only scenarios).
     "own_units_gte": lambda c, v: len(_agent_units(c)) >= int(v),
+    # Strict-spec production: agent units of a given type. `_eq` is the
+    # no-overproduction teeth (exactly N, not ≥N); `_gte` is handy as a
+    # *fail* predicate ("built too many → violation").
+    "unit_type_count_eq": lambda c, v: sum(
+        1 for u in _agent_units(c)
+        if str(u.get("type", "")).lower() == str(v["type"]).lower()
+    ) == int(v["n"]),
+    "unit_type_count_gte": lambda c, v: sum(
+        1 for u in _agent_units(c)
+        if str(u.get("type", "")).lower() == str(v["type"]).lower()
+    ) >= int(v["n"]),
     "cash_gte": lambda c, v: c.signals.cash >= int(v),
     "resources_gte": lambda c, v: c.signals.resources >= int(v),
     # Final economy value = spendable cash + stored (uncashed) resources.
