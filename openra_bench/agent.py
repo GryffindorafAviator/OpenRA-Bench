@@ -477,6 +477,28 @@ class ModelAgent:
         return {"role": "user", "content": text}
 
     @staticmethod
+    def _window(history: list[dict], max_turns: int) -> list[dict]:
+        """Wire-history sliding window: keep all leading system
+        messages + the last `max_turns` user-led groups. Slicing on a
+        user boundary keeps every assistant↔tool pairing intact (only
+        whole older groups are dropped, so no dangling tool replies).
+        `self.history` itself is untouched — playback keeps the full
+        transcript; only what's POSTED is bounded."""
+        if max_turns <= 0:
+            return history
+        lead = 0
+        while lead < len(history) and history[lead].get("role") == "system":
+            lead += 1
+        user_idx = [
+            i for i in range(lead, len(history))
+            if history[i].get("role") == "user"
+        ]
+        if len(user_idx) <= max_turns:
+            return history
+        cut = user_idx[-max_turns]
+        return history[:lead] + history[cut:]
+
+    @staticmethod
     def _strip_old_images(history: list[dict]) -> None:
         """Keep only the latest image to bound ViT token cost (mirrors
         Training's _strip_historical_images)."""
@@ -495,7 +517,10 @@ class ModelAgent:
         self.stats["turns"] += 1
         self.history.append(self._user_message(render_state))
         self._strip_old_images(self.history)
-        reply = self.provider.complete(self.history, self.tools)
+        wire = self._window(
+            self.history, getattr(self.cfg, "max_history_turns", 16)
+        )
+        reply = self.provider.complete(wire, self.tools)
         self.history.append(
             {
                 "role": "assistant",

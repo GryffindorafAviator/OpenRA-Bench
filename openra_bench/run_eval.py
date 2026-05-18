@@ -21,6 +21,7 @@ import statistics
 import sys
 import time
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -80,6 +81,13 @@ def evaluate(
     concurrency: int = 1,
     run_id: str | None = None,
     model: str | None = None,
+    journal_path: str | Path | None = None,
+    resume: bool = False,
+    max_spend_usd: float = 0.0,
+    smoke: bool = False,
+    dry_run: bool = False,
+    report_path: str | Path | None = None,
+    progress=None,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -87,7 +95,42 @@ def evaluate(
     held-out composite) — the anti-memorization metric the
     generalization literature (Procgen/SMACv2/lmgame-Bench) requires.
     """
-    factory = agent_factory or _default_agent_factory(provider_cfg)
+    from .resilience import (
+        BudgetExceeded,
+        CostMeter,
+        RateLimiter,
+        RunJournal,
+        episode_key,
+    )
+
+    # One shared cost meter + rate limiter across the whole sweep, so
+    # the budget cap and throttle apply globally (not per episode).
+    meter = CostMeter(
+        getattr(provider_cfg, "price_in_per_m", 0.0),
+        getattr(provider_cfg, "price_out_per_m", 0.0),
+        max_usd=max_spend_usd,
+    )
+    limiter = RateLimiter(getattr(provider_cfg, "qps", 0.0) or 0.0)
+    if agent_factory is not None:
+        factory = agent_factory
+    elif provider_cfg is None:
+        factory = lambda _c: scripted_explore_agent  # noqa: E731
+    else:
+        from .agent import ModelAgent
+        from .providers import make_provider
+
+        shared = make_provider(
+            provider_cfg, rate_limiter=limiter, cost_meter=meter
+        )
+
+        def factory(compiled: CompiledLevel):
+            return ModelAgent(
+                provider_cfg,
+                allowed_tools=compiled.scenario.tools,
+                objective=compiled.scenario.description,
+                provider=shared,
+            ).agent_fn
+
     # Run/model identity so a single playback root can hold many runs
     # and the viewer can filter run → model → scenario.
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S", time.gmtime())
@@ -169,48 +212,166 @@ def evaluate(
             "_sc": sc,
         }
 
-    if concurrency > 1 and len(tasks) > 1:
-        from concurrent.futures import ThreadPoolExecutor
+    # Pre-flight: dry-run validates compile/selection without engine or
+    # API spend; smoke runs exactly one episode.
+    if dry_run:
+        return {
+            "dry_run": True,
+            "run_id": run_id,
+            "model": model,
+            "tasks": len(tasks),
+            "skipped": skipped,
+            "cells": sorted({t[1] for t in tasks}),
+        }
+    if smoke:
+        tasks = tasks[:1]
 
-        with ThreadPoolExecutor(max_workers=concurrency) as ex:
-            results = list(ex.map(_run_one, tasks))
-    else:
-        results = [_run_one(t) for t in tasks]
+    # Checkpoint/resume: a journal of completed episodes. On resume we
+    # skip done (pack|level|split|seed) and fold prior records back in,
+    # so a killed multi-hour run continues losslessly.
+    jp = journal_path
+    if jp is None and playback_root is not None:
+        jp = Path(playback_root) / f"{run_id}__{_safe_model}" / "_journal.jsonl"
+    journal = RunJournal(jp) if jp is not None else None
+    prior: list[dict] = []
+    if journal is not None and resume:
+        done = journal.done_keys()
+        prior = journal.records()
+        tasks = [
+            t for t in tasks
+            if episode_key(t[0].meta.id, t[0].level, t[2], t[3]) not in done
+        ]
 
-    # Deterministic aggregation: sort so the report is identical
-    # regardless of worker scheduling.
-    results.sort(key=lambda r: (r["cell"], r["split"], r["seed"]))
+    def _persist(rec: dict) -> None:
+        if journal is None:
+            return
+        slim = {k: v for k, v in rec.items() if k != "_sc"}
+        journal.append(
+            episode_key(
+                rec["cell"].rsplit(":", 1)[0],
+                rec["cell"].rsplit(":", 1)[1],
+                rec["split"],
+                rec["seed"],
+            ),
+            slim,
+        )
+
+    new_results: list[dict] = []
+    truncated = False
+    done_n = 0
+
+    def _record(rec: dict) -> None:
+        nonlocal done_n
+        _persist(rec)
+        new_results.append(rec)
+        done_n += 1
+        if progress is not None:
+            progress(done_n, len(tasks), rec, meter.snapshot())
+        if report_path is not None:
+            # Incremental flush so a long run is always inspectable.
+            try:
+                write_report(
+                    _finalize(prior, new_results, skipped, run_id, model,
+                              meter, truncated=False),
+                    report_path,
+                )
+            except Exception:  # noqa: BLE001 — flush must never abort a run
+                pass
+
+    try:
+        if concurrency > 1 and len(tasks) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=concurrency) as ex:
+                futs = {ex.submit(_run_one, t): t for t in tasks}
+                from concurrent.futures import as_completed
+
+                for fu in as_completed(futs):
+                    _record(fu.result())
+        else:
+            for t in tasks:
+                _record(_run_one(t))
+    except BudgetExceeded as e:
+        truncated = True
+        skipped.append(f"BUDGET STOP: {e}")
+
+    out = _finalize(prior, new_results, skipped, run_id, model, meter,
+                    truncated=truncated)
+    if report_path is not None:
+        write_report(out, report_path)
+    return out
+
+
+@dataclass
+class _ScoreShim:
+    """Reconstruct the fields `_agg` needs from a journaled episode
+    dict, so resume aggregates prior + new identically to a fresh run."""
+
+    composite: float
+    outcome: str
+    perception: float
+    reasoning: float
+    action: float
+    weakest_link: str
+    dimensions: dict
+
+
+def _shim(r: dict):
+    sc = r.get("_sc")
+    if sc is not None:
+        return sc
+    return _ScoreShim(
+        composite=r.get("composite", 0.0),
+        outcome=r.get("outcome", "draw"),
+        perception=r.get("perception", 0.0),
+        reasoning=r.get("reasoning", 0.0),
+        action=r.get("action", 0.0),
+        weakest_link=r.get("weakest_link", "n/a"),
+        dimensions={"objective": r.get("objective_progress", 0.0)},
+    )
+
+
+def _finalize(prior: list[dict], new: list[dict], skipped: list[str],
+              run_id, model, meter, *, truncated: bool) -> dict:
+    rows = list(prior) + list(new)
+    rows.sort(key=lambda r: (r.get("cell", ""), r.get("split", ""),
+                             r.get("seed", 0)))
     by_cell: dict[str, list] = {}
     public_scores: list = []
     held_scores: list = []
     episodes: list[dict] = []
-    for r in results:
-        sc = r.pop("_sc")
-        if r["split"] == "public":
+    for r in rows:
+        sc = _shim(r)
+        slim = {k: v for k, v in r.items() if k != "_sc"}
+        if r.get("split") == "public":
             by_cell.setdefault(r["cell"], []).append(sc)
             public_scores.append(sc)
         else:
             held_scores.append(sc)
-        episodes.append(r)
+        episodes.append(slim)
 
-    # Mean cumulative reward vector across public episodes — the
-    # scenario-agnostic progress signature, comparable across runs.
-    pub = [r for r in episodes if r["split"] == "public" and r.get("reward_vector")]
+    pub = [r for r in episodes
+           if r.get("split") == "public" and r.get("reward_vector")]
     rv_mean: dict = {}
     if pub:
         for k in pub[0]["reward_vector"]:
             rv_mean[k] = round(
-                statistics.fmean(r["reward_vector"].get(k, 0.0) for r in pub), 4
+                statistics.fmean(r["reward_vector"].get(k, 0.0) for r in pub),
+                4,
             )
 
     out = {
-        "summary": {cell: _agg(scs) for cell, scs in by_cell.items()},
+        "run_id": run_id,
+        "model": model,
+        "truncated": truncated,
+        "resumed": len(prior),
+        "cost": meter.snapshot() if meter is not None else {},
+        "summary": {c: _agg(s) for c, s in by_cell.items()},
         "overall": _agg(public_scores),
         "reward_vector_mean": rv_mean,
         "episodes": episodes,
         "skipped": skipped,
     }
-    # Adversarial spotlight: per-pack ladder ratings + headline mean.
     from .adversarial import adversarial_summary
 
     adv = adversarial_summary(out)
@@ -278,6 +439,19 @@ def main(argv: list[str]) -> int:
         help="publish this run to the leaderboard store (optional path; "
         "default data/leaderboard.jsonl)",
     )
+    # Resilience flags for real OpenRouter runs.
+    ap.add_argument("--resume", action="store_true",
+                    help="skip episodes already in the run journal")
+    ap.add_argument("--journal", default=None,
+                    help="checkpoint journal path (default: under --playback)")
+    ap.add_argument("--max-spend", type=float, default=0.0,
+                    help="hard USD cap; the run finalizes when hit")
+    ap.add_argument("--qps", type=float, default=0.0,
+                    help="global request/sec throttle (0 = unthrottled)")
+    ap.add_argument("--smoke", action="store_true",
+                    help="run exactly one episode (live preflight)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="validate/compile + list tasks, no engine/API")
     a = ap.parse_args(argv[1:])
 
     cfg = None
@@ -289,6 +463,7 @@ def main(argv: list[str]) -> int:
             model=a.model,
             base_url=a.base_url,
             vision=not a.no_vision,
+            qps=a.qps,
         )
 
     stats = evaluate(
@@ -299,7 +474,23 @@ def main(argv: list[str]) -> int:
         held_out_seeds=[int(s) for s in a.held_out_seeds.split(",") if s.strip()],
         playback_root=a.playback,
         concurrency=a.concurrency,
+        model=a.model if a.provider else None,
+        journal_path=a.journal,
+        resume=a.resume,
+        max_spend_usd=a.max_spend,
+        smoke=a.smoke,
+        dry_run=a.dry_run,
+        report_path=a.out,
+        progress=lambda d, n, rec, c: print(
+            f"[{d}/{n}] {rec['cell']}:{rec['split']}#{rec['seed']} "
+            f"{rec['outcome']} comp={rec['composite']} "
+            f"${c['usd']:.4f}", flush=True
+        ),
     )
+    if stats.get("dry_run"):
+        print(f"dry-run: {stats['tasks']} tasks over "
+              f"{len(stats['cells'])} cells; skipped {len(stats['skipped'])}")
+        return 0
     write_report(stats, a.out)
     o = stats["overall"]
     print(f"\nwrote {a.out}")

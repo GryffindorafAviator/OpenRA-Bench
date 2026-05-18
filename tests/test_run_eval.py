@@ -92,8 +92,10 @@ def test_concurrency_is_deterministic_and_isolated():
         PACKS / "perception-frontier-reading.yaml",
         PACKS / "reasoning-frontier-commit.yaml",
     ]
-    seq = evaluate(packs, ["easy"], [1, 2, 3], concurrency=1)
-    par = evaluate(packs, ["easy"], [1, 2, 3], concurrency=4)
+    # Pin run_id: it's a wall-clock label by design, not part of the
+    # determinism contract (scores/episodes/aggregates are).
+    seq = evaluate(packs, ["easy"], [1, 2, 3], concurrency=1, run_id="t")
+    par = evaluate(packs, ["easy"], [1, 2, 3], concurrency=4, run_id="t")
     # Same report regardless of worker scheduling (episodes sorted,
     # aggregates order-independent) — episodes ran in isolation.
     assert json.dumps(seq, sort_keys=True) == json.dumps(par, sort_keys=True)

@@ -52,6 +52,14 @@ class ProviderConfig:
     timeout_s: float = 120.0
     vision: bool = True
     extra_headers: dict[str, str] = field(default_factory=dict)
+    # Resilience (real OpenRouter runs): bounded retry, throttle, price.
+    max_retries: int = 5
+    retry_base_s: float = 1.0
+    retry_cap_s: float = 30.0
+    qps: float = 0.0  # 0 = unthrottled; shared limiter set by evaluate
+    max_history_turns: int = 16  # sliding wire-history window (0=unbounded)
+    price_in_per_m: float = 0.0   # USD / 1M prompt tokens
+    price_out_per_m: float = 0.0  # USD / 1M completion tokens
 
     def resolved_base_url(self) -> str:
         if self.base_url:
@@ -82,6 +90,7 @@ class ChatReply:
     text: str
     tool_calls: list[dict]  # [{"name": str, "arguments": dict}]
     reasoning: str = ""  # chain-of-thought, when the model/provider emits it
+    usage: dict = field(default_factory=dict)  # prompt/completion tokens
     raw: dict = field(default_factory=dict)
 
 
@@ -93,11 +102,58 @@ class ChatProvider:
 class OpenAICompatibleProvider(ChatProvider):
     """OpenAI /chat/completions with `tools`. vLLM + OpenRouter + OpenAI."""
 
-    def __init__(self, cfg: ProviderConfig):
+    def __init__(self, cfg: ProviderConfig, *, rate_limiter=None,
+                 cost_meter=None):
         self.cfg = cfg
         self._client = httpx.Client(timeout=cfg.timeout_s)
+        from .resilience import CostMeter, RateLimiter, RetryPolicy
+
+        self._rl = rate_limiter or RateLimiter(cfg.qps)
+        self._cost = cost_meter or CostMeter(
+            cfg.price_in_per_m, cfg.price_out_per_m
+        )
+        self._policy = RetryPolicy(
+            max_attempts=max(1, cfg.max_retries),
+            base=cfg.retry_base_s,
+            cap=cfg.retry_cap_s,
+        )
+
+    @property
+    def cost_meter(self):
+        return self._cost
+
+    def _post_once(self, url, headers, body):
+        from .resilience import FatalProviderError
+
+        try:
+            resp = self._client.post(url, headers=headers, json=body)
+        except httpx.TimeoutException as e:
+            e.transient = True  # type: ignore[attr-defined]
+            e.retry_after = None  # type: ignore[attr-defined]
+            raise
+        except httpx.TransportError as e:
+            e.transient = True  # type: ignore[attr-defined]
+            e.retry_after = None  # type: ignore[attr-defined]
+            raise
+        if resp.status_code >= 400:
+            ra = resp.headers.get("retry-after")
+            try:
+                retry_after = float(ra) if ra is not None else None
+            except ValueError:
+                retry_after = None
+            transient = self._policy.is_transient_status(resp.status_code)
+            cls = RuntimeError if transient else FatalProviderError
+            exc = cls(
+                f"{resp.status_code} from provider: {resp.text[:200]}"
+            )
+            exc.transient = transient  # type: ignore[attr-defined]
+            exc.retry_after = retry_after  # type: ignore[attr-defined]
+            raise exc
+        return resp
 
     def complete(self, messages: list[dict], tools: list[dict]) -> ChatReply:
+        from .resilience import retry_call
+
         cfg = self.cfg
         headers = {
             "Authorization": f"Bearer {cfg.resolved_api_key()}",
@@ -113,13 +169,17 @@ class OpenAICompatibleProvider(ChatProvider):
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
-        resp = self._client.post(
-            f"{cfg.resolved_base_url()}/chat/completions",
-            headers=headers,
-            json=body,
+        url = f"{cfg.resolved_base_url()}/chat/completions"
+
+        self._rl.acquire()
+        resp = retry_call(
+            lambda: self._post_once(url, headers, body), self._policy
         )
-        resp.raise_for_status()
-        return self._reply_from_data(resp.json())
+        reply = self._reply_from_data(resp.json())
+        u = reply.usage or {}
+        self._cost.add(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
+        self._cost.check()  # raises BudgetExceeded → evaluate finalizes
+        return reply
 
     # Keys the OpenAI Chat Completions wire format accepts per message.
     # `history` carries extra playback-only keys (notably "reasoning");
@@ -157,10 +217,15 @@ class OpenAICompatibleProvider(ChatProvider):
             rc = "".join(
                 p.get("text", "") if isinstance(p, dict) else str(p) for p in rc
             )
+        usage = data.get("usage") or {}
         return ChatReply(
             text=msg.get("content") or "",
             tool_calls=calls,
             reasoning=str(rc),
+            usage={
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+            },
             raw=data,
         )
 
@@ -182,9 +247,12 @@ class BedrockProvider(ChatProvider):
         )
 
 
-def make_provider(cfg: ProviderConfig) -> ChatProvider:
+def make_provider(cfg: ProviderConfig, *, rate_limiter=None,
+                  cost_meter=None) -> ChatProvider:
     if cfg.provider == "bedrock":
         return BedrockProvider(cfg)
     if cfg.provider in ("openai", "vllm", "openrouter"):
-        return OpenAICompatibleProvider(cfg)
+        return OpenAICompatibleProvider(
+            cfg, rate_limiter=rate_limiter, cost_meter=cost_meter
+        )
     raise ValueError(f"unknown provider {cfg.provider!r}")
