@@ -25,6 +25,8 @@ PACKS = Path(__file__).parent.parent / "openra_bench" / "scenarios" / "packs"
 # economy-*/building-and-planning/strict-production-bom are N/A).
 UPGRADED = [
     "adversarial-duel",
+    "adversarial-skirmish",
+    "adversarial-siege",
 ]
 
 
