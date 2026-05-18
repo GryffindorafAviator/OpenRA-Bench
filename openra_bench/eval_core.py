@@ -168,6 +168,7 @@ def run_level(
         outcome = "draw"
         turns = 0
         issued = warned = 0
+        conceded = False
         # Interrupt-driven mode (step 4): if the scenario enabled any
         # interrupt signals, advance with step_until_event so the agent
         # is re-prompted (debriefed) the moment an event fires
@@ -189,6 +190,8 @@ def run_level(
         for turns in range(1, compiled.max_turns + 1):
             rs = adapter.render_state()
             cmds = agent_fn(rs, env.Command) or [env.Command.observe()]
+            if not conceded:
+                conceded = any("Surrender" in repr(c) for c in cmds)
             interrupt = None
             if interrupt_mode:
                 obs, _r, done, info, was_int, reason, _tk = (
@@ -229,6 +232,8 @@ def run_level(
             )
             if outcome != "draw" or done:
                 break
+        if conceded:
+            outcome = "loss"  # the agent chose to concede
         adapter.signals.outcome = {"win": 1.0, "draw": 0.5, "loss": 0.0}[outcome]
         result = EpisodeResult(
             scenario=f"{compiled.pack_id}:{compiled.level}",

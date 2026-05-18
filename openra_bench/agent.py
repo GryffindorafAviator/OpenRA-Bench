@@ -72,6 +72,15 @@ _TOOL_SCHEMAS: dict[str, dict] = {
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    "surrender": {
+        "type": "function",
+        "function": {
+            "name": "surrender",
+            "description": "Concede the match. Use only when the position "
+            "is unrecoverable; ends the scenario as a loss.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 }
 
 
@@ -261,6 +270,8 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
                 cmds.append(Command.attack_unit(ids, str(args["target_id"])))
             elif name == "observe":
                 cmds.append(Command.observe())
+            elif name == "surrender":
+                cmds.append(Command.surrender())
             elif name in ("attack_move", "harvest", "set_rally_point"):
                 ids = [str(i) for i in args["unit_ids"]]
                 fn = getattr(Command, name)
