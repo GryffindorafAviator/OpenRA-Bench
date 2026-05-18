@@ -168,10 +168,36 @@ def run_level(
         outcome = "draw"
         turns = 0
         issued = warned = 0
+        # Interrupt-driven mode (step 4): if the scenario enabled any
+        # interrupt signals, advance with step_until_event so the agent
+        # is re-prompted (debriefed) the moment an event fires
+        # (enemy spotted, unit lost, production complete, …) instead of
+        # only on fixed tick boundaries. Falls back to fixed step()
+        # when no signals are enabled or the env lacks the API.
+        _KNOWN_SIGNALS = {
+            "enemy_unit_spotted", "enemy_building_spotted", "engage_start",
+            "own_unit_destroyed", "production_complete",
+        }
+        enabled_sig = sorted(
+            s for s, on in (compiled.scenario.interrupts or {}).items()
+            if on and s in _KNOWN_SIGNALS
+        )
+        raw_env = getattr(env, "_env", None)
+        interrupt_mode = bool(enabled_sig) and raw_env is not None and hasattr(
+            raw_env, "step_until_event"
+        )
         for turns in range(1, compiled.max_turns + 1):
             rs = adapter.render_state()
             cmds = agent_fn(rs, env.Command) or [env.Command.observe()]
-            obs, _r, done, info = env.step(cmds)
+            interrupt = None
+            if interrupt_mode:
+                obs, _r, done, info, was_int, reason, _tk = (
+                    raw_env.step_until_event(cmds, None, 5, enabled_sig)
+                )
+                if was_int:
+                    interrupt = reason
+            else:
+                obs, _r, done, info = env.step(cmds)
             adapter.observe(obs, done=done)
             issued += len(cmds)
             warned += len(info.get("warnings", []) if isinstance(info, dict) else [])
@@ -188,7 +214,9 @@ def run_level(
                     _png = _render_minimap_b64(rs)
                 except Exception:  # noqa: BLE001 — playback never breaks a run
                     pass
-                playback.record_turn(turns, rs, cmds, adapter.signals, _png)
+                playback.record_turn(
+                    turns, rs, cmds, adapter.signals, _png, interrupt=interrupt
+                )
             trace.append(
                 {
                     "turn": turns,
@@ -196,6 +224,7 @@ def run_level(
                     "explored": round(adapter.signals.explored_percent, 2),
                     "kills": adapter.signals.units_killed,
                     "enemies_seen": len(adapter.signals.enemies_seen_ids),
+                    "interrupt": interrupt,
                 }
             )
             if outcome != "draw" or done:

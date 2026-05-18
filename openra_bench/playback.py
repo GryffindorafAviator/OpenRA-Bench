@@ -57,6 +57,7 @@ class Playback:
         cmds: list,
         signals: Any,
         minimap_png_b64: str | None = None,
+        interrupt: str | None = None,
     ) -> None:
         self._n += 1
         if minimap_png_b64:
@@ -69,6 +70,7 @@ class Playback:
         rec = {
             "turn": turn,
             "tick": getattr(signals, "game_tick", None),
+            "interrupt": interrupt,
             "commands": [repr(c) for c in cmds],
             "ascii_minimap": render_state.get("minimap", ""),
             "signals": _jsonable(
