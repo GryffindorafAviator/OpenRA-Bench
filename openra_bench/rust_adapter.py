@@ -289,4 +289,12 @@ class RustObsAdapter:
                 for (t, x, y) in self.signals.own_buildings
             ],
             "production": list(self.signals.production_items),
+            # S9 spatial tensor passthrough (flat row-major [y][x][c] +
+            # (h,w,c) shape) so multimodal/spatial agents and transfer
+            # studies can do grid/occupancy reasoning. Empty when the
+            # engine doesn't emit it.
+            "spatial": self._raw.get("spatial", []) or [],
+            "spatial_shape": tuple(
+                self._raw.get("spatial_shape", (0, 0, 0)) or (0, 0, 0)
+            ),
         }
