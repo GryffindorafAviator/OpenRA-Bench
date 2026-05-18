@@ -1,3 +1,13 @@
+> **RETIRED (curation decision).** The auto-generated 200-level `cat-*`
+> corpus described below has been removed from the repo. It scored low
+> on discrimination/rigor (see `SCENARIO_QUALITY.md`) and added
+> memorization surface without distinct capability. The benchmark is now
+> a small **curated, hand-authored** set (Art-of-War, economy/building
+> planning, strategy, rush-hour, adversarial, strict-spec, perception,
+> reasoning), each designed deliberately one at a time with a
+> non-gameable win+fail and a named external-benchmark analogue. This
+> file is kept only as historical design notes.
+
 # OpenRA-Bench Scenario Catalog (research-grounded, 200 levels)
 
 Goal: a benchmark whose scenarios **generalize on reasoning** — we
