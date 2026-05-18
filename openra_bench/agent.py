@@ -113,6 +113,22 @@ _TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
+    "set_primary": {
+        "type": "function",
+        "function": {
+            "name": "set_primary",
+            "description": "Designate a production building (by id, in "
+            "unit_ids) as the PRIMARY producer for its type; newly "
+            "produced units of that category spawn from / rally there.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}}
+                },
+                "required": ["unit_ids"],
+            },
+        },
+    },
     "patrol": {
         "type": "function",
         "function": {
@@ -360,7 +376,14 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
                 ids = [str(i) for i in args["unit_ids"]]
                 fn = getattr(Command, name)
                 cmds.append(fn(ids, int(args["target_x"]), int(args["target_y"])))
-            elif name in ("stop", "deploy", "sell", "repair", "power_down"):
+            elif name in (
+                "stop",
+                "deploy",
+                "sell",
+                "repair",
+                "power_down",
+                "set_primary",
+            ):
                 ids = [str(i) for i in args["unit_ids"]]
                 cmds.append(getattr(Command, name)(ids))
             elif name in ("build", "cancel_production"):

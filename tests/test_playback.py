@@ -74,11 +74,16 @@ def test_run_eval_playback_tree_with_score(tmp_path):
         playback_root=tmp_path,
     )
     assert out["overall"]["n"] == 1
-    # <root>/<pack:level:public>/seed1/{manifest,turns,score}.json
-    seed_dirs = list(tmp_path.glob("*/seed1"))
+    # <root>/<run_id>__<model>/<pack:level:public>/seed1/{manifest,…}
+    seed_dirs = list(tmp_path.glob("*/*/seed1"))
     assert len(seed_dirs) == 1
     sd = seed_dirs[0]
     for f in ("manifest.json", "turns.jsonl", "score.json"):
         assert (sd / f).exists(), f"missing {f}"
     score = json.loads((sd / "score.json").read_text())
     assert "composite" in score and "weakest_link" in score
+    # run/model identity is recorded for the viewer cascade.
+    man = json.loads((sd / "manifest.json").read_text())
+    assert man.get("run_id") and man.get("model")
+    assert man["objective_progress"] is not None
+    assert isinstance(man.get("reward_vector"), dict)

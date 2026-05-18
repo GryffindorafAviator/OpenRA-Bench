@@ -277,6 +277,8 @@ def run_level(
                     "pack_id": compiled.pack_id,
                     "level": compiled.level,
                     "capability": compiled.meta.capability,
+                    "run_id": getattr(playback, "run_id", None),
+                    "model": getattr(playback, "model", None),
                     "seed": seed,
                     "outcome": outcome,
                     "turns": turns,

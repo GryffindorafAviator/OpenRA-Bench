@@ -49,6 +49,10 @@ class Playback:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._turns_fh = open(self.dir / "turns.jsonl", "w")
         self._n = 0
+        # Set by run_eval so manifests carry run/model identity for the
+        # viewer's run → model → scenario filter.
+        self.run_id: str | None = None
+        self.model: str | None = None
 
     def record_turn(
         self,

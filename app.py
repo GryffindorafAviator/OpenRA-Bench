@@ -172,12 +172,158 @@ def load_capability_leaderboard() -> pd.DataFrame:
         rows = []
     cols = [
         "rank", "model", "episodes", "win_rate", "composite",
-        "perception", "reasoning", "action", "weakest_link",
-        "held_out_composite", "generalization_gap",
+        "objective", "perception", "reasoning", "action", "weakest_link",
+        "reward_vector", "held_out_composite", "generalization_gap",
     ]
     if not rows:
         return pd.DataFrame(columns=cols)
-    return pd.DataFrame([{c: r.get(c) for c in cols} for r in rows])
+
+    def _rv(v) -> str:
+        if not isinstance(v, dict) or not v:
+            return ""
+        return " ".join(f"{k[:3]}={float(val):.2f}" for k, val in v.items())
+
+    out = []
+    for r in rows:
+        row = {c: r.get(c) for c in cols}
+        row["reward_vector"] = _rv(r.get("reward_vector"))
+        out.append(row)
+    return pd.DataFrame(out)
+
+
+# ── Battle Viewer ─────────────────────────────────────────────────────────────
+# Single-command playback browser: filter run → model → scenario, step
+# the battle turn-by-turn, and compare two models head-to-head on the
+# same scenario+seed.
+
+PLAYBACK_ROOT = Path(
+    os.environ.get(
+        "OPENRA_BENCH_PLAYBACK_ROOT", Path(__file__).parent / "playback"
+    )
+)
+
+
+def _bv_scan():
+    try:
+        from openra_bench.battle_viewer import scan
+
+        return scan(PLAYBACK_ROOT)
+    except Exception:  # noqa: BLE001 — empty/missing root → empty viewer
+        return []
+
+
+def _bv_turn_md(v: dict, heading: str) -> str:
+    if not v or v.get("n_turns", 0) == 0:
+        return f"### {heading}\n\n_no episode / no turns_"
+    m = v.get("manifest", {})
+    g = v.get("goal", {}) or {}
+    lines = [
+        f"### {heading}",
+        f"**{m.get('model','?')}** · run `{m.get('run_id','?')}` · "
+        f"{m.get('scenario','?')} · seed {m.get('seed','?')} · "
+        f"outcome **{m.get('outcome','?')}**",
+        f"**turn {v.get('turn')} / {v['n_turns']}** · tick "
+        f"{v.get('tick')}"
+        + (f" · ⚡ {v['interrupt']}" if v.get("interrupt") else ""),
+    ]
+    if g:
+        parts = []
+        for leaf in g.get("leaves", []):
+            mark = (
+                "✅" if leaf.get("satisfied")
+                else f"{float(leaf.get('ratio', 0.0)):.0%}"
+            )
+            parts.append(
+                f"{leaf['name']} {leaf.get('current')}/"
+                f"{leaf.get('target')} {mark}"
+            )
+        bars = " · ".join(parts)
+        rv = g.get("reward_vector", {})
+        lines += [
+            f"**objective: {g.get('objective_progress',0):.0%}**"
+            + ("  ✅ WON" if g.get("won") else ""),
+            (f"_{bars}_" if bars else ""),
+            "reward vector: "
+            + " ".join(f"`{k}={float(x):.2f}`" for k, x in rv.items()),
+        ]
+    if v.get("reasoning"):
+        lines += ["", "**reasoning**", "> " + str(v["reasoning"]).replace(
+            "\n", "\n> ")]
+    if v.get("assistant_text"):
+        lines += ["", "**model said**", str(v["assistant_text"])]
+    cmds = v.get("commands", [])
+    lines += ["", "**commands**", "```\n" + (
+        "\n".join(cmds) if cmds else "(none)") + "\n```"]
+    sig = v.get("signals", {})
+    if sig:
+        lines += ["signals: " + " ".join(
+            f"`{k}={sig[k]}`" for k in sig)]
+    if v.get("briefing"):
+        b = str(v["briefing"])
+        lines += ["", "<details><summary>briefing</summary>\n\n```\n"
+                  + b[:2000] + "\n```\n</details>"]
+    return "\n\n".join(s for s in lines if s != "")
+
+
+def _bv_b_label(e) -> str:
+    return f"{e.run_id} / {e.model} ({e.outcome})"
+
+
+def bv_runs():
+    from openra_bench.battle_viewer import runs
+
+    idx = _bv_scan()
+    rs = runs(idx)
+    return idx, gr.update(choices=rs, value=rs[0] if rs else None)
+
+
+def bv_on_run(idx, run):
+    from openra_bench.battle_viewer import models
+
+    ms = models(idx or [], run) if run else []
+    return gr.update(choices=ms, value=ms[0] if ms else None)
+
+
+def bv_on_model(idx, run, model):
+    from openra_bench.battle_viewer import scenarios
+
+    sc = scenarios(idx or [], run, model) if (run and model) else []
+    return gr.update(choices=sc, value=sc[0] if sc else None)
+
+
+def _bv_render(idx, run, model, scen, turn, compare, b_choice):
+    from openra_bench.battle_viewer import (
+        compare_candidates,
+        episode_view,
+        find,
+    )
+
+    idx = idx or []
+    a = find(idx, run, model, scen) if (run and model and scen) else None
+    if a is None:
+        return (None, _bv_turn_md({}, "A"), None,
+                _bv_turn_md({}, "B"), "—", gr.update())
+    av = episode_view(a.dir, turn)
+    n = av.get("n_turns", 1)
+    ti = av.get("turn_idx", 0)
+    cands = compare_candidates(idx, a)
+    labels = [_bv_b_label(e) for e in cands]
+    bv = {}
+    if compare and b_choice:
+        by = {_bv_b_label(e): e for e in cands}
+        be = by.get(b_choice)
+        if be is not None:
+            bv = episode_view(be.dir, turn)
+    return (
+        av.get("minimap_png"),
+        _bv_turn_md(av, "A"),
+        bv.get("minimap_png") if compare else None,
+        _bv_turn_md(bv, "B") if compare else "_comparison off_",
+        f"turn {ti + 1} / {n}",
+        gr.update(choices=labels,
+                  value=b_choice if b_choice in labels else (
+                      labels[0] if labels else None)),
+    )
 
 
 # ── Filtering ─────────────────────────────────────────────────────────────────
@@ -950,6 +1096,105 @@ def build_app() -> gr.Blocks:
                 refresh_cap = gr.Button("Refresh")
                 refresh_cap.click(load_capability_leaderboard, outputs=cap_df)
 
+            # ── Battle Viewer Tab ─────────────────────────────────────────
+            # Browse saved playbacks: filter run → model → scenario,
+            # step the battle with ◀ / ▶, and compare two models
+            # head-to-head on the same scenario+seed.
+            with gr.Tab("Battle Viewer"):
+                gr.Markdown(
+                    "Pick a **run → model → scenario**, then step the "
+                    f"battle. Playback root: `{PLAYBACK_ROOT}` "
+                    "(set `OPENRA_BENCH_PLAYBACK_ROOT` to change)."
+                )
+                bv_idx = gr.State([])
+                bv_turn = gr.State(0)
+                with gr.Row():
+                    bv_run = gr.Dropdown(label="Run", scale=2)
+                    bv_model = gr.Dropdown(label="Model", scale=2)
+                    bv_scen = gr.Dropdown(label="Scenario @ seed", scale=3)
+                    bv_refresh = gr.Button("⟳ Rescan", scale=1)
+                with gr.Row():
+                    bv_compare = gr.Checkbox(label="Compare mode", value=False)
+                    bv_bsel = gr.Dropdown(
+                        label="B: run / model (same scenario+seed)", scale=3
+                    )
+                with gr.Row():
+                    bv_prev = gr.Button("◀ Prev turn")
+                    bv_pos = gr.Markdown("—")
+                    bv_next = gr.Button("Next turn ▶")
+                with gr.Row():
+                    with gr.Column():
+                        bv_a_img = gr.Image(
+                            label="A minimap", height=320,
+                            show_label=True, interactive=False
+                        )
+                        bv_a_md = gr.Markdown()
+                    with gr.Column():
+                        bv_b_img = gr.Image(
+                            label="B minimap", height=320,
+                            show_label=True, interactive=False
+                        )
+                        bv_b_md = gr.Markdown()
+
+                _render_outs = [
+                    bv_a_img, bv_a_md, bv_b_img, bv_b_md, bv_pos, bv_bsel
+                ]
+                _sel = [bv_run, bv_model, bv_scen]
+
+                def _bv_go(idx, run, model, scen, turn, comp, b, delta=0):
+                    turn = max(0, (turn or 0) + delta)
+                    *outs, bupd = _bv_render(
+                        idx, run, model, scen, turn, comp, b
+                    )
+                    return (*outs, bupd, turn)
+
+                bv_refresh.click(
+                    bv_runs, outputs=[bv_idx, bv_run]
+                ).then(
+                    bv_on_run, [bv_idx, bv_run], bv_model
+                ).then(
+                    bv_on_model, [bv_idx, bv_run, bv_model], bv_scen
+                ).then(
+                    _bv_go,
+                    [bv_idx, bv_run, bv_model, bv_scen, bv_turn,
+                     bv_compare, bv_bsel],
+                    [*_render_outs, bv_turn],
+                )
+
+                bv_run.change(bv_on_run, [bv_idx, bv_run], bv_model).then(
+                    bv_on_model, [bv_idx, bv_run, bv_model], bv_scen
+                )
+                bv_model.change(
+                    bv_on_model, [bv_idx, bv_run, bv_model], bv_scen
+                )
+                for comp in (bv_scen, bv_compare, bv_bsel):
+                    comp.change(
+                        lambda i, r, m, s, c, b: _bv_go(
+                            i, r, m, s, 0, c, b),
+                        [bv_idx, bv_run, bv_model, bv_scen, bv_compare,
+                         bv_bsel],
+                        [*_render_outs, bv_turn],
+                    )
+                bv_prev.click(
+                    lambda i, r, m, s, t, c, b: _bv_go(
+                        i, r, m, s, t, c, b, -1),
+                    [bv_idx, bv_run, bv_model, bv_scen, bv_turn,
+                     bv_compare, bv_bsel],
+                    [*_render_outs, bv_turn],
+                )
+                bv_next.click(
+                    lambda i, r, m, s, t, c, b: _bv_go(
+                        i, r, m, s, t, c, b, +1),
+                    [bv_idx, bv_run, bv_model, bv_scen, bv_turn,
+                     bv_compare, bv_bsel],
+                    [*_render_outs, bv_turn],
+                )
+                app.load(bv_runs, outputs=[bv_idx, bv_run]).then(
+                    bv_on_run, [bv_idx, bv_run], bv_model
+                ).then(
+                    bv_on_model, [bv_idx, bv_run, bv_model], bv_scen
+                )
+
             # ── About Tab ─────────────────────────────────────────────────
             with gr.Tab("About"):
                 gr.Markdown(ABOUT_MD)
@@ -1012,4 +1257,6 @@ def build_app() -> gr.Blocks:
 
 if __name__ == "__main__":
     app = build_app()
-    app.launch(allowed_paths=[str(SUBMISSIONS_DIR)])
+    app.launch(
+        allowed_paths=[str(SUBMISSIONS_DIR), str(PLAYBACK_ROOT)]
+    )

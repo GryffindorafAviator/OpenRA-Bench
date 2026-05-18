@@ -38,7 +38,7 @@ def test_explicit_allowlist_is_exactly_honored():
 def test_wildcard_exposes_everything():
     assert _names(["*"]) == set(_TOOL_SCHEMAS)
     assert _names(["all"]) == set(_TOOL_SCHEMAS)
-    assert len(_names(["*"])) == 18
+    assert len(_names(["*"])) == 19
 
 
 def test_unknown_tool_names_are_ignored_not_errors():

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Callable
@@ -76,6 +78,8 @@ def evaluate(
     held_out_seeds: list[int] | None = None,
     playback_root: str | Path | None = None,
     concurrency: int = 1,
+    run_id: str | None = None,
+    model: str | None = None,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -84,6 +88,11 @@ def evaluate(
     generalization literature (Procgen/SMACv2/lmgame-Bench) requires.
     """
     factory = agent_factory or _default_agent_factory(provider_cfg)
+    # Run/model identity so a single playback root can hold many runs
+    # and the viewer can filter run → model → scenario.
+    run_id = run_id or time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    model = model or getattr(provider_cfg, "model", None) or "agent"
+    _safe_model = re.sub(r"[^A-Za-z0-9._-]+", "_", model)
     skipped: list[str] = []
     held_out_seeds = held_out_seeds or []
 
@@ -109,7 +118,12 @@ def evaluate(
         if playback_root is not None:
             from .playback import Playback
 
-            pb = Playback(playback_root, f"{cell}:{split}", seed)
+            pb = Playback(
+                Path(playback_root) / f"{run_id}__{_safe_model}",
+                f"{cell}:{split}",
+                seed,
+            )
+            pb.run_id, pb.model = run_id, model
         res = run_level(compiled, factory(compiled), seed=seed, playback=pb)
         sc = score_episode(compiled, res)
         if pb is not None:
