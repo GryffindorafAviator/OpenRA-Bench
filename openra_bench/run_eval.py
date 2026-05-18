@@ -295,18 +295,48 @@ def evaluate(
                 pass
 
     try:
+        def _safe_run(task: tuple) -> dict:
+            # One bad episode (fatal provider 400, engine crash, …) must
+            # not abort a multi-hour sweep or lose the report — record
+            # it as outcome="error" and continue. Budget is the only
+            # signal that intentionally stops the whole run.
+            compiled, cell, split, seed = task
+            try:
+                return _run_one(task)
+            except BudgetExceeded:
+                raise
+            except Exception as e:  # noqa: BLE001
+                msg = f"{type(e).__name__}: {e}"
+                return {
+                    "cell": cell,
+                    "capability": compiled.meta.capability,
+                    "split": split,
+                    "seed": seed,
+                    "outcome": "error",
+                    "composite": 0.0,
+                    "perception": 0.0,
+                    "reasoning": 0.0,
+                    "action": 0.0,
+                    "weakest_link": "n/a",
+                    "objective_progress": 0.0,
+                    "reward_vector": {},
+                    "turns": 0,
+                    "notes": [msg[:500]],
+                    "_sc": None,
+                }
+
         if concurrency > 1 and len(tasks) > 1:
             from concurrent.futures import ThreadPoolExecutor
 
             with ThreadPoolExecutor(max_workers=concurrency) as ex:
-                futs = {ex.submit(_run_one, t): t for t in tasks}
+                futs = {ex.submit(_safe_run, t): t for t in tasks}
                 from concurrent.futures import as_completed
 
                 for fu in as_completed(futs):
                     _record(fu.result())
         else:
             for t in tasks:
-                _record(_run_one(t))
+                _record(_safe_run(t))
     except BudgetExceeded as e:
         truncated = True
         skipped.append(f"BUDGET STOP: {e}")

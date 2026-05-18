@@ -144,7 +144,7 @@ class OpenAICompatibleProvider(ChatProvider):
             transient = self._policy.is_transient_status(resp.status_code)
             cls = RuntimeError if transient else FatalProviderError
             exc = cls(
-                f"{resp.status_code} from provider: {resp.text[:200]}"
+                f"{resp.status_code} from provider: {resp.text[:800]}"
             )
             exc.transient = transient  # type: ignore[attr-defined]
             exc.retry_after = retry_after  # type: ignore[attr-defined]
@@ -190,11 +190,28 @@ class OpenAICompatibleProvider(ChatProvider):
 
     @staticmethod
     def _wire_messages(messages: list[dict]) -> list[dict]:
-        """Pure: project each message onto OpenAI-legal keys only."""
-        return [
-            {k: v for k, v in m.items() if k in OpenAICompatibleProvider._WIRE_KEYS}
-            for m in messages
-        ]
+        """Pure: project each message onto OpenAI-legal keys only, and
+        coerce `tool_calls[].function.arguments` to a JSON **string**
+        (the wire spec requires a string; history keeps the dict for
+        readable playback). Pure — inputs are not mutated."""
+        out: list[dict] = []
+        for m in messages:
+            wm = {
+                k: v for k, v in m.items()
+                if k in OpenAICompatibleProvider._WIRE_KEYS
+            }
+            tcs = wm.get("tool_calls")
+            if tcs:
+                fixed = []
+                for tc in tcs:
+                    fn = dict(tc.get("function", {}))
+                    args = fn.get("arguments", {})
+                    if not isinstance(args, str):
+                        fn["arguments"] = json.dumps(args)
+                    fixed.append({**tc, "function": fn})
+                wm["tool_calls"] = fixed
+            out.append(wm)
+        return out
 
     @staticmethod
     def _reply_from_data(data: dict) -> ChatReply:

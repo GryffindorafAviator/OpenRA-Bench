@@ -196,7 +196,19 @@ def _describe(node: Any, join: str = " AND ") -> str:
     if "any_of" in node:
         return "(" + " OR ".join(_describe(c) for c in node["any_of"]) + ")"
     if "not" in node:
-        return "NOT (" + _describe(node["not"]) + ")"
+        inner = node["not"]
+        inner_d = inner if isinstance(inner, dict) else dict(
+            getattr(inner, "__pydantic_extra__", {}) or {}
+        )
+        # Common fail form {not: {own_units_gte: N}} reads far clearer
+        # as a plain loss statement than a double negative.
+        if set(inner_d) == {"own_units_gte"}:
+            n = inner_d["own_units_gte"]
+            return (
+                "your whole force is destroyed" if int(n) <= 1
+                else f"fewer than {n} of your units remain"
+            )
+        return "NOT (" + _describe(inner) + ")"
     return join.join(_leaf_phrase(k, v) for k, v in node.items())
 
 

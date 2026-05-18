@@ -1,0 +1,79 @@
+"""Bench-native minimap PNG: must produce a *valid* image (the live
+smoke caught the old training-repo path emitting bytes PIL couldn't
+open, so the model silently ran text-only)."""
+
+from __future__ import annotations
+
+import base64
+import io
+
+import pytest
+
+from openra_bench.minimap import render_png_b64
+
+PIL = pytest.importorskip("PIL")
+from PIL import Image  # noqa: E402
+
+
+def _grid(w, h, explored_cols=0):
+    return "\n".join(
+        "".join("." if x < explored_cols else "#" for x in range(w))
+        for _ in range(h)
+    )
+
+
+def test_renders_a_valid_png_pil_can_reopen():
+    rs = {
+        "minimap": _grid(128, 40, explored_cols=20),
+        "units_summary": [{"cell_x": 6, "cell_y": 8}],
+        "enemy_summary": [
+            {"cell_x": 34, "cell_y": 22, "is_building": False},
+            {"cell_x": 40, "cell_y": 5, "is_building": True},
+        ],
+    }
+    b64 = render_png_b64(rs)
+    assert isinstance(b64, str) and b64
+    im = Image.open(io.BytesIO(base64.b64decode(b64)))  # must NOT raise
+    im.verify()
+    assert im.format == "PNG"
+    assert im.size == (128 * 6, 40 * 6)
+
+
+def test_unit_and_fog_pixels_are_distinct():
+    rs = {
+        "minimap": _grid(20, 10, explored_cols=0),  # all fog
+        "units_summary": [{"cell_x": 5, "cell_y": 5}],
+    }
+    im = Image.open(
+        io.BytesIO(base64.b64decode(render_png_b64(rs)))
+    ).convert("RGB")
+    own = im.getpixel((5 * 6 + 3, 5 * 6 + 3))      # on the unit
+    fog = im.getpixel((0, 0))                       # fog corner
+    assert own != fog
+    assert own[1] > own[0] and own[1] > own[2]      # green-ish own unit
+
+
+def test_graceful_none_when_nothing_to_draw():
+    assert render_png_b64({"minimap": ""}) is None
+    assert render_png_b64({}) is None
+
+
+def test_agent_attaches_image_when_vision_on():
+    from openra_bench.agent import ModelAgent
+    from openra_bench.providers import ProviderConfig
+
+    a = ModelAgent(ProviderConfig(vision=True), allowed_tools=["observe"],
+                   provider=type("P", (), {"complete": lambda *a, **k: None})())
+    msg = a._user_message({
+        "minimap": _grid(16, 8, 4),
+        "units_summary": [{"id": "1001", "cell_x": 1, "cell_y": 1}],
+        "enemy_summary": [],
+    })
+    assert isinstance(msg["content"], list)
+    kinds = [p["type"] for p in msg["content"]]
+    assert "image_url" in kinds and "text" in kinds
+    url = next(p["image_url"]["url"] for p in msg["content"]
+              if p["type"] == "image_url")
+    assert url.startswith("data:image/png;base64,")
+    # the attached payload is itself a valid PNG
+    Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).verify()

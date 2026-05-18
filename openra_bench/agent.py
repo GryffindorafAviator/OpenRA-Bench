@@ -378,18 +378,9 @@ def _render_minimap_b64(render_state: dict) -> str | None:
     """Best-effort minimap PNG. Returns None (text-only fallback) when
     terrain isn't resolvable — vision degrades gracefully in Phase 0."""
     try:
-        from openra_rl_training.training.minimap_renderer import render_minimap
+        from .minimap import render_png_b64
 
-        return render_minimap(
-            terrain_png=render_state.get("terrain_png"),  # None in Phase 0 -> None
-            map_width=render_state.get("map_width", 64),
-            map_height=render_state.get("map_height", 64),
-            bounds_x=render_state.get("bounds_x", 0),
-            bounds_y=render_state.get("bounds_y", 0),
-            own_units=render_state.get("units_summary", []) or [],
-            enemy_units=render_state.get("enemy_summary", []) or [],
-            ascii_minimap=render_state.get("minimap", ""),
-        )
+        return render_png_b64(render_state)
     except Exception as e:  # noqa: BLE001 — vision is optional
         logger.debug("minimap render skipped: %s", e)
         return None

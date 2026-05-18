@@ -166,3 +166,55 @@ def test_evaluate_journal_resume_is_lossless(tmp_path):
     assert b["resumed"] == 2 and b["overall"]["n"] == 2
     assert len(jp.read_text().splitlines()) == 2  # nothing re-appended
     assert "cost" in b and "truncated" in b
+
+
+# ── wire: tool_call arguments must be a JSON string (OpenRouter 400) ────────
+
+
+def test_wire_messages_serializes_tool_call_arguments():
+    from openra_bench.providers import OpenAICompatibleProvider as P
+
+    hist = [
+        {"role": "system", "content": "s"},
+        {"role": "assistant", "content": "", "reasoning": "drop me",
+         "tool_calls": [{"id": "c0", "type": "function",
+                         "function": {"name": "move_units",
+                                      "arguments": {"unit_ids": [1],
+                                                    "target_x": 5}}}]},
+        {"role": "tool", "tool_call_id": "c0", "content": "ok"},
+    ]
+    wire = P._wire_messages(hist)
+    args = wire[1]["tool_calls"][0]["function"]["arguments"]
+    assert isinstance(args, str)            # JSON string, not dict
+    assert json.loads(args) == {"unit_ids": [1], "target_x": 5}
+    assert "reasoning" not in wire[1]       # playback-only key stripped
+    # pure: original history untouched (still a dict for playback)
+    assert isinstance(
+        hist[1]["tool_calls"][0]["function"]["arguments"], dict
+    )
+    # already-string args are left alone
+    hist[1]["tool_calls"][0]["function"]["arguments"] = '{"a":1}'
+    assert P._wire_messages(hist)[1]["tool_calls"][0]["function"][
+        "arguments"
+    ] == '{"a":1}'
+
+
+def test_evaluate_continues_past_a_failing_episode(tmp_path):
+    pytest.importorskip("openra_train")
+    from openra_bench.run_eval import evaluate
+
+    PACK = Path("openra_bench/scenarios/packs/perception-frontier-reading.yaml")
+
+    def boom_factory(_compiled):
+        def agent_fn(_rs, _Command):
+            raise RuntimeError("simulated fatal provider 400")
+        return agent_fn
+
+    out = evaluate([PACK], ["easy"], [1, 2], agent_factory=boom_factory,
+                   journal_path=tmp_path / "j.jsonl")
+    eps = out["episodes"]
+    assert len(eps) == 2
+    assert all(e["outcome"] == "error" for e in eps)   # recorded, not raised
+    assert "overall" in out                            # report still produced
+    # journal captured them so --resume won't re-run the errored ones
+    assert len((tmp_path / "j.jsonl").read_text().splitlines()) == 2
