@@ -421,6 +421,10 @@ class ModelAgent:
             {
                 "role": "assistant",
                 "content": reply.text or "",
+                # Playback-only: the wire layer (providers._wire_messages)
+                # strips this before posting, so it never goes back to
+                # the model but is preserved in messages.json.
+                "reasoning": reply.reasoning or "",
                 "tool_calls": [
                     {
                         "id": f"c{i}",

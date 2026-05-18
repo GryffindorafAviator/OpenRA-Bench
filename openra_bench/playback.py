@@ -58,6 +58,7 @@ class Playback:
         signals: Any,
         minimap_png_b64: str | None = None,
         interrupt: str | None = None,
+        goal: dict | None = None,
     ) -> None:
         self._n += 1
         if minimap_png_b64:
@@ -88,6 +89,9 @@ class Playback:
             ),
             "units": render_state.get("units_summary", []),
             "enemies": render_state.get("enemy_summary", []),
+            # Per-turn goal tracker: win-condition leaf progress AND the
+            # normalized cumulative reward vector, side by side.
+            "goal": goal or {},
         }
         self._turns_fh.write(json.dumps(_jsonable(rec)) + "\n")
         self._turns_fh.flush()

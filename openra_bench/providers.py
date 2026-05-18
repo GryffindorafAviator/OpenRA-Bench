@@ -81,6 +81,7 @@ class ChatReply:
 
     text: str
     tool_calls: list[dict]  # [{"name": str, "arguments": dict}]
+    reasoning: str = ""  # chain-of-thought, when the model/provider emits it
     raw: dict = field(default_factory=dict)
 
 
@@ -105,7 +106,7 @@ class OpenAICompatibleProvider(ChatProvider):
         }
         body: dict[str, Any] = {
             "model": cfg.model,
-            "messages": messages,
+            "messages": self._wire_messages(messages),
             "temperature": cfg.temperature,
             "max_tokens": cfg.max_tokens,
         }
@@ -118,7 +119,28 @@ class OpenAICompatibleProvider(ChatProvider):
             json=body,
         )
         resp.raise_for_status()
-        data = resp.json()
+        return self._reply_from_data(resp.json())
+
+    # Keys the OpenAI Chat Completions wire format accepts per message.
+    # `history` carries extra playback-only keys (notably "reasoning");
+    # those must never be posted back or strict servers (vLLM) 400.
+    _WIRE_KEYS = frozenset(
+        {"role", "content", "name", "tool_calls", "tool_call_id"}
+    )
+
+    @staticmethod
+    def _wire_messages(messages: list[dict]) -> list[dict]:
+        """Pure: project each message onto OpenAI-legal keys only."""
+        return [
+            {k: v for k, v in m.items() if k in OpenAICompatibleProvider._WIRE_KEYS}
+            for m in messages
+        ]
+
+    @staticmethod
+    def _reply_from_data(data: dict) -> ChatReply:
+        """Pure parse of a Chat Completions response, including the
+        provider-specific reasoning channel (vLLM/DeepSeek emit
+        `reasoning_content`; OpenRouter/others a flat `reasoning`)."""
         msg = data["choices"][0]["message"]
         calls: list[dict] = []
         for tc in msg.get("tool_calls") or []:
@@ -130,7 +152,17 @@ class OpenAICompatibleProvider(ChatProvider):
                 except json.JSONDecodeError:
                     args = {}
             calls.append({"name": fn.get("name", ""), "arguments": args})
-        return ChatReply(text=msg.get("content") or "", tool_calls=calls, raw=data)
+        rc = msg.get("reasoning_content") or msg.get("reasoning") or ""
+        if isinstance(rc, list):  # some providers chunk it
+            rc = "".join(
+                p.get("text", "") if isinstance(p, dict) else str(p) for p in rc
+            )
+        return ChatReply(
+            text=msg.get("content") or "",
+            tool_calls=calls,
+            reasoning=str(rc),
+            raw=data,
+        )
 
     def close(self) -> None:
         self._client.close()

@@ -217,8 +217,12 @@ def run_level(
                     _png = _render_minimap_b64(rs)
                 except Exception:  # noqa: BLE001 — playback never breaks a run
                     pass
+                from .goal_tracker import turn_goal
+
                 playback.record_turn(
-                    turns, rs, cmds, adapter.signals, _png, interrupt=interrupt
+                    turns, rs, cmds, adapter.signals, _png,
+                    interrupt=interrupt,
+                    goal=turn_goal(compiled.win_condition, ctx),
                 )
             trace.append(
                 {
