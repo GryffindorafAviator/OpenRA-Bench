@@ -102,6 +102,14 @@ def evaluate(
     tasks: list[tuple] = []
     for pack_path in packs:
         pack = load_pack(pack_path)
+        # Quarantined packs stay runnable by explicit --packs but never
+        # enter the default sweep / leaderboard (audit hygiene).
+        if getattr(pack.meta, "status", "active") == "quarantine":
+            skipped.append(
+                f"{pack.meta.id} (quarantine: "
+                f"{pack.meta.quarantine_reason or 'excluded from default set'})"
+            )
+            continue
         for level in levels:
             compiled = compile_level(pack, level)
             if not compiled.map_supported:

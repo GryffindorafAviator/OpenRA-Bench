@@ -62,6 +62,13 @@ class ScenarioMeta(BaseModel):
         ..., min_length=10, description="Concrete robotics/agentic parallel"
     )
     author: str = "unknown"
+    # Hygiene (audit): "quarantine" keeps the file on disk and runnable
+    # by explicit --packs, but excludes it from the default eval set so
+    # it doesn't dilute scores / the leaderboard. Used for the
+    # redundant cat-* over-generation and the harvest packs blocked on
+    # the engine S0/S1 ore-income prerequisite.
+    status: Literal["active", "quarantine"] = "active"
+    quarantine_reason: str = ""
 
     @field_validator("id")
     @classmethod
