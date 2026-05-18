@@ -210,8 +210,37 @@ _TOOL_SCHEMAS.update(
 _TOOL_ALIASES = {"attack_target": "attack_unit", "stop_units": "stop"}
 
 
+# Scenario-agnostic safe default: the core movement/combat verbs every
+# scenario needs. A scenario that does not declare `tools:` gets this
+# set (NOT all 17 — economy/structure/concede verbs are noise on a
+# perception or combat scenario). A scenario opts into more via its
+# `tools:` allowlist; `"*"`/`"all"` exposes everything.
+DEFAULT_CORE_TOOLS = (
+    "move_units",
+    "attack_unit",
+    "attack_move",
+    "stop",
+    "observe",
+)
+
+
 def _tool_schemas(allowed: list[str] | None) -> list[dict]:
-    names = list(_TOOL_SCHEMAS) if not allowed else allowed
+    """Resolve the tool set offered to the model:
+
+    * unset / empty       → DEFAULT_CORE_TOOLS
+    * ["*"] or ["all"]    → every implemented tool
+    * explicit list       → exactly those (intersected with known tools;
+                            unknown names are ignored, not errors)
+
+    `observe` (the safe no-op) is always included so the agent can
+    always emit a valid turn even under the tightest allowlist.
+    """
+    if not allowed:
+        names: list[str] = list(DEFAULT_CORE_TOOLS)
+    elif any(a in ("*", "all") for a in allowed):
+        names = list(_TOOL_SCHEMAS)
+    else:
+        names = list(allowed)
     out = [_TOOL_SCHEMAS[n] for n in names if n in _TOOL_SCHEMAS]
     if "observe" not in {t["function"]["name"] for t in out}:
         out.append(_TOOL_SCHEMAS["observe"])  # always allow a no-op
