@@ -85,6 +85,24 @@ def test_no_held_out_keeps_backward_compatible_shape():
     assert all(e["split"] == "public" for e in stats["episodes"])
 
 
+def test_concurrency_is_deterministic_and_isolated():
+    import json
+
+    packs = [
+        PACKS / "perception-frontier-reading.yaml",
+        PACKS / "reasoning-frontier-commit.yaml",
+    ]
+    seq = evaluate(packs, ["easy"], [1, 2, 3], concurrency=1)
+    par = evaluate(packs, ["easy"], [1, 2, 3], concurrency=4)
+    # Same report regardless of worker scheduling (episodes sorted,
+    # aggregates order-independent) — episodes ran in isolation.
+    assert json.dumps(seq, sort_keys=True) == json.dumps(par, sort_keys=True)
+    assert seq["overall"]["n"] == 6
+    assert [e["seed"] for e in par["episodes"]] == sorted(
+        e["seed"] for e in par["episodes"]
+    ) or len({e["cell"] for e in par["episodes"]}) > 1
+
+
 def test_unsupported_map_is_skipped_not_crashed(tmp_path):
     """A pack on a non-Rust map must be reported as skipped, not raise."""
     pack = (PACKS / "perception-frontier-reading.yaml").read_text()

@@ -72,6 +72,7 @@ def evaluate(
     agent_factory: AgentFactory | None = None,
     held_out_seeds: list[int] | None = None,
     playback_root: str | Path | None = None,
+    concurrency: int = 1,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -80,13 +81,13 @@ def evaluate(
     generalization literature (Procgen/SMACv2/lmgame-Bench) requires.
     """
     factory = agent_factory or _default_agent_factory(provider_cfg)
-    by_cell: dict[str, list] = {}
-    episodes: list[dict] = []
     skipped: list[str] = []
-    public_scores: list = []
-    held_scores: list = []
     held_out_seeds = held_out_seeds or []
 
+    # Build the flat list of independent episodes (each is fully
+    # isolated: own RustEnvPool, own agent, own playback dir) so they
+    # can run concurrently.
+    tasks: list[tuple] = []
     for pack_path in packs:
         pack = load_pack(pack_path)
         for level in levels:
@@ -97,51 +98,71 @@ def evaluate(
             cell = f"{pack.meta.id}:{level}"
             for split, slist in (("public", seeds), ("held_out", held_out_seeds)):
                 for seed in slist:
-                    pb = None
-                    if playback_root is not None:
-                        from .playback import Playback
+                    tasks.append((compiled, cell, split, seed))
 
-                        pb = Playback(playback_root, f"{cell}:{split}", seed)
-                    res = run_level(
-                        compiled, factory(compiled), seed=seed, playback=pb
-                    )
-                    sc = score_episode(compiled, res)
-                    if pb is not None:
-                        (pb.dir / "score.json").write_text(
-                            json.dumps(
-                                {
-                                    "composite": sc.composite,
-                                    "outcome": sc.outcome,
-                                    "perception": sc.perception,
-                                    "reasoning": sc.reasoning,
-                                    "action": sc.action,
-                                    "weakest_link": sc.weakest_link,
-                                    "notes": sc.notes,
-                                },
-                                indent=2,
-                            )
-                        )
-                    if split == "public":
-                        by_cell.setdefault(cell, []).append(sc)
-                        public_scores.append(sc)
-                    else:
-                        held_scores.append(sc)
-                    episodes.append(
-                        {
-                            "cell": cell,
-                            "capability": compiled.meta.capability,
-                            "split": split,
-                            "seed": seed,
-                            "outcome": sc.outcome,
-                            "composite": sc.composite,
-                            "perception": sc.perception,
-                            "reasoning": sc.reasoning,
-                            "action": sc.action,
-                            "weakest_link": sc.weakest_link,
-                            "turns": res.turns,
-                            "notes": sc.notes,
-                        }
-                    )
+    def _run_one(task: tuple) -> dict:
+        compiled, cell, split, seed = task
+        pb = None
+        if playback_root is not None:
+            from .playback import Playback
+
+            pb = Playback(playback_root, f"{cell}:{split}", seed)
+        res = run_level(compiled, factory(compiled), seed=seed, playback=pb)
+        sc = score_episode(compiled, res)
+        if pb is not None:
+            (pb.dir / "score.json").write_text(
+                json.dumps(
+                    {
+                        "composite": sc.composite,
+                        "outcome": sc.outcome,
+                        "perception": sc.perception,
+                        "reasoning": sc.reasoning,
+                        "action": sc.action,
+                        "weakest_link": sc.weakest_link,
+                        "notes": sc.notes,
+                    },
+                    indent=2,
+                )
+            )
+        return {
+            "cell": cell,
+            "capability": compiled.meta.capability,
+            "split": split,
+            "seed": seed,
+            "outcome": sc.outcome,
+            "composite": sc.composite,
+            "perception": sc.perception,
+            "reasoning": sc.reasoning,
+            "action": sc.action,
+            "weakest_link": sc.weakest_link,
+            "turns": res.turns,
+            "notes": sc.notes,
+            "_sc": sc,
+        }
+
+    if concurrency > 1 and len(tasks) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=concurrency) as ex:
+            results = list(ex.map(_run_one, tasks))
+    else:
+        results = [_run_one(t) for t in tasks]
+
+    # Deterministic aggregation: sort so the report is identical
+    # regardless of worker scheduling.
+    results.sort(key=lambda r: (r["cell"], r["split"], r["seed"]))
+    by_cell: dict[str, list] = {}
+    public_scores: list = []
+    held_scores: list = []
+    episodes: list[dict] = []
+    for r in results:
+        sc = r.pop("_sc")
+        if r["split"] == "public":
+            by_cell.setdefault(r["cell"], []).append(sc)
+            public_scores.append(sc)
+        else:
+            held_scores.append(sc)
+        episodes.append(r)
 
     out = {
         "summary": {cell: _agg(scs) for cell, scs in by_cell.items()},
@@ -180,6 +201,13 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--packs", help="pack file or dir (default: bundled packs/)")
     ap.add_argument("--levels", default="easy,medium,hard")
     ap.add_argument("--seeds", default="1,2,3")
+    ap.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="run up to N episodes concurrently (each isolated; "
+        "report is deterministic regardless)",
+    )
     ap.add_argument(
         "--held-out-seeds",
         default="",
@@ -224,6 +252,7 @@ def main(argv: list[str]) -> int:
         provider_cfg=cfg,
         held_out_seeds=[int(s) for s in a.held_out_seeds.split(",") if s.strip()],
         playback_root=a.playback,
+        concurrency=a.concurrency,
     )
     write_report(stats, a.out)
     o = stats["overall"]
