@@ -85,8 +85,14 @@ def _dimension_values(compiled: CompiledLevel, res: EpisodeResult) -> dict:
         if res.actions_issued == 0
         else _clamp(1.0 - res.actions_warned / res.actions_issued)
     )
+    # objective: continuous partial credit toward the scenario win
+    # condition (goal_tracker.objective_progress). A near-miss loss
+    # (cash 1900/2000) now scores above a no-effort loss instead of
+    # both collapsing to the binary `outcome`.
+    objective = _clamp(getattr(res, "objective_progress", 0.0))
     return {
         "outcome": outcome,
+        "objective": objective,
         "exploration": exploration,
         "discovery": discovery,
         "combat": combat,
@@ -103,6 +109,10 @@ def _dimension_values(compiled: CompiledLevel, res: EpisodeResult) -> dict:
 def _weights(compiled: CompiledLevel) -> dict:
     """Scenario reward overrides on top of the Training default schema."""
     w = dict(DEFAULT_REWARD_WEIGHTS)
+    # `objective` is bench-specific (Training's schema has no such key);
+    # give it a meaningful default so partial goal progress moves the
+    # composite, still fully scenario-overridable via `scenario.reward`.
+    w.setdefault("objective", 0.2)
     w.update(compiled.scenario.reward or {})
     return w
 
@@ -139,8 +149,15 @@ def _pra_diagnostics(compiled: CompiledLevel, res: EpisodeResult, dims: dict) ->
     # Floor on the non-win branch so that when *perception* is the
     # bottleneck (near-zero coverage), reasoning is not spuriously the
     # minimum — reasoning can only be judged on what was actually sensed.
+    # On the non-win branch, how far the plan actually moved the
+    # objective is the most direct reasoning signal we have — a loss
+    # at 90% of the win condition reflects far better planning than a
+    # loss that never progressed. Blend it with the wander proxy.
+    obj = dims["objective"]
     reasoning = _clamp(
-        (0.6 + 0.4 * efficiency) if win else (0.2 + 0.5 * focus + 0.1 * dims["exploration"])
+        (0.6 + 0.4 * efficiency)
+        if win
+        else (0.2 + 0.45 * obj + 0.25 * focus + 0.1 * dims["exploration"])
     )
 
     # ACTION — valid, non-empty, accepted commands.

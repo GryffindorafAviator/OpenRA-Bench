@@ -64,6 +64,12 @@ class EpisodeResult:
     actions_issued: int = 0
     actions_warned: int = 0  # commands the engine rejected/warned on
     trace: list[dict] = field(default_factory=list)
+    # Final goal-tracker snapshot (always computed, playback or not).
+    # objective_progress is continuous partial credit toward the
+    # scenario win condition; reward_vector is the normalized
+    # cumulative, scenario-agnostic vector (see goal_tracker).
+    objective_progress: float = 0.0
+    reward_vector: dict = field(default_factory=dict)
 
 
 def scripted_explore_agent(render_state: dict, Command: Any) -> list:
@@ -239,6 +245,13 @@ def run_level(
         if conceded:
             outcome = "loss"  # the agent chose to concede
         adapter.signals.outcome = {"win": 1.0, "draw": 0.5, "loss": 0.0}[outcome]
+        from .goal_tracker import turn_goal
+
+        final_goal = turn_goal(
+            compiled.win_condition,
+            WinContext(signals=adapter.signals,
+                       render_state=adapter.render_state()),
+        )
         result = EpisodeResult(
             scenario=f"{compiled.pack_id}:{compiled.level}",
             seed=seed,
@@ -248,6 +261,8 @@ def run_level(
             actions_issued=issued,
             actions_warned=warned,
             trace=trace,
+            objective_progress=final_goal["objective_progress"],
+            reward_vector=final_goal["reward_vector"],
         )
         if playback is not None:
             # Dump the full model⇄env transcript when the agent is a
@@ -269,6 +284,8 @@ def run_level(
                     "actions_issued": issued,
                     "actions_warned": warned,
                     "agent_stats": getattr(agent_obj, "stats", None),
+                    "objective_progress": result.objective_progress,
+                    "reward_vector": result.reward_vector,
                     "signals": {
                         "economy_value": adapter.signals.cash
                         + adapter.signals.resources,

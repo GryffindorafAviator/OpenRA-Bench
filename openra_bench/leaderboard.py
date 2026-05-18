@@ -36,6 +36,9 @@ def _capability_breakdown(episodes: list[dict]) -> dict[str, dict]:
             "n": n,
             "composite": round(sum(e["composite"] for e in eps) / n, 4),
             "win_rate": round(sum(e["outcome"] == "win" for e in eps) / n, 4),
+            "objective": round(
+                sum(e.get("objective_progress", 0.0) for e in eps) / n, 4
+            ),
         }
     return out
 
@@ -62,6 +65,10 @@ def ingest_run(
         "perception": overall.get("perception_mean", 0.0),
         "reasoning": overall.get("reasoning_mean", 0.0),
         "action": overall.get("action_mean", 0.0),
+        # Continuous goal achievement (partial credit) + the cumulative
+        # reward-vector signature, comparable across models/runs.
+        "objective": overall.get("objective_mean", 0.0),
+        "reward_vector": stats.get("reward_vector_mean", {}),
         "weakest_link_hist": overall.get("weakest_link_hist", {}),
         # Anti-memorization: held-out composite + generalization gap
         # (public − held-out). None when the run had no held-out split.

@@ -60,6 +60,9 @@ def _agg(scores: list) -> dict:
         "perception_mean": round(statistics.fmean(s.perception for s in scores), 4),
         "reasoning_mean": round(statistics.fmean(s.reasoning for s in scores), 4),
         "action_mean": round(statistics.fmean(s.action for s in scores), 4),
+        "objective_mean": round(
+            statistics.fmean(s.dimensions.get("objective", 0.0) for s in scores), 4
+        ),
         "weakest_link_hist": dict(Counter(s.weakest_link for s in scores)),
     }
 
@@ -119,6 +122,8 @@ def evaluate(
                         "reasoning": sc.reasoning,
                         "action": sc.action,
                         "weakest_link": sc.weakest_link,
+                        "objective_progress": res.objective_progress,
+                        "reward_vector": res.reward_vector,
                         "notes": sc.notes,
                     },
                     indent=2,
@@ -135,6 +140,8 @@ def evaluate(
             "reasoning": sc.reasoning,
             "action": sc.action,
             "weakest_link": sc.weakest_link,
+            "objective_progress": res.objective_progress,
+            "reward_vector": res.reward_vector,
             "turns": res.turns,
             "notes": sc.notes,
             "_sc": sc,
@@ -164,9 +171,20 @@ def evaluate(
             held_scores.append(sc)
         episodes.append(r)
 
+    # Mean cumulative reward vector across public episodes — the
+    # scenario-agnostic progress signature, comparable across runs.
+    pub = [r for r in episodes if r["split"] == "public" and r.get("reward_vector")]
+    rv_mean: dict = {}
+    if pub:
+        for k in pub[0]["reward_vector"]:
+            rv_mean[k] = round(
+                statistics.fmean(r["reward_vector"].get(k, 0.0) for r in pub), 4
+            )
+
     out = {
         "summary": {cell: _agg(scs) for cell, scs in by_cell.items()},
         "overall": _agg(public_scores),
+        "reward_vector_mean": rv_mean,
         "episodes": episodes,
         "skipped": skipped,
     }
