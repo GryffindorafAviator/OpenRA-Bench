@@ -97,6 +97,37 @@ _TOOL_SCHEMAS: dict[str, dict] = {
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    "enter_transport": {
+        "type": "function",
+        "function": {
+            "name": "enter_transport",
+            "description": "Order passenger units (infantry) to walk to "
+            "and board a transport actor id (e.g. an APC).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}},
+                    "target_id": {"type": "integer"},
+                },
+                "required": ["unit_ids", "target_id"],
+            },
+        },
+    },
+    "unload": {
+        "type": "function",
+        "function": {
+            "name": "unload",
+            "description": "Order transport(s) (by id, in unit_ids) to "
+            "eject all carried passengers next to it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}}
+                },
+                "required": ["unit_ids"],
+            },
+        },
+    },
     "set_stance": {
         "type": "function",
         "function": {
@@ -363,6 +394,11 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
             elif name == "guard":
                 ids = [str(i) for i in args["unit_ids"]]
                 cmds.append(Command.guard(ids, str(args["target_id"])))
+            elif name == "enter_transport":
+                ids = [str(i) for i in args["unit_ids"]]
+                cmds.append(
+                    Command.enter_transport(ids, str(args["target_id"]))
+                )
             elif name == "observe":
                 cmds.append(Command.observe())
             elif name == "surrender":
@@ -383,6 +419,7 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
                 "repair",
                 "power_down",
                 "set_primary",
+                "unload",
             ):
                 ids = [str(i) for i in args["unit_ids"]]
                 cmds.append(getattr(Command, name)(ids))
