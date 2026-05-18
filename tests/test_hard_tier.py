@@ -51,11 +51,13 @@ NOT_APPLICABLE = {
     "strict-production-bom": "non-spatial: exact bill-of-materials spec",
     "reasoning-risk-route": "rigor 5/5 from one tuned safe seam — varying "
     "the start would break the single-solution tuning / seed parity",
-    "strategy-dilemma": "needs win-predicate redesign (gameable "
-    "buildings_discovered_gte:1), not spawn variation — separate rigor item",
-    "strategy-gauntlet": "dual-entry design + gameable win — separate item",
-    "strategy-twobody": "two simultaneously-controlled groups IS the task; "
-    "spawn-alternatives would break intent — separate item",
+    "strategy-dilemma": "win redesigned to destroy fact+proc (faithful "
+    "to training); spawn deferred — route-choice puzzle is the decision",
+    "strategy-gauntlet": "win redesigned to fact+proc; single defended "
+    "corridor — spawn variation would not add a distinct decision",
+    "strategy-twobody": "win redesigned to fact+proc; two "
+    "simultaneously-controlled groups IS the task — spawn-alternatives "
+    "would break intent",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss

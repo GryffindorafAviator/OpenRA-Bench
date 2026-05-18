@@ -29,6 +29,9 @@ _CURRENT: dict[str, Any] = {
     "enemies_discovered_gte": lambda c: len(c.signals.enemies_seen_ids),
     "buildings_discovered_gte": lambda c: len(c.signals.enemy_buildings_seen_ids),
     "units_killed_gte": lambda c: c.signals.units_killed,
+    "enemy_buildings_destroyed_gte": lambda c: getattr(
+        c.signals, "enemy_buildings_destroyed", 0
+    ),
     "units_lost_lte": lambda c: c.signals.units_lost,
     "within_ticks": lambda c: c.signals.game_tick,
     "after_ticks": lambda c: c.signals.game_tick,

@@ -83,6 +83,12 @@ class EpisodeSignals:
     explored_delta: float = 0.0
     enemies_seen_ids: set[str] = field(default_factory=set)
     enemy_buildings_seen_ids: set[str] = field(default_factory=set)
+    # Enemy buildings confirmed destroyed: a building seen earlier that
+    # is now absent while we still have vision of its cell (so it's
+    # killed, not fogged). Total + per-type — the faithful signal for
+    # "eliminate the enemy's key economic structures" objectives.
+    enemy_buildings_destroyed: int = 0
+    enemy_buildings_destroyed_types: dict = field(default_factory=dict)
     new_enemies_this_step: int = 0
     new_buildings_this_step: int = 0
     game_tick: int = 0
@@ -143,6 +149,10 @@ class RustObsAdapter:
         self._prev_own_ids: set[str] = set()
         self._raw: dict[str, Any] = {}
         self._first_own_count: int | None = None
+        # id -> (type, (cell_x, cell_y)) last time the building was seen,
+        # for destruction detection (absent + cell explored ⇒ killed).
+        self._seen_buildings: dict[str, tuple[str, tuple[int, int]]] = {}
+        self._destroyed_bldg_ids: set[str] = set()
 
     # -- ingestion --------------------------------------------------------
     def observe(self, obs: dict[str, Any], done: bool = False) -> None:
@@ -173,10 +183,40 @@ class RustObsAdapter:
         s.new_enemies_this_step = len(s.enemies_seen_ids) - before_e
 
         before_b = len(s.enemy_buildings_seen_ids)
+        visible_b: set[str] = set()
         for b in self._raw.get("enemy_buildings_summary", []) or []:
             if isinstance(b, dict) and b.get("id") is not None:
-                s.enemy_buildings_seen_ids.add(str(b["id"]))
+                bid = str(b["id"])
+                s.enemy_buildings_seen_ids.add(bid)
+                visible_b.add(bid)
+                self._seen_buildings[bid] = (
+                    str(b.get("type", "")).lower(),
+                    (int(b.get("cell_x", 0)), int(b.get("cell_y", 0))),
+                )
         s.new_buildings_this_step = len(s.enemy_buildings_seen_ids) - before_b
+        # Destruction: a previously-seen enemy building now absent while
+        # an agent unit is right on top of its last cell ⇒ it was
+        # killed (not merely fogged after a retreat). Proximity to a
+        # *current* unit is the reliable "we have vision here" test —
+        # `explored_cells` is cumulative and can't distinguish the two.
+        _VIS = 6  # cells; ~unit sight radius
+        agent_cells = [
+            (int(p.get("cell_x", 0)), int(p.get("cell_y", 0)))
+            for p in (own.values() if isinstance(own, dict) else [])
+            if isinstance(p, dict)
+        ]
+        for bid, (btype, (bx, by)) in self._seen_buildings.items():
+            if bid in visible_b or bid in self._destroyed_bldg_ids:
+                continue
+            if any(
+                max(abs(ux - bx), abs(uy - by)) <= _VIS
+                for ux, uy in agent_cells
+            ):
+                self._destroyed_bldg_ids.add(bid)
+                s.enemy_buildings_destroyed_types[btype] = (
+                    s.enemy_buildings_destroyed_types.get(btype, 0) + 1
+                )
+        s.enemy_buildings_destroyed = len(self._destroyed_bldg_ids)
 
         econ = self._raw.get("economy") or {}
         if isinstance(econ, dict):

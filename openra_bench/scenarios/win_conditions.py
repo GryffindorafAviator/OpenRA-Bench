@@ -51,6 +51,20 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
     "buildings_discovered_gte": lambda c, v: len(c.signals.enemy_buildings_seen_ids)
     >= int(v),
     "units_killed_gte": lambda c, v: c.signals.units_killed >= int(v),
+    # Eliminate the enemy's key economic structures (the training
+    # strategy design: destroy fact+proc, NOT brute-force the whole
+    # strong enemy). Total count, or all of a named type set.
+    "enemy_buildings_destroyed_gte": lambda c, v: getattr(
+        c.signals, "enemy_buildings_destroyed", 0
+    )
+    >= int(v),
+    "enemy_key_buildings_destroyed": lambda c, v: all(
+        getattr(c.signals, "enemy_buildings_destroyed_types", {}).get(
+            str(t).lower(), 0
+        )
+        >= 1
+        for t in (v["types"] if isinstance(v, dict) else v)
+    ),
     "units_lost_lte": lambda c, v: c.signals.units_lost <= int(v),
     "within_ticks": lambda c, v: c.signals.game_tick <= int(v),
     "after_ticks": lambda c, v: c.signals.game_tick >= int(v),
