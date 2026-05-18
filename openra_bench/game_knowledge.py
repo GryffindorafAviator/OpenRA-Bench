@@ -92,12 +92,40 @@ def actor_codes(scenario: Any) -> set[str]:
     return out
 
 
+def _condition_codes(node: Any) -> set[str]:
+    """Actor codes named inside a win/fail predicate tree (production
+    targets like e3/tsla that are NOT pre-placed actors but the model
+    is asked to build/destroy — they must still be glossary-explained)."""
+    out: set[str] = set()
+    if node is None:
+        return out
+    if not isinstance(node, dict):
+        node = dict(getattr(node, "__pydantic_extra__", {}) or {})
+    for k, v in node.items():
+        if k in ("all_of", "any_of"):
+            for c in v:
+                out |= _condition_codes(c)
+        elif k == "not":
+            out |= _condition_codes(v)
+        elif isinstance(v, dict):
+            if v.get("type"):
+                out.add(str(v["type"]).lower())
+            for t in v.get("types", []) or []:
+                out.add(str(t).lower())
+        elif k == "has_building" and isinstance(v, str):
+            out.add(v.lower())
+    return out
+
+
 def scenario_primer(compiled: Any) -> str:
     """The knowledge block for THIS scenario: glossary of present
     codes + the fixed game model (+ tech note only if the scenario
     actually allows production)."""
     sc = compiled.scenario
-    codes = sorted(actor_codes(sc))
+    codes = set(actor_codes(sc))
+    codes |= _condition_codes(getattr(compiled, "win_condition", None))
+    codes |= _condition_codes(getattr(compiled, "fail_condition", None))
+    codes = sorted(codes)
     lines = ["GAME KNOWLEDGE (Command & Conquer: Red Alert)"]
     if codes:
         lines.append("Units/buildings in this scenario:")
