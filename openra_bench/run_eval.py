@@ -419,7 +419,30 @@ def _resolve_packs(spec: str | None) -> list[Path]:
     return sorted(p.glob("*.yaml")) if p.is_dir() else [p]
 
 
+def _load_dotenv(path: str | Path = ".env") -> None:
+    """Minimal, dependency-free .env loader: populate os.environ from
+    `KEY=VALUE` lines (skips comments/blanks; never overrides an
+    already-set var; strips matching surrounding quotes). Lets
+    `--provider openrouter` work straight from a git-ignored .env."""
+    import os
+
+    p = Path(path)
+    if not p.exists():
+        return
+    for raw in p.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, val = line.partition("=")
+        k, val = k.strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        if k and k not in os.environ:
+            os.environ[k] = val
+
+
 def main(argv: list[str]) -> int:
+    _load_dotenv()
     ap = argparse.ArgumentParser(description="Run a model over OpenRA-Bench scenario packs")
     ap.add_argument("--packs", help="pack file or dir (default: bundled packs/)")
     ap.add_argument("--levels", default="easy,medium,hard")
