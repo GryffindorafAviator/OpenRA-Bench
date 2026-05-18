@@ -26,7 +26,9 @@ from pydantic import BaseModel, Field, field_validator
 from .win_conditions import WinCondition
 
 LevelName = Literal["easy", "medium", "hard"]
-Capability = Literal["perception", "reasoning", "action"]
+# "adversarial" = head-to-head reasoning vs a reactive opponent (the
+# axis an RTS engine uniquely owns); ranked by a difficulty ladder + Elo.
+Capability = Literal["perception", "reasoning", "action", "adversarial"]
 
 
 def deep_merge(base: dict, patch: dict) -> dict:

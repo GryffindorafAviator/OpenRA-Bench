@@ -172,8 +172,9 @@ def load_capability_leaderboard() -> pd.DataFrame:
         rows = []
     cols = [
         "rank", "model", "episodes", "win_rate", "composite",
-        "objective", "perception", "reasoning", "action", "weakest_link",
-        "reward_vector", "held_out_composite", "generalization_gap",
+        "objective", "adversarial_rating", "perception", "reasoning",
+        "action", "weakest_link", "reward_vector",
+        "held_out_composite", "generalization_gap",
     ]
     if not rows:
         return pd.DataFrame(columns=cols)

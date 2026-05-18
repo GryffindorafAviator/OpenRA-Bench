@@ -202,6 +202,12 @@ def evaluate(
         "episodes": episodes,
         "skipped": skipped,
     }
+    # Adversarial spotlight: per-pack ladder ratings + headline mean.
+    from .adversarial import adversarial_summary
+
+    adv = adversarial_summary(out)
+    if adv["packs"]:
+        out["adversarial"] = adv
     if held_scores:
         ho = _agg(held_scores)
         out["overall_held_out"] = ho

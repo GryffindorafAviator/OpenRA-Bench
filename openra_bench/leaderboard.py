@@ -18,7 +18,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-CAPABILITIES = ("perception", "reasoning", "action")
+CAPABILITIES = ("perception", "reasoning", "action", "adversarial")
 DEFAULT_STORE = Path(__file__).parent.parent / "data" / "leaderboard.jsonl"
 # A run must cover at least this many episodes to be rankable (mirrors
 # the existing app.py min-games gate; keeps one-off noise off the board).
@@ -69,6 +69,13 @@ def ingest_run(
         # reward-vector signature, comparable across models/runs.
         "objective": overall.get("objective_mean", 0.0),
         "reward_vector": stats.get("reward_vector_mean", {}),
+        # Adversarial 1v1 spotlight: mean ladder rating (0–3) + per-pack.
+        "adversarial_rating": stats.get("adversarial", {}).get(
+            "mean_ladder_rating", 0.0
+        ),
+        "adversarial_ladders": stats.get("adversarial", {}).get(
+            "ladder_ratings", {}
+        ),
         "weakest_link_hist": overall.get("weakest_link_hist", {}),
         # Anti-memorization: held-out composite + generalization gap
         # (public − held-out). None when the run had no held-out split.
