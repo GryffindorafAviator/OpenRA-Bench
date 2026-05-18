@@ -147,6 +147,7 @@ def run_level(
     compiled: CompiledLevel,
     agent_fn: AgentFn = scripted_explore_agent,
     seed: int = 0,
+    playback=None,
 ) -> EpisodeResult:
     """Run one scenario-pack level, scoring against its declarative
     win/fail conditions (checked every turn). Outcome maps to the
@@ -179,6 +180,15 @@ def run_level(
                 outcome = "win"
             elif evaluate(compiled.fail_condition, ctx):
                 outcome = "loss"
+            if playback is not None:
+                _png = None
+                try:
+                    from .agent import _render_minimap_b64
+
+                    _png = _render_minimap_b64(rs)
+                except Exception:  # noqa: BLE001 — playback never breaks a run
+                    pass
+                playback.record_turn(turns, rs, cmds, adapter.signals, _png)
             trace.append(
                 {
                     "turn": turns,
@@ -191,7 +201,7 @@ def run_level(
             if outcome != "draw" or done:
                 break
         adapter.signals.outcome = {"win": 1.0, "draw": 0.5, "loss": 0.0}[outcome]
-        return EpisodeResult(
+        result = EpisodeResult(
             scenario=f"{compiled.pack_id}:{compiled.level}",
             seed=seed,
             turns=turns,
@@ -201,6 +211,38 @@ def run_level(
             actions_warned=warned,
             trace=trace,
         )
+        if playback is not None:
+            # Dump the full model⇄env transcript when the agent is a
+            # ModelAgent (bound-method closure exposes the instance).
+            agent_obj = getattr(agent_fn, "__self__", None)
+            hist = getattr(agent_obj, "history", None)
+            if isinstance(hist, list):
+                playback.write_messages(hist)
+            playback.finalize(
+                {
+                    "scenario": result.scenario,
+                    "pack_id": compiled.pack_id,
+                    "level": compiled.level,
+                    "capability": compiled.meta.capability,
+                    "seed": seed,
+                    "outcome": outcome,
+                    "turns": turns,
+                    "max_turns": compiled.max_turns,
+                    "actions_issued": issued,
+                    "actions_warned": warned,
+                    "agent_stats": getattr(agent_obj, "stats", None),
+                    "signals": {
+                        "economy_value": adapter.signals.cash
+                        + adapter.signals.resources,
+                        "explored_percent": round(
+                            adapter.signals.explored_percent, 2
+                        ),
+                        "units_killed": adapter.signals.units_killed,
+                        "units_lost": adapter.signals.units_lost,
+                    },
+                }
+            )
+        return result
     finally:
         pool.release(env)
         pool.shutdown()

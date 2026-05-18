@@ -71,6 +71,7 @@ def evaluate(
     provider_cfg=None,
     agent_factory: AgentFactory | None = None,
     held_out_seeds: list[int] | None = None,
+    playback_root: str | Path | None = None,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -96,8 +97,30 @@ def evaluate(
             cell = f"{pack.meta.id}:{level}"
             for split, slist in (("public", seeds), ("held_out", held_out_seeds)):
                 for seed in slist:
-                    res = run_level(compiled, factory(compiled), seed=seed)
+                    pb = None
+                    if playback_root is not None:
+                        from .playback import Playback
+
+                        pb = Playback(playback_root, f"{cell}:{split}", seed)
+                    res = run_level(
+                        compiled, factory(compiled), seed=seed, playback=pb
+                    )
                     sc = score_episode(compiled, res)
+                    if pb is not None:
+                        (pb.dir / "score.json").write_text(
+                            json.dumps(
+                                {
+                                    "composite": sc.composite,
+                                    "outcome": sc.outcome,
+                                    "perception": sc.perception,
+                                    "reasoning": sc.reasoning,
+                                    "action": sc.action,
+                                    "weakest_link": sc.weakest_link,
+                                    "notes": sc.notes,
+                                },
+                                indent=2,
+                            )
+                        )
                     if split == "public":
                         by_cell.setdefault(cell, []).append(sc)
                         public_scores.append(sc)
@@ -169,6 +192,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--no-vision", action="store_true")
     ap.add_argument("--out", default="eval_stats.json")
     ap.add_argument(
+        "--playback",
+        default=None,
+        help="dir to save per-episode playback (messages incl. minimap, "
+        "per-turn record, manifest, score) so runs can be inspected",
+    )
+    ap.add_argument(
         "--leaderboard",
         nargs="?",
         const="",
@@ -194,6 +223,7 @@ def main(argv: list[str]) -> int:
         [int(s) for s in a.seeds.split(",")],
         provider_cfg=cfg,
         held_out_seeds=[int(s) for s in a.held_out_seeds.split(",") if s.strip()],
+        playback_root=a.playback,
     )
     write_report(stats, a.out)
     o = stats["overall"]
