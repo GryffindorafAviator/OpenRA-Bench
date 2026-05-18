@@ -53,6 +53,7 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
                 compiled.max_turns,
             ),
             system_extra=scenario_primer(compiled),
+            base_map=compiled.scenario.base_map,
         )
         return agent.agent_fn
 
@@ -145,6 +146,7 @@ def evaluate(
                 ),
                 provider=shared,
                 system_extra=scenario_primer(compiled),
+                base_map=compiled.scenario.base_map,
             ).agent_fn
 
     # Run/model identity so a single playback root can hold many runs

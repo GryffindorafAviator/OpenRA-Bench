@@ -145,9 +145,20 @@ def episode_view(ep_dir: str | Path, turn_idx: int) -> dict:
         return {"n_turns": 0, "manifest": ep["manifest"]}
     i = max(0, min(turn_idx, n - 1))
     t = turns[i]
-    users = _role_turns(ep["messages"], "user")
-    assts = _role_turns(ep["messages"], "assistant")
+    msgs = ep["messages"]
+    sys_prompt = next(
+        (m.get("content", "") for m in msgs if m.get("role") == "system"), ""
+    )
+    if isinstance(sys_prompt, list):
+        sys_prompt = _text(sys_prompt)
+    users = _role_turns(msgs, "user")
+    assts = _role_turns(msgs, "assistant")
+    tools = _role_turns(msgs, "tool")
     g = t.get("goal") or {}
+    # The model's "debrief" for a turn = the briefing it was handed
+    # (post-interrupt this is the scoped re-prompt). Surface it
+    # explicitly + the interrupt reason, matching the training viewer.
+    briefing = _text(users[i]["content"]) if i < len(users) else ""
     return {
         "n_turns": n,
         "turn_idx": i,
@@ -156,11 +167,15 @@ def episode_view(ep_dir: str | Path, turn_idx: int) -> dict:
         "interrupt": t.get("interrupt"),
         "minimap_png": t.get("minimap_png"),
         "ascii_minimap": t.get("ascii_minimap", ""),
-        "briefing": _text(users[i]["content"]) if i < len(users) else "",
+        "system_prompt": sys_prompt,
+        "briefing": briefing,
+        "debrief": briefing,  # alias: what the model was (re-)briefed with
         "reasoning": (assts[i].get("reasoning", "")
                       if i < len(assts) else ""),
         "assistant_text": (_text(assts[i].get("content"))
                            if i < len(assts) else ""),
+        "tool_result": (_text(tools[i].get("content"))
+                        if i < len(tools) else ""),
         "commands": t.get("commands", []),
         "signals": t.get("signals", {}),
         "goal": g,

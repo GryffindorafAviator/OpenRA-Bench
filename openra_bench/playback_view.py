@@ -72,10 +72,27 @@ def render_streamlit(root: str) -> None:  # pragma: no cover - UI glue
     m = ep["manifest"]
     st.title(f"{m.get('scenario', pick)} — {m.get('outcome', '?')}")
     st.caption(
+        f"{m.get('model','?')} · run {m.get('run_id','?')} · "
         f"turns {m.get('turns')}/{m.get('max_turns')} · "
         f"capability {m.get('capability')} · seed {m.get('seed')}"
     )
 
+    # System prompt once at top (the deterministic scenario knowledge
+    # the model was given) — same as the training pipeline viewer.
+    sysp = next(
+        (x.get("content", "") for x in ep["messages"]
+         if x.get("role") == "system"), ""
+    )
+    if isinstance(sysp, list):
+        sysp = " ".join(
+            p.get("text", "") for p in sysp if isinstance(p, dict)
+        )
+    if sysp:
+        with st.expander(f"🧠 System prompt ({len(sysp)} chars)",
+                         expanded=False):
+            st.code(sysp, language="text")
+
+    users = [x for x in ep["messages"] if x.get("role") == "user"]
     asst = _assistant_turns(ep["messages"])
     for i, t in enumerate(ep["turns"]):
         with st.expander(

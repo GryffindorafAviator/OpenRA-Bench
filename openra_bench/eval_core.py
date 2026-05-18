@@ -219,8 +219,11 @@ def run_level(
                 _png = None
                 try:
                     from .agent import _render_minimap_b64
+                    from .minimap import terrain_png_for
 
-                    _png = _render_minimap_b64(rs)
+                    _png = _render_minimap_b64(
+                        rs, terrain_png_for(compiled.scenario.base_map)
+                    )
                 except Exception:  # noqa: BLE001 — playback never breaks a run
                     pass
                 from .goal_tracker import turn_goal

@@ -77,3 +77,37 @@ def test_agent_attaches_image_when_vision_on():
     assert url.startswith("data:image/png;base64,")
     # the attached payload is itself a valid PNG
     Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).verify()
+
+
+# ── training renderer (real terrain + embedded legend) ─────────────────────
+
+
+def test_terrain_png_extracted_and_training_renderer_used():
+    pytest.importorskip("matplotlib")
+    from openra_bench.minimap import render_b64, terrain_png_for
+
+    t = terrain_png_for("rush-hour-arena")
+    assert t and t[:4] == b"\x89PNG"            # real map.png from .oramap
+    rs = {
+        "minimap": "\n".join("#" * 128 for _ in range(40)),
+        "map_width": 128, "map_height": 40, "bounds_x": 0, "bounds_y": 0,
+        "units_summary": [{"id": "1", "cell_x": 6, "cell_y": 8}],
+        "enemy_summary": [],
+    }
+    with_terrain = render_b64(rs, t)
+    fallback = render_b64(rs, None)
+    im = Image.open(io.BytesIO(base64.b64decode(with_terrain)))
+    im.verify()
+    assert im.format == "PNG"
+    assert with_terrain != fallback             # training path actually used
+    assert terrain_png_for("no-such-map") is None  # graceful
+
+
+def test_agent_uses_terrain_when_base_map_given():
+    from openra_bench.agent import ModelAgent
+    from openra_bench.providers import ProviderConfig
+
+    a = ModelAgent(ProviderConfig(vision=True), allowed_tools=["observe"],
+                   provider=type("P", (), {"complete": lambda *x, **k: None})(),
+                   base_map="rush-hour-arena")
+    assert a._terrain and a._terrain[:4] == b"\x89PNG"

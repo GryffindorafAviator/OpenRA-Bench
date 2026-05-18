@@ -374,13 +374,16 @@ def build_briefing(render_state: dict, objective: str = "") -> str:
     return "\n".join(lines)
 
 
-def _render_minimap_b64(render_state: dict) -> str | None:
-    """Best-effort minimap PNG. Returns None (text-only fallback) when
-    terrain isn't resolvable — vision degrades gracefully in Phase 0."""
+def _render_minimap_b64(
+    render_state: dict, terrain_png: bytes | None = None
+) -> str | None:
+    """Best-effort minimap PNG. With `terrain_png` uses the training
+    renderer (real terrain + an embedded legend the model can read);
+    else the bench fallback. None ⇒ graceful text-only."""
     try:
-        from .minimap import render_png_b64
+        from .minimap import render_b64
 
-        return render_png_b64(render_state)
+        return render_b64(render_state, terrain_png)
     except Exception as e:  # noqa: BLE001 — vision is optional
         logger.debug("minimap render skipped: %s", e)
         return None
@@ -466,11 +469,22 @@ class ModelAgent:
         objective: str = "",
         provider: ChatProvider | None = None,
         system_extra: str = "",
+        base_map: str = "",
     ):
         self.cfg = cfg
         self.objective = objective
         self.tools = _tool_schemas(allowed_tools)
         self.provider = provider or make_provider(cfg)
+        # Real terrain (map.png from the .oramap) so the model gets the
+        # training renderer's terrain+legend minimap, not colour dots.
+        self._terrain: bytes | None = None
+        if base_map:
+            try:
+                from .minimap import terrain_png_for
+
+                self._terrain = terrain_png_for(base_map)
+            except Exception:  # noqa: BLE001
+                self._terrain = None
         sys_content = SYSTEM_PROMPT
         if system_extra:
             # Deterministic scenario-scoped game knowledge (glossary,
@@ -483,7 +497,7 @@ class ModelAgent:
     def _user_message(self, render_state: dict) -> dict:
         text = build_briefing(render_state, self.objective)
         if self.cfg.vision:
-            b64 = _render_minimap_b64(render_state)
+            b64 = _render_minimap_b64(render_state, self._terrain)
             if b64:
                 return {
                     "role": "user",

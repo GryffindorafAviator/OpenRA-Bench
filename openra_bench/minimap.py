@@ -12,8 +12,58 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import zipfile
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=32)
+def terrain_png_for(base_map: str) -> bytes | None:
+    """Raw `map.png` bytes from the resolved `.oramap` (a zip), cached.
+    None when the map can't be resolved — caller falls back."""
+    if not base_map:
+        return None
+    try:
+        from .scenarios.loader import resolve_map_path
+
+        p = resolve_map_path(base_map)
+        if not p:
+            return None
+        with zipfile.ZipFile(p, "r") as zf:
+            if "map.png" in zf.namelist():
+                return zf.read("map.png")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("terrain extract failed for %s: %s", base_map, e)
+    return None
+
+
+def render_b64(render_state: dict, terrain_png: bytes | None = None) -> str | None:
+    """Preferred minimap: the training renderer (real terrain + an
+    embedded legend the model can read) when terrain is available;
+    otherwise the self-contained bench fallback. Either way a *valid*
+    base64 PNG, or None for graceful text-only."""
+    if terrain_png:
+        try:
+            from openra_rl_training.training.minimap_renderer import (
+                render_minimap,
+            )
+
+            b64 = render_minimap(
+                terrain_png=terrain_png,
+                map_width=int(render_state.get("map_width", 64) or 64),
+                map_height=int(render_state.get("map_height", 64) or 64),
+                bounds_x=int(render_state.get("bounds_x", 0) or 0),
+                bounds_y=int(render_state.get("bounds_y", 0) or 0),
+                own_units=render_state.get("units_summary", []) or [],
+                enemy_units=render_state.get("enemy_summary", []) or [],
+                ascii_minimap=render_state.get("minimap", "") or "",
+            )
+            if b64:
+                return b64
+        except Exception as e:  # noqa: BLE001 — fall back below
+            logger.debug("training minimap failed, using fallback: %s", e)
+    return render_png_b64(render_state)
 
 CELL = 6  # px per map cell (≈768×240 for a 128×40 map — legible)
 

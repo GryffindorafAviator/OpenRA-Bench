@@ -247,22 +247,38 @@ def _bv_turn_md(v: dict, heading: str) -> str:
             "reward vector: "
             + " ".join(f"`{k}={float(x):.2f}`" for k, x in rv.items()),
         ]
+    # System prompt (the deterministic scenario knowledge the model
+    # was given) — collapsible, shown with char count like the
+    # training pipeline viewer.
+    sp = str(v.get("system_prompt") or "")
+    if sp:
+        lines += [
+            "", f"<details><summary>🧠 system prompt ({len(sp)} chars)"
+            "</summary>\n\n```\n" + sp[:6000] + "\n```\n</details>"
+        ]
+    # DEBRIEF / briefing actually handed to the model this turn
+    # (post-interrupt this is the scoped re-prompt).
+    deb = str(v.get("debrief") or v.get("briefing") or "")
+    if deb:
+        tag = "⚡ DEBRIEF (interrupt)" if v.get("interrupt") else "briefing"
+        lines += [
+            "", f"<details open><summary>{tag}</summary>\n\n```\n"
+            + deb[:8000] + "\n```\n</details>"
+        ]
     if v.get("reasoning"):
-        lines += ["", "**reasoning**", "> " + str(v["reasoning"]).replace(
-            "\n", "\n> ")]
+        lines += ["", "**🤔 reasoning (thinking)**",
+                  "> " + str(v["reasoning"]).replace("\n", "\n> ")]
     if v.get("assistant_text"):
         lines += ["", "**model said**", str(v["assistant_text"])]
     cmds = v.get("commands", [])
-    lines += ["", "**commands**", "```\n" + (
+    lines += ["", "**tool calls**", "```\n" + (
         "\n".join(cmds) if cmds else "(none)") + "\n```"]
+    if v.get("tool_result"):
+        lines += [f"tool result: `{v['tool_result']}`"]
     sig = v.get("signals", {})
     if sig:
         lines += ["signals: " + " ".join(
             f"`{k}={sig[k]}`" for k in sig)]
-    if v.get("briefing"):
-        b = str(v["briefing"])
-        lines += ["", "<details><summary>briefing</summary>\n\n```\n"
-                  + b[:2000] + "\n```\n</details>"]
     return "\n\n".join(s for s in lines if s != "")
 
 
