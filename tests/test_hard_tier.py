@@ -27,6 +27,10 @@ UPGRADED = [
     "adversarial-duel",
     "adversarial-skirmish",
     "adversarial-siege",
+    "artofwar-decoy-sacrifice",
+    "artofwar-indirect-approach",
+    "artofwar-lure-the-tiger",
+    "artofwar-sequenced-citadel",
 ]
 
 
