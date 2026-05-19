@@ -4,17 +4,35 @@ meta:
   capability: reasoning
   real_world_meaning: >
     Construction planning under dependency and spatial constraints:
-    decide a build order that respects tech-tree prerequisites, place
-    structures where the objective requires (a defended direction), and
-    when needed relocate to found a new base in a designated region.
-    The decision is the plan — order, placement, and commitment — not
-    the motor control of any single build.
+    decide a build order that respects engine-enforced tech-tree
+    prerequisites (a barracks needs power; a pillbox needs the
+    barracks), place structures where the objective requires (a
+    defended direction), and when needed creep the base across the map
+    to found the defensive line in a designated far region. The
+    decision is the plan — order, placement, and relocation — not the
+    motor control of any single build. The prerequisite is genuinely
+    enforced by the engine: a power-less barracks NEVER completes, so a
+    greedy "build the goal building first" policy cannot win.
   robotics_analogue: >
     Autonomous construction / facility-layout planning: a task-graph
-    with prerequisites (B needs A) plus spatial goals (assemble in zone
-    Z, relocate the depot near region R) under a time budget.
+    with prerequisites (B needs A, C needs B) plus spatial goals
+    (assemble in zone Z; relocate and found the depot near region R)
+    under a time budget — out-of-order or mis-placed construction never
+    satisfies the goal.
   author: autonomous-loop
 
+# rush-hour-arena. ONLY a construction yard (`fact`) is pre-placed —
+# power is NOT, so respecting the tech tree (powr BEFORE tent, tent
+# BEFORE pbox) is the real, engine-enforced decision (verified: a
+# power-less `tent` never completes in queue → a greedy goal-first
+# policy cannot win). `deploy` is deliberately absent: the installed
+# engine wheel does not transform an MCV into a `fact` (1:1 parity —
+# the bench never advertises a mechanic the engine can't execute), so
+# relocation is expressed as build-radius creep (chained power plants
+# walking the base east), which the engine DOES execute. An unarmed
+# high-HP enemy `fact` far east is the on-map landmark AND keeps the
+# episode alive (eliminating the lone enemy `e1` cannot auto-terminate
+# the episode as a draw).
 base_map: rush-hour-arena
 starting_cash: 6000
 
@@ -27,97 +45,88 @@ base:
     - build
     - place_building
     - move_units
-    - deploy
     - stop
   planning: true
   termination:
     max_ticks: 40000
   actors:
-    - type: fact
-      owner: agent
-      position:
-      - 10
-      - 18
-    - type: powr
-      owner: agent
-      position:
-      - 14
-      - 18
-    - type: jeep
-      owner: agent
-      position:
-      - 8
-      - 16
-    - type: e1
-      owner: enemy
-      position:
-      - 114
-      - 34
-      stance: 2
+    - {type: fact, owner: agent, position: [10, 18]}
+    - {type: e1, owner: enemy, position: [78, 20], stance: 2}
+    - {type: fact, owner: enemy, position: [112, 20]}
 
 levels:
+  # ── EASY ── the bare tech-dependency skill. No power is pre-placed:
+  # the barracks (tent) only completes AFTER a power plant exists
+  # (engine-enforced). Win = own the power-dependent barracks AND ≥3
+  # buildings total (fact+powr+tent). A greedy "build tent first"
+  # policy loses (the power-less tent never completes); spam-powr loses
+  # (no tent); idle/stall loses on the clock. Generous, tick-aligned
+  # clock. max_turns 30 → reachable tick 93+90·29 = 2703.
   easy:
     description: >
-      Base + budget given. Build the required structures — including a
-      barracks that depends on power (tech-tree prerequisite). Win =
-      reach the target building total AND the tech-dependent barracks.
+      No power is pre-placed. Build a power plant first, THEN the
+      power-dependent barracks (tent) — a power-less barracks never
+      completes. Win = own a 'tent' AND ≥3 buildings total. Building
+      the barracks first never completes (no power); spamming power
+      plants never gives a barracks; idling loses on the clock.
     starting_cash: 6000
     win_condition:
       all_of:
-        - building_total_gte: 4      # fact+powr (pre) + built powr + tent
-        - has_building: tent         # requires power → proves the tech dep
-        - within_ticks: 20000
-    max_turns: 60
+        - building_total_gte: 3
+        - has_building: tent
+        - within_ticks: 2400
+    fail_condition:
+      not: {within_ticks: 2400}
+    max_turns: 30
+
+  # ── MEDIUM ── +1 controlled variable: spatial placement of a
+  # TWO-HOP-dependent defensive building. The pillbox (pbox) needs the
+  # barracks (tent) which needs power — a powr→tent→pbox chain — AND
+  # the two pillboxes must sit inside the designated EAST region.
+  # Direction + the deeper chain is the decision. Spam-powr loses (no
+  # pbox); pbox built but mis-placed (near base / wrong direction)
+  # loses (not in region); idle loses on the clock.
+  # max_turns 40 → reachable tick 93+90·39 = 3603.
   medium:
     description: >
-      Build a defensive line to the EAST (toward the enemy): place at
-      least two pillboxes inside the designated eastern region within
-      the deadline. Placement direction is the decision.
+      Build a defensive line to the EAST: stand up power, then the
+      barracks it enables, then place at least two pillboxes (pbox —
+      they need the barracks, which needs power) INSIDE the designated
+      eastern region near (40,20). Skipping the chain never yields a
+      pillbox; placing the pillboxes near the base (wrong direction)
+      does not count; idling loses on the clock.
     starting_cash: 5000
-    overrides:
-      actors:
-        - type: fact
-          owner: agent
-          position: [10, 18]
-        - type: powr
-          owner: agent
-          position: [14, 18]
-        - type: tent          # pre-placed so pbox prereq is satisfiable
-          owner: agent
-          position: [12, 21]
-        - type: jeep
-          owner: agent
-          position: [8, 16]
-        - type: e1
-          owner: enemy
-          position: [114, 34]
-          stance: 2
     win_condition:
       all_of:
         - building_in_region: {type: pbox, x: 40, y: 20, radius: 9, count: 2}
-        - within_ticks: 22000
-    max_turns: 70
+        - within_ticks: 3400
+    fail_condition:
+      not: {within_ticks: 3400}
+    max_turns: 40
+
+  # ── HARD ── +1 controlled variable: RELOCATION. The defensive line
+  # must be founded in a FAR region near (60,20) — far beyond the
+  # construction yard's initial build radius — so the plan must creep
+  # the base east (chained power plants walk the build radius across
+  # the map) before standing up the tech-dependent pillboxes there.
+  # Same engine-enforced powr→tent→pbox chain, far placement, tight
+  # tick-aligned clock. A near-base build never reaches the region; a
+  # creep that omits the tech chain never yields a pillbox; idle loses
+  # on the clock. max_turns 70 → reachable tick 93+90·69 = 6303.
   hard:
     description: >
-      No starting base economy here — an MCV and a scout. Relocate to
-      the designated eastern region, deploy a construction yard there,
-      and stand up a power plant: found a new base near the region.
-    starting_cash: 4000
-    overrides:
-      actors:
-        - type: mcv
-          owner: agent
-          position: [10, 18]
-        - type: jeep
-          owner: agent
-          position: [8, 16]
-        - type: e1
-          owner: enemy
-          position: [120, 34]
-          stance: 2
+      Found the defensive line FAR to the east, near (60,20) — beyond
+      the construction yard's reach. Creep the base east (each new
+      power plant extends where you may build) until you can stand up
+      the barracks and place at least two pillboxes (pbox → tent →
+      power chain) inside the far region, before the tight deadline.
+      Building near the spawn never reaches the region; a power creep
+      that skips the barracks never yields a pillbox; idling loses.
+    starting_cash: 6000
     win_condition:
       all_of:
-        - building_in_region: {x: 60, y: 20, radius: 10, count: 2}
-        - within_ticks: 30000
-        - units_lost_lte: 1
-    max_turns: 90
+        - building_in_region: {type: pbox, x: 60, y: 20, radius: 10, count: 2}
+        - within_ticks: 5800
+    fail_condition:
+      not: {within_ticks: 5800}
+    max_turns: 70
