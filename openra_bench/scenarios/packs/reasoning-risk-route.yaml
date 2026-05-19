@@ -1,14 +1,31 @@
 # reasoning-risk-route.yaml
 #
-# REASONING-link scenario. Perception is correct (defenses are visible
-# once approached and the layout is fixed); the hard part is the
+# REASONING-link scenario. Perception is correct (the defenses are
+# visible once approached and the layout is fixed); the hard part is the
 # *plan*: there are two ways to the objective region — a short corridor
-# straight through lethal defenses, and a longer detour along a map
-# edge that avoids them. The short route is faster but kills a
-# light-unit scout; the safe route is slower but survivable. The model
-# must reason about the risk/route tradeoff and choose the longer,
-# safer plan under an attrition constraint and a deadline that still
-# permits the detour.
+# straight through a lethal LEASHED GUARD line, and a longer detour
+# along a map edge that stays out of weapon range. The short route is
+# faster but the guard wall shreds the lone scout; the safe route is
+# slower but survivable. The model must reason about the risk/route
+# tradeoff and choose the longer, safer plan under a zero-loss
+# constraint and a real deadline that the detour still satisfies.
+#
+# Idiom (shared with #5 artofwar-indirect-approach): the enemy is the
+# engine scripted bot 'guard' — a leashed defender that holds post,
+# auto-fires on anything in range, lunges at a unit inside its aggro
+# radius, then snaps back. Driving the scout down the short lane gets
+# it killed in a turn; the only zero-loss play abandons the short axis
+# and rounds the wall's tip along the map edge. An unarmed high-HP
+# `fact` marks the objective and keeps the episode alive (no
+# enemy-elimination auto-terminal).
+#
+# BAR ("no defect, no cheat"): every non-win is a real LOSS (a
+# fail_condition is present on every level), the short/brute lane is
+# lethal, idling/stalling loses on the clock, and the safe longer
+# route is required and winnable in budget. Tick budget: engine
+# advances ~90 ticks/decision-turn, tick ≈ 93 + 90·(turn-1); every
+# `within_ticks` / `after_ticks` here is ≤ that bound for its
+# `max_turns`, so the deadline actually bites.
 #
 # Validate:
 #   cd /Users/berta/Projects/OpenRA-Bench && \
@@ -36,97 +53,146 @@ meta:
 base_map: rush-hour-arena
 
 base:
-  agent: {faction: allies}
-  enemy: {faction: soviet}
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
   tools: [move_units, attack_unit, stop_units]
   planning: true
   termination: {max_ticks: 9000}
   actors:
-    # Lone light scout, NW corner (x<25). Fragile — cannot trade fire
-    # with turrets, so the route choice is the whole game.
+    # Lone light scout, NW corner. Fragile — cannot trade fire with the
+    # guard line, so the route choice is the whole game.
     - {type: jeep, owner: agent, position: [6, 20], count: 1}
-    # Objective marker on the far (east) side of the map.
-    - {type: gun, owner: enemy, position: [120, 20], stance: 0}
-    # Mid-map central choke "short route" defenses (lethal). The detour
-    # is along the top edge (low y) or bottom edge (high y), which is
-    # longer but clear in easy/medium.
-    - {type: tsla, owner: enemy, position: [62, 20], stance: 0}
-    - {type: e3,   owner: enemy, position: [60, 19], stance: 2, count: 3}
-    - {type: e3,   owner: enemy, position: [64, 21], stance: 2, count: 3}
+    # Objective marker on the far (east) side. Unarmed high-HP `fact`:
+    # keeps the episode alive (no enemy-elimination auto-terminal) and
+    # is the landmark the safe route must reach.
+    - {type: fact, owner: enemy, position: [120, 20]}
+    # Central short-route guard wall (lethal): a rocket-infantry line
+    # straight across the direct west→east lane at x=60, y=17/20/23.
+    # As scripted `guard` bots they auto-fire and lunge well past the
+    # wall (effective reach ≈14 cells), so the whole mid-band y≈4..36
+    # is a kill zone. The ONLY survivable crossing is the extreme map
+    # edge: top y≤3 or bottom y≥37, around the wall's tip. Drive the
+    # scout straight east and it dies in a turn.
+    - {type: e3, owner: enemy, position: [60, 17], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 20], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 23], stance: 2}
 
 levels:
+  # ── EASY ── the bare risk/route skill: one central guard wall, both
+  # the top edge (y≤3) and the bottom edge (y≥37) survivable. A head-on
+  # charge dies in a turn; either edge detour lands the scout. Binding
+  # clock — within_ticks 2700 ≤ 93+90·31 = 2883, and a real
+  # fail_condition so brute / stall / clipped is a LOSS, not a draw.
   easy:
     description: >
-      One central hazard, one obvious safe detour. The direct line
-      x-axis route passes through a tesla coil + rocket infantry that
-      shred the jeep; the top and bottom edges are completely open.
-      Generous deadline: any safe detour wins. The model only has to
-      recognise the corridor is lethal and not drive into it.
+      A leashed rocket-infantry wall blocks the direct lane east to the
+      objective and shreds anything that drives into the mid-band. Get
+      the scout to the objective (far east, marked by the enemy
+      structure) with ZERO losses, before the deadline. Driving straight
+      east loses the scout in a turn; go the long way — climb to the
+      open top edge (y≤3) or drop to the open bottom edge (y≥37), run
+      east past the wall's tip, then turn in. Idling never commits and
+      loses on the clock.
     overrides: {}
     win_condition:
       all_of:
         - {reach_region: {x: 120, y: 20, radius: 7}}
         - {units_lost_lte: 0}
-        - {within_ticks: 7500}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
     max_turns: 32
 
+  # ── MEDIUM ── +1 controlled variable: the BOTTOM edge is now also a
+  # lethal guard cluster, so only the longer TOP-edge detour survives.
+  # Tighter clock — within_ticks 3100 ≤ 93+90·35 = 3243 — with less
+  # slack but still satisfied by the top route.
   medium:
     description: >
-      The bottom detour is now also guarded, so only the top-edge route
-      is safe — a longer commitment that the deadline still allows but
-      with less slack. The model must reason that the shortest route is
-      lethal, the bottom route is also lethal, and the top route,
-      though longest, is the only plan that satisfies both the
-      no-loss constraint and the tighter clock.
+      The bottom edge is now also guarded — only the longer top-edge
+      route is safe. The model must reason that the short lane is
+      lethal, the bottom detour is also lethal, and the top detour
+      (y≤3), though longer, is the only plan that satisfies both the
+      zero-loss constraint and the tighter deadline.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [6, 20], count: 1}
-        - {type: gun,  owner: enemy, position: [120, 20], stance: 0}
-        # Central short-route hazard.
-        - {type: tsla, owner: enemy, position: [62, 20], stance: 0}
-        - {type: e3,   owner: enemy, position: [60, 19], stance: 2, count: 3}
-        - {type: e3,   owner: enemy, position: [64, 21], stance: 2, count: 3}
-        # Bottom-edge route now blocked too (lethal cluster, high y).
-        - {type: e3,   owner: enemy, position: [62, 36], stance: 2, count: 4}
-        - {type: gun,  owner: enemy, position: [62, 38], stance: 0}
+        - {type: fact, owner: enemy, position: [120, 20]}
+        # Central short-route guard wall (same as easy).
+        - {type: e3, owner: enemy, position: [60, 17], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 23], stance: 2}
+        # Bottom-edge route now a lethal guard cluster: its reach
+        # closes the previously-open bottom seam (y≥37), so only the
+        # top edge (y≤3) remains survivable — the longer detour.
+        - {type: e3, owner: enemy, position: [60, 33], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 36], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 39], stance: 2}
       termination: {max_ticks: 8000}
     win_condition:
       all_of:
         - {reach_region: {x: 120, y: 20, radius: 7}}
         - {units_lost_lte: 0}
-        - {within_ticks: 6000}
+        - {within_ticks: 3100}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3101}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
     max_turns: 36
 
+  # ── HARD ── +1 controlled variable: a top-edge defended pocket at
+  # (100,2). Now even hugging the top edge (y≤3) all the way is lethal
+  # — the only winning plan threads a NARROW SEAM: hug y=2 past the
+  # central wall (to ~x=90), then dip down to y≈10 to skirt BELOW the
+  # pocket while staying clear of the (now distant) central wall, then
+  # turn in to the objective. Risk and route are traded against the
+  # tight clock — within_ticks 3300 ≤ 93+90·39 = 3603 — not avoided
+  # outright. This single tuned seam is why hard is NOT spawn-varied
+  # (see tests/test_hard_tier.py NOT_APPLICABLE): varying the start
+  # would break the single-solution tuning / seed parity.
   hard:
     description: >
-      Both edges are partly contested and the deadline is tight enough
-      that the longest fully-safe path is too slow — the model must
-      reason about a graduated tradeoff: the top edge is fastest but
-      grazes a defended pocket, the bottom edge is fully safe but too
-      long for the clock, so the only winning plan threads the
-      narrow safe seam near the top while staying out of weapon range.
-      Risk and route must be traded against the deadline, not avoided
-      outright.
+      Both edges are contested: the bottom is fully blocked (lethal
+      cluster) and the top edge has a defended pocket near x=100. The
+      only winning plan threads the narrow safe seam — hug the top
+      edge (y≤3) east past the central wall, then dip down to y≈10 to
+      skirt BELOW the top pocket while staying clear of the (now
+      distant) central wall, then turn in to the objective before the
+      tight deadline. Risk and route must be traded against the clock,
+      not avoided outright.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [6, 20], count: 1}
-        - {type: gun,  owner: enemy, position: [122, 20], stance: 0}
-        # Central short-route hazard (still lethal).
-        - {type: tsla, owner: enemy, position: [62, 20], stance: 0}
-        - {type: e3,   owner: enemy, position: [60, 19], stance: 2, count: 3}
-        - {type: e3,   owner: enemy, position: [64, 21], stance: 2, count: 3}
-        # Top-edge defended pocket — must skirt it precisely, not
-        # plough through it.
-        - {type: e3,   owner: enemy, position: [70, 6], stance: 2, count: 2}
-        - {type: gun,  owner: enemy, position: [72, 4], stance: 0}
-        # Bottom-edge fully blocked (forces the top seam, but bottom
-        # detour would also be too slow for the clock anyway).
-        - {type: e3,   owner: enemy, position: [62, 36], stance: 2, count: 4}
-        - {type: tsla, owner: enemy, position: [62, 38], stance: 0}
+        - {type: fact, owner: enemy, position: [122, 20]}
+        # Central short-route guard wall (same as easy/medium).
+        - {type: e3, owner: enemy, position: [60, 17], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 23], stance: 2}
+        # Top-edge defended pocket at (100,2): a naive top-edge hug
+        # (y≤3 all the way east) now runs straight into it and dies.
+        # The narrow safe seam: hug y=2 to x≈90 (well past the central
+        # wall), dip down to y≈10 to skirt BELOW this pocket while the
+        # central wall is too far west to reach, then turn in to the
+        # objective at (122,20).
+        - {type: e3, owner: enemy, position: [100, 2], stance: 2}
+        # Bottom-edge fully blocked (same cluster as medium); forces
+        # the top seam.
+        - {type: e3, owner: enemy, position: [60, 33], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 36], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 39], stance: 2}
       termination: {max_ticks: 7000}
     win_condition:
       all_of:
         - {reach_region: {x: 122, y: 20, radius: 6}}
         - {units_lost_lte: 0}
-        - {within_ticks: 4800}
+        - {within_ticks: 3300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3301}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
     max_turns: 40
