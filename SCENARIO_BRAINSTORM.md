@@ -341,3 +341,74 @@ full (b) **needs S0 + S1**.
 - `openra_bench/scenarios/packs/economy-time-box.yaml` — validator: `OK`
 - `openra_bench/scenarios/packs/economy-investment.yaml` — validator: `OK`
 - `SCENARIO_BRAINSTORM.md` (this file)
+
+---
+
+## Tech-Tree & Production Planning pack (design-doc Family 2)
+
+Pack: `openra_bench/scenarios/packs/tech-production-planning.yaml`. Maps
+the Benchmark Design Proposal's **Task Family 2 — Sequential Dependency
+Planning** (Scenarios 2A/2B/2C) directly into one bench pack.
+
+**Why a new pack rather than extending existing ones.** Two existing
+packs touch this territory but ladder on different axes:
+
+| Pack | Easy axis | Medium axis | Hard axis | Ladder shape |
+|---|---|---|---|---|
+| `building-and-planning` | 1-hop prereq (powr→tent) + building count | spatial direction (place pbox east) | MCV relocate / new base | building → spatial → mobility (changes axis per level) |
+| `strict-production-bom` | exact 3×e1 (no overproduction) | + 2×e3 | + tsla + tight budget | spec-fidelity (BFCL/τ²-bench style; orthogonal to dependency planning) |
+| **`tech-production-planning`** (new) | 2-hop chain `weap→fix→3tnk` | parallel branches (barr ‖ weap+fix) + `power_surplus_gte:0` forces 2nd powr | mid-game infantry tech committed → scout fog → pivot to anti-armor | **dependency depth → parallel breadth → adaptive replanning** (same axis at increasing complexity) |
+
+`building-and-planning` is mixed-axis (Family 2-ish at easy, drifts into
+Family 3/spatial later). `strict-production-bom` tests a different
+capability entirely (instruction-following fidelity, not dependency
+planning). The new pack is the first time Family 2 is ladded canonically
+on one axis end-to-end.
+
+**Real tech tree (engine ground truth from `openra_env/game_data.py`):**
+
+| Building | Prereqs | Power |
+|---|---|---|
+| `powr` | — | +100 |
+| `proc` (refinery) | `powr` | −30 |
+| `weap` (war factory) | `proc` | −30 |
+| `fix` (service depot) | `weap` | −30 |
+| `barr` (soviet barracks) | `powr` | −20 |
+| `3tnk` (Heavy Tank) | `weap` + `fix` | unit |
+| `e1` / `e3` (infantry) | `barr|tent` | unit |
+
+→ Heavy Tank's real chain is `powr → proc → weap → fix → 3tnk` (4
+prereqs deep). Building all of `proc + weap + fix + barr` drains to −10
+power against a 100-power base — a SECOND powr is mandatory for medium.
+This is the real `power_surplus_gte:0` teeth at medium.
+
+**Difficulty calibration (one notch under doc spec).** Design doc 2A
+("Construction Yard + 5000 credits → produce one Heavy Tank from
+scratch") is harder than every existing easy in the repo (~3× the
+work). Easy here pre-places `fact + powr + proc` so the chain becomes
+`weap → fix → 3tnk` (2-hop), aligning with `strict-production-bom`
+easy's "1 build + N train" workload. Medium and hard are calibrated
+similarly downward. Hard (adaptive transition under fog) is left at the
+design-doc difficulty because no existing pack tests online plan
+revision — this is the pack's core new contribution.
+
+### Follow-ups (Design Proposal Families 4 / 5 / 7) — separate PRs
+
+Each likely needs new engine infrastructure that isn't yet wired into
+the bench:
+
+- **Family 4 — Adversarial Reasoning** (Beginner/Normal/Hard AI
+  match). Existing `adversarial-*.yaml` packs are duels/sieges (combat
+  encounters), not full RTS matches; `bot_type: ''` is empty across
+  them, so a scripted opponent AI tier doesn't appear to be exposed
+  yet. Needs `bot_type` integration + a "win full match" win predicate.
+
+- **Family 5 — Reactive Replanning** (Early threat / Multi-raid /
+  Catastrophic). The `interrupts` field exists (`adversarial-duel`
+  uses `enemy_unit_spotted` + `own_unit_destroyed`), but
+  raid-generation hooks (mid-game enemy attack scripts) and an
+  "infrastructure destroyed" trigger aren't represented in any pack.
+
+- **Family 7 — Holistic Strategic Intelligence** (full RTS match at 3
+  difficulties). Needs Family 4's infra (full-match predicate + AI
+  opponent) plus long-horizon scoring beyond the existing rubric.
