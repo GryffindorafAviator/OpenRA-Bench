@@ -496,6 +496,55 @@ A pack no longer needs a static `.oramap` + static enemy actors:
   can't see fogged enemy ids or command the enemy player; the bench
   surface (`openra_bench/botgen.py`) validates the name at compile.
 
+## Whole-suite no-cheat pass (#1–#21, all 21 active packs)
+
+Every active pack has been individually closer-looked + redesigned to
+the **"no defect, no cheat"** bar: a scripted brute / stall / greedy /
+shortest-path / sweep / wrong-route policy must LOSE on every level +
+every hard seed; the intended capability policy must WIN; non-win is a
+real reachable timeout LOSS, not a draw. Engine smoke clean across
+seeds 1–4 each level (no panics, in-bounds, `map_supported`); hard
+tiers in `tests/test_hard_tier.py::UPGRADED` keep ≥2 distinct seed-
+driven spawns; reasoned `NOT_APPLICABLE` exceptions documented in the
+test. Suite **414 passed, 1 skipped, 0 failed** on the consolidated
+`main` after all 21 redesigns landed. Author-side artifacts: the
+SCENARIO_REVIEW_CHECKLIST.md is the methodology; per-scenario commit
+messages on `main` document each capability, the cheat path that was
+closed, and the scripted before/after evidence.
+
+Recurring defect classes the pass eliminated:
+- **Inert deadlines** (`within_ticks` ≫ tick reachable at `max_turns`,
+  i.e. > `93+90·(max_turns-1)`) ⇒ draw degeneracy. Every level now
+  satisfies `within_ticks` AND `after_ticks` ≤ that bound.
+- **Missing `fail_condition`** ⇒ non-win = draw. Every level now has
+  an `any_of` fail covering at least the timeout (plus force-loss /
+  attrition where applicable).
+- **Capability not enforced by the win predicate** (the laziest play
+  satisfies it without doing the advertised skill). Fixed with the
+  right predicate per pack: `units_in_region_gte` (split / main body),
+  `waypoint_sequence` (ordered / latched), `units_lost_lte` (bait
+  budget), `buildings_discovered_gte` (fog-dependent discovery),
+  `enemy_key_buildings_destroyed` (faithful "destroy fact+proc"),
+  exact-cost `starting_cash` (binding allocation), etc.
+- **Off-map actors** (engine panic). Every level's actors verified in
+  playable bounds across seeds 1–4.
+- **Engine auto-`done` on enemy-elimination** terminating before the
+  intended win/fail evaluated → drew. Mitigation: an unarmed high-HP
+  enemy `fact` marker at the objective ensures the episode runs to a
+  real win or timeout LOSS.
+
+Engine footguns surfaced during the pass (flagged for follow-up):
+- **`power_surplus_gte` is currently inert**: the obs reports
+  `power_provided/power_drained = 0` even with placed `powr`, so the
+  predicate is effectively `0 ≥ N` and never fires meaningfully.
+  Affected packs (economy-investment, tech-production-planning, etc.)
+  intentionally do NOT rely on it as the sole discriminator.
+- **`deploy` is not executed** by the installed wheel: an MCV reaches
+  the target cell but never becomes a Construction Yard. `building-
+  and-planning` hard was redesigned around build-radius creep instead.
+- Both are tracked as engine-side follow-ups (separate from the
+  pre-existing pending task #11 sabotage/specials).
+
 Note: `capture_actor` is deliberately absent until the engine gains a
 Capture order (pending S8 / task #11) — the bench never advertises a
 tool the engine can't execute (1:1 parity).
