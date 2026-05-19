@@ -6,11 +6,13 @@
 # "unexplored region" and "where the target is" as unrelated facts. It
 # explores the nearest fog patch, sees nothing, and never connects that
 # the target building must therefore be in the OTHER unexplored region.
-# Here the win requires discovering the actual target building (not just
-# map coverage), and there is always a nearer-but-empty fog pocket plus a
-# farther fog pocket that genuinely contains the target. Passing means
-# the model spatially reasoned about WHERE the unexplored mass is
-# relative to WHERE the target must be — not just that fog exists.
+# The win requires discovering the actual target BUILDING (not map
+# coverage), and there is always a nearer-but-empty/decoy fog pocket plus
+# a farther pocket that genuinely contains the target. Passing means the
+# model spatially reasoned about WHERE the unexplored mass is relative to
+# WHERE the target must be — not just that fog exists, and not by
+# stalling or charging blindly. The clock is reachable: failing to
+# discover the target before it runs out is a real LOSS, not a draw.
 
 meta:
   id: perception-target-vs-fog
@@ -21,6 +23,7 @@ meta:
     several unexplored regions could actually contain the target given
     what the empty regions rule out, then committing sensors there.
   robotics_analogue: "Search-and-rescue: choosing which unexplored room can still hold the victim after clearing the near ones"
+  author: "openra-bench"
 
 base_map: rush-hour-arena
 
@@ -38,81 +41,97 @@ base:
 levels:
   easy:
     description: >
-      One target building, one unexplored region — both far east. The
-      near area is already open (no decoy fog). Reading "fog is east,
-      therefore the target is east" is direct. Generous clock.
+      One target building, one unexplored region — far east, roughly on
+      the spawn latitude. The near area is already open (no decoy fog).
+      The bare skill: read "the fog is east, therefore the target is
+      east" and commit a sustained eastward push. Idling, a one-cell
+      nudge, or dithering on the nearest frontier runs out the clock and
+      LOSES — only a committed read of where the fog mass is wins.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [6, 5], count: 3}
         - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
         # Target building in the single eastern fog mass.
-        - {type: fact, owner: enemy, position: [105, 20]}
+        - {type: fact, owner: enemy, position: [110, 8]}
         # Light guard so it reads as a real objective, not a stray actor.
-        - {type: e1, owner: enemy, position: [102, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [106, 11], stance: 1}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
-        - {within_ticks: 8000}
-    max_turns: 30
+        - {within_ticks: 2000}
+    fail_condition:
+      any_of:
+        - {not: {within_ticks: 2000}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 26
 
   medium:
     description: >
-      Two unexplored regions: a NEAR one (NE, closer to spawn) that is
-      EMPTY, and a FAR one (SE, opposite corner) that holds the real
-      target. The model must not stop after clearing the near fog and
-      finding nothing — it must infer the target is in the remaining
-      unexplored region. Decoy enemy units sit in the empty near region.
+      Two unexplored regions: a NEAR one (NE, near the spawn latitude)
+      that holds only enemy UNITS — no building — and a FAR one (SE,
+      opposite corner) that holds the real target building. A blind
+      eastward charge sweeps the near pocket, finds no building, and
+      runs out the clock; the nearest-frontier sweep never reaches the
+      far corner. Only inferring "the near fog is empty, so the target
+      must be in the remaining unexplored region" and committing SE wins
+      in time. Missing the deadline is a LOSS.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [6, 5], count: 3}
         - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
         # Near (NE) decoy region: enemy units but NO building (a trap
         # that satisfies curiosity but not the win condition).
-        - {type: e1,  owner: enemy, position: [70, 6], stance: 2, count: 2}
-        - {type: jeep, owner: enemy, position: [74, 9], stance: 2}
+        - {type: e1,  owner: enemy, position: [72, 5], stance: 1, count: 2}
+        - {type: jeep, owner: enemy, position: [76, 8], stance: 1}
         # Far (SE) region: the actual target building.
-        - {type: fact, owner: enemy, position: [118, 35]}
-        - {type: e2,   owner: enemy, position: [114, 33], stance: 2}
+        - {type: fact, owner: enemy, position: [116, 35]}
+        - {type: e1,   owner: enemy, position: [112, 33], stance: 1}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
-        - {within_ticks: 6000}
-    max_turns: 35
+        - {within_ticks: 2300}
+    fail_condition:
+      any_of:
+        - {not: {within_ticks: 2300}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
 
   hard:
     description: >
-      Three unexplored regions. Two are decoys: a NEAR-NE pocket with a
-      noisy enemy squad (pure bait) and a MID-SOUTH pocket with a single
-      enemy *building of the wrong kind already implicitly elsewhere* —
-      both contain no usable target. The real target is a lone building
-      tucked in the far-NW strip, the LEAST intuitive direction from a
-      spawn that naturally pushes east. Short deadline and attrition:
-      only a correct read of which fog pocket can still hold the target
-      — after the near ones are ruled out — discovers it in time.
+      Two decoy pockets — a NE squad and a mid-SOUTH squad, both enemy
+      units only, no building — flank the lane to the real target, a
+      lone building deep east on the mid latitude (counter-intuitive
+      relative to a spawn that pushes along its own edge). Short clock
+      and an attrition cap (≤1 unit lost): plowing scouts straight
+      through a decoy busts the cap or the clock; only reading which
+      fog pocket can still hold the target AND routing the clear
+      mid-lane around the decoys discovers it in time. Two seed-varied
+      spawn points (NW / SW).
     overrides:
       actors:
         # spawn_point 0 — staged NW
         - {type: jeep, owner: agent, position: [6, 5], count: 3, spawn_point: 0}
         - {type: 1tnk, owner: agent, position: [8, 8], count: 2, spawn_point: 0}
-        # spawn_point 1 — staged SW (target/decoys fixed, so which
-        # pocket is "counter-intuitive" flips by seed)
+        # spawn_point 1 — staged SW (decoys/target fixed, so which
+        # decoy is "on the way" flips by seed)
         - {type: jeep, owner: agent, position: [6, 33], count: 3, spawn_point: 1}
         - {type: 1tnk, owner: agent, position: [8, 30], count: 2, spawn_point: 1}
-        # Decoy A — near NE, loud enemy squad, no target building.
-        - {type: e1,  owner: enemy, position: [60, 6],  stance: 2, count: 3}
-        - {type: dog, owner: enemy, position: [64, 9],  stance: 2, count: 2}
-        # Decoy B — mid-south, enemy units only, no target building.
-        - {type: e3,  owner: enemy, position: [70, 34], stance: 2, count: 2}
-        - {type: apc, owner: enemy, position: [66, 31], stance: 2}
-        # The real target: a single building in the far-NW strip, the
-        # counter-intuitive corner relative to an eastward spawn bias.
-        - {type: tsla, owner: enemy, position: [118, 4]}
-        - {type: e1,   owner: enemy, position: [115, 6], stance: 2}
+        # Decoy A — NE squad, enemy units only, no target building.
+        - {type: e1,  owner: enemy, position: [64, 6],  stance: 1, count: 2}
+        # Decoy B — mid-south squad, enemy units only, no target.
+        - {type: e1,  owner: enemy, position: [62, 33], stance: 1, count: 2}
+        # The real target: a single building deep east on the mid
+        # latitude, reachable only via the clear lane between the decoys.
+        - {type: fact, owner: enemy, position: [116, 20]}
+        - {type: e1,   owner: enemy, position: [110, 25], stance: 1}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
-        - {within_ticks: 4800}
+        - {within_ticks: 2700}
         - {units_lost_lte: 1}
     fail_condition:
-      not: {own_units_gte: 1}
-    max_turns: 40
+      any_of:
+        - {not: {within_ticks: 2700}}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 34
