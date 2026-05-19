@@ -1,111 +1,129 @@
 meta:
   id: artofwar-sequenced-citadel
-  title: 'Staged Assault — Reach Waypoints in Order, Then Seize the Objective'
+  title: 'Staged Assault — Reach the Waypoints In Order, Then Seize the Citadel'
   capability: reasoning
   real_world_meaning: >
-    攻其无备 — strike where unprepared, but only after the prerequisite
-    moves. The mission is a strict sub-goal chain: stage at A, then
-    (and only after a hold) advance through B, and finally seize C.
-    Reward lands only at C; A and B are unrewarded prerequisites whose
-    *ordering* is graded. Long-horizon sub-goal sequencing with delayed
-    terminal credit.
+    攻其無備 — strike where unprepared, but only after the prerequisite
+    moves. The mission is a STRICT ordered sub-goal chain: stage at A,
+    then transit B, then seize the citadel C — and only after a
+    deliberate hold (the strike is timed, not rushed). Reward lands
+    only at C; A and B are unrewarded prerequisites whose ORDER is
+    enforced (reaching C without having passed A then B counts for
+    nothing). Long-horizon sub-goal sequencing with delayed terminal
+    credit; a greedy beeline to C, or idling, fails.
   robotics_analogue: >
-    Ordered multi-waypoint mission (stage → transit-after-hold →
-    objective) where only terminal success is rewarded and step order
-    is graded — the Blocksworld/GAIA-style long-horizon plan.
+    Ordered multi-waypoint mission (stage → transit → objective) where
+    only terminal success is rewarded, step order is hard-enforced
+    (not merely graded), and the terminal action must wait out a hold
+    — the Blocksworld/GAIA-style long-horizon plan.
   author: openra-bench
+
 base_map: rush-hour-arena
+
 base:
-  agent:
-    faction: allies
-    cash: 0
-  enemy:
-    faction: soviet
-    cash: 0
-    bot_type: ''
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 12000}
   actors:
-    - type: 2tnk
-      owner: agent
-      position: [6, 20]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 3
-    - type: e1
-      owner: enemy
-      position: [44, 20]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 4
+    - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+    # Light pickets near B/C — contest the route, not a combat wall.
+    - {type: e1, owner: enemy, position: [70, 12], stance: 2, count: 2}
+    - {type: e1, owner: enemy, position: [104, 20], stance: 2, count: 2}
+    # Citadel marker at C: unarmed high-HP landmark; also prevents the
+    # enemy-elimination auto-terminal (so the ordered chain must be
+    # completed — a picket-wipe can't end the episode early).
+    - {type: fact, owner: enemy, position: [110, 20]}
+
 levels:
+  # ── EASY ── the bare ordered chain: A → B → C in order, then a
+  # modest hold before the citadel counts. Generous clock. A beeline
+  # straight to C never satisfies the ordered latch → timeout LOSS.
   easy:
     description: >
-      Stage at A (~20,20), hold past tick 3000, then seize the citadel
-      region C (~44,20). Arriving at C before the hold does not count.
+      Strict ordered chain: first reach staging point A (mid-west),
+      then transit point B (north-centre), then seize the citadel C
+      (far east) — IN THAT ORDER. Reaching C without having passed A
+      then B counts for nothing. The strike is timed: C only counts
+      after the hold. A greedy beeline to C, or idling, loses on the
+      clock.
+    overrides: {}
     win_condition:
       all_of:
-        - reach_region: {x: 44, y: 20, radius: 4}
-        - after_ticks: 3000
-        - within_ticks: 18000
+        - waypoint_sequence:
+            id: S
+            radius: 6
+            points:
+              - {x: 35, y: 20}
+              - {x: 70, y: 12}
+              - {x: 110, y: 20}
+        - {after_ticks: 1100}
+        - {within_ticks: 2300}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 85
+      any_of:
+        - {after_ticks: 2301}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ── +1 controlled variable: a longer prerequisite hold and
+  # a tighter terminal deadline (the band is narrower — the strike must
+  # be timed, not just ordered).
   medium:
-    description: 'Longer prerequisite hold; tighter terminal deadline.'
+    description: >
+      Same ordered chain (A → B → C) but a longer prerequisite hold and
+      a tighter terminal deadline — the strike window is narrow, so the
+      order AND the timing both bind.
     win_condition:
       all_of:
-        - reach_region: {x: 46, y: 20, radius: 4}
-        - after_ticks: 5000
-        - within_ticks: 16000
+        - waypoint_sequence:
+            id: S
+            radius: 6
+            points:
+              - {x: 35, y: 20}
+              - {x: 70, y: 12}
+              - {x: 110, y: 20}
+        - {after_ticks: 1300}
+        - {within_ticks: 2300}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 90
+      any_of:
+        - {after_ticks: 2301}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── HARD ── +1 controlled variable: seed-chosen staging latitude
+  # (two spawn_point groups, in-bounds — the approach can't be
+  # memorised) + a four-point chain + an attrition cap.
   hard:
     description: >
-      Narrow ordered window AND a loss cap: seize C only inside the
-      tick band, with the force near-intact.
+      Four-point ordered chain from a seed-chosen latitude, narrow
+      timed window, and a loss cap — seize the citadel with the force
+      near-intact, in order, inside the band.
     overrides:
       actors:
         # spawn_point 0 — northern staging
-        - type: 2tnk
-          owner: agent
-          position: [6, 20]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-          spawn_point: 0
-          randomize:
-            position: {base: [6, 20], offset: 3}
-        # spawn_point 1 — southern staging (same ordered task,
-        # different approach latitude — seed-chosen)
-        - type: 2tnk
-          owner: agent
-          position: [6, 36]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-          spawn_point: 1
-          randomize:
-            position: {base: [6, 36], offset: 3}
-        - type: e1
-          owner: enemy
-          position: [44, 20]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 6
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, count: 3, spawn_point: 0}
+        # spawn_point 1 — southern staging (same ordered task)
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [70, 12], stance: 2, count: 3}
+        - {type: e1, owner: enemy, position: [104, 20], stance: 2, count: 3}
+        - {type: fact, owner: enemy, position: [110, 20]}
     win_condition:
       all_of:
-        - reach_region: {x: 48, y: 20, radius: 3}
-        - after_ticks: 6000
-        - within_ticks: 12000
-        - units_lost_lte: 1
+        - waypoint_sequence:
+            id: S
+            radius: 6
+            points:
+              - {x: 30, y: 20}
+              - {x: 60, y: 30}
+              - {x: 90, y: 10}
+              - {x: 110, y: 20}
+        - {after_ticks: 1400}
+        - {within_ticks: 2300}
+        - {units_lost_lte: 1}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 95
+      any_of:
+        - {after_ticks: 2301}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 32
