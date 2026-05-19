@@ -3,10 +3,14 @@
 # REASONING-link scenario. Perception is trivially correct (the map is
 # fog-of-war and a single scout discovers whatever it drives into); the
 # hard part is the *decision*: given partial information and a finite
-# tick budget, WHICH unexplored region do you commit your scout to?
-# Multiple regions look equally plausible from the corner; only one
-# holds the survivor (the objective marker). Wrong commitment burns the
-# clock and you draw.
+# tick budget, WHICH unexplored region do you commit your one scout to?
+# Several regions look equally plausible from the corner; only one
+# holds the survivor (the objective building marker). The deadline is
+# tuned so that ONE decisive direct trip to the correct region wins,
+# but any detour to a decoy region first (or sweeping every region, or
+# stalling) overruns the clock and is a real LOSS. The commitment is
+# un-hedgeable: a single body cannot split, so the model must read the
+# frontier and commit to the right option the first time.
 #
 # Validate:
 #   cd /Users/berta/Projects/OpenRA-Bench && \
@@ -43,74 +47,102 @@ base:
     # commitment — the decision cannot be hedged by splitting forces.
     - {type: jeep, owner: agent, position: [6, 6], count: 1}
     # The survivor: a static building marker, the only thing that
-    # satisfies the win condition. NE region.
-    - {type: gun, owner: enemy, position: [112, 6], stance: 0}
+    # satisfies the win condition. Far-NE corner.
+    - {type: gun, owner: enemy, position: [122, 5], stance: 0}
 
 levels:
   easy:
     description: >
-      One survivor, one plausible region. The objective marker sits in
-      the far-NE region and nothing else does — perception is honest,
-      the only task is to plan a direct commitment within the deadline.
-    overrides: {}
-    win_condition:
-      all_of:
-        - {buildings_discovered_gte: 1}
-        - {within_ticks: 6500}
-    max_turns: 30
-
-  medium:
-    description: >
-      Two candidate regions, one decoy. A decoy marker sits in the
-      far-SE region; the real survivor is in the far-NE. From the
-      corner both are equidistant-looking, but only the NE building
-      counts toward 'buildings_discovered'. Committing to the SE decoy
-      first wastes enough ticks to miss the deadline — the model must
-      reason about which to commit to, not just navigate.
+      Two candidate regions, one decoy. The objective marker (a
+      building) sits in the far-NE corner; a decoy enemy *unit* cluster
+      sits in the far-SE corner. Only the NE building counts toward the
+      win. A single decisive trip straight to the NE corner finishes
+      well inside the deadline; detouring to the SE decoy first, or
+      sweeping both regions, overruns the clock and LOSES. Perception
+      is honest — the only task is to commit to the correct region.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [6, 6], count: 1}
-        # Decoy: an enemy *unit* in SE — discovering it does NOT satisfy
-        # the buildings-based win condition. Pure distractor.
-        - {type: e1, owner: enemy, position: [112, 34], stance: 0, count: 2}
-        # Real survivor marker: NE building.
-        - {type: gun, owner: enemy, position: [112, 6], stance: 0}
-      termination: {max_ticks: 7000}
+        # Decoy: a passive enemy unit cluster in the far-SE corner.
+        # Discovering it does NOT satisfy the buildings-based win.
+        - {type: e1, owner: enemy, position: [122, 35], stance: 0, count: 2}
+        # Real survivor marker: far-NE building.
+        - {type: gun, owner: enemy, position: [122, 5], stance: 0}
+      termination: {max_ticks: 6000}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
-        - {within_ticks: 5200}
-    max_turns: 34
+        - {within_ticks: 950}
+    fail_condition:
+      any_of:
+        - {after_ticks: 951}
+        - {not: {own_units_gte: 1}}
+    max_turns: 14
+
+  medium:
+    description: >
+      Three candidate regions, two decoys, a tighter deadline. Decoy
+      enemy *unit* clusters sit in the far-SE corner and the mid-south
+      edge; the real survivor marker is the building in the far-NE
+      corner. From the start corner all three look equally plausible,
+      but only the NE building counts. The deadline now permits exactly
+      one decisive trip to the correct corner — committing to either
+      decoy first, or sweeping, overruns it and LOSES. The model must
+      reason about which region to commit to, not just navigate.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 6], count: 1}
+        # Decoy A: passive unit cluster, far-SE corner.
+        - {type: e1, owner: enemy, position: [122, 35], stance: 0, count: 2}
+        # Decoy B: passive unit cluster, mid-south edge.
+        - {type: e1, owner: enemy, position: [64, 36], stance: 0, count: 2}
+        # Real survivor marker: far-NE building.
+        - {type: gun, owner: enemy, position: [122, 5], stance: 0}
+      termination: {max_ticks: 6000}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 880}
+    fail_condition:
+      any_of:
+        - {after_ticks: 881}
+        - {not: {own_units_gte: 1}}
+    max_turns: 14
 
   hard:
     description: >
-      Three candidate regions, two decoys, a tighter deadline, and an
-      attrition constraint. Decoy unit clusters sit in the SE and
-      mid-S regions; the real survivor marker is in the far-NE. One
-      decoy cluster is hostile (stance 2) so a careless route into it
-      can get the lone scout killed — the model must pick the
-      commitment that finds the building, fits the clock, AND avoids
-      the lethal frontier. Reasoning must trade route safety against
-      time without splitting (only one unit).
+      Three candidate regions, two decoys, a tight deadline, and an
+      attrition constraint. One decoy in the far-SE corner is a
+      HOSTILE cluster (stance 2) — a careless route into it gets the
+      lone scout killed; a passive decoy sits on the mid-south edge.
+      The real survivor marker is the building in the far-NE corner.
+      The model must pick the commitment that (a) finds the building,
+      (b) fits the clock — a detour to a decoy region first overruns
+      it — and (c) avoids the lethal frontier, all without splitting
+      (only one unit). The scout starts at a seed-chosen corner so the
+      commitment decision must generalise across start positions.
     overrides:
       actors:
         # Single scout, seed-chosen corner — the commitment decision
         # must generalise across start positions, not be memorised.
         - {type: jeep, owner: agent, position: [6, 6],  count: 1, spawn_point: 0}
         - {type: jeep, owner: agent, position: [6, 33], count: 1, spawn_point: 1}
-        # Decoy A (SE) — hostile cluster; a route through it risks the
-        # lone scout (units_lost_lte: 0 constraint below).
-        - {type: e3, owner: enemy, position: [110, 34], stance: 2, count: 3}
-        # Decoy B (mid-S) — passive distractor unit.
-        - {type: e1, owner: enemy, position: [62, 36], stance: 0, count: 2}
+        # Decoy A (far-SE) — hostile cluster; a route through it kills
+        # the lone scout (units_lost_lte: 0 constraint below).
+        - {type: e3, owner: enemy, position: [120, 35], stance: 2, count: 3}
+        # Decoy B (mid-south) — passive distractor unit.
+        - {type: e1, owner: enemy, position: [64, 36], stance: 0, count: 2}
         # Real survivor marker: far-NE building.
-        - {type: gun, owner: enemy, position: [118, 5], stance: 0}
+        - {type: gun, owner: enemy, position: [122, 5], stance: 0}
       termination: {max_ticks: 6000}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
-        - {within_ticks: 4200}
+        - {within_ticks: 1050}
         - {units_lost_lte: 0}
     fail_condition:
-      not: {own_units_gte: 1}
-    max_turns: 38
+      any_of:
+        - {after_ticks: 1051}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 15
