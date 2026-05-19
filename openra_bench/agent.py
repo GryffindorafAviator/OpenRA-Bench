@@ -128,24 +128,10 @@ _TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
-    "capture_actor": {
-        "type": "function",
-        "function": {
-            "name": "capture_actor",
-            "description": "Order engineer unit(s) (by id, in unit_ids) "
-            "to walk to and capture an enemy building (target_id). The "
-            "engineer is consumed; on success the building changes to "
-            "your ownership.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "unit_ids": {"type": "array", "items": {"type": "integer"}},
-                    "target_id": {"type": "integer"},
-                },
-                "required": ["unit_ids", "target_id"],
-            },
-        },
-    },
+    # NOTE: `capture_actor` is intentionally NOT exposed — the engine
+    # has no Capture order yet (belongs to the pending S8 / task #11
+    # sabotage+special-abilities work). The bench must not advertise a
+    # tool the engine can't execute (1:1 parity — see test_surrender).
     "set_stance": {
         "type": "function",
         "function": {
@@ -410,11 +396,6 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
                 ids = [str(i) for i in args["unit_ids"]]
                 cmds.append(
                     Command.enter_transport(ids, str(args["target_id"]))
-                )
-            elif name == "capture_actor":
-                ids = [str(i) for i in args["unit_ids"]]
-                cmds.append(
-                    Command.capture_actor(ids, str(args["target_id"]))
                 )
             elif name == "observe":
                 cmds.append(Command.observe())

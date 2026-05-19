@@ -188,6 +188,11 @@ class ScenarioPack(BaseModel):
         from ..mapgen import resolve_base_map
 
         merged["base_map"] = resolve_base_map(merged["base_map"])
+        # A declared scripted opponent (enemy.bot/bot_type) must name a
+        # known behaviour — fail fast at load, not mid-eval.
+        from ..botgen import validate_enemy_bot
+
+        validate_enemy_bot(merged.get("enemy"))
         # Validate against the real engine model so a broken level fails
         # at load time, not mid-eval.
         scenario = ScenarioDefinition(**merged)
