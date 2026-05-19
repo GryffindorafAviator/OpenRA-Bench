@@ -84,3 +84,38 @@ def test_scenario_tool_allowlist_is_restrictive():
     assert set(p.base.get("tools", [])) == {"move_units", "stop"}
     bom = load_pack(PACKS / "strict-production-bom.yaml")
     assert "attack_unit" not in bom.base.get("tools", [])
+
+
+def test_strict_sequence_enforces_strict_order_no_cheat():
+    """No-cheat invariant for strict-sequence: every level's win is a
+    latched `waypoint_sequence` (so out-of-order / skip / beeline can
+    never satisfy it) + a reachable within_ticks deadline, and the
+    fail tree carries an after_ticks timeout that is genuinely
+    reachable inside max_turns (tick ≈ 93 + 90·(turn-1)) so a staller
+    LOSES, never draws. No force-loss clause (no-enemy map).
+    """
+    from openra_bench.scenarios import load_pack
+    from openra_bench.scenarios.loader import compile_level
+
+    pack = load_pack(PACKS / "strict-sequence.yaml")
+    for lvl in ("easy", "medium", "hard"):
+        cc = compile_level(pack, lvl)
+        win = dict(cc.win_condition.__pydantic_extra__ or {})
+        clauses = win["all_of"]
+        wp = next(c["waypoint_sequence"] for c in clauses if "waypoint_sequence" in c)
+        assert len(wp["points"]) >= 3, (lvl, "needs a real ordered route")
+        within = next(c["within_ticks"] for c in clauses if "within_ticks" in c)
+        fail = dict(cc.fail_condition.__pydantic_extra__ or {})
+        after = next(
+            c["after_ticks"] for c in fail["any_of"] if "after_ticks" in c
+        )
+        max_tick = 93 + 90 * (cc.max_turns - 1)
+        # deadline + timeout are reachable inside the turn budget …
+        assert within <= max_tick, (lvl, within, max_tick)
+        assert after <= max_tick, (lvl, after, max_tick)
+        # … and the timeout is strictly past the win deadline so a
+        # non-completing run is a real LOSS, never a draw.
+        assert after == within + 1, (lvl, after, within)
+        # no force-loss clause: _NO_ENEMY classification stays valid.
+        keys = {k for c in fail["any_of"] for k in c}
+        assert "units_lost_lte" not in keys and "units_killed_gte" not in keys

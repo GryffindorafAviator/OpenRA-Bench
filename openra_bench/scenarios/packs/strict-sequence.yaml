@@ -1,17 +1,44 @@
+# Validate: python -m openra_bench.scenarios.validate packs/strict-sequence.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ACTION focus — STRICT ORDERED EXECUTION: the procedure is GIVEN as an
+# ordered list of staging points; the model must visit them in EXACTLY
+# that order, with only the {move_units, stop} API. Order is enforced by
+# the stateful, latched `waypoint_sequence` predicate: Wk+1 only counts
+# AFTER Wk was tagged (progress is monotonic & persists across turns), so
+# a beeline-to-final, an out-of-order visit, a skipped step, or an idle
+# can NEVER satisfy it. Only the exact ordered execution wins.
+#
+# No enemy on this map (rush-hour-arena, 128x40) — nothing can destroy
+# the force, so the ONLY real failure is the timeout: a reachable
+# `fail after_ticks` strictly below the within_ticks deadline. Stalling,
+# skipping, or doing it out of order all run out the clock ⇒ a real
+# LOSS, never a draw. (Keeps the _NO_ENEMY classification valid: no
+# force-loss fail clause.)
+#
+# Tick budget: the engine advances ~90 ticks per decision turn
+# (tick ≈ 93 + 90·(turn-1)). Every within_ticks / after_ticks here is
+# strictly ≤ 93 + 90·(max_turns-1) so the deadline (and therefore the
+# timeout LOSS) is genuinely reachable inside max_turns — never inert.
+# An idle jeep at the far edge does NOT trigger engine auto-done on this
+# map (verified: 50-turn idle stays alive), so the timeout LOSS is the
+# sole and reliable fail and it fires well before any engine auto-done.
+
 meta:
   id: strict-sequence
-  title: 'Follow the Procedure — Reach the Region in the Exact Ordered Time Window'
+  title: 'Follow the Procedure — Visit the Given Staging Points in the Exact Order'
   capability: action
   real_world_meaning: >
-    Follow a precise procedure: reach a marked staging region FIRST,
-    and only AFTER that has been achieved is the mission complete —
-    doing the steps out of order, or skipping the constraint, fails.
-    Tests literal instruction-following and precondition ordering under
-    a strict action API rather than free-form goal seeking.
+    Follow a precise procedure: the staging points are GIVEN as an
+    ordered checklist and must be reached strictly in that order with a
+    restricted action API. Doing the steps out of order, skipping one,
+    rushing straight to the last, or idling all fail. Tests literal
+    ordered instruction-following and precondition fidelity under a
+    strict action API rather than free-form goal seeking.
   robotics_analogue: >
     Procedural compliance: a robot must satisfy an ordered checklist
-    (reach checkpoint, hold, then proceed) where step order is graded,
-    not just the end state.
+    (reach checkpoint A, then B, then C) within a cycle-time budget
+    where step ORDER is graded, not just the end state.
   author: openra-bench
 base_map: rush-hour-arena
 base:
@@ -34,32 +61,74 @@ base:
       facing: -1
       count: 1
 levels:
+  # ── EASY ── ONE given 3-point ordered route. Bare skill: visit
+  # S1 → S2 → S3 in that exact order with only move_units. Rushing
+  # straight to S3, or visiting them out of order, never latches the
+  # sequence; idling runs out the clock. Generous budget.
   easy:
     description: >
-      Reach the staging region (≈ x18,y22) within the deadline using
-      only move_units. The strict part: attack/economy tools are not
-      offered — a valid solution must be expressed in the allowed API.
+      Execute the GIVEN ordered procedure with only move_units / stop.
+      Visit the three staging points STRICTLY IN ORDER:
+      S1 (≈ x40,y30) → S2 (≈ x95,y10) → S3 (≈ x118,y33).
+      Reaching a later point before its predecessor does NOT count and
+      does NOT skip ahead — the order is latched. Complete the full
+      ordered route before the deadline or you lose.
     win_condition:
       all_of:
-        - reach_region: {x: 18, y: 22, radius: 4}
-        - within_ticks: 12000
-    max_turns: 50
+        - waypoint_sequence:
+            id: E
+            radius: 5
+            points:
+              - {x: 40,  y: 30}
+              - {x: 95,  y: 10}
+              - {x: 118, y: 33}
+        - {within_ticks: 2600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2601}
+        - {not: {own_units_gte: 1}}
+    max_turns: 34
+  # ── MEDIUM ── +1 controlled variable vs easy: ONE MORE ordered leg
+  # (4-point serpentine instead of 3). Same strict-order latch, tighter
+  # budget — the extra back-and-forth leg means a non-stop in-order run
+  # is required; any reorder/skip/idle overruns.
   medium:
     description: >
-      Two-step procedure: only after holding past tick 3000 does
-      reaching the region count (after_ticks gates the win).
+      Execute the GIVEN ordered procedure (move_units / stop only).
+      Visit FOUR staging points STRICTLY IN ORDER:
+      S1 (≈ x40,y30) → S2 (≈ x95,y10) → S3 (≈ x40,y33) →
+      S4 (≈ x118,y20). A later point reached early does NOT count and
+      does NOT advance the sequence; a skipped point can never be
+      recovered. Run the full route in order before the deadline.
     win_condition:
       all_of:
-        - reach_region: {x: 22, y: 26, radius: 4}
-        - after_ticks: 3000
-        - within_ticks: 14000
-    max_turns: 60
+        - waypoint_sequence:
+            id: M
+            radius: 5
+            points:
+              - {x: 40,  y: 30}
+              - {x: 95,  y: 10}
+              - {x: 40,  y: 33}
+              - {x: 118, y: 20}
+        - {within_ticks: 3400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3401}
+        - {not: {own_units_gte: 1}}
+    max_turns: 44
+  # ── HARD ── +1 controlled variable vs medium: seed-chosen staging
+  # corner (two spawn_point groups) so the exact timed ordered move
+  # can't be replayed from memory — the same strict 4-point ordered
+  # serpentine must be re-derived from whichever start the seed picks.
+  # Tight budget; timeout is a reachable LOSS (no enemy ⇒ no other fail).
   hard:
     description: >
-      Tight ordered window: reach the region within a narrow tick band
-      (not before 4000, not after 9000) — precise timing compliance.
-      The unit stages from a seed-chosen position (two spawn_point
-      groups) so the exact timed move can't be replayed from memory.
+      Execute the GIVEN ordered procedure (move_units / stop only) from
+      a seed-chosen staging corner. Visit FOUR staging points STRICTLY
+      IN ORDER: S1 (≈ x40,y30) → S2 (≈ x95,y10) → S3 (≈ x40,y33) →
+      S4 (≈ x118,y20). Order is latched: a later point reached early
+      does not count or skip ahead, a skipped point is unrecoverable.
+      Complete the full ordered route within the tight deadline.
     overrides:
       actors:
         - type: jeep
@@ -80,7 +149,17 @@ levels:
           spawn_point: 1
     win_condition:
       all_of:
-        - reach_region: {x: 26, y: 30, radius: 3}
-        - after_ticks: 4000
-        - within_ticks: 9000
-    max_turns: 60
+        - waypoint_sequence:
+            id: H
+            radius: 5
+            points:
+              - {x: 40,  y: 30}
+              - {x: 95,  y: 10}
+              - {x: 40,  y: 33}
+              - {x: 118, y: 20}
+        - {within_ticks: 3700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 46
