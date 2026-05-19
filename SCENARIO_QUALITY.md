@@ -478,3 +478,24 @@ win tree else `max_ticks`). Bounded so a fast win ranks above a slow
 win but never lifts a loss above a win or overrides correctness.
 Leaderboard carries `win_speed`/`win_turns` and breaks composite/
 win-rate ties by faster wins.
+
+## YAML-referenceable generators (mapgen / botgen)
+
+A pack no longer needs a static `.oramap` + static enemy actors:
+
+- **Map** — `base_map: {generator: arena, name: scout-arena,
+  width: 176, height: 80, cordon: 4}` materializes a deterministic,
+  content-addressed `.oramap` at compile time (`openra_bench/mapgen.py`;
+  static string ids still work). #2 hard uses this.
+- **Bot** — `enemy: {faction: soviet, bot_type: hunt}` (alias `bot:`)
+  attaches an engine-side scripted opponent. Behaviours (map-agnostic,
+  ground-truth, per-tick): `hunt` (each unit attacks nearest agent
+  unit), `rusher` (concentrated relentless charge), `patrol` (oscillate
+  around own spawn, engage intruders), `turtle` (hold spawn, return
+  fire). Runs in `openra-sim/scripted_bot` because the Python boundary
+  can't see fogged enemy ids or command the enemy player; the bench
+  surface (`openra_bench/botgen.py`) validates the name at compile.
+
+Note: `capture_actor` is deliberately absent until the engine gains a
+Capture order (pending S8 / task #11) — the bench never advertises a
+tool the engine can't execute (1:1 parity).
