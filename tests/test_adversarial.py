@@ -21,7 +21,8 @@ from openra_bench.adversarial import (
 from openra_bench.leaderboard import _capability_breakdown, ingest_run
 
 PACKS = Path(__file__).parent.parent / "openra_bench" / "scenarios" / "packs"
-ADV = ["adversarial-duel", "adversarial-skirmish", "adversarial-siege"]
+# skirmish/siege consolidated into adversarial-duel (quarantined dups).
+ADV = ["adversarial-duel"]
 
 
 def test_ladder_rating_is_contiguous_from_easy():

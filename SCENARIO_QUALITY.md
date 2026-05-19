@@ -373,3 +373,29 @@ strict-production-bom hard (raise budget or cut).
 fidelity predicate / `forbidden_tools` auto-fail; (2)
 `building_destroyed_gte`; (3) a happened-before ordering composite;
 (4) scripted mid-episode adversary hook (engine, Phase-1).
+
+---
+## De-duplication (overlap analysis, 24→21 active)
+
+Win-predicate Jaccard overstates overlap (small vocab); judged at the
+decision level. Consolidated the genuinely-aimless dups (same map +
+same win signature + same skill):
+
+- **adversarial-siege, adversarial-skirmish → quarantined**:
+  same as adversarial-duel (rush-hour-arena, kill-reactive-enemy-within
+  -ticks-with-loss-cap); duel's easy→hard ladder + easy/medium configs
+  already cover even→outnumbered→entrenched. adversarial-duel is the
+  canonical adversarial scenario.
+- **economy-time-box → quarantined**: = economy-force-buildup + a
+  "keep a building standing" clause (same budget-under-clock decision).
+  Kept economy-force-buildup + economy-investment (the latter adds a
+  distinct economy-vs-military allocation choice).
+
+Kept (NOT aimless dup — each serves a purpose):
+- strategy-dilemma vs strategy-gauntlet: same objective but **different
+  maps** (singles-dilemma vs singles-gauntlet) → different route puzzle.
+- artofwar-decoy-sacrifice vs -lure-the-tiger: same map but genuinely
+  distinct credit-assignment (sacrifice-and-lose vs displace-and-exploit).
+
+Active set: 21 distinct decisions. Quarantined packs remain on disk,
+runnable via explicit --packs, excluded from the default sweep.

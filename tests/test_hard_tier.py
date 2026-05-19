@@ -25,8 +25,8 @@ PACKS = Path(__file__).parent.parent / "openra_bench" / "scenarios" / "packs"
 # economy-*/building-and-planning/strict-production-bom are N/A).
 UPGRADED = [
     "adversarial-duel",
-    "adversarial-skirmish",
-    "adversarial-siege",
+    # adversarial-skirmish/-siege consolidated into adversarial-duel
+    # (quarantined) — see SCENARIO_QUALITY.md de-dup.
     "artofwar-decoy-sacrifice",
     "artofwar-indirect-approach",
     "artofwar-lure-the-tiger",
