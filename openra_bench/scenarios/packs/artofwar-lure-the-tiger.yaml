@@ -1,161 +1,145 @@
 meta:
   id: artofwar-lure-the-tiger
-  title: 'Lure the Guard Away — Bait a Mobile Defender, Then Slip the Main Force Through'
+  title: 'Lure the Tiger Off the Mountain — Bait the Guard Away, Then Take the Objective'
   capability: reasoning
   real_world_meaning: >
-    调虎离山 — draw the enemy from its strong position. A mobile
-    reactive defender sits astride the only lane to the objective.
-    Phase 1 (send a probe to bait the defender out of position) yields
-    ZERO objective progress; only in phase 2, through the vacated lane,
-    does the main force score. Two-phase plan with no reward for the
-    enabling first phase.
+    調虎離山 — draw the enemy from its strong position. A single strong,
+    reactive GUARD force is posted on the only objective and is too
+    powerful to fight head-on. Phase 1 (send the fast probe in close so
+    the guard lunges out after it) yields ZERO objective progress and
+    looks locally wasteful; only in phase 2 — while the guard is pulled
+    off its post — does the main force, timed into that window, take
+    the objective before the guard snaps back. A two-phase plan whose
+    enabling first phase has no reward: long-horizon credit assignment.
   robotics_analogue: >
-    Two-phase manipulation: a no-reward enabling action (displace a
-    reactive obstacle) must precede the rewarded objective action.
+    Two-phase manipulation against a reactive sentry: a no-reward
+    enabling action (lure the sentry off its station within its leash)
+    must precede, and be timed with, the rewarded objective action.
   author: openra-bench
+
 base_map: rush-hour-arena
+
+# The "tiger" is a LEASHED GUARD (engine scripted bot 'guard'): heavy
+# armour + rocket infantry posted ON the objective. It holds station,
+# auto-fires in range, lunges at a foe within its aggro radius, and
+# SNAPS BACK past its leash. Charging the main force straight in is
+# destroyed by it (too strong to fight). Only sending the fast jeep
+# in close pulls the tiger off-post — then the main body, timed into
+# that vacancy, runs the lane to the objective before it returns.
+# Greedy head-on / do-nothing both fail.
 base:
-  agent:
-    faction: allies
-    cash: 0
-  enemy:
-    faction: soviet
-    cash: 0
-    bot_type: ''
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 12000}
   actors:
-    - type: 2tnk          # main force, held back until the lane opens
-      owner: agent
-      position: [6, 24]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 3
-    - type: jeep          # the lure
-      owner: agent
-      position: [6, 16]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 1
-    - type: 3tnk          # the "tiger": mobile, reactive, blocks the lane
-      owner: enemy
-      position: [26, 24]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 2
+    # Main force — THREE must reach the far objective. Cannot beat the
+    # tiger head-on.
+    - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+    # The probe/lure — fast, draws the tiger off-post (need not die).
+    - {type: jeep, owner: agent, position: [6, 24], stance: 1, count: 2}
+    # The tiger — heavy guard posted ON the objective approach.
+    - {type: e3, owner: enemy, position: [55, 6], stance: 2}
+    - {type: e3, owner: enemy, position: [55, 11], stance: 2}
+    - {type: e3, owner: enemy, position: [55, 16], stance: 2}
+    - {type: e3, owner: enemy, position: [55, 21], stance: 2}
+    - {type: e3, owner: enemy, position: [55, 26], stance: 2}
+    - {type: e3, owner: enemy, position: [55, 31], stance: 2}
+    - {type: e3, owner: enemy, position: [55, 36], stance: 2}
+    # Objective marker (far east, just past the tiger's post). Unarmed
+    # high-HP: the landmark, and it prevents the enemy-elimination
+    # auto-terminal (the tiger can't be wiped to end the episode).
+    - {type: fact, owner: enemy, position: [123, 20]}
+
 levels:
+  # ── EASY ── the bare lure: a 2×3tnk + 3×e3 tiger. A head-on push by
+  # the 3 medium tanks is destroyed; baiting the tiger off-post with
+  # the jeeps opens the lane. Generous clock.
   easy:
     description: >
-      The tiger guards the lane at (~26,24). Bait it north with the
-      jeep, then run the main force east to the objective.
+      A heavy guard (2 heavy tanks + rocket infantry) is posted on the
+      objective and is too strong to fight head-on. Get THREE tanks to
+      the objective (far east). Send the fast jeeps in close first so
+      the guard lunges out after them (this scores nothing); while it
+      is pulled off-post, run the tanks through to the objective before
+      it snaps back. Charging straight in, or idling, loses.
+    overrides: {}
     win_condition:
       all_of:
-        - reach_region: {x: 42, y: 24, radius: 4}
-        - within_ticks: 16000
+        - {units_in_region_gte: {x: 122, y: 20, radius: 5, n: 3}}
+        - {within_ticks: 5000}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 75
+      any_of:
+        - {after_ticks: 5001}
+        - {not: {own_units_gte: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 controlled variable: a heavier tiger (3×3tnk +
+  # 4×e3) — the head-on route is decisively fatal; tighter clock.
   medium:
-    description: 'A heavier tiger; baiting must be more deliberate.'
+    description: >
+      Heavier guard — a head-on push is now decisively fatal. Same
+      task: bait the tiger off its post with the probe, then time the
+      main force through the lane before it returns, inside the
+      (tighter) deadline.
     overrides:
       actors:
-        - type: 2tnk
-          owner: agent
-          position: [6, 24]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-        - type: jeep
-          owner: agent
-          position: [6, 16]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 1
-        - type: 3tnk
-          owner: enemy
-          position: [26, 24]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+        - {type: jeep, owner: agent, position: [6, 24], stance: 1, count: 2}
+        - {type: e3, owner: enemy, position: [55, 5], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 9], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 14], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 29], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 33], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 37], stance: 2}
+        - {type: fact, owner: enemy, position: [123, 20]}
     win_condition:
       all_of:
-        - reach_region: {x: 46, y: 24, radius: 4}
-        - within_ticks: 14000
+        - {units_in_region_gte: {x: 122, y: 20, radius: 5, n: 3}}
+        - {within_ticks: 5400}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 85
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+    max_turns: 66
+
+  # ── HARD ── +1 controlled variable: seed-chosen staging latitude
+  # (two spawn_point groups, in-bounds — the lure that works can't be
+  # memorised) + strict attrition cap (only the probe jeeps may be
+  # spent; burning a tank fails).
   hard:
     description: >
-      Loss-capped: the bait may die, the main force may not. Force
-      stages from a seed-chosen latitude (two spawn_point groups, same
-      main+lure formation) — the lure path that works can't be
-      memorised. The tiger blocks the lane beyond initial sight.
+      Strongest guard; the force stages from a seed-chosen latitude
+      (the lure that works varies by seed). Land THREE tanks on the
+      objective AND lose ≤2 units (only the two probe jeeps may be
+      spent) before the tight deadline.
     overrides:
       actors:
         # spawn_point 0 — northern staging
-        - type: 2tnk
-          owner: agent
-          position: [6, 24]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-          spawn_point: 0
-          randomize:
-            position: {base: [6, 24], offset: 3}
-        - type: jeep
-          owner: agent
-          position: [6, 16]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 1
-          spawn_point: 0
-        # spawn_point 1 — southern staging
-        - type: 2tnk
-          owner: agent
-          position: [6, 40]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-          spawn_point: 1
-          randomize:
-            position: {base: [6, 40], offset: 3}
-        - type: jeep
-          owner: agent
-          position: [6, 32]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 1
-          spawn_point: 1
-        - type: 3tnk
-          owner: enemy
-          position: [26, 24]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-        - type: e1
-          owner: enemy
-          position: [30, 20]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, count: 3, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [6, 14], stance: 1, count: 2, spawn_point: 0}
+        # spawn_point 1 — southern staging (in-bounds)
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 3, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [6, 34], stance: 1, count: 2, spawn_point: 1}
+        - {type: e3, owner: enemy, position: [55, 6], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 11], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 26], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 31], stance: 2}
+        - {type: e3, owner: enemy, position: [55, 36], stance: 2}
+        - {type: fact, owner: enemy, position: [123, 20]}
     win_condition:
       all_of:
-        - reach_region: {x: 48, y: 24, radius: 3}
-        - within_ticks: 12000
-        - units_lost_lte: 1
+        - {units_in_region_gte: {x: 122, y: 20, radius: 5, n: 3}}
+        - {within_ticks: 5800}
+        - {units_lost_lte: 2}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 95
+      any_of:
+        - {after_ticks: 5801}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 70
