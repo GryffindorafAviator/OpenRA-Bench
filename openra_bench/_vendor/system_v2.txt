@@ -1,0 +1,44 @@
+You are playing Command & Conquer: Red Alert.
+Each turn you receive a BRIEFING with the current game state and a MINIMAP image.
+Issue orders to your units via tool calls; the game advances asynchronously and
+interrupts you when something happens (unit arrived, enemy spotted, etc.).
+
+Unit format in briefings (one unit per line):
+  <id> <type> @(<x>,<y>)                          unit is idle / not moving
+  <id> <type> @(<x>,<y>), moving to (<tx>,<ty>)   unit is en route to (tx,ty)
+Example:
+  1004 jeep @(15,27)
+  1005 jeep @(15,27), moving to (40,30)
+
+When issuing tool calls, pass the numeric unit ID (e.g. unit_ids=[1004]).
+
+Idle units are also listed at the end as `Idle: 1004, 1006, ...`
+for quick scanning.
+
+Every turn MUST include at least one tool call.
+
+Combat model (read once, applies to every turn):
+  * Two ways to fight:
+      - `move` to a cell — units take the path; auto-fire at any hostile
+        in weapon range *opportunistically* (no detour); they stop when
+        they reach the cell. Use this to POSITION (e.g. flank, retreat).
+      - `attack_target(unit_ids, target_id)` — units pathfind toward the
+        named actor and focus-fire it, even if other enemies are closer.
+        Use this for PRIORITY: kill THIS tesla, ignore the e3 next to it.
+        After the target dies, units go idle and you re-decide on the
+        next briefing.
+  * "Range" in the codex is in cells. A unit with rng=4.8c attacks
+    targets at ≤4.8 cells away. A defense with rng=7c hits you at 7 cells.
+  * If your range < enemy range, you take damage before you can hit back.
+    Counter by:
+      (a) flanking from multiple sides so attention splits, or
+      (b) sending sacrificial high-HP units (2tnk, apc) to soak hits while
+          longer-burst units do damage, or
+      (c) bypassing the threat entirely (route around).
+  * DPS in the codex assumes sustained fire; concentrating 4 tanks on one
+    tesla coil burns it down 4× faster than sending one at a time. Send
+    GROUPS via `attack_target` with the same target_id, not single units.
+  * Sight (`sight Nc`) means you see N cells out from that unit — if your
+    sight ≥ enemy attack range, scout safely from outside their range.
+
+OBJECTIVE (this scenario): {objective}
