@@ -1,188 +1,151 @@
 meta:
   id: artofwar-decoy-sacrifice
-  title: 'Decoy Sacrifice — Spend a Bait Unit to Pull Defenders Off the Objective'
+  title: 'Decoy Sacrifice — Divert Hunting Defenders So the Main Body Reaches the Objective'
   capability: reasoning
   real_world_meaning: >
-    以利动之 — "move the enemy with the prospect of gain." A small bait
-    detachment must be deliberately spent to pull a reactive guarding
-    force off the objective so the main body can reach it. An agent
-    that keeps every unit safe and pushes head-on is destroyed; the
-    winning policy accepts an early, local loss for the delayed mission
-    payoff — long-horizon credit assignment, not greedy unit
-    preservation.
+    以利动之 — "move the enemy with the prospect of gain." A reactive
+    HUNTING force (it actively pursues the nearest of your units) sits
+    astride the only corridor to the objective. Push the durable main
+    body straight through and the hunters converge and destroy it
+    before three of them arrive. The winning policy commits the fast,
+    expendable bait on a divergent vector so the hunters lock onto and
+    chase IT — clearing the corridor for the main body. This is
+    long-horizon credit assignment: a decoy maneuver whose payoff is
+    delayed and whose cost (the bait drawing fire / dying) looks
+    locally negative; greedy "keep everyone safe, push head-on" and
+    "do nothing" both fail.
   robotics_analogue: >
-    Sacrificial-decoy planning: expend a cheap agent to divert a
-    reactive obstacle/defender, accepting negative short-term reward
-    for a later objective gain.
+    Sacrificial-decoy planning against a pursuing adversary: expend or
+    risk a cheap agent to draw a reactive interceptor off the protected
+    corridor, accepting negative short-term reward for the delayed
+    arrival of the main payload.
   author: openra-bench
+
 base_map: rush-hour-arena
+
+# The enemy is a LEASHED GUARD line (engine scripted bot 'guard'):
+# each e3 holds its post and auto-fires in range, lunges at a foe
+# within an aggro radius, and SNAPS BACK past a leash. Drive the
+# column straight through and the whole line engages it (anti-tank
+# rockets) — it dies before three arrive. Send the fast jeeps in as a
+# decoy against one segment: those guards lunge off post after the
+# bait, opening a transient gap the main body sprints through before
+# they snap back. Greedy head-on / do-nothing both fail.
 base:
-  agent:
-    faction: allies
-    cash: 0
-  enemy:
-    faction: soviet
-    cash: 0
-    bot_type: ''
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 12000}
   actors:
-    - type: 2tnk          # main body — must reach the objective
-      owner: agent
-      position: [6, 22]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 3
-    - type: jeep          # the bait — fast, expendable
-      owner: agent
-      position: [6, 30]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 2
-    - type: e1            # reactive guards sitting on the objective
-      owner: enemy
-      position: [40, 24]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 5
-    - type: fact          # objective marker — episode can't end on guard-wipe
-      owner: enemy
-      position: [44, 24]
+    # Main body — durable but slow; THREE must reach the far objective.
+    - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+    # Bait — fast (kites the foot hunters), expendable. The decoy.
+    - {type: jeep, owner: agent, position: [6, 24], stance: 1, count: 2}
+    # Hunting picket astride the direct line spawn(6,20)→objective.
+    # e3 = anti-tank rockets: lethal to an unsupported tank column.
+    - {type: e3, owner: enemy, position: [60, 6],  stance: 2}
+    - {type: e3, owner: enemy, position: [60, 11], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 16], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 26], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 31], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 36], stance: 2}
+    - {type: e1, owner: enemy, position: [60, 20], stance: 2, count: 4}
+    # Objective marker (far east). Unarmed, high-HP: keeps the episode
+    # alive (no enemy-elimination auto-terminal) and is the landmark.
+    - {type: fact, owner: enemy, position: [112, 20]}
+
 levels:
+  # ── EASY ── the bare decoy skill: a modest hunting picket. A naive
+  # head-on column loses too many tanks to land 3 at the objective;
+  # leading the hunters off with the jeeps clears the way. Generous
+  # clock.
   easy:
     description: >
-      Reach the objective region with the main body. The guards will
-      chase whatever they see — bait them aside, then drive through.
+      A hunting picket (rocket infantry + riflemen) blocks the lane to
+      the objective and chases your nearest unit. Get THREE tanks to
+      the objective (far east). Driving the column straight in gets it
+      shot apart before three arrive; send the fast jeeps in as bait on
+      a separate vector to pull the hunters off, then run the tanks
+      through. Idling or never committing loses on the clock.
+    overrides: {}
     win_condition:
       all_of:
-        - reach_region: {x: 44, y: 24, radius: 4}
-        - within_ticks: 6000
-    # Deadline reachable within max_turns (tick ≈ 93+90·(70-1) = 6303);
-    # after_ticks 6001 makes a staller LOSE instead of drawing. The
-    # intended bait-then-drive-through win lands far inside 6000.
+        - {units_in_region_gte: {x: 112, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 5800}
     fail_condition:
       any_of:
-      - after_ticks: 6001
-      - {not: {own_units_gte: 1}}
-    max_turns: 70
+        - {after_ticks: 5801}
+        - {not: {own_units_gte: 1}}
+    max_turns: 66
+
+  # ── MEDIUM ── +1 controlled variable: a heavier anti-armor picket
+  # (more e3) so a head-on push is decisively fatal; tighter clock.
   medium:
-    description: 'More guards; the head-on route is now clearly fatal.'
+    description: >
+      Heavier rocket-infantry picket — a head-on push is now decisively
+      fatal. Same task: divert the hunters with the bait, land THREE
+      tanks on the objective before the (tighter) deadline.
     overrides:
       actors:
-        - type: 2tnk
-          owner: agent
-          position: [6, 22]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-        - type: jeep
-          owner: agent
-          position: [6, 30]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 2
-        - type: e1
-          owner: enemy
-          position: [40, 24]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 7
-        - type: fact      # objective marker (see easy)
-          owner: enemy
-          position: [44, 24]
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+        - {type: jeep, owner: agent, position: [6, 24], stance: 1, count: 2}
+        - {type: e3, owner: enemy, position: [60, 6],  stance: 2}
+        - {type: e3, owner: enemy, position: [60, 11], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 26], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 31], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 36], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2, count: 5}
+        - {type: fact, owner: enemy, position: [112, 20]}
     win_condition:
       all_of:
-        - reach_region: {x: 44, y: 24, radius: 4}
-        - within_ticks: 7000
-    # Deadline reachable within max_turns (tick ≈ 93+90·(80-1) = 7203);
-    # after_ticks 7001 makes a staller LOSE instead of drawing. The
-    # head-on route is fatal here — the decoy maneuver wins well under
-    # 7000.
+        - {units_in_region_gte: {x: 112, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 6600}
     fail_condition:
       any_of:
-      - after_ticks: 7001
-      - {not: {own_units_gte: 1}}
-    max_turns: 80
+        - {after_ticks: 6601}
+        - {not: {own_units_gte: 1}}
+    max_turns: 76
+
+  # ── HARD ── +1 controlled variable: seed-chosen staging latitude
+  # (two spawn_point groups, in-bounds) so the working decoy line can't
+  # be memorised; strongest picket; strict attrition cap on top (the
+  # main body must arrive nearly whole — only the bait may be spent).
   hard:
     description: >
-      The main body must arrive nearly intact (loss cap) — only the
-      bait may be spent. The force stages from a seed-chosen latitude
-      (two spawn_point groups, same main+bait formation) so the decoy
-      line that works can't be memorised; guards sit on the objective
-      beyond initial sight.
+      Strongest hunting picket; the force stages from a seed-chosen
+      latitude (the decoy line that works varies by seed, so it can't
+      be memorised). Land THREE tanks on the objective AND lose ≤2
+      units (only the two bait jeeps may be spent — burning armour
+      fails) before the tight deadline.
     overrides:
       actors:
         # spawn_point 0 — northern staging
-        - type: 2tnk
-          owner: agent
-          position: [6, 22]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-          spawn_point: 0
-          randomize:
-            position: {base: [6, 22], offset: 3}
-        - type: jeep
-          owner: agent
-          position: [6, 30]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 2
-          spawn_point: 0
-        # spawn_point 1 — southern staging (same formation, shifted)
-        # spawn_point 1 — northern staging. WAS y=40/48 which is
-        # OFF-MAP on rush-hour-arena (MapSize 128x40, playable y≈2..37):
-        # cell (6,40) indexed past the 128*40 grid and panicked the
-        # engine. Relocated in-bounds, kept distinct from spawn_point
-        # 0's mid/south staging so the ≥2-spawn contract still holds.
-        - type: 2tnk
-          owner: agent
-          position: [6, 8]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-          spawn_point: 1
-          randomize:
-            position: {base: [6, 8], offset: 3}
-        - type: jeep
-          owner: agent
-          position: [6, 14]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 2
-          spawn_point: 1
-        - type: e1
-          owner: enemy
-          position: [40, 24]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 8
-        - type: fact      # objective marker (see easy)
-          owner: enemy
-          position: [44, 24]
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, count: 3, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [6, 14], stance: 1, count: 2, spawn_point: 0}
+        # spawn_point 1 — southern staging (same formation, in-bounds)
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 3, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [6, 34], stance: 1, count: 2, spawn_point: 1}
+        - {type: e3, owner: enemy, position: [60, 6],  stance: 2}
+        - {type: e3, owner: enemy, position: [60, 11], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 26], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 31], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 36], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2, count: 6}
+        - {type: fact, owner: enemy, position: [112, 20]}
     win_condition:
       all_of:
-        - reach_region: {x: 44, y: 24, radius: 3}
-        - within_ticks: 8000
-        - units_lost_lte: 2          # bait only; losing armour fails
-    # Deadline reachable within max_turns (tick ≈ 93+90·(90-1) = 8103);
-    # after_ticks 8001 makes a staller LOSE. Exceeding the bait-only
-    # loss cap (units_lost > 2 ⇒ a tank was spent) also loses
-    # immediately rather than drawing — this is what makes the
-    # credit-assignment capability load-bearing: a brute-force push
-    # that arrives but burned the armour is a LOSS, not a draw.
+        - {units_in_region_gte: {x: 112, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 7400}
+        - {units_lost_lte: 2}
     fail_condition:
       any_of:
-      - after_ticks: 8001
-      - {not: {units_lost_lte: 2}}
-      - {not: {own_units_gte: 1}}
-    max_turns: 90
+        - {after_ticks: 7401}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 84

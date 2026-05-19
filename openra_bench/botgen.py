@@ -17,13 +17,18 @@ Behaviours (all derive targets from live world state — no map coords):
   rusher  — relentless concentrated charge at the agent's mass; fast.
   patrol  — units oscillate around their own spawn; engage intruders.
   turtle  — hold the spawn position; return fire only.
+  guard   — leashed defender: holds its post; lunges at a
+            foe only within an aggro radius and snaps back
+            past a leash (a decoy can bait it off post).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-BEHAVIORS: frozenset[str] = frozenset({"hunt", "rusher", "patrol", "turtle"})
+BEHAVIORS: frozenset[str] = frozenset(
+    {"hunt", "rusher", "patrol", "turtle", "guard"}
+)
 
 
 def read_enemy_bot(enemy: Any) -> str | None:

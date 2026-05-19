@@ -62,9 +62,11 @@ def test_indirect_hard_requires_zero_loss_traversal():
 def test_decoy_hard_loss_cap_allows_bait_not_army():
     c = compile_level(load_pack(PACKS / "artofwar-decoy-sacrifice.yaml"),
                        "hard")
-    at_obj = [(44, 24)] * 3
-    assert evaluate(c.win_condition, _ctx(at_obj, 8000, lost=2)) is True
-    assert evaluate(c.win_condition, _ctx(at_obj, 8000, lost=3)) is False
+    # Redesigned: far-east objective (112,20); hard caps losses at 2
+    # (only the two bait jeeps may be spent — burning a tank fails).
+    at_obj = [(112, 20)] * 3
+    assert evaluate(c.win_condition, _ctx(at_obj, 5000, lost=2)) is True
+    assert evaluate(c.win_condition, _ctx(at_obj, 5000, lost=3)) is False
 
 
 @pytest.mark.parametrize("pid", FAMILY)
