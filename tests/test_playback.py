@@ -72,6 +72,38 @@ def test_run_level_without_playback_is_unchanged(tmp_path):
     assert not any(tmp_path.iterdir())  # nothing written
 
 
+def test_perception_frontier_reading_enforces_capability():
+    """Anti-regression for the no-cheat redesign: the win condition
+    (`buildings_discovered_gte` + a tick-aligned `within_ticks`) must
+    DISCRIMINATE between a stall/blind policy and a genuine
+    frontier-reading scout. A stall (observe-only) must LOSE on easy —
+    not draw — and a directed scout that drives a unit into the hidden
+    eastern fog pocket must WIN. If either flips, the pack has lost
+    its perception teeth and should be reviewed."""
+    c = compile_level(load_pack(PACK), "easy")
+    # easy hides one marker in the far-east fog pocket off the spawn
+    # rows (proc at ~[108,18]); a scout that drives there discovers it.
+    r_stall = run_level(c, lambda rs, C: [C.observe()], seed=1)
+    assert r_stall.outcome == "loss", (
+        f"stall must LOSE easy (real fail_condition, not draw); "
+        f"got {r_stall.outcome}"
+    )
+
+    def scout(rs, C):
+        u = rs.get("units_summary", []) or []
+        if not u:
+            return [C.observe()]
+        return [C.move_units([str(x["id"])], target_x=108, target_y=18)
+                for x in u]
+
+    r_win = run_level(c, scout, seed=1)
+    assert r_win.outcome == "win", (
+        f"a scout driving into the hidden fog pocket must WIN easy; "
+        f"got {r_win.outcome} bld_seen="
+        f"{len(r_win.signals.enemy_buildings_seen_ids)}"
+    )
+
+
 def test_run_eval_playback_tree_with_score(tmp_path):
     out = evaluate(
         packs=[PACK],
