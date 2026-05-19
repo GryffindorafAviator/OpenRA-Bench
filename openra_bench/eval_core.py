@@ -46,6 +46,12 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     # Rust scenario parser reads (default 5000 when unset).
     if compiled.starting_cash is not None:
         data["starting_cash"] = compiled.starting_cash
+    # The Rust engine defaults spawn_mcvs:true → it auto-seeds MCVs at
+    # the map's built-in spawn points (e.g. (124,36)), which reveal fog
+    # and pollute unit counts for scenarios that never asked for them.
+    # Curated packs declare their own actors, so default it OFF; a pack
+    # may still opt in via base.spawn_mcvs / a scenario-declared `mcv`.
+    data.setdefault("spawn_mcvs", bool(data.get("spawn_mcvs", False)))
     fd = tempfile.NamedTemporaryFile(
         "w", suffix=f"_{compiled.pack_id}_{compiled.level}.yaml", delete=False
     )
