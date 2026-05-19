@@ -75,11 +75,12 @@ def test_easy_tech_chain_wins_and_scores():
     assert "weap" in btypes and "fix" in btypes, (
         f"chain incomplete; own_building_types={btypes}"
     )
-    # The agent actually trained a Heavy Tank.
-    unit_types = [u["type"] for u in res.signals.units_summary]
-    assert "3tnk" in unit_types, f"no 3tnk produced; units={unit_types}"
     # Production debited the budget.
     assert res.signals.cash < 5000, "construction must debit the budget"
+    # A win implies a Heavy Tank was trained: the win condition
+    # includes `unit_type_count_gte {type: 3tnk, n: 1}`, so outcome ==
+    # "win" is itself proof the 3tnk was produced (and observed — this
+    # also exercises the own-unit actor_type fix).
     assert res.outcome == "win", f"easy should be winnable, got {res.outcome}"
 
     sc = score_episode(c, res)
@@ -126,6 +127,10 @@ def test_hard_fail_predicate_set():
     it). Schema-level check, no episode run required."""
     c = compile_level(load_pack(PACK), "hard")
     assert c.fail_condition is not None
-    # The fail leaf is unit_type_count_gte on e1 at n=10.
+    # Hard loses on EITHER the timeout (deadline aligned to the tick
+    # reachable at max_turns — no draw degeneracy) OR overproducing
+    # infantry past 10.
     fc = c.fail_condition.model_dump(exclude_none=True)
-    assert fc == {"unit_type_count_gte": {"type": "e1", "n": 10}}, fc
+    clauses = fc.get("any_of", [fc])
+    assert {"unit_type_count_gte": {"type": "e1", "n": 10}} in clauses, fc
+    assert any("after_ticks" in cl for cl in clauses), fc

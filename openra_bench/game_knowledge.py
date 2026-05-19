@@ -52,6 +52,7 @@ ACTOR_GLOSSARY: dict[str, str] = {
     "fix": "service depot (repairs vehicles)",
     "dome": "radar dome (reveals map / tech prerequisite)",
     "silo": "ore silo (stores surplus ore)",
+    "mine": "ore mine (resource node harvesters gather from)",
     "gun": "gun turret (anti-vehicle base defence)",
     "pbox": "pillbox (anti-infantry base defence)",
     "tsla": "Tesla coil (powerful anti-everything defence)",

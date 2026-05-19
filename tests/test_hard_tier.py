@@ -48,6 +48,11 @@ NOT_APPLICABLE = {
     "economy-force-buildup": "non-spatial: production economy",
     "building-and-planning": "non-spatial: build-order/tech, fixed base",
     "strict-production-bom": "non-spatial: exact bill-of-materials spec",
+    "tech-production-planning": "non-spatial: build-order dependency "
+    "planning (precedence + power + budget); start position irrelevant",
+    "longhorizon-opening-to-assault": "fixed pre-seeded base; the test "
+    "is the scout→tech→army→strike phase chain within one budget, not "
+    "start-position generalization (single base by design)",
     "reasoning-risk-route": "rigor 5/5 from one tuned safe seam — varying "
     "the start would break the single-solution tuning / seed parity",
     "strategy-dilemma": "win redesigned to destroy fact+proc (faithful "
