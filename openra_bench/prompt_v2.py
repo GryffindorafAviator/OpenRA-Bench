@@ -154,8 +154,22 @@ def state_from_render(render_state: dict) -> dict:
     }
 
 
+import re as _re
+
+
 def briefing(render_state: dict) -> str:
-    return _BRIEF.format_state_briefing_v2(state_from_render(render_state))
+    text = _BRIEF.format_state_briefing_v2(state_from_render(render_state))
+    # Vendored briefing_v2's empty-own-buildings fallback emits a
+    # confusing "Buildings: ? ()" for unit-only scenarios (the agent
+    # has no base). Sanitize that one degenerate line in our wrapper
+    # (the vendored module stays byte-identical for the drift test).
+    text = _re.sub(
+        r"(?m)^Buildings: (?:\?|0|none)? ?\(\)\s*$",
+        "Buildings: none (you command mobile units only; enemy "
+        "buildings appear under Enemies once scouted)",
+        text,
+    )
+    return text
 
 
 def structured_fog(render_state: dict) -> str:

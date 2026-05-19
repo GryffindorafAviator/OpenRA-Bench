@@ -194,3 +194,13 @@ def test_extra_body_merged_into_request(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
     p.complete([{"role": "user", "content": "hi"}], [])
     assert captured.get("provider") == {"sort": "throughput"}
+
+
+def test_briefing_sanitizes_empty_buildings_line():
+    """Unit-only scenarios must not show the vendored fallback's
+    confusing 'Buildings: ? ()'."""
+    b = P.briefing(_render_state())
+    assert "Buildings: ? ()" not in b
+    assert "Buildings: 0 ()" not in b
+    line = [l for l in b.splitlines() if l.startswith("Buildings:")][0]
+    assert "none" in line and "mobile units only" in line
