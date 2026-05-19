@@ -78,8 +78,11 @@ def unit_codex(codes) -> str:
         return ""
     body = "\n".join(f"  {c:<5} {_CODEX[c]}" for c in rows)
     return (
-        "UNIT CODEX (this scenario — cost/hp/range(c)/dps/sight(c)):\n"
-        + body
+        "UNIT CODEX (this scenario). Each line: <code> $cost hp<HP> "
+        "rng<attack range, cells> dps<damage/sec> sight<vision, cells> "
+        "<movement: foot/wheeled/tracked> (role). Unarmed units list "
+        "their function instead of rng/dps; buildings list their "
+        "purpose.\n" + body
     )
 
 
