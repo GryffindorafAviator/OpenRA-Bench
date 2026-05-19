@@ -79,3 +79,44 @@ def test_split_dash_policy_can_win_easy():
 
     res = run_level(c, split, seed=1)
     assert res.outcome == "win", f"split policy should win easy, got {res.outcome}"
+
+
+def test_medium_regions_are_dispersed_not_clustered():
+    from openra_bench.scenarios import load_pack
+    from openra_bench.scenarios.loader import compile_level
+    c = compile_level(
+        load_pack(PACKS / "action-multiunit-coordination.yaml"), "medium")
+    wc = dict(c.win_condition.__pydantic_extra__ or {})
+    pts = [(cl["units_in_region_gte"]["x"], cl["units_in_region_gte"]["y"])
+           for cl in wc["all_of"] if "units_in_region_gte" in cl]
+    xs = [p[0] for p in pts]
+    assert max(xs) - min(xs) >= 80, f"regions not x-dispersed: {pts}"
+    assert min(xs) <= 25, f"no bottom-left/low-x region: {pts}"   # (20,36)
+    assert max(xs) >= 110, f"no far-east region: {pts}"
+
+
+def test_medium_split_wins_but_all_east_misses_bottom_left():
+    pytest.importorskip("openra_train")
+    from openra_bench.eval_core import run_level
+    from openra_bench.scenarios import load_pack
+    from openra_bench.scenarios.loader import compile_level
+    c = compile_level(
+        load_pack(PACKS / "action-multiunit-coordination.yaml"), "medium")
+
+    def three_way(rs, C):
+        ids = [str(u["id"]) for u in (rs.get("units_summary") or [])]
+        if len(ids) < 6:
+            return [C.observe()]
+        a, b = ids[:3], ids[3:6]
+        c2 = ids[6:] or ids[:1]
+        return [C.move_units(a, 115, 6),     # NE corner
+                C.move_units(b, 20, 36),     # bottom-left
+                C.move_units(c2, 115, 34)]   # SE corner
+
+    def all_east(rs, C):
+        ids = [str(u["id"]) for u in (rs.get("units_summary") or [])]
+        return [C.move_units(ids, 115, 20)] if ids else [C.observe()]
+
+    assert run_level(c, three_way, seed=1).outcome == "win"
+    # one eastward column physically can't cover the bottom-left region
+    assert run_level(c, all_east, seed=1).outcome == "loss"
