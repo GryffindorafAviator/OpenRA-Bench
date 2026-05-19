@@ -1,28 +1,34 @@
 # Validate: python -m openra_bench.scenarios.validate packs/action-sequenced-execution.yaml
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
-# ACTION focus: the route is given as an ordered plan — waypoint W1, then
-# W2, then the final objective. The model is not asked to *find* the order;
-# it is asked to *execute* it without stalling. The win condition encodes
-# the sequence via after_ticks gates: the final region must be reached only
-# after enough ticks that an idle / dithering agent runs out the clock,
-# while a decisive agent that keeps the column moving clears each leg in
-# time. Each level lengthens the route and tightens the budget so stalling
-# between legs becomes the dominant failure mode.
+# ACTION focus: the ordered route is GIVEN — the model must EXECUTE it
+# faithfully, in order, without idling or skipping. Order is enforced by
+# the stateful `waypoint_sequence` predicate (latched, monotonic): Wk+1
+# only counts after Wk was reached, so a beeline-to-final or an idle can
+# never satisfy it. The within_ticks budget is the non-stalling teeth;
+# overrun / attrition-bust / wipe are real LOSSES (no draw degeneracy).
+# Each waypoint is marked by an enemy building (a visible landmark; on
+# hard they are fogged and revealed by the enemy_building_spotted
+# interrupt, so the route must genuinely be scouted).
+#
+# Tick budget note: the engine advances ~90 ticks per decision turn
+# (tick ≈ 93 + 90·(turn-1)). Every `fail after_ticks K` is set so K is
+# reachable within max_turns — otherwise a staller would draw, not lose.
 
 meta:
   id: action-sequenced-execution
-  title: 'Non-Stop Route Execution — Run an Ordered Path Without Stalling'
+  title: 'Non-Stop Ordered Route Execution — Run Given Waypoints In Order Without Stalling'
   capability: action
   real_world_meaning: >
-    The route is already planned; the open problem is faithful, non-stalling
-    execution of an ordered objective sequence — issuing the next move the
-    instant a leg completes rather than idling, re-deliberating, or skipping
-    a waypoint, which is what makes long autonomous missions fail.
+    The route is already planned; the open problem is faithful,
+    non-stalling execution of an ORDERED objective sequence — reaching
+    each waypoint in turn and issuing the next move the instant a leg
+    completes, rather than idling, re-deliberating, skipping a waypoint,
+    or rushing straight to the end.
   robotics_analogue: >
     Manipulator / mobile-base task sequencing: a robot must hit a fixed
-    ordered set of stations (pick, transit, place) within a cycle-time
-    budget; pausing or reordering between steps misses the takt time.
+    ORDERED set of stations (pick → transit → place) within a cycle-time
+    budget; pausing, reordering, or skipping a station misses the takt.
   author: "openra-bench"
 
 base_map: rush-hour-arena
@@ -30,105 +36,169 @@ base_map: rush-hour-arena
 base:
   agent: {faction: allies}
   enemy: {faction: soviet}
-  tools: [move_units, attack_unit, stop_units]
+  tools: [move_units, attack_unit, stop]
   planning: true
   termination: {max_ticks: 8000}
   actors:
-    # One cohesive column that must traverse an ordered route.
-    - {type: 2tnk, owner: agent, position: [5, 8],  count: 2}
-    - {type: 1tnk, owner: agent, position: [7, 12], count: 2}
-    # Waypoint / terminal markers as static enemy buildings.
-    - {type: powr, owner: enemy, position: [45, 30]}   # W1
-    - {type: proc, owner: enemy, position: [90, 10]}    # W2
-    - {type: fact, owner: enemy, position: [118, 33]}   # final
+    - {type: 2tnk, owner: agent, position: [5, 8], count: 2}
 
 levels:
+  # ── EASY ── one column, ONE ordered 3-waypoint route, clear lanes,
+  # generous budget. Tests pure "go in the given order, don't idle."
   easy:
     description: >
-      Two-leg route: go to waypoint W1 (SW-mid), then the final objective
-      (far SE). The after_ticks gate means the agent must already be
-      moving; arriving at the end only counts once W1's leg time has
-      elapsed, and the overall deadline punishes any stall.
-    overrides: {}
-    win_condition:
-      all_of:
-        - {reach_region: {x: 118, y: 33, radius: 8}}
-        - {after_ticks: 1200}
-        - {within_ticks: 6000}
-    # Overrunning the takt-time deadline is a LOSS, not a draw: a
-    # stalling/dithering agent that fails to arrive by the budget
-    # must score as a failure (no non-win == draw degeneracy).
-    fail_condition:
-      after_ticks: 6001
-    max_turns: 30
-
-  medium:
-    description: >
-      Three-leg route W1 -> W2 -> final with a contested first leg and an
-      attrition cap. A model that stalls to re-plan between legs cannot
-      clear all three before the tighter deadline.
+      Execute ONE given route IN ORDER: waypoint W1 (mid-south, marked
+      by an enemy Power Plant) → W2 (north, enemy Ore Refinery) → W3 /
+      final (far SE, enemy Construction Yard). You must reach them in
+      that order — rushing straight to the final does NOT count. Keep
+      the column moving: arrive within the time budget or you lose.
     overrides:
       actors:
         - {type: 2tnk, owner: agent, position: [5, 8],  count: 2}
         - {type: 1tnk, owner: agent, position: [7, 12], count: 2}
-        - {type: jeep, owner: agent, position: [5, 16]}
-        - {type: powr, owner: enemy, position: [45, 31]}
-        - {type: proc, owner: enemy, position: [92, 9]}
-        - {type: fact, owner: enemy, position: [120, 34]}
-        - {type: e1,   owner: enemy, position: [40, 25], stance: 2, count: 2}
+        - {type: powr, owner: enemy, position: [40, 30]}   # W1
+        - {type: proc, owner: enemy, position: [95, 9]}     # W2
+        - {type: fact, owner: enemy, position: [118, 33]}   # W3 / final
     win_condition:
       all_of:
-        - {reach_region: {x: 120, y: 34, radius: 7}}
-        - {after_ticks: 2200}
-        - {within_ticks: 5000}
-        - {units_lost_lte: 1}
-    # Loss on either failure mode: deadline overrun, or busting the
-    # attrition cap (once >1 lost the win is unreachable — that must
-    # be a loss now, not a draw at max_turns).
+        - waypoint_sequence:
+            id: R
+            radius: 7
+            points:
+              - {x: 40,  y: 30}
+              - {x: 95,  y: 9}
+              - {x: 118, y: 33}
+        - {within_ticks: 2400}
     fail_condition:
       any_of:
-        - {after_ticks: 5001}
+        - {after_ticks: 2401}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ── TWO independent ordered routes, BOTH required. They
+  # cross at mid-map, so one column cannot serve both and serial
+  # execution (finish route N, then route S) overruns the budget —
+  # only a genuine two-column parallel split clears it. Attrition cap.
+  medium:
+    description: >
+      TWO given routes that must BOTH be completed, each IN ORDER.
+      Route N: N1 (W, enemy Power Plant) → N2 (mid-SOUTH, enemy Ore
+      Refinery) → N3 (far-E NORTH, enemy Construction Yard). Route S:
+      S1 (W-south, enemy Radar Dome) → S2 (mid-NORTH, enemy Power
+      Plant) → S3 (far-E SOUTH, enemy Ore Refinery). The two routes
+      cross in the middle: split into two columns and run them in
+      parallel — doing one fully then the other overruns the clock.
+      Lose ≤1 unit; arrive within budget or lose.
+    overrides:
+      actors:
+        # Northern staging cluster
+        - {type: 2tnk, owner: agent, position: [5, 8],  count: 2}
+        - {type: 1tnk, owner: agent, position: [7, 10]}
+        # Southern staging cluster
+        - {type: 1tnk, owner: agent, position: [5, 30], count: 2}
+        - {type: jeep, owner: agent, position: [7, 32]}
+        # Route N markers
+        - {type: powr, owner: enemy, position: [45, 8]}     # N1
+        - {type: proc, owner: enemy, position: [90, 32]}    # N2
+        - {type: fact, owner: enemy, position: [120, 8]}    # N3
+        # Route S markers
+        - {type: dome, owner: enemy, position: [45, 32]}    # S1
+        - {type: powr, owner: enemy, position: [90, 8]}     # S2
+        - {type: proc, owner: enemy, position: [120, 32]}   # S3
+        # Contested centre where the routes cross
+        - {type: e1, owner: enemy, position: [88, 20], stance: 2, count: 2}
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: N
+            radius: 7
+            points:
+              - {x: 45,  y: 8}
+              - {x: 90,  y: 32}
+              - {x: 120, y: 8}
+        - waypoint_sequence:
+            id: S
+            radius: 7
+            points:
+              - {x: 45,  y: 32}
+              - {x: 90,  y: 8}
+              - {x: 120, y: 32}
+        - {within_ticks: 3000}
+        - {units_lost_lte: 1}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3001}
         - {not: {units_lost_lte: 1}}
         - {not: {own_units_gte: 1}}
     max_turns: 36
 
+  # ── HARD ── TWO ordered 4-waypoint serpentine routes on the larger
+  # scout-arena, given only by RELATIVE compass direction (no
+  # coordinates). The marker buildings start fogged; the
+  # enemy_building_spotted interrupt re-prompts the instant a unit
+  # sights one, revealing its position — the agent must genuinely
+  # SCOUT each leg in the right direction, then converge in order.
+  # Seed picks the staging corner. Strict budget + attrition.
   hard:
+    objective_coords: relative
     description: >
-      Four-leg serpentine route across the full arena with defended
-      waypoints, a strict attrition cap and a tight budget. Every leg must
-      be executed back-to-back; any idling, re-deliberation, or skipped
-      leg overruns the clock or loses too many units.
+      TWO given routes across a large arena, each four ordered
+      waypoints, described ONLY by direction — you are NOT given
+      coordinates. Each waypoint is an enemy building hidden in fog:
+      scout toward the stated direction and you will be interrupted the
+      instant a unit sights the marker, revealing it; then move on to
+      it and continue the route IN ORDER. Both routes must be completed
+      (split into two columns and run them together). Keep advancing —
+      idling, skipping, or doing one route then the other overruns the
+      clock. Lose ≤1 unit.
     overrides:
+      interrupts:
+        enemy_building_spotted: true
       actors:
-        # spawn_point 0 — northern staging
-        - {type: 2tnk, owner: agent, position: [5, 8],  count: 2, spawn_point: 0}
-        - {type: 1tnk, owner: agent, position: [7, 12], count: 2, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [5, 16], spawn_point: 0}
-        - {type: apc,  owner: agent, position: [9, 20], spawn_point: 0}
-        # spawn_point 1 — southern staging (same serpentine to the same
-        # fixed waypoints/final; seed picks the start)
-        - {type: 2tnk, owner: agent, position: [5, 22], count: 2, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [7, 26], count: 2, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [5, 30], spawn_point: 1}
-        - {type: apc,  owner: agent, position: [9, 34], spawn_point: 1}
-        - {type: powr, owner: enemy, position: [45, 33]}    # W1
-        - {type: proc, owner: enemy, position: [80, 6]}      # W2
-        - {type: tsla, owner: enemy, position: [110, 30]}    # W3
-        - {type: fact, owner: enemy, position: [122, 6]}     # final
-        - {type: e3,   owner: enemy, position: [42, 27], stance: 2, count: 2}
-        - {type: e1,   owner: enemy, position: [78, 12], stance: 2, count: 2}
-        - {type: gun,  owner: enemy, position: [108, 25]}
+        # spawn_point 0 — north-west staging (seed may pick this)
+        - {type: 2tnk, owner: agent, position: [10, 10], count: 2, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [12, 14], count: 2, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [10, 18], count: 2, spawn_point: 0}
+        # spawn_point 1 — south-west staging (same two routes to run)
+        - {type: 2tnk, owner: agent, position: [10, 62], count: 2, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [12, 58], count: 2, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [10, 54], count: 2, spawn_point: 1}
+        # Route A markers (dispersed enemy bases, fogged)
+        - {type: powr, owner: enemy, position: [40, 14]}    # A1 far NW
+        - {type: proc, owner: enemy, position: [90, 60]}    # A2 S-centre
+        - {type: dome, owner: enemy, position: [140, 18]}   # A3 E-mid north
+        - {type: fact, owner: enemy, position: [160, 64]}   # A4 far SE
+        # Route B markers
+        - {type: dome, owner: enemy, position: [40, 62]}    # B1 far SW
+        - {type: powr, owner: enemy, position: [90, 12]}    # B2 N-centre
+        - {type: proc, owner: enemy, position: [140, 58]}   # B3 E-mid south
+        - {type: fact, owner: enemy, position: [160, 12]}   # B4 far NE
+        # Light contest along the way
+        - {type: e1, owner: enemy, position: [88, 36], stance: 2, count: 2}
+        - {type: e3, owner: enemy, position: [138, 38], stance: 2, count: 2}
     win_condition:
       all_of:
-        - {reach_region: {x: 122, y: 6, radius: 7}}
-        - {after_ticks: 3400}
-        - {within_ticks: 4400}
+        - waypoint_sequence:
+            id: A
+            radius: 7
+            points:
+              - {x: 40,  y: 14, label: "the far NORTH-WEST"}
+              - {x: 90,  y: 60, label: "the SOUTH-CENTRE"}
+              - {x: 140, y: 18, label: "the EAST side, NORTH of centre"}
+              - {x: 160, y: 64, label: "the far SOUTH-EAST corner"}
+        - waypoint_sequence:
+            id: B
+            radius: 7
+            points:
+              - {x: 40,  y: 62, label: "the far SOUTH-WEST"}
+              - {x: 90,  y: 12, label: "the NORTH-CENTRE"}
+              - {x: 140, y: 58, label: "the EAST side, SOUTH of centre"}
+              - {x: 160, y: 12, label: "the far NORTH-EAST corner"}
+        - {within_ticks: 6000}
         - {units_lost_lte: 1}
-    # Loss on any failure mode: force destroyed, deadline overrun, or
-    # attrition cap busted (win unreachable once >1 lost).
     fail_condition:
       any_of:
-        - {not: {own_units_gte: 1}}
-        - {after_ticks: 4401}
+        - {after_ticks: 6001}
         - {not: {units_lost_lte: 1}}
-    max_turns: 46
+        - {not: {own_units_gte: 1}}
+    max_turns: 70

@@ -44,6 +44,49 @@ def _in_radius(units: list[dict], x: int, y: int, r: float) -> int:
     return sum(1 for u in units if (u["cell_x"] - x) ** 2 + (u["cell_y"] - y) ** 2 <= r * r)
 
 
+def _waypoint_sequence(c: "WinContext", v: dict) -> bool:
+    """Ordered-visit latch: the agent must reach the waypoints in
+    `points` IN ORDER. Progress is monotonic and persists across turns
+    on the per-episode `signals.seq_progress` (keyed by `id`), so a
+    unit may leave a waypoint after tagging it. The next waypoint only
+    advances when ≥`n` agent units are within its radius — reaching a
+    later point early does NOT skip ahead, and skipping a waypoint
+    means the sequence can never complete. Satisfied once every point
+    has been reached in order.
+
+    value: {id: str, points: [{x,y[,radius][,label]}...],
+            radius: float = 6, n: int = 1}
+    """
+    pts = v.get("points") or []
+    if not pts:
+        return False
+    store = getattr(c.signals, "seq_progress", None)
+    if store is None or not isinstance(store, dict):
+        store = {}
+        try:
+            c.signals.seq_progress = store  # type: ignore[attr-defined]
+        except Exception:  # frozen/stub signals in unit tests
+            pass
+    key = str(v.get("id", id(v)))
+    idx = int(store.get(key, 0))
+    units = _agent_units(c)
+    r_def = float(v.get("radius", 6))
+    need = int(v.get("n", 1))
+    # Advance through every consecutive waypoint currently satisfied
+    # (waypoints are spaced > 2r apart, so normally ≤1 per turn).
+    while idx < len(pts):
+        p = pts[idx]
+        if _in_radius(
+            units, int(p["x"]), int(p["y"]),
+            float(p.get("radius", r_def)),
+        ) >= need:
+            idx += 1
+        else:
+            break
+    store[key] = idx
+    return idx >= len(pts)
+
+
 # Each predicate: (ctx, value) -> bool. Pure and side-effect free.
 _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
     "explored_pct_gte": lambda c, v: c.signals.explored_percent >= float(v),
@@ -79,6 +122,10 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
         _agent_units(c), int(v["x"]), int(v["y"]), float(v.get("radius", 3))
     )
     >= int(v.get("n", 1)),
+    # Stateful ordered-route latch (see _waypoint_sequence). Lets a
+    # scenario require visiting W1→W2→…→Wk IN ORDER (skip/idle ⇒ never
+    # satisfied), which stateless region predicates cannot express.
+    "waypoint_sequence": lambda c, v: _waypoint_sequence(c, v),
     "all_units_in_region": lambda c, v: len(_agent_units(c)) > 0
     and _in_radius(_agent_units(c), int(v["x"]), int(v["y"]), float(v.get("radius", 3)))
     == len(_agent_units(c)),

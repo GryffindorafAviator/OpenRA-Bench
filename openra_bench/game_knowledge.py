@@ -206,6 +206,13 @@ _REGION_PHRASES: dict[str, Any] = {
         f"units into {_region(v, c)}"
     ),
     "all_units_in_region": lambda v, c: f"get EVERY unit into {_region(v, c)}",
+    "waypoint_sequence": lambda v, c: (
+        "reach these waypoints IN ORDER (no skipping, no idling): "
+        + " → then → ".join(
+            _region(p, c)
+            for p in ((v.get("points") or []) if isinstance(v, dict) else [])
+        )
+    ),
 }
 
 

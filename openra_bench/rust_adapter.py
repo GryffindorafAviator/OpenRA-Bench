@@ -122,6 +122,10 @@ class EpisodeSignals:
     # found a new base near a region).
     own_buildings: list[tuple[str, int, int]] = field(default_factory=list)
     production_items: list[str] = field(default_factory=list)
+    # Per-episode scratch latch for stateful win predicates (e.g.
+    # waypoint_sequence's ordered-visit progress, keyed by sequence id).
+    # Reset for free: EpisodeSignals is reconstructed each episode.
+    seq_progress: dict = field(default_factory=dict)
     # Outcome is synthesized (Rust has no result field): a scenario is
     # "won" when all enemy buildings have been discovered AND/OR all
     # enemy units neutralized — refined per-scenario in Phase 2 rubrics.
