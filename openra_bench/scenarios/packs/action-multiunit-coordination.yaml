@@ -2,11 +2,13 @@
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
 # ACTION focus: the plan is trivial and stated outright — "split the force,
-# send one group to region A and another to region B, arrive at both before
-# the deadline". The hard part is EXECUTION: a model that controls only one
-# group at a time, or marches everyone to a single objective, fails. Each
-# level adds another simultaneous objective / a tighter window so a single
-# serialized column can no longer satisfy the win condition in time.
+# put >=2 units in EACH region before the deadline". The hard part is
+# EXECUTION: serialized one-group-at-a-time control (visit A, then B, then
+# C) takes ~30+ turns to tour the map and BLOWS the binding tick deadline;
+# only genuine parallel dispatch (all groups moving at once, ~17-20 turns)
+# makes it. The split is enforced by units_in_region_gte (not reach_region,
+# which one touring unit could satisfy). Missing the deadline is a LOSS,
+# not a draw.
 
 meta:
   id: action-multiunit-coordination
@@ -29,38 +31,43 @@ base_map: rush-hour-arena
 base:
   agent: {faction: allies}
   enemy: {faction: soviet}
-  tools: [move_units, attack_unit, stop_units]
+  tools: [move_units, attack_unit, stop]
   planning: true
   termination: {max_ticks: 8000}
   actors:
-    # Two distinct agent groups in the spawn corner (x < 25) that must be
-    # split and driven to two separate regions at the same time.
+    # Two agent groups in the spawn corner (x < 25) that must be split
+    # and driven to separate regions at the same time.
     - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
     - {type: 1tnk, owner: agent, position: [7, 10], count: 3}
-    # Static enemy buildings act as the destination markers / targets.
+    # Static enemy buildings mark the destination regions.
     - {type: fact, owner: enemy, position: [110, 6]}
     - {type: proc, owner: enemy, position: [110, 33]}
 
 levels:
   easy:
     description: >
-      Two objectives, generous window. Split the 2tnk group to the
-      north-east region and the 1tnk group to the south-east region;
-      both groups must be on station before the deadline.
+      Two regions, 6 units. Put >=2 units in EACH region (NE ~110,6 and
+      SE ~110,33) before tick 2400. One direct parallel dispatch makes
+      it (~17-20 turns); touring both with one column does not. Lose if
+      the deadline passes or the force is wiped.
     overrides: {}
     win_condition:
       all_of:
-        - {reach_region: {x: 110, y: 6,  radius: 8}}
-        - {reach_region: {x: 110, y: 33, radius: 8}}
-        - {within_ticks: 6000}
+        - {units_in_region_gte: {x: 110, y: 6,  radius: 8, n: 2}}
+        - {units_in_region_gte: {x: 110, y: 33, radius: 8, n: 2}}
+        - {within_ticks: 2400}
+    fail_condition:
+      any_of:
+        - {not: {own_units_gte: 1}}
+        - {after_ticks: 2401}
     max_turns: 30
 
   medium:
     description: >
-      Three simultaneous regions and an attrition cap. The force splits
-      three ways (NE, SE, mid-east); enemy infantry contest the lanes so
-      sloppy serialized movement bleeds units and misses the tighter
-      deadline.
+      Three regions, 8 units, tighter deadline, attrition cap. Put >=2
+      units in EACH of NE/SE/mid-east before tick 2800; enemy infantry
+      contest the lanes (lose <=2 units). Serialized movement bleeds
+      units and misses the clock.
     overrides:
       actors:
         - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
@@ -73,19 +80,23 @@ levels:
         - {type: e1,   owner: enemy, position: [60, 31], stance: 2, count: 2}
     win_condition:
       all_of:
-        - {reach_region: {x: 110, y: 5,  radius: 7}}
-        - {reach_region: {x: 110, y: 34, radius: 7}}
-        - {reach_region: {x: 112, y: 20, radius: 7}}
-        - {within_ticks: 5000}
+        - {units_in_region_gte: {x: 110, y: 5,  radius: 7, n: 2}}
+        - {units_in_region_gte: {x: 110, y: 34, radius: 7, n: 2}}
+        - {units_in_region_gte: {x: 112, y: 20, radius: 7, n: 2}}
+        - {within_ticks: 2800}
         - {units_lost_lte: 2}
+    fail_condition:
+      any_of:
+        - {not: {own_units_gte: 1}}
+        - {after_ticks: 2801}
     max_turns: 36
 
   hard:
     description: >
-      Three contested regions, the full force must arrive (every unit in
-      one of the three zones — checked as occupied corners), defenders
-      have turrets, the deadline is tight and attrition is strict. Only
-      genuine parallel multi-group control can satisfy all clauses.
+      Three regions, full force (~10 units) from a seed-chosen corner,
+      gun turrets + infantry on the lanes, tight deadline + strict
+      attrition. Put >=2 units in EACH region before tick 3300 losing
+      <=2. Only genuine parallel multi-group control clears every clause.
     overrides:
       actors:
         # spawn_point 0 — full force, northern staging
@@ -109,11 +120,13 @@ levels:
         - {type: e1,   owner: enemy, position: [58, 20], stance: 2, count: 2}
     win_condition:
       all_of:
-        - {reach_region: {x: 112, y: 5,  radius: 7}}
-        - {reach_region: {x: 112, y: 35, radius: 7}}
-        - {reach_region: {x: 115, y: 20, radius: 7}}
-        - {within_ticks: 4200}
+        - {units_in_region_gte: {x: 112, y: 5,  radius: 7, n: 2}}
+        - {units_in_region_gte: {x: 112, y: 35, radius: 7, n: 2}}
+        - {units_in_region_gte: {x: 115, y: 20, radius: 7, n: 2}}
+        - {within_ticks: 3300}
         - {units_lost_lte: 2}
     fail_condition:
-      not: {own_units_gte: 1}
+      any_of:
+        - {not: {own_units_gte: 1}}
+        - {after_ticks: 3301}
     max_turns: 44

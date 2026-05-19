@@ -158,6 +158,10 @@ _PHRASES: dict[str, Any] = {
     "enemies_discovered_gte": lambda v: f"spot ≥{v} enemy units",
     "buildings_discovered_gte": lambda v: f"spot ≥{v} enemy buildings",
     "reach_region": lambda v: f"get a unit into region {_region(v)}",
+    "units_in_region_gte": lambda v: (
+        f"get ≥{(v if isinstance(v, dict) else {}).get('n', 1)} "
+        f"units into region {_region(v)}"
+    ),
     "all_units_in_region": lambda v: f"get EVERY unit into region {_region(v)}",
     "own_units_gte": lambda v: f"keep ≥{v} units alive",
     "cash_gte": lambda v: f"hold ≥{v} credits",

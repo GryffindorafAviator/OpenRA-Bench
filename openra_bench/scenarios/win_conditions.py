@@ -72,6 +72,13 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
         _agent_units(c), int(v["x"]), int(v["y"]), float(v.get("radius", 3))
     )
     >= 1,
+    # ≥ n agent units within radius of (x,y). Lets a scenario require a
+    # real force SPLIT ("≥2 units in EACH of 3 regions"), which
+    # reach_region (≥1) cannot express.
+    "units_in_region_gte": lambda c, v: _in_radius(
+        _agent_units(c), int(v["x"]), int(v["y"]), float(v.get("radius", 3))
+    )
+    >= int(v.get("n", 1)),
     "all_units_in_region": lambda c, v: len(_agent_units(c)) > 0
     and _in_radius(_agent_units(c), int(v["x"]), int(v["y"]), float(v.get("radius", 3)))
     == len(_agent_units(c)),
