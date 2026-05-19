@@ -111,3 +111,17 @@ def test_objective_brief_renders_ordered_and_relative():
     assert "IN ORDER" in exact and "(10,10)" in exact
     assert "the far NORTH-WEST" in rel and "(10,10)" not in rel
     assert "10" not in rel  # no coordinate leak in relative mode
+
+
+def test_hard_base_map_override_takes_effect():
+    """base_map must be set INSIDE overrides (a Level-level base_map is
+    silently ignored) — #2 hard must compile onto scout-arena, not the
+    pack-default rush-hour-arena."""
+    from openra_bench.scenarios import load_pack
+    from openra_bench.scenarios.loader import PACKS_DIR, compile_level
+    p = load_pack(PACKS_DIR / "action-sequenced-execution.yaml")
+    assert compile_level(p, "easy").scenario.base_map == "rush-hour-arena"
+    assert compile_level(p, "medium").scenario.base_map == "rush-hour-arena"
+    hard = compile_level(p, "hard")
+    assert hard.scenario.base_map == "scout-arena"
+    assert hard.map_supported, "scout-arena must resolve to a real .oramap"
