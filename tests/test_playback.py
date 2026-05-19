@@ -46,8 +46,14 @@ def test_run_level_playback_writes_transcript_and_manifest(tmp_path):
     lines = [
         json.loads(x) for x in (d / "turns.jsonl").read_text().splitlines() if x
     ]
-    assert len(lines) == res.turns
+    # res.turns model turns + 1 terminal "episode end" frame (the
+    # resolved post-action board the moment the episode ends).
+    assert len(lines) == res.turns + 1
     assert "ascii_minimap" in lines[0] and "commands" in lines[0]
+    term = lines[-1]
+    assert term["turn"] == res.turns + 1
+    assert "episode end" in term["commands"][0]
+    assert term["goal"]  # final goal snapshot present on the terminal frame
 
     manifest = json.loads((d / "manifest.json").read_text())
     assert manifest["outcome"] == res.outcome

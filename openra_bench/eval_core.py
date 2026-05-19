@@ -266,11 +266,39 @@ def run_level(
         adapter.signals.outcome = {"win": 1.0, "draw": 0.5, "loss": 0.0}[outcome]
         from .goal_tracker import turn_goal
 
+        final_rs = adapter.render_state()
         final_goal = turn_goal(
             compiled.win_condition,
-            WinContext(signals=adapter.signals,
-                       render_state=adapter.render_state()),
+            WinContext(signals=adapter.signals, render_state=final_rs),
         )
+        # Terminal frame: the RESOLVED post-action board the moment the
+        # episode ends (win/loss). The per-turn record uses the
+        # pre-step state, so without this the viewer never shows the
+        # winning/losing position. No model action on this frame.
+        if playback is not None:
+            _fpng = None
+            try:
+                from .minimap import terrain_png_for
+
+                if _pb_terrain is None:
+                    _pb_terrain = terrain_png_for(compiled.scenario.base_map)
+                from .prompt_v2 import minimap_b64 as _v2_mm
+
+                _fpng = _v2_mm(
+                    final_rs, _pb_terrain, _pb_explored,
+                    constant_colors=compiled.level in ("easy", "medium"),
+                )
+                if _fpng is None:
+                    from .agent import _render_minimap_b64
+
+                    _fpng = _render_minimap_b64(final_rs, _pb_terrain)
+            except Exception:  # noqa: BLE001 — playback never breaks a run
+                pass
+            playback.record_turn(
+                turns + 1, final_rs,
+                [f"(episode end: {('loss' if conceded else outcome)})"],
+                adapter.signals, _fpng, interrupt=None, goal=final_goal,
+            )
         result = EpisodeResult(
             scenario=f"{compiled.pack_id}:{compiled.level}",
             seed=seed,
