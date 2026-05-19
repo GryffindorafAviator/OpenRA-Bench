@@ -98,24 +98,32 @@ levels:
     # Identical setup to MEDIUM (same regions, same enemy pickets, same
     # deadline + attrition). The ONLY changed variable is disclosure:
     # objective_coords:relative names the enemy building TYPE in each
-    # direction instead of (x,y), so the model must find that specific
-    # structure on the minimap and converge on it. Each named building
-    # sits at the region centre (fact NE / proc SE / powr SW). A hard
-    # failure attributes to spatial grounding, not extra combat.
+    # direction instead of (x,y). The buildings start in fog, so the
+    # model must SCOUT toward each direction; enemy_building_spotted
+    # interrupts re-prompt it the instant a unit sights a marker,
+    # revealing that building's exact position — the corrective
+    # feedback loop that makes coordinate-blind grounding solvable. A
+    # hard failure attributes to spatial grounding, not extra combat.
     objective_coords: relative
     description: >
-      Three dispersed regions, 8 units, attrition cap — but you are NOT
-      given coordinates. Instead, each target region is marked by a
-      specific enemy building you must reach. Put >=2 units next to EACH
-      of: the enemy Construction Yard in the NORTH-EAST, the enemy Power
-      Plant in the SOUTH-WEST (bottom-left), and the enemy Ore Refinery
-      in the SOUTH-EAST, before tick 2800, losing <=2. Identify each
-      building on the minimap and drive to it. The three lie in three
-      different directions; a single eastward column cannot reach the
-      south-west one, so this needs genuine multi-vector dispatch.
-      Enemy infantry contest the two eastern lanes; the south-west
-      route is clear.
+      Three dispersed regions, 8 units, attrition cap — you are NOT
+      given coordinates. Each target region is marked by a specific
+      enemy building, hidden in fog until you scout it. Put >=2 units
+      next to EACH of: the enemy Construction Yard in the NORTH-EAST,
+      the enemy Power Plant in the SOUTH-WEST (bottom-left), and the
+      enemy Ore Refinery in the SOUTH-EAST, before tick 2800, losing
+      <=2. Push a group toward each direction and KEEP ADVANCING — do
+      not stop at a guessed spot. The instant a unit spots a target
+      building you will be interrupted and shown its exact location;
+      then converge >=2 units on it. The three lie in three different
+      directions; a single eastward column cannot reach the south-west
+      one, so this needs genuine multi-vector dispatch. Enemy infantry
+      contest the two eastern lanes; the south-west route is clear.
     overrides:
+      interrupts:
+        # Re-prompt the moment a unit sights a marker building — gives
+        # the coordinate-blind agent the position feedback it needs.
+        enemy_building_spotted: true
       actors:
         - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
         - {type: 1tnk, owner: agent, position: [7, 10], count: 3}
