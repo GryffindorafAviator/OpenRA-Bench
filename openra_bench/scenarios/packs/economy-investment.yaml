@@ -1,33 +1,43 @@
 meta:
   id: economy-investment
-  title: 'Capital Allocation — Split One Budget Between Economy and Military'
+  title: 'Capital Allocation — Commit One Indivisible Budget to a Single Path'
   capability: reasoning
   real_world_meaning: >
-    A capital-allocation decision under a single indivisible budget:
-    the same cash buys EITHER a wide economy (a second refinery plus
-    supporting power — depot/throughput capacity) OR a deep one (one
-    refinery plus a larger forward force — collection/utilisation). The
-    budget covers exactly one coherent path; splitting it builds
-    neither. The test is committing to and completing one allocation,
-    not the mechanics of either build.
+    A capital-allocation decision under a single indivisible budget that
+    is razor-tight: the cash buys EXACTLY ONE coherent path — a WIDE
+    economy (a second refinery plus supporting power: added
+    depot/throughput capacity) OR a DEEP one (keep the single refinery
+    and convert the whole budget into a larger forward force:
+    collection/utilisation). The budget cannot fund both, and any
+    credit diverted to the other path starves the required one so it
+    never completes in time. The test is committing to and finishing
+    the one correct allocation; a split (hedged) budget builds neither
+    and loses.
   robotics_analogue: >
-    Fleet capital allocation: a fixed budget that buys either added
-    depot/processing capacity or added collector/worker agents — the
-    classic throughput-versus-collection trade in an autonomous
-    foraging fleet, where indecision (a split budget) yields neither.
+    Fleet capital allocation under a hard, indivisible budget: the same
+    funds buy EITHER added depot/processing capacity OR added
+    collector/worker agents — the classic throughput-versus-collection
+    trade in an autonomous foraging fleet, where a hedged (split)
+    budget yields neither and the mission deadline is missed.
   author: autonomous-loop
 
-# ENGINE NOTE (verified): harvest income is 0 in a runnable pack today
-# (no schema-valid ore source; .oramap files embed no resource tiles;
-# `silo` is schema-valid but `resource_capacity` is hardcoded 0 so
-# silos have no effect). This runnable variant therefore tests the
-# ALLOCATION decision over a fixed `starting_cash`, verified by build
-# predicates. The full harvest-throughput version (2 proc vs 1 proc +
-# extra harv, scored by harvested cash, plus silo storage cap) is
-# specified in SCENARIO_BRAINSTORM.md and gated on engine-prereqs
-# S0 (schema-valid ore source) and S1 (silo storage modeling).
+# ENGINE NOTE (verified 2026-05-19, scripted run_level seeds 1-4):
+# harvest income is 0 in a runnable pack today (no schema-valid ore
+# source; .oramap files embed no resource tiles; `silo`
+# resource_capacity is hardcoded 0). Without income the ONLY scarcity
+# lever is `starting_cash`, so each level's budget is set to the EXACT
+# cost of its one correct path (proc 1400, powr 300, e1 100, verified
+# against openra-sim/src/gamerules.rs). Any credit spent on the other
+# path leaves too little to complete the required one before the
+# deadline → the wide/deep trade is mutually exclusive and binding
+# (proven: a "split"/"do-both" policy LOSES every level, every seed).
+# Newly produced infantry block the barracks exit cells if they are
+# not moved away — a competent deep policy must scatter its force
+# (verified: naive non-scattering builder stalls at ~14 units; a
+# scatter policy reaches 26+). The full harvest-throughput version is
+# specified in SCENARIO_BRAINSTORM.md, gated on engine S0/S1.
 base_map: rush-hour-arena
-starting_cash: 4500
+starting_cash: 1700
 
 base:
   agent:
@@ -64,52 +74,55 @@ base:
 levels:
   easy:
     description: >
-      Wide-economy path, generous clock: invest the budget into a
-      second refinery plus supporting power (added throughput
-      capacity). Splitting the budget into scattered units instead
-      fails the building bar.
-    starting_cash: 4500
+      WIDE path. The budget is exactly the cost of a second refinery
+      plus its supporting power plant (1400 + 300 = 1700) and nothing
+      more. Build and place a 2nd refinery and a 2nd power plant. Any
+      credit spent on units instead leaves too little to finish both
+      structures — a split budget builds neither in time.
+    starting_cash: 1700
     win_condition:
       all_of:
         - building_count_gte: {type: proc, n: 2}
         - building_count_gte: {type: powr, n: 2}
-        - within_ticks: 6303
-    # aligned to tick reachable at max_turns (~90/turn): non-finisher
-    # LOSES not draws; turn budget unchanged (solvency-safe).
+        - within_ticks: 1893
+    # after_ticks == within_ticks and both ≤ 93+90·(24-1)=2163:
+    # a non-finisher (stall / wrong-or-split allocation) LOSES, not
+    # draws. Wide completes ~tick 1263 (measured) — comfortable slack.
     fail_condition:
-      after_ticks: 6303
-    max_turns: 70
+      after_ticks: 1893
+    max_turns: 24
   medium:
     description: >
-      Budget covers exactly one coherent path. The wide-economy
-      allocation is scored here (second refinery + power + a small
-      utilising force) under a tighter clock; the deep alternative is
-      the hard level.
-    starting_cash: 3200
+      WIDE path under a tighter clock, plus a small utilising force.
+      The budget is exactly the wide expansion (1400 + 300) plus three
+      infantry (3 × 100 = 2000) and nothing more. Build the 2nd
+      refinery, 2nd power plant, AND three units. A fourth unit (or any
+      other diversion) overspends and the second refinery never
+      completes in time.
+    starting_cash: 2000
     win_condition:
       all_of:
         - building_count_gte: {type: proc, n: 2}
         - building_count_gte: {type: powr, n: 2}
         - own_units_gte: 3
-        - within_ticks: 7203
+        - within_ticks: 2073
     fail_condition:
-      after_ticks: 7203
-    max_turns: 80
+      after_ticks: 2073
+    max_turns: 26
   hard:
     description: >
-      Lean budget forces the DEEP allocation: keep the single refinery
-      and instead convert the budget into a larger forward force under
-      a short clock with an attrition cap. Only a committed (unsplit)
-      allocation clears the bar in time.
-    starting_cash: 2600
+      DEEP path. The budget converts entirely into a forward force:
+      keep the single refinery and field 22 infantry (22 × 100 = 2200,
+      the whole budget). Building a second refinery or power plant
+      consumes credits the force needs and the bar is missed. Newly
+      produced units must be moved clear of the barracks or production
+      stalls.
+    starting_cash: 2200
     win_condition:
       all_of:
-        - own_units_gte: 6
+        - own_units_gte: 22
         - building_count_gte: {type: proc, n: 1}
-        - units_lost_lte: 0
-        - within_ticks: 8103
+        - within_ticks: 2613
     fail_condition:
-      any_of:
-        - after_ticks: 8103
-        - not: {units_lost_lte: 0}
-    max_turns: 90
+      after_ticks: 2613
+    max_turns: 32
