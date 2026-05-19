@@ -175,6 +175,10 @@ def run_level(
         turns = 0
         issued = warned = 0
         conceded = False
+        # Persistent fog history so the SAVED minimap == the image the
+        # model actually saw (same vendored _minimap_v2, accumulating).
+        _pb_explored: set = set()
+        _pb_terrain = None
         # Interrupt-driven mode (step 4): if the scenario enabled any
         # interrupt signals, advance with step_until_event so the agent
         # is re-prompted (debriefed) the moment an event fires
@@ -218,12 +222,21 @@ def run_level(
             if playback is not None:
                 _png = None
                 try:
-                    from .agent import _render_minimap_b64
                     from .minimap import terrain_png_for
 
-                    _png = _render_minimap_b64(
-                        rs, terrain_png_for(compiled.scenario.base_map)
-                    )
+                    if _pb_terrain is None:
+                        _pb_terrain = terrain_png_for(
+                            compiled.scenario.base_map
+                        )
+                    # Same vendored _minimap_v2 the model is sent, with
+                    # accumulating fog → saved image == model's image.
+                    from .prompt_v2 import minimap_b64 as _v2_mm
+
+                    _png = _v2_mm(rs, _pb_terrain, _pb_explored)
+                    if _png is None:
+                        from .agent import _render_minimap_b64
+
+                        _png = _render_minimap_b64(rs, _pb_terrain)
                 except Exception:  # noqa: BLE001 — playback never breaks a run
                     pass
                 from .goal_tracker import turn_goal
