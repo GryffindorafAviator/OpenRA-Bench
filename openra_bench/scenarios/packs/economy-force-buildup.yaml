@@ -1,22 +1,36 @@
 meta:
   id: economy-force-buildup
-  title: 'Force Buildup — Spend a Limited Budget to Field the Strongest Army'
+  title: 'Force Buildup — Allocate a Fixed Budget to a Power+Force Mix'
   capability: reasoning
   real_world_meaning: >
-    Resource allocation under a hard budget and deadline: given finite
-    funds and a production facility, decide how much to spend and when
-    to commit, so a sufficient force is fielded before time runs out.
-    Spend too slow and the deadline is missed; the budget caps how much
-    is even possible — the decision is the spend/commit schedule.
+    Resource allocation under a hard budget and a deadline. The budget
+    buys exactly one coherent build: a structural investment (a second
+    power plant) PLUS a force of capable units (anti-vehicle infantry,
+    not the cheapest filler). Spamming the cheapest unit clears no
+    structural bar and no quality bar; over-spending on the wrong item
+    misses the deadline. The decision is the spend mix and its order,
+    not the mechanics of any single build.
   robotics_analogue: >
-    Autonomous fleet/agent provisioning under an energy or money budget
-    — deciding how many sub-agents to spin up and when, given a finite
-    resource pool and a mission deadline.
+    Autonomous fleet provisioning under an energy/money budget: the
+    same pool must fund both a capacity upgrade (a charging/relay node)
+    AND a set of capable mission agents — not a swarm of the cheapest
+    drones — before a mission deadline; an unfocused spend yields
+    neither in time.
   author: autonomous-loop
 
+# ENGINE NOTE (verified 2026-05): harvest income is 0 in a runnable
+# pack (no schema-valid ore source), and power_provided/power_drained
+# read 0 even with preplaced power plants, so `power_surplus_gte` is
+# inert here and is NOT used. The structural-investment axis is
+# therefore expressed with `building_count_gte` (a *placed* second
+# powr), and unit quality with `unit_type_count_gte` (e3 anti-vehicle
+# infantry at 300cr, vs the 100cr e1 filler). `place_building`
+# requires the item to be queued via `build` and completed first
+# (two-step: build → place). Budgets/clocks measured with a scripted
+# allocator (build powr → place → train e3): see commit message.
 base_map: rush-hour-arena
-# Pack-wide economy default; levels tighten it as the designed constraint.
-starting_cash: 2000
+# Pack-wide economy default; levels set the binding per-level budget.
+starting_cash: 2400
 
 base:
   agent:
@@ -25,28 +39,29 @@ base:
     faction: soviet
   tools:
     - build
+    - place_building
     - move_units
-    - attack_unit
+    - deploy
     - stop
   planning: true
   termination:
     max_ticks: 30000
   actors:
-    - type: barr
+    - type: fact
       owner: agent
       position:
       - 10
-      - 20
+      - 18
     - type: powr
       owner: agent
       position:
       - 14
-      - 20
-    - type: jeep
+      - 18
+    - type: tent
       owner: agent
       position:
-      - 8
-      - 18
+      - 10
+      - 22
     - type: e1
       owner: enemy
       position:
@@ -57,32 +72,56 @@ base:
 levels:
   easy:
     description: >
-      Generous budget and clock. Build a small force from the barracks;
-      the only failure mode is not committing funds at all.
-    starting_cash: 2000
+      Allocate the budget to a structural upgrade PLUS a quality force:
+      build and place a second power plant (powr) and train at least 4
+      anti-vehicle infantry (e3). Spamming the cheap rifle (e1) clears
+      neither bar. Generous clock; the only failure is an unfocused or
+      late spend.
+    starting_cash: 2400
     win_condition:
       all_of:
-        - own_units_gte: 4        # jeep + >=3 produced infantry
-        - within_ticks: 16000
-    max_turns: 45
+        - building_count_gte: {type: powr, n: 2}
+        - unit_type_count_gte: {type: e3, n: 4}
+        - within_ticks: 2703
+    # aligned to the tick reachable at max_turns (~90/turn): a
+    # non-finisher LOSES (not draws). Intended allocator finishes by
+    # tick ~993, well inside. (No `own_units_gte` fail clause: the
+    # agent starts unit-less and must produce a force, so that clause
+    # would mis-fire on turn 1.)
+    fail_condition:
+      after_ticks: 2703
+    max_turns: 30
   medium:
     description: >
-      Tighter budget — only a few units are affordable; spend must start
-      promptly to make the deadline.
-    starting_cash: 900
+      Tighter budget and clock. The same allocation, scaled: a second
+      power plant plus 5 anti-vehicle infantry. The budget covers
+      exactly this one coherent build — cheap-unit spam or an
+      over-investment misses the deadline.
+    starting_cash: 1900
     win_condition:
       all_of:
+        - building_count_gte: {type: powr, n: 2}
+        - unit_type_count_gte: {type: e3, n: 5}
         - own_units_gte: 5
-        - within_ticks: 12000
-    max_turns: 45
+        - within_ticks: 2523
+    fail_condition:
+      after_ticks: 2523
+    max_turns: 28
   hard:
     description: >
-      Lean budget and a short clock with an attrition cap: every credit
-      and tick must convert to fielded force, losing nothing.
-    starting_cash: 700
+      Lean budget, short clock, zero-attrition: build and place a
+      second power plant and train 6 anti-vehicle infantry, losing
+      nothing. Every credit and tick must convert to fielded force in
+      the correct order; spam or an over-spend fails the clock.
+    starting_cash: 2150
     win_condition:
       all_of:
-        - own_units_gte: 6
-        - within_ticks: 9000
+        - building_count_gte: {type: powr, n: 2}
+        - unit_type_count_gte: {type: e3, n: 6}
         - units_lost_lte: 0
-    max_turns: 50
+        - within_ticks: 2163
+    fail_condition:
+      any_of:
+        - after_ticks: 2163
+        - not: {units_lost_lte: 0}
+    max_turns: 24
