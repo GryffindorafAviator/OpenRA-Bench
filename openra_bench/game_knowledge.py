@@ -196,6 +196,11 @@ _PHRASES: dict[str, Any] = {
     "enemy_buildings_destroyed_gte": lambda v: f"destroy ≥{v} enemy buildings",
     "enemy_key_buildings_destroyed": lambda v: "destroy the enemy "
     + "+".join(v.get("types", []) if isinstance(v, dict) else v),
+    "enemy_key_buildings_destroyed_in_region": lambda v: (
+        "destroy the enemy "
+        + "+".join((v or {}).get("types", []))
+        + f" at the base near ({(v or {}).get('x')},{(v or {}).get('y')})"
+    ),
 }
 
 

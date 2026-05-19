@@ -108,6 +108,22 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
         >= 1
         for t in (v["types"] if isinstance(v, dict) else v)
     ),
+    # Region-scoped variant: every named key type must have been
+    # destroyed WITHIN radius of (x,y). Lets a scenario require razing
+    # fact+proc at TWO separate bases (one per squad) — the type-only
+    # count above is satisfied by levelling a single base, so it cannot
+    # enforce genuine simultaneous two-group control. {x,y,radius,types}
+    "enemy_key_buildings_destroyed_in_region": lambda c, v: all(
+        any(
+            str(bt).lower() == str(t).lower()
+            and (bx - int(v["x"])) ** 2 + (by - int(v["y"])) ** 2
+            <= float(v.get("radius", 8)) ** 2
+            for (bt, bx, by) in getattr(
+                c.signals, "enemy_buildings_destroyed_records", []
+            )
+        )
+        for t in v["types"]
+    ),
     "units_lost_lte": lambda c, v: c.signals.units_lost <= int(v),
     "within_ticks": lambda c, v: c.signals.game_tick <= int(v),
     "after_ticks": lambda c, v: c.signals.game_tick >= int(v),

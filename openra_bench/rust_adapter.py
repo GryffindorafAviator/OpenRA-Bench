@@ -105,6 +105,11 @@ class EpisodeSignals:
     # "eliminate the enemy's key economic structures" objectives.
     enemy_buildings_destroyed: int = 0
     enemy_buildings_destroyed_types: dict = field(default_factory=dict)
+    # Per-destroyed-building records (type, last-seen cell_x, cell_y) so a
+    # win can require key buildings be destroyed AT a specific region —
+    # i.e. raze fact+proc at TWO separate bases (one per squad), which
+    # the type-only count cannot express.
+    enemy_buildings_destroyed_records: list = field(default_factory=list)
     new_enemies_this_step: int = 0
     new_buildings_this_step: int = 0
     game_tick: int = 0
@@ -235,6 +240,9 @@ class RustObsAdapter:
                 self._destroyed_bldg_ids.add(bid)
                 s.enemy_buildings_destroyed_types[btype] = (
                     s.enemy_buildings_destroyed_types.get(btype, 0) + 1
+                )
+                s.enemy_buildings_destroyed_records.append(
+                    (btype, int(bx), int(by))
                 )
         s.enemy_buildings_destroyed = len(self._destroyed_bldg_ids)
 
