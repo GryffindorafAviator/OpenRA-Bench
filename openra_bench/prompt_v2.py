@@ -130,7 +130,11 @@ def state_from_render(render_state: dict) -> dict:
         "explored_percent": round(
             float(render_state.get("explored_percent", 0.0) or 0.0), 1
         ),
-        "minimap": render_state.get("minimap", "") or "",
+        # Deliberately empty: the spatial channel is the PNG minimap
+        # (sent as an image). Training strips the ASCII grid from
+        # briefings (agent_rollout._strip_ascii_minimap) — it's
+        # redundant, token-heavy, and a coordinate-counting crutch.
+        "minimap": "",
         "buildings_summary": [
             {"type": t, "id": i, "cell_x": x, "cell_y": y}
             for i, (t, x, y) in enumerate(
