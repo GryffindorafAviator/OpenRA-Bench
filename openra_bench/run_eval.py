@@ -40,7 +40,13 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
         return lambda _c: scripted_explore_agent
     from .agent import ModelAgent
 
-    from .game_knowledge import objective_brief, scenario_primer
+    from .game_knowledge import (actor_codes, objective_brief,
+                                 scenario_primer)
+    from .prompt_v2 import unit_codex as _codex
+    def _scn_codes(c):
+        from .game_knowledge import _condition_codes
+        return (actor_codes(c.scenario) | _condition_codes(c.win_condition)
+                | _condition_codes(c.fail_condition))
 
     def factory(compiled: CompiledLevel):
         agent = ModelAgent(
@@ -54,6 +60,7 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
             ),
             system_extra=scenario_primer(compiled),
             base_map=compiled.scenario.base_map,
+            unit_codex=_codex(_scn_codes(compiled)),
         )
         return agent.agent_fn
 
@@ -132,7 +139,13 @@ def evaluate(
             provider_cfg, rate_limiter=limiter, cost_meter=meter
         )
 
-        from .game_knowledge import objective_brief, scenario_primer
+        from .game_knowledge import (actor_codes, objective_brief,
+                                     scenario_primer)
+        from .prompt_v2 import unit_codex as _codex
+        def _scn_codes(c):
+            from .game_knowledge import _condition_codes
+            return (actor_codes(c.scenario) | _condition_codes(c.win_condition)
+                    | _condition_codes(c.fail_condition))
 
         def factory(compiled: CompiledLevel):
             return ModelAgent(
@@ -147,6 +160,7 @@ def evaluate(
                 provider=shared,
                 system_extra=scenario_primer(compiled),
                 base_map=compiled.scenario.base_map,
+                unit_codex=_codex(_scn_codes(compiled)),
             ).agent_fn
 
     # Run/model identity so a single playback root can hold many runs

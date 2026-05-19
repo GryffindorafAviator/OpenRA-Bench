@@ -47,24 +47,40 @@ def _units_to_render_list(
     hp = hp or {}
     type_by_id = type_by_id or {}
     out: list[dict] = []
+    _NONCOMBAT = {"harv", "mcv", "medi", "e6", "spy", "thf"}
     for uid, p in (positions or {}).items():
+        tgt = None
         if isinstance(p, dict):
             cx, cy = int(p.get("cell_x", 0)), int(p.get("cell_y", 0))
             activity = p.get("activity")
+            t = p.get("target")
+            if isinstance(t, (list, tuple)) and len(t) >= 2:
+                tgt = (int(t[0]), int(t[1]))
         elif isinstance(p, (list, tuple)) and len(p) >= 2:
             cx, cy, activity = int(p[0]), int(p[1]), None
         else:
             continue
-        out.append(
-            {
-                "id": str(uid),
-                "cell_x": cx,
-                "cell_y": cy,
-                "type": type_by_id.get(str(uid)),
-                "hp": float(hp.get(uid, hp.get(str(uid), 1.0)) or 0.0),
-                "activity": activity,
-            }
-        )
+        utype = type_by_id.get(str(uid))
+        if not utype and isinstance(p, dict):
+            utype = p.get("actor_type")  # engine now emits own-unit type
+        utype = utype or "?"
+        is_idle = tgt is None and (activity in (None, "", "idle", "Idle"))
+        entry = {
+            "id": str(uid),
+            "cell_x": cx,
+            "cell_y": cy,
+            "type": utype,
+            "hp": float(hp.get(uid, hp.get(str(uid), 1.0)) or 0.0),
+            "activity": activity,
+            "idle": is_idle,
+            # Unknown type ⇒ assume combat-capable (don't hide it from
+            # the Idle scan); known non-combat types excluded.
+            "can_attack": (str(utype).lower() not in _NONCOMBAT)
+            if utype else True,
+        }
+        if tgt is not None:
+            entry["target_x"], entry["target_y"] = tgt
+        out.append(entry)
     return out
 
 
@@ -337,4 +353,14 @@ class RustObsAdapter:
             "spatial_shape": tuple(
                 self._raw.get("spatial_shape", (0, 0, 0)) or (0, 0, 0)
             ),
+            # Raw obs + playable bounds so the vendored training
+            # minimap_v2.render (consumes unit_positions/enemy_positions/
+            # explored_cells directly) and briefing_v2 can be used
+            # verbatim — identical-by-construction with training.
+            "_raw": self._raw,
+            "bounds": (0, 0, w, h),
+            "enemy_buildings_summary": list(
+                self._raw.get("enemy_buildings_summary", []) or []
+            ),
+            "harvesters": self.signals.harvesters,
         }

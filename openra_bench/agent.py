@@ -470,14 +470,16 @@ class ModelAgent:
         provider: ChatProvider | None = None,
         system_extra: str = "",
         base_map: str = "",
+        unit_codex: str = "",
     ):
         self.cfg = cfg
         self.objective = objective
         self.tools = _tool_schemas(allowed_tools)
         self.provider = provider or make_provider(cfg)
-        # Real terrain (map.png from the .oramap) so the model gets the
-        # training renderer's terrain+legend minimap, not colour dots.
+        # Real terrain (map.png from the .oramap) for the vendored
+        # training bitmap minimap; persistent fog history across turns.
         self._terrain: bytes | None = None
+        self._explored_history: set = set()
         if base_map:
             try:
                 from .minimap import terrain_png_for
@@ -485,19 +487,42 @@ class ModelAgent:
                 self._terrain = terrain_png_for(base_map)
             except Exception:  # noqa: BLE001
                 self._terrain = None
-        sys_content = SYSTEM_PROMPT
-        if system_extra:
-            # Deterministic scenario-scoped game knowledge (glossary,
-            # game model, tech) so every model is judged on reasoning,
-            # not on patchy Red Alert trivia.
-            sys_content = f"{SYSTEM_PROMPT}\n\n{system_extra}"
+        # System prompt = vendored training system_v2 (objective lives
+        # HERE, not per-turn) + the scenario unit codex. Falls back to
+        # the legacy prompt only if the vendored template is missing.
+        try:
+            from .prompt_v2 import system_prompt as _sysp
+
+            sys_content = _sysp(self.objective, unit_codex)
+        except Exception:  # noqa: BLE001
+            sys_content = SYSTEM_PROMPT + (
+                f"\n\n{system_extra}" if system_extra else ""
+            )
         self.history: list[dict] = [{"role": "system", "content": sys_content}]
         self.stats = {"turns": 0, "tool_calls": 0, "empty_replies": 0}
 
     def _user_message(self, render_state: dict) -> dict:
-        text = build_briefing(render_state, self.objective)
+        # Briefing = vendored training briefing_v2 (one unit/line,
+        # "moving to (x,y)", Idle list). Objective is in the system
+        # prompt now, so it's NOT repeated here.
+        try:
+            from .prompt_v2 import briefing as _v2_brief
+
+            text = _v2_brief(render_state)
+        except Exception:  # noqa: BLE001 — never break a turn
+            text = build_briefing(render_state, self.objective)
         if self.cfg.vision:
-            b64 = _render_minimap_b64(render_state, self._terrain)
+            b64 = None
+            try:
+                from .prompt_v2 import minimap_b64 as _v2_mm
+
+                b64 = _v2_mm(
+                    render_state, self._terrain, self._explored_history
+                )
+            except Exception:  # noqa: BLE001
+                b64 = None
+            if b64 is None:
+                b64 = _render_minimap_b64(render_state, self._terrain)
             if b64:
                 return {
                     "role": "user",

@@ -108,18 +108,28 @@ def test_all_predicate_keys_have_a_translation():
         )
 
 
-def test_model_agent_injects_primer_into_system():
-    from openra_bench.agent import SYSTEM_PROMPT, ModelAgent
+def test_model_agent_system_is_vendored_v2_with_objective_and_codex():
+    """System prompt = vendored training system_v2 (objective lives
+    HERE, not per-turn) + the scenario unit codex."""
+    from openra_bench.agent import ModelAgent
+    from openra_bench.prompt_v2 import unit_codex
     from openra_bench.providers import ProviderConfig
 
     a = ModelAgent(
         ProviderConfig(vision=False),
         allowed_tools=["observe"],
-        objective="WIN WHEN: x.",
+        objective="WIN WHEN: destroy 3 enemy units.",
         provider=type("P", (), {"complete": lambda *a, **k: None})(),
-        system_extra="GAME KNOWLEDGE: e1 = rifle infantry",
+        unit_codex=unit_codex({"e1", "2tnk"}),
     )
-    sysmsg = a.history[0]
-    assert sysmsg["role"] == "system"
-    assert SYSTEM_PROMPT in sysmsg["content"]
-    assert "GAME KNOWLEDGE: e1 = rifle infantry" in sysmsg["content"]
+    sys = a.history[0]
+    assert a.history[0]["role"] == "system"
+    sys = sys["content"]
+    # vendored system_v2 header + combat model
+    assert sys.startswith("You are playing Command & Conquer: Red Alert.")
+    assert "Combat model" in sys
+    # objective substituted into the system prompt; no leftover token
+    assert "OBJECTIVE (this scenario): WIN WHEN: destroy 3 enemy units." in sys
+    assert "{objective}" not in sys
+    # scenario unit codex with numbers appended
+    assert "UNIT CODEX" in sys and "e1" in sys and "hp" in sys
