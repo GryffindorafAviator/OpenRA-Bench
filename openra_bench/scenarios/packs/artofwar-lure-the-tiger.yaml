@@ -1,32 +1,54 @@
 meta:
   id: artofwar-lure-the-tiger
-  title: 'Lure the Tiger Off the Mountain — Bait the Guard Away, Then Take the Objective'
+  title: 'Lure the Tiger Off the Mountain — Pull the Strong Defender Off the Lane, Then Run the Main Force Past It'
   capability: reasoning
   real_world_meaning: >
-    調虎離山 — draw the enemy from its strong position. A single strong,
-    reactive GUARD force is posted on the only objective and is too
-    powerful to fight head-on. Phase 1 (send the fast probe in close so
-    the guard lunges out after it) yields ZERO objective progress and
-    looks locally wasteful; only in phase 2 — while the guard is pulled
-    off its post — does the main force, timed into that window, take
-    the objective before the guard snaps back. A two-phase plan whose
-    enabling first phase has no reward: long-horizon credit assignment.
+    调虎离山 — "lure the tiger off the mountain." A STRONG leashed
+    GUARD line (engine scripted bot 'guard') walls the only lane to the
+    objective: every guard holds its post, auto-fires anything in
+    range, lunges at the nearest foe within its aggro radius, and snaps
+    straight back to its post the instant nothing threatens it. Driving
+    the durable main body straight down the lane runs it into the full
+    line (anti-tank rockets) and it is shot apart before it gets
+    through. The only winning policy commits the fast bait on a
+    DIVERGENT vector that comes just close enough to the line to make a
+    segment of it lunge OUT after the bait — off the lane, toward its
+    leash — then, in that transient window while the tiger is off the
+    mountain, runs the main body through the briefly-open slot to the
+    far objective before the line snaps back. Phase 1 (pulling the
+    tiger off) yields ZERO objective progress and looks locally
+    negative (the bait draws all the fire); only phase 2, through the
+    vacated slot, scores. The distinction from decoy-sacrifice: here
+    the credit problem is DISPLACE-AND-EXPLOIT — the bait must lure the
+    defender off and the main force must exploit the *reversible*
+    vacancy in time; preserving the force is what is rewarded, not
+    spending a sacrificial decoy. Greedy "just charge the lane" and "do
+    nothing" both fail; a bait that never gets close enough never
+    displaces the tiger.
   robotics_analogue: >
-    Two-phase manipulation against a reactive sentry: a no-reward
-    enabling action (lure the sentry off its station within its leash)
-    must precede, and be timed with, the rewarded objective action.
+    Two-phase manipulation against a reactive guarding obstacle: a
+    no-reward enabling action (entice a leashed interceptor off the
+    only corridor with a decoy on a divergent vector) must precede and
+    temporally overlap the rewarded objective action (run the payload
+    through the briefly-cleared corridor before the interceptor
+    snaps back).
   author: openra-bench
 
 base_map: rush-hour-arena
 
-# The "tiger" is a LEASHED GUARD (engine scripted bot 'guard'): heavy
-# armour + rocket infantry posted ON the objective. It holds station,
-# auto-fires in range, lunges at a foe within its aggro radius, and
-# SNAPS BACK past its leash. Charging the main force straight in is
-# destroyed by it (too strong to fight). Only sending the fast jeep
-# in close pulls the tiger off-post — then the main body, timed into
-# that vacancy, runs the lane to the objective before it returns.
-# Greedy head-on / do-nothing both fail.
+# Same map/topology FAMILY as artofwar-decoy-sacrifice (leashed guard
+# line + far `fact` objective + units_in_region_gte n3 + reachable
+# timeout/attrition fails) — the audited, no-cheat idiom. The genuinely
+# distinct credit-assignment (per the design audit, decoy-sacrifice vs
+# lure-the-tiger = "sacrifice-and-lose" vs "displace-and-exploit"):
+# decoy-sacrifice SPENDS expendable bait against a distributed hunting
+# picket; here the bait LURES a segment of the wall off its post and
+# the main body must exploit the *reversible* vacancy while preserving
+# the force (strict loss caps forbid spending armour; on easy the bait
+# itself must survive). e3 = anti-tank rockets: a head-on column dies
+# in the line. An unarmed high-HP `fact` marks the far objective AND
+# keeps the episode alive (no enemy-elimination auto-terminal — the
+# line cannot simply be wiped for a draw).
 base:
   agent: {faction: allies, cash: 0}
   enemy: {faction: soviet, cash: 0, bot_type: guard}
@@ -34,107 +56,49 @@ base:
   planning: true
   termination: {max_ticks: 12000}
   actors:
-    # Main force — THREE must reach the far objective. Cannot beat the
-    # tiger head-on.
+    # Main body — durable but slow; THREE must reach the far objective.
     - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
-    # The probe/lure — fast, draws the tiger off-post (need not die).
-    - {type: jeep, owner: agent, position: [6, 24], stance: 1, count: 2}
-    # The tiger — heavy guard posted ON the objective approach.
-    - {type: e3, owner: enemy, position: [55, 6], stance: 2}
-    - {type: e3, owner: enemy, position: [55, 11], stance: 2}
-    - {type: e3, owner: enemy, position: [55, 16], stance: 2}
-    - {type: e3, owner: enemy, position: [55, 21], stance: 2}
-    - {type: e3, owner: enemy, position: [55, 26], stance: 2}
-    - {type: e3, owner: enemy, position: [55, 31], stance: 2}
-    - {type: e3, owner: enemy, position: [55, 36], stance: 2}
-    # Objective marker (far east, just past the tiger's post). Unarmed
-    # high-HP: the landmark, and it prevents the enemy-elimination
-    # auto-terminal (the tiger can't be wiped to end the episode).
-    - {type: fact, owner: enemy, position: [123, 20]}
+    # Bait — fast. The decoy that lures a segment of the line off post.
+    - {type: jeep, owner: agent, position: [6, 26], stance: 1, count: 2}
+    # The TIGER: a leashed guard wall astride the only lane (x=60),
+    # spanning the traversable height. Anti-tank rockets — a head-on
+    # column is shot apart in it before three get through.
+    - {type: e3, owner: enemy, position: [60, 6],  stance: 2}
+    - {type: e3, owner: enemy, position: [60, 11], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 16], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 26], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 31], stance: 2}
+    - {type: e3, owner: enemy, position: [60, 36], stance: 2}
+    - {type: e1, owner: enemy, position: [60, 20], stance: 2, count: 4}
+    # Objective marker (far east). Unarmed, high-HP: the on-map
+    # landmark AND keeps the episode alive (no auto-terminal wipe).
+    - {type: fact, owner: enemy, position: [112, 20]}
 
 levels:
-  # ── EASY ── the bare lure: a 2×3tnk + 3×e3 tiger. A head-on push by
-  # the 3 medium tanks is destroyed; baiting the tiger off-post with
-  # the jeeps opens the lane. Generous clock.
+  # ── EASY ── the bare lure-and-exploit skill. A head-on column is
+  # shot apart in the line before three get through; bait a segment off
+  # post with the fast jeeps on a divergent vector and run the tanks
+  # through the open slot. Generous clock. DISPLACE-not-sacrifice: the
+  # win is keyed on the MAIN BODY arriving (units_in_region n3) and
+  # preserving armour — only the two bait jeeps may be spent (loss cap
+  # 2; burning a tank fails). Idling never commits and loses on the
+  # clock.
   easy:
     description: >
-      A heavy guard (2 heavy tanks + rocket infantry) is posted on the
-      objective and is too strong to fight head-on. Get THREE tanks to
-      the objective (far east). Send the fast jeeps in close first so
-      the guard lunges out after them (this scores nothing); while it
-      is pulled off-post, run the tanks through to the objective before
-      it snaps back. Charging straight in, or idling, loses.
+      A strong rocket-infantry guard wall blocks the one lane to the
+      objective (far east, marked by the enemy structure) and snaps
+      straight back to it the instant nothing threatens it. Get THREE
+      tanks to the objective. Driving the column straight in runs it
+      into the wall and it is destroyed; send the fast jeeps in close
+      on a separate vector so a segment of the wall lunges off post
+      after them, then run the tanks through the open slot before it
+      snaps back. Only the two bait jeeps may be spent — burning a tank
+      (≥3 lost) fails. Idling never commits and loses on the clock.
     overrides: {}
     win_condition:
       all_of:
-        - {units_in_region_gte: {x: 122, y: 20, radius: 5, n: 3}}
-        - {within_ticks: 5000}
-    fail_condition:
-      any_of:
-        - {after_ticks: 5001}
-        - {not: {own_units_gte: 1}}
-    max_turns: 60
-
-  # ── MEDIUM ── +1 controlled variable: a heavier tiger (3×3tnk +
-  # 4×e3) — the head-on route is decisively fatal; tighter clock.
-  medium:
-    description: >
-      Heavier guard — a head-on push is now decisively fatal. Same
-      task: bait the tiger off its post with the probe, then time the
-      main force through the lane before it returns, inside the
-      (tighter) deadline.
-    overrides:
-      actors:
-        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
-        - {type: jeep, owner: agent, position: [6, 24], stance: 1, count: 2}
-        - {type: e3, owner: enemy, position: [55, 5], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 9], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 14], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 19], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 24], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 29], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 33], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 37], stance: 2}
-        - {type: fact, owner: enemy, position: [123, 20]}
-    win_condition:
-      all_of:
-        - {units_in_region_gte: {x: 122, y: 20, radius: 5, n: 3}}
-        - {within_ticks: 5400}
-    fail_condition:
-      any_of:
-        - {after_ticks: 5401}
-        - {not: {own_units_gte: 1}}
-    max_turns: 66
-
-  # ── HARD ── +1 controlled variable: seed-chosen staging latitude
-  # (two spawn_point groups, in-bounds — the lure that works can't be
-  # memorised) + strict attrition cap (only the probe jeeps may be
-  # spent; burning a tank fails).
-  hard:
-    description: >
-      Strongest guard; the force stages from a seed-chosen latitude
-      (the lure that works varies by seed). Land THREE tanks on the
-      objective AND lose ≤2 units (only the two probe jeeps may be
-      spent) before the tight deadline.
-    overrides:
-      actors:
-        # spawn_point 0 — northern staging
-        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, count: 3, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [6, 14], stance: 1, count: 2, spawn_point: 0}
-        # spawn_point 1 — southern staging (in-bounds)
-        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 3, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [6, 34], stance: 1, count: 2, spawn_point: 1}
-        - {type: e3, owner: enemy, position: [55, 6], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 11], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 16], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 21], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 26], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 31], stance: 2}
-        - {type: e3, owner: enemy, position: [55, 36], stance: 2}
-        - {type: fact, owner: enemy, position: [123, 20]}
-    win_condition:
-      all_of:
-        - {units_in_region_gte: {x: 122, y: 20, radius: 5, n: 3}}
+        - {units_in_region_gte: {x: 112, y: 20, radius: 6, n: 3}}
         - {within_ticks: 5800}
         - {units_lost_lte: 2}
     fail_condition:
@@ -142,4 +106,91 @@ levels:
         - {after_ticks: 5801}
         - {not: {units_lost_lte: 2}}
         - {not: {own_units_gte: 1}}
-    max_turns: 70
+    max_turns: 66
+
+  # ── MEDIUM ── +1 controlled variable: a denser wall (more e3) so the
+  # head-on push is decisively fatal and the bait must pull a wider
+  # segment off; tighter clock. Same loss cap of 2 (only the two bait
+  # jeeps may be spent — burning armour fails).
+  medium:
+    description: >
+      Denser rocket-infantry wall — a head-on push is now decisively
+      fatal and the bait must pull a wider segment off the lane. Same
+      task: lure a segment off post with the jeeps on a divergent
+      vector, run THREE tanks through the open slot to the objective
+      before the (tighter) deadline, losing only the two bait jeeps.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+        - {type: jeep, owner: agent, position: [6, 26], stance: 1, count: 2}
+        - {type: e3, owner: enemy, position: [60, 6],  stance: 2}
+        - {type: e3, owner: enemy, position: [60, 10], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 14], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 26], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 30], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 34], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2, count: 5}
+        - {type: fact, owner: enemy, position: [112, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 112, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 6600}
+        - {units_lost_lte: 2}
+    fail_condition:
+      any_of:
+        - {after_ticks: 6601}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 76
+
+  # ── HARD ── +1 controlled variable: seed-chosen staging latitude
+  # (two spawn_point groups, IN-BOUNDS — north y=10 / south y=30). The
+  # bait vector and the slot the main body uses depend on the start, so
+  # the lure line can't be memorised. Densest wall; strict loss cap of
+  # 2 (only the two bait jeeps may be spent — burning armour fails).
+  hard:
+    description: >
+      Densest guard wall; the force stages from a seed-chosen latitude
+      (north or south), so the bait vector and the slot the main body
+      runs through vary by seed and can't be memorised. Lure a segment
+      off post with the jeeps, then run THREE tanks through the open
+      slot to the objective AND lose ≤2 units (only the two bait jeeps
+      may be spent — burning armour fails) before the tight deadline.
+    overrides:
+      actors:
+        # spawn_point 0 — northern staging (in-bounds, y=10/14)
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, count: 3,
+           spawn_point: 0,
+           randomize: {position: {base: [6, 10], offset: 2}}}
+        - {type: jeep, owner: agent, position: [6, 14], stance: 1, count: 2,
+           spawn_point: 0}
+        # spawn_point 1 — southern staging (in-bounds, y=30/34)
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 3,
+           spawn_point: 1,
+           randomize: {position: {base: [6, 30], offset: 2}}}
+        - {type: jeep, owner: agent, position: [6, 34], stance: 1, count: 2,
+           spawn_point: 1}
+        - {type: e3, owner: enemy, position: [60, 6],  stance: 2}
+        - {type: e3, owner: enemy, position: [60, 10], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 14], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 26], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 30], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 34], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 38], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2, count: 5}
+        - {type: fact, owner: enemy, position: [112, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 112, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 7400}
+        - {units_lost_lte: 2}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7401}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 84

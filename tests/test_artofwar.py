@@ -37,17 +37,53 @@ def _ctx(units_xy, tick, lost=0):
     )
 
 
-def test_sequenced_citadel_credits_only_after_prerequisite_hold():
+def _seq_ctx(sig, units_xy):
+    """A ctx sharing one persistent signals (so waypoint_sequence's
+    latch carries across calls, like a real episode)."""
+    return WinContext(
+        signals=sig,
+        render_state={"units_summary": [
+            {"cell_x": x, "cell_y": y} for x, y in units_xy
+        ]},
+    )
+
+
+def test_sequenced_citadel_enforces_ordered_chain_then_timed_strike():
+    """Redesigned: win = waypoint_sequence(A→B→C, ordered/latched) AND
+    a prerequisite hold (after_ticks) AND a reachable deadline. A
+    beeline to C that skips A,B can NEVER satisfy the ordered latch;
+    arriving in order but before the hold doesn't count; the timeout
+    is a real, reachable LOSS (no draw degeneracy)."""
+    import types
     c = compile_level(load_pack(PACKS / "artofwar-sequenced-citadel.yaml"),
                        "easy")
-    at_c = [(44, 20), (44, 20), (44, 20)]
-    # arrived at the citadel EARLY (tick 1000 < after_ticks 3000):
-    # the enabling phase isn't done → no terminal credit yet.
-    assert evaluate(c.win_condition, _ctx(at_c, 1000)) is False
-    # same position, prerequisite hold satisfied, inside deadline → win.
-    assert evaluate(c.win_condition, _ctx(at_c, 8000)) is True
-    # too late (past within_ticks) → no win.
-    assert evaluate(c.win_condition, _ctx(at_c, 999999)) is False
+    A, B, Cc = (35, 20), (70, 12), (110, 20)
+
+    # Beeline straight to C, skipping A and B — the ordered latch never
+    # advances, so it never wins no matter the tick.
+    sig = types.SimpleNamespace(game_tick=1500, units_lost=0, seq_progress={})
+    for _ in range(4):
+        assert evaluate(c.win_condition, _seq_ctx(sig, [Cc, Cc, Cc])) is False
+
+    # Visit A → B in order, then arrive at C. Before the hold
+    # (after_ticks): not yet. Inside the band: win. Past within_ticks:
+    # no win (too late).
+    sig = types.SimpleNamespace(game_tick=300, units_lost=0, seq_progress={})
+    evaluate(c.win_condition, _seq_ctx(sig, [A, A, A]))      # latch A
+    evaluate(c.win_condition, _seq_ctx(sig, [B, B, B]))      # latch B
+    sig.game_tick = 800     # chain done but before the hold → no credit
+    assert evaluate(c.win_condition, _seq_ctx(sig, [Cc, Cc, Cc])) is False
+    sig.game_tick = 1800    # in [after_ticks, within_ticks] → win
+    assert evaluate(c.win_condition, _seq_ctx(sig, [Cc, Cc, Cc])) is True
+    sig.game_tick = 999999  # past the deadline → no win
+    assert evaluate(c.win_condition, _seq_ctx(sig, [Cc, Cc, Cc])) is False
+
+    # Timeout is a real LOSS and reachable within max_turns
+    # (≈ 93 + 90·(max_turns-1), ~90 ticks/turn).
+    lose = types.SimpleNamespace(game_tick=2301, units_lost=0,
+                                 seq_progress={})
+    assert evaluate(c.fail_condition, _seq_ctx(lose, [(6, 20)] * 3)) is True
+    assert 2301 <= 93 + 90 * (c.max_turns - 1)
 
 
 def test_indirect_hard_requires_zero_loss_whole_force_arrival():
@@ -91,6 +127,54 @@ def test_decoy_hard_loss_cap_allows_bait_not_army():
     at_obj = [(112, 20)] * 3
     assert evaluate(c.win_condition, _ctx(at_obj, 5000, lost=2)) is True
     assert evaluate(c.win_condition, _ctx(at_obj, 5000, lost=3)) is False
+
+
+def test_lure_the_tiger_win_requires_preserved_main_body_in_budget():
+    """Redesigned (no-cheat, #4-idiom): far-east objective (112,20),
+    win = THREE units in region (the main body, not one touring unit)
+    AND a loss cap (only the two bait jeeps may be spent — a survivable
+    head-on grab that burns armour cannot win) AND the deadline. The
+    lure is physically required (the guard wall is lethal head-on) and
+    the predicate refuses every lazy/greedy substitute."""
+    for lvl, cap, wt in (("easy", 2, 5800), ("medium", 2, 6600),
+                         ("hard", 2, 7400)):
+        c = compile_level(load_pack(PACKS / "artofwar-lure-the-tiger.yaml"),
+                          lvl)
+        at_obj = [(112, 20)] * 3
+        # intended: 3 tanks landed, only the 2 bait jeeps spent → win.
+        assert evaluate(c.win_condition, _ctx(at_obj, wt - 100, lost=cap))
+        # one touring unit reaching the region does NOT win (n=3 split,
+        # not reach_region ≥1 — the old cheat).
+        assert evaluate(
+            c.win_condition, _ctx([(112, 20)], wt - 100, lost=0)
+        ) is False
+        # a survivable head-on grab that burned armour (lost > cap)
+        # cannot win AND trips the fail clause.
+        assert evaluate(c.win_condition, _ctx(at_obj, wt - 100,
+                                              lost=cap + 1)) is False
+        assert evaluate(c.fail_condition, _ctx(at_obj, wt - 100,
+                                               lost=cap + 1)) is True
+        # past the deadline → no win; the timeout is a real LOSS and is
+        # reachable within max_turns (no draw degeneracy).
+        assert evaluate(c.win_condition, _ctx(at_obj, 10 ** 7,
+                                              lost=0)) is False
+        assert evaluate(c.fail_condition, _ctx([(6, 20)] * 5, wt + 1,
+                                               lost=0)) is True
+        assert (wt + 1) <= 93 + 90 * (c.max_turns - 1)
+
+
+def test_lure_the_tiger_hard_seed_varied_two_spawn_groups():
+    """Hard-tier contract: ≥2 spawn_point groups → seed-varied start
+    (the lure line can't be memorised). In-bounds (rush-hour y 2..38;
+    the old pack had off-map y=40/32 → engine panic — fixed)."""
+    c = compile_level(load_pack(PACKS / "artofwar-lure-the-tiger.yaml"),
+                       "hard")
+    groups = {a.spawn_point for a in c.scenario.actors
+              if a.spawn_point is not None}
+    assert groups == {0, 1}
+    for a in c.scenario.actors:
+        x, y = a.position
+        assert 2 <= x <= 126 and 2 <= y <= 38, (a.type, a.position)
 
 
 @pytest.mark.parametrize("pid", FAMILY)
