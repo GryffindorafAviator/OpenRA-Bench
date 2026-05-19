@@ -1,0 +1,127 @@
+meta:
+  id: tech-production-planning
+  title: 'Tech-Tree & Production — Sequential Dependency Planning'
+  capability: reasoning
+  real_world_meaning: >
+    Sequential dependency planning under hard precedence + power + budget
+    constraints. Easy is a 2-hop prereq chain (build weap → fix → train
+    one Heavy Tank). Medium forces parallel branches (infantry queue at
+    barr AND vehicle queue at weap+fix) under a power brownout that
+    requires a second power plant. Hard requires online plan revision:
+    the agent starts mid-game with infantry tech committed, must scout
+    through fog to reveal that the enemy is heavy armor, and pivot
+    production to anti-armor (Rocket Soldier) before the deadline. The
+    decision being tested is build-order scheduling under precedence,
+    not motor control of any single build.
+  robotics_analogue: >
+    Task-graph scheduling with multi-hop precedence and resource
+    constraints, escalating to mid-execution replanning when discovered
+    facts invalidate the initial plan — PlanBench Mystery-Blocksworld
+    (precedence) plus an online-revision twist after partial observation.
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: soviet
+    cash: 0
+  enemy:
+    faction: allies
+    cash: 0
+    bot_type: ''
+  tools:
+    - build
+    - place_building
+    - train
+    - cancel_production
+    - move_units
+    - deploy
+    - stop
+    - set_rally_point
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    - {type: fact, owner: agent, position: [10, 18]}
+    - {type: powr, owner: agent, position: [14, 18]}
+
+levels:
+  easy:
+    description: >
+      Simple Tech Chain — fact, powr, and proc are pre-placed; build
+      War Factory → Service Depot, then train one Heavy Tank. The
+      decision is recognising 3tnk needs weap + fix in that order; the
+      budget covers the chain with modest slack. Tests the agent can
+      sequence a deep enough prereq chain (proc→weap→fix→3tnk) without
+      attempting to train 3tnk before fix exists.
+    starting_cash: 5000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        - {type: proc, owner: agent, position: [16, 22]}
+        - {type: mine, owner: agent, position: [20, 24]}
+        - {type: e1, owner: enemy, position: [114, 34], stance: 2}
+    win_condition:
+      all_of:
+        - unit_type_count_gte: {type: 3tnk, n: 1}
+        - building_count_gte: {type: fix, n: 1}
+        - within_ticks: 18000
+    max_turns: 60
+
+  medium:
+    description: >
+      Parallel Dependency Optimization — only fact + powr pre-placed.
+      Produce one Heavy Tank PLUS one Rocket Soldier PLUS three Rifle
+      Infantry, with power_surplus ≥ 0 at the deadline. The combined
+      build (proc + barr + weap + fix = -110 power) drains net power
+      below zero against a 100-power base, so a SECOND power plant is
+      mandatory. Tight clock forces queueing the infantry branch (barr)
+      in parallel with the vehicle branch (weap+fix); serial production
+      blows the clock on idle time.
+    starting_cash: 6500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        - {type: mine, owner: agent, position: [20, 24]}
+        - {type: e1, owner: enemy, position: [114, 34], stance: 2}
+    win_condition:
+      all_of:
+        - unit_type_count_gte: {type: 3tnk, n: 1}
+        - unit_type_count_gte: {type: e3, n: 1}
+        - unit_type_count_gte: {type: e1, n: 3}
+        - power_surplus_gte: 0
+        - within_ticks: 22000
+    max_turns: 80
+
+  hard:
+    description: >
+      Adaptive Tech Transition — mid-game start: fact + powr + proc +
+      barr and three Rifle Infantry are already on the field (an
+      infantry build committed). Three enemy Heavy Tanks sit passive on
+      the east side, hidden by fog. The agent must scout, recognise
+      that infantry is the wrong counter to heavy armor, and pivot
+      production to FIVE Rocket Soldiers (e3, anti-armor) before the
+      deadline. Overproducing infantry past ten = fail (doubling down
+      on the wrong plan exhausts the budget). The transition — cancel
+      planned infantry, fund anti-armor, scout — is the test.
+    starting_cash: 3000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        - {type: proc, owner: agent, position: [16, 22]}
+        - {type: barr, owner: agent, position: [12, 21]}
+        - {type: e1, owner: agent, position: [8, 16], count: 3}
+        - {type: mine, owner: agent, position: [20, 24]}
+        - {type: 3tnk, owner: enemy, position: [110, 34], stance: 2, count: 3}
+    win_condition:
+      all_of:
+        - enemies_discovered_gte: 2
+        - unit_type_count_gte: {type: e3, n: 5}
+        - within_ticks: 14000
+    fail_condition:
+      unit_type_count_gte: {type: e1, n: 10}
+    max_turns: 90
