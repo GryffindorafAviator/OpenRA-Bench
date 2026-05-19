@@ -143,8 +143,10 @@ def test_run_eval_whole_result_deterministic():
     from openra_bench.run_eval import evaluate
 
     pk = [PACKS_DIR / "perception-frontier-reading.yaml"]
-    a = evaluate(pk, ["easy"], [1, 2])
-    b = evaluate(pk, ["easy"], [1, 2])
+    # Pin run_id: it's a wall-clock label by design, not part of the
+    # determinism contract (scores/episodes/aggregates are).
+    a = evaluate(pk, ["easy"], [1, 2], run_id="t")
+    b = evaluate(pk, ["easy"], [1, 2], run_id="t")
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
 
 
