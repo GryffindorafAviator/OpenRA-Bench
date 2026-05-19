@@ -87,3 +87,110 @@ def test_minimap_b64_is_valid_png_with_terrain():
     # None without terrain (graceful text-only) and without _raw
     assert P.minimap_b64(_render_state(), None, set()) is None
     assert P.minimap_b64({"_raw": {}}, t, set()) is None
+
+
+# ── structured-fog text mode + codex descriptions + premium routing ────────
+
+
+def test_structured_fog_regions_and_text():
+    from openra_bench.structured_fog import (
+        compute_unexplored_regions,
+        format_structured_fog,
+    )
+    bounds = (0, 0, 10, 10)
+    # explored a 3x3 NW block → one big unexplored component
+    explored = [(x, y) for x in range(3) for y in range(3)]
+    regs = compute_unexplored_regions(explored, bounds)
+    assert regs and regs[0]["cells"] == 100 - 9
+    txt = format_structured_fog({"explored_cells": explored}, bounds)
+    assert txt.startswith("Unexplored regions (largest first")
+    assert "x ∈ [" in txt and "cells)" in txt
+    # nothing explored → whole map
+    assert "entire playable map" in format_structured_fog(
+        {"explored_cells": []}, bounds
+    )
+
+
+def _rs_with_raw():
+    return {
+        "game_tick": 100, "cash": 0, "resources": 0, "harvesters": 0,
+        "power_provided": 0, "power_drained": 0, "explored_percent": 5.0,
+        "units_summary": [{"id": "1", "type": "2tnk", "cell_x": 6,
+                           "cell_y": 8, "idle": True, "can_attack": True}],
+        "enemy_summary": [], "enemy_buildings_summary": [],
+        "own_buildings": [], "production": [],
+        "map_width": 20, "map_height": 12, "bounds": (0, 0, 20, 12),
+        "_raw": {"unit_positions": {"1": {"cell_x": 6, "cell_y": 8}},
+                 "enemy_positions": [], "explored_cells": [[6, 8], [6, 9]]},
+    }
+
+
+def test_structured_fog_mode_sends_text_no_image():
+    from openra_bench.agent import ModelAgent
+    from openra_bench.providers import ProviderConfig
+
+    a = ModelAgent(
+        ProviderConfig(vision=True, fog_mode="structured"),
+        allowed_tools=["observe"],
+        provider=type("P", (), {"complete": lambda *x, **k: None})(),
+        base_map="rush-hour-arena", level="easy",
+    )
+    msg = a._user_message(_rs_with_raw())
+    assert isinstance(msg["content"], str)              # NO image
+    assert "Unexplored regions" in msg["content"]
+    assert "TURN BRIEFING" in msg["content"]
+
+
+def test_minimap_constant_vs_per_type_differ():
+    from openra_bench.minimap import terrain_png_for
+    from openra_bench.prompt_v2 import minimap_b64
+
+    t = terrain_png_for("rush-hour-arena")
+    if not t:
+        import pytest as _p
+        _p.skip("oramap absent")
+    rs = _rs_with_raw()
+    rs["units_summary"] = [
+        {"id": "1", "type": "2tnk", "cell_x": 6, "cell_y": 8},
+        {"id": "2", "type": "jeep", "cell_x": 7, "cell_y": 8},
+    ]
+    rs["_raw"]["unit_positions"] = {
+        "1": {"cell_x": 6, "cell_y": 8}, "2": {"cell_x": 7, "cell_y": 8}}
+    per = minimap_b64(rs, t, set(), constant_colors=False)
+    const = minimap_b64(rs, t, set(), constant_colors=True)
+    assert per and const and per != const
+
+
+def test_codex_leads_with_one_sentence_description():
+    from openra_bench.prompt_v2 import unit_codex
+
+    cx = unit_codex({"1tnk", "2tnk", "tsla"})
+    assert "Medium tank" in cx and "Light tank" in cx
+    assert "Tesla coil" in cx
+    # description then stats on the same line
+    line = [l for l in cx.splitlines() if l.strip().startswith("2tnk")][0]
+    assert "tank" in line and "$850" in line and "hp400" in line
+
+
+def test_extra_body_merged_into_request(monkeypatch):
+    from openra_bench.providers import OpenAICompatibleProvider, ProviderConfig
+
+    cfg = ProviderConfig(provider="openrouter",
+                         extra_body={"provider": {"sort": "throughput"}})
+    p = OpenAICompatibleProvider(cfg)
+    captured = {}
+
+    class _R:
+        status_code = 200
+        def json(self):
+            return {"choices": [{"message": {"content": "",
+                     "tool_calls": []}}], "usage": {}}
+
+    def fake_post(url, headers=None, json=None):
+        captured.update(json or {})
+        return _R()
+
+    monkeypatch.setattr(p._client, "post", fake_post)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    p.complete([{"role": "user", "content": "hi"}], [])
+    assert captured.get("provider") == {"sort": "throughput"}

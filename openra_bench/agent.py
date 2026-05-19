@@ -471,11 +471,13 @@ class ModelAgent:
         system_extra: str = "",
         base_map: str = "",
         unit_codex: str = "",
+        level: str = "",
     ):
         self.cfg = cfg
         self.objective = objective
         self.tools = _tool_schemas(allowed_tools)
         self.provider = provider or make_provider(cfg)
+        self._level = level
         # Real terrain (map.png from the .oramap) for the vendored
         # training bitmap minimap; persistent fog history across turns.
         self._terrain: bytes | None = None
@@ -511,13 +513,31 @@ class ModelAgent:
             text = _v2_brief(render_state)
         except Exception:  # noqa: BLE001 — never break a turn
             text = build_briefing(render_state, self.objective)
+        # Structured-fog mode: NO image — append the text "Unexplored
+        # regions" block instead (text-vs-vision A/B; pair with the
+        # easy/medium level of the setup).
+        if getattr(self.cfg, "fog_mode", "vision") == "structured":
+            try:
+                from .prompt_v2 import structured_fog as _v2_fog
+
+                text = f"{text}\n\n{_v2_fog(render_state)}"
+            except Exception:  # noqa: BLE001
+                pass
+            return {"role": "user", "content": text}
         if self.cfg.vision:
+            # Per-type colours on hard; constant own/enemy on
+            # easy/medium; overridable via cfg.minimap_color_mode.
+            cm = getattr(self.cfg, "minimap_color_mode", "auto")
+            constant = cm == "constant" or (
+                cm == "auto" and self._level in ("easy", "medium")
+            )
             b64 = None
             try:
                 from .prompt_v2 import minimap_b64 as _v2_mm
 
                 b64 = _v2_mm(
-                    render_state, self._terrain, self._explored_history
+                    render_state, self._terrain, self._explored_history,
+                    constant_colors=constant,
                 )
             except Exception:  # noqa: BLE001
                 b64 = None

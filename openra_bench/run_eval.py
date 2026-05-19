@@ -61,6 +61,7 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
             system_extra=scenario_primer(compiled),
             base_map=compiled.scenario.base_map,
             unit_codex=_codex(_scn_codes(compiled)),
+            level=compiled.level,
         )
         return agent.agent_fn
 
@@ -161,6 +162,7 @@ def evaluate(
                 system_extra=scenario_primer(compiled),
                 base_map=compiled.scenario.base_map,
                 unit_codex=_codex(_scn_codes(compiled)),
+                level=compiled.level,
             ).agent_fn
 
     # Run/model identity so a single playback root can hold many runs

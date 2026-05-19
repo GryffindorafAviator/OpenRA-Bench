@@ -232,7 +232,10 @@ def run_level(
                     # accumulating fog → saved image == model's image.
                     from .prompt_v2 import minimap_b64 as _v2_mm
 
-                    _png = _v2_mm(rs, _pb_terrain, _pb_explored)
+                    _png = _v2_mm(
+                        rs, _pb_terrain, _pb_explored,
+                        constant_colors=compiled.level in ("easy", "medium"),
+                    )
                     if _png is None:
                         from .agent import _render_minimap_b64
 

@@ -51,7 +51,20 @@ class ProviderConfig:
     max_tokens: int = 1024
     timeout_s: float = 120.0
     vision: bool = True
+    # Spatial channel: "vision" = PNG minimap; "structured" = NO image,
+    # a text "Unexplored regions" block instead (text-vs-vision A/B;
+    # pair structured runs with the easy/medium level of the setup).
+    fog_mode: str = "vision"
+    # Minimap unit colours: "auto" = per-type palette on hard, constant
+    # own/enemy colours on easy/medium; or force "per_type"/"constant".
+    minimap_color_mode: str = "auto"
     extra_headers: dict[str, str] = field(default_factory=dict)
+    # Merged into the request JSON body — e.g. OpenRouter provider
+    # routing to avoid the rate-limited free pool:
+    #   extra_body={"provider": {"sort": "throughput",
+    #                            "allow_fallbacks": True}}
+    # (premium/paid routing also needs account credits).
+    extra_body: dict = field(default_factory=dict)
     # Resilience (real OpenRouter runs): bounded retry, throttle, price.
     max_retries: int = 5
     retry_base_s: float = 1.0
@@ -169,6 +182,10 @@ class OpenAICompatibleProvider(ChatProvider):
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+        if cfg.extra_body:
+            # e.g. OpenRouter {"provider": {...}} routing — premium/
+            # paid endpoints instead of the rate-limited free pool.
+            body.update(cfg.extra_body)
         url = f"{cfg.resolved_base_url()}/chat/completions"
 
         self._rl.acquire()
