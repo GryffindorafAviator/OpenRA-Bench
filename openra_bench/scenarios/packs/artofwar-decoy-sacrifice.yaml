@@ -46,6 +46,9 @@ base:
       health: 100
       facing: -1
       count: 5
+    - type: fact          # objective marker — episode can't end on guard-wipe
+      owner: enemy
+      position: [44, 24]
 levels:
   easy:
     description: >
@@ -54,10 +57,14 @@ levels:
     win_condition:
       all_of:
         - reach_region: {x: 44, y: 24, radius: 4}
-        - within_ticks: 16000
+        - within_ticks: 6000
+    # Deadline reachable within max_turns (tick ≈ 93+90·(70-1) = 6303);
+    # after_ticks 6001 makes a staller LOSE instead of drawing. The
+    # intended bait-then-drive-through win lands far inside 6000.
     fail_condition:
-      not:
-        own_units_gte: 1
+      any_of:
+      - after_ticks: 6001
+      - {not: {own_units_gte: 1}}
     max_turns: 70
   medium:
     description: 'More guards; the head-on route is now clearly fatal.'
@@ -84,13 +91,21 @@ levels:
           health: 100
           facing: -1
           count: 7
+        - type: fact      # objective marker (see easy)
+          owner: enemy
+          position: [44, 24]
     win_condition:
       all_of:
         - reach_region: {x: 44, y: 24, radius: 4}
-        - within_ticks: 14000
+        - within_ticks: 7000
+    # Deadline reachable within max_turns (tick ≈ 93+90·(80-1) = 7203);
+    # after_ticks 7001 makes a staller LOSE instead of drawing. The
+    # head-on route is fatal here — the decoy maneuver wins well under
+    # 7000.
     fail_condition:
-      not:
-        own_units_gte: 1
+      any_of:
+      - after_ticks: 7001
+      - {not: {own_units_gte: 1}}
     max_turns: 80
   hard:
     description: >
@@ -121,19 +136,24 @@ levels:
           count: 2
           spawn_point: 0
         # spawn_point 1 — southern staging (same formation, shifted)
+        # spawn_point 1 — northern staging. WAS y=40/48 which is
+        # OFF-MAP on rush-hour-arena (MapSize 128x40, playable y≈2..37):
+        # cell (6,40) indexed past the 128*40 grid and panicked the
+        # engine. Relocated in-bounds, kept distinct from spawn_point
+        # 0's mid/south staging so the ≥2-spawn contract still holds.
         - type: 2tnk
           owner: agent
-          position: [6, 40]
+          position: [6, 8]
           stance: 3
           health: 100
           facing: -1
           count: 3
           spawn_point: 1
           randomize:
-            position: {base: [6, 40], offset: 3}
+            position: {base: [6, 8], offset: 3}
         - type: jeep
           owner: agent
-          position: [6, 48]
+          position: [6, 14]
           stance: 3
           health: 100
           facing: -1
@@ -146,12 +166,23 @@ levels:
           health: 100
           facing: -1
           count: 8
+        - type: fact      # objective marker (see easy)
+          owner: enemy
+          position: [44, 24]
     win_condition:
       all_of:
         - reach_region: {x: 44, y: 24, radius: 3}
-        - within_ticks: 12000
+        - within_ticks: 8000
         - units_lost_lte: 2          # bait only; losing armour fails
+    # Deadline reachable within max_turns (tick ≈ 93+90·(90-1) = 8103);
+    # after_ticks 8001 makes a staller LOSE. Exceeding the bait-only
+    # loss cap (units_lost > 2 ⇒ a tank was spent) also loses
+    # immediately rather than drawing — this is what makes the
+    # credit-assignment capability load-bearing: a brute-force push
+    # that arrives but burned the armour is a LOSS, not a draw.
     fail_condition:
-      not:
-        own_units_gte: 1
+      any_of:
+      - after_ticks: 8001
+      - {not: {units_lost_lte: 2}}
+      - {not: {own_units_gte: 1}}
     max_turns: 90
