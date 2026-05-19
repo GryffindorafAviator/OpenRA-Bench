@@ -81,3 +81,48 @@ def test_agg_and_ingest_carry_objective_and_reward_vector(tmp_path):
     assert rec["reward_vector"] == {"economy": 0.1, "objective": 0.5}
     cap = _capability_breakdown(stats["episodes"])
     assert cap["perception"]["objective"] == round((0.8 + 0.2) / 2, 4)
+
+
+def _win(tick: int, turns: int = 12) -> EpisodeResult:
+    sig = EpisodeSignals(units_killed=1, units_lost=0, explored_percent=20.0,
+                         game_tick=tick, outcome=1.0)
+    return EpisodeResult(scenario="t", seed=0, turns=turns, signals=sig,
+                         outcome="win", actions_issued=turns, actions_warned=0,
+                         objective_progress=1.0,
+                         reward_vector={"objective": 1.0})
+
+
+def test_win_speed_bonus_orders_fast_above_slow_but_below_correctness():
+    c = _compiled()  # perception-frontier-reading easy
+    from openra_bench.scoring import _win_budget, SPEED_BONUS
+    budget = _win_budget(c)
+    fast = score_episode(c, _win(tick=budget // 5))
+    slow = score_episode(c, _win(tick=int(budget * 0.95)))
+    # recorded fields present on every win
+    assert fast.win_tick == budget // 5 and fast.win_turns == 12
+    assert fast.win_budget == budget and 0.0 < fast.speed <= 1.0
+    # faster win ranks above slower win...
+    assert fast.composite > slow.composite
+    # ...by no more than the capped bonus (correctness still dominates)
+    assert (fast.composite - fast.composite_base) <= SPEED_BONUS + 1e-9
+    assert abs(slow.composite - slow.composite_base) <= SPEED_BONUS + 1e-9
+    # a slow win still beats any loss (speed never rescues a loss)
+    assert slow.composite > score_episode(c, _loss(0.9)).composite
+
+
+def test_speed_zero_and_no_bonus_on_non_win():
+    c = _compiled()
+    lo = score_episode(c, _loss(0.5))
+    assert lo.speed == 0.0 and lo.win_tick == 0 and lo.win_turns == 0
+    assert lo.composite == lo.composite_base  # no bonus applied
+
+
+def test_win_budget_prefers_tightest_within_ticks():
+    from openra_bench.scoring import _win_budget
+    from openra_bench.scenarios import load_pack
+    from openra_bench.scenarios.loader import compile_level as _cl
+    p = load_pack(PACKS / "action-sequenced-execution.yaml")
+    # easy win has within_ticks: 2400
+    assert _win_budget(_cl(p, "easy")) == 2400
+    # medium within_ticks: 3000
+    assert _win_budget(_cl(p, "medium")) == 3000

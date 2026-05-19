@@ -85,6 +85,16 @@ def _agg(scores: list) -> dict:
         "objective_mean": round(
             statistics.fmean(s.dimensions.get("objective", 0.0) for s in scores), 4
         ),
+        # Win-speed: averaged over WINS only (0 when there are none) so
+        # it compares how decisively a model wins, not diluted by losses.
+        "win_speed_mean": round(
+            statistics.fmean([s.speed for s in scores if s.outcome == "win"]), 4
+        ) if any(s.outcome == "win" for s in scores) else 0.0,
+        "win_turns_mean": round(
+            statistics.fmean(
+                [s.win_turns for s in scores if s.outcome == "win"]
+            ), 2
+        ) if any(s.outcome == "win" for s in scores) else 0.0,
         "weakest_link_hist": dict(Counter(s.weakest_link for s in scores)),
     }
 

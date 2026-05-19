@@ -43,7 +43,7 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 @dataclass
 class ScoreCard:
-    composite: float            # weighted scalar in [0,1]
+    composite: float            # weighted scalar in [0,1] (incl. speed bonus)
     outcome: str                # win | draw | loss
     perception: float           # P/R/A link sub-scores, each in [0,1]
     reasoning: float
@@ -52,9 +52,50 @@ class ScoreCard:
     weights: dict               # weights actually used (scenario or default)
     weakest_link: str           # "perception" | "reasoning" | "action"
     notes: list
+    # Win-speed bonus (recorded for every episode; only non-zero on a
+    # win). speed ∈ [0,1] = 1 − win_tick/budget (faster ⇒ higher); the
+    # composite gets at most SPEED_BONUS·speed added — enough to rank
+    # fast wins above slow wins, never enough to lift a loss above a
+    # win or override correctness.
+    win_tick: int = 0           # game tick the win fired (0 if not won)
+    win_turns: int = 0          # decision turns to the win (0 if not won)
+    win_budget: int = 0         # the tick budget judged against
+    speed: float = 0.0          # [0,1], 0 unless won
+    composite_base: float = 0.0  # composite before the speed bonus
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+# Max additive speed bonus on the composite (wins only). Small by
+# design: orders fast vs slow wins without dominating correctness.
+SPEED_BONUS = 0.05
+
+
+def _win_budget(compiled: CompiledLevel) -> int:
+    """Tick budget a win is judged 'fast' against: the tightest
+    `within_ticks` in the win tree, else the scenario max_ticks."""
+    best: list[int] = []
+
+    def walk(node):
+        if node is None:
+            return
+        d = node if isinstance(node, dict) else dict(
+            getattr(node, "__pydantic_extra__", {}) or {}
+        )
+        for k, v in d.items():
+            if k in ("all_of", "any_of"):
+                for c in v:
+                    walk(c)
+            elif k == "not":
+                walk(v)
+            elif k == "within_ticks":
+                best.append(int(v))
+
+    walk(compiled.win_condition)
+    if best:
+        return max(1, min(best))
+    return max(1, compiled.scenario.termination.max_ticks)
 
 
 def _dimension_values(compiled: CompiledLevel, res: EpisodeResult) -> dict:
@@ -172,11 +213,23 @@ def _pra_diagnostics(compiled: CompiledLevel, res: EpisodeResult, dims: dict) ->
 def score_episode(compiled: CompiledLevel, res: EpisodeResult) -> ScoreCard:
     dims = _dimension_values(compiled, res)
     weights = _weights(compiled)
-    composite = _composite(dims, weights)
+    composite_base = _composite(dims, weights)
     pra = _pra_diagnostics(compiled, res, dims)
+
+    won = res.outcome == "win"
+    win_tick = int(res.signals.game_tick) if won else 0
+    win_turns = int(res.turns) if won else 0
+    budget = _win_budget(compiled)
+    speed = _clamp(1.0 - win_tick / budget) if won and win_tick > 0 else 0.0
+    composite = _clamp(composite_base + SPEED_BONUS * speed) if won else composite_base
 
     weakest = min(pra, key=pra.get)
     notes: list[str] = []
+    if won:
+        notes.append(
+            f"won in {win_turns} turns / tick {win_tick} of {budget} "
+            f"(speed {speed:.2f}, +{SPEED_BONUS * speed:.3f} bonus)"
+        )
     if res.outcome != "win":
         notes.append(f"objective not met ({res.outcome}); weakest link: {weakest}")
     if res.actions_issued and res.actions_warned / res.actions_issued > 0.25:
@@ -197,4 +250,9 @@ def score_episode(compiled: CompiledLevel, res: EpisodeResult) -> ScoreCard:
         weights=weights,
         weakest_link=weakest,
         notes=notes,
+        win_tick=win_tick,
+        win_turns=win_turns,
+        win_budget=budget,
+        speed=round(speed, 4),
+        composite_base=round(composite_base, 4),
     )

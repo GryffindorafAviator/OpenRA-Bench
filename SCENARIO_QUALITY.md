@@ -430,3 +430,51 @@ failure attributes to a single capability):
 default `exact`) is a reusable knob: any pack can opt into
 coordinate-blind objectives. The win predicate always evaluates
 against the real engine coordinates regardless of disclosure.
+
+## Per-scenario closer look — #2 action-sequenced-execution
+
+Original defect: the pack claimed to test ordered, non-stalling route
+execution but the win condition referenced only the *final* region +
+a tick band — a beeline-to-final that skipped every waypoint and
+idled to the gate won (verified: model arrived tick 1353, idled ~900
+ticks, won). Not model compensation: the scenario didn't enforce what
+it advertised.
+
+Fix — new reusable **stateful** predicate `waypoint_sequence`: latches
+ordered region-visit progress (monotonic) on a per-episode
+`signals.seq_progress` scratch. Wk+1 only counts after Wk; skip /
+out-of-order / idle ⇒ never satisfied. Coords-aware phrase
+(`exact|relative`). Difficulty axis (one new controlled variable per
+tier):
+
+- **easy** — ONE ordered 3-waypoint route, clear lanes, generous
+  budget. Run: WIN, W1→W2→W3 in order, tick 1893 < 2400.
+- **medium** — TWO ordered routes that *cross*, BOTH required ⇒ must
+  split into two parallel columns (serial overruns); attrition cap.
+  Run: LOSS (valid) — model split correctly, finished route S in
+  order, lost column discipline on N and timed out (the exact
+  re-deliberation failure the pack targets).
+- **hard** — TWO 4-waypoint serpentine routes on the larger
+  `scout-arena` (176×80, `scripts/build_scout_arena_map.py`), given
+  ONLY by relative *search bands* (no coords); fogged markers revealed
+  by the `enemy_building_spotted` interrupt; seed-varied 2 spawn
+  points. Run: LOSS (valid) — machinery all verified working
+  (interrupts fired on the big map); model drove to literal corners
+  instead of scanning the bands, ignored the revealed positions,
+  attrition-bust. Solvable in principle; not compensated.
+
+All tick budgets aligned to ~90 ticks/turn so timeout / attrition /
+wipe are reachable **losses** within `max_turns` (no draw degeneracy).
+Footgun recorded: a `base_map` placed at the Level level is silently
+ignored — it must go inside `overrides:` (guard test added).
+
+## Win-speed bonus (cross-cutting scoring)
+
+Every episode records `win_tick` / `win_turns` / `win_budget` /
+`speed` / `composite_base` (score.json + manifest). On a **win** the
+composite gets `+SPEED_BONUS·speed` (`SPEED_BONUS=0.05`,
+`speed = 1 − win_tick/budget`, budget = tightest `within_ticks` in the
+win tree else `max_ticks`). Bounded so a fast win ranks above a slow
+win but never lifts a loss above a win or overrides correctness.
+Leaderboard carries `win_speed`/`win_turns` and breaks composite/
+win-rate ties by faster wins.

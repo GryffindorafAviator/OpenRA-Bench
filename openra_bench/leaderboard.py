@@ -68,6 +68,9 @@ def ingest_run(
         # Continuous goal achievement (partial credit) + the cumulative
         # reward-vector signature, comparable across models/runs.
         "objective": overall.get("objective_mean", 0.0),
+        # Win speed (mean over wins): how decisively the model wins.
+        "win_speed": overall.get("win_speed_mean", 0.0),
+        "win_turns": overall.get("win_turns_mean", 0.0),
         "reward_vector": stats.get("reward_vector_mean", {}),
         # Adversarial 1v1 spotlight: mean ladder rating (0–3) + per-pack.
         "adversarial_rating": stats.get("adversarial", {}).get(
@@ -125,7 +128,11 @@ def build_table(
             best[m] = r
     rows = sorted(
         best.values(),
-        key=lambda r: (-r["composite"], -r["win_rate"], r["model"]),
+        key=lambda r: (
+            -r["composite"], -r["win_rate"],
+            -r.get("win_speed", 0.0),  # faster wins break ties
+            r["model"],
+        ),
     )
     for i, r in enumerate(rows, 1):
         r["rank"] = i
