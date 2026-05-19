@@ -1,0 +1,149 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/longhorizon-opening-to-assault.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# LONG-HORIZON CREDIT ASSIGNMENT focus. Every other pack is a short
+# single-phase test (one decision, one clock). This one chains four
+# phases in a single episode with a TERMINAL-ONLY win predicate so the
+# score depends on every earlier choice still being correct at the end:
+#   scout  -> the map is foggy and the agent must establish coverage
+#   tech   -> a refinery must exist (the tech-graph waypoint)
+#   army   -> a real combat force must be standing
+#   strike -> a contingent of that force must reach the enemy base
+# The win is `all_of` of these four — partial completion = loss on
+# timeout, draws are impossible. Skipping scouting still passes only if
+# the model bulldozed through fog (rare); skipping tech is hard-failing.
+# This is the OpenRA analogue of long-horizon agentic benchmarks
+# (Terminal-Bench 2.0, OSWorld 50-step, GAIA multi-hop): credit must
+# survive the full opening -> tech -> army -> assault chain.
+
+meta:
+  id: longhorizon-opening-to-assault
+  title: 'Opening-to-Assault — Chain Scout, Tech, Army, and Strike in One Episode'
+  capability: reasoning
+  real_world_meaning: >
+    A long single-episode plan whose terminal score depends on every
+    intermediate phase being completed in order: scout the map, stand
+    up the supporting tech, build a real fighting force, and commit it
+    to a positional objective on the enemy base. Partial progress is
+    not a partial score; skipping or delaying any phase fails the win.
+  robotics_analogue: >
+    Long-horizon autonomous operation: a mission that must execute
+    distinct phases (sensor coverage, infrastructure, fleet
+    provisioning, terminal action) within one budget window, where
+    credit is only assigned at the end of the episode.
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    bot_type: ''
+  tools:
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - deploy
+    - stop_units
+  planning: true
+  termination:
+    max_ticks: 60000
+  actors:
+    # Pre-seeded agent base in the western corner: a construction yard,
+    # one power plant, and a barracks (tech prerequisite for infantry).
+    # The agent must still build proc (refinery) + recruit a force +
+    # cross the map.
+    - type: fact
+      owner: agent
+      position: [10, 18]
+    - type: powr
+      owner: agent
+      position: [14, 18]
+    - type: tent
+      owner: agent
+      position: [10, 22]
+    # Static enemy buildings on the far east mark the assault target.
+    - type: fact
+      owner: enemy
+      position: [115, 30]
+    - type: proc
+      owner: enemy
+      position: [115, 34]
+    # A few defenders so reach_region is not free.
+    - type: e1
+      owner: enemy
+      position: [108, 30]
+      stance: 2
+      count: 2
+    - type: e3
+      owner: enemy
+      position: [108, 34]
+      stance: 2
+
+starting_cash: 5000
+
+levels:
+  easy:
+    description: >
+      Generous clock (40k ticks), generous coverage bar. Chain the four
+      phases in order: explore >=35% of the map, build a refinery
+      (proc), stand up >=4 combat units, and put at least one unit on
+      the enemy base at (115, 32). Missing any of the four at episode
+      end is a loss, not a draw.
+    starting_cash: 5000
+    win_condition:
+      all_of:
+        - explored_pct_gte: 35
+        - has_building: proc
+        - own_units_gte: 4
+        - reach_region: {x: 115, y: 32, radius: 8}
+        - within_ticks: 40000
+    fail_condition:
+      after_ticks: 40001
+    max_turns: 120
+
+  medium:
+    description: >
+      Tighter clock (32k ticks), coverage 45%, force >=5, refinery
+      required, contact the enemy base. Same chain; less slack.
+    starting_cash: 5000
+    win_condition:
+      all_of:
+        - explored_pct_gte: 45
+        - has_building: proc
+        - own_units_gte: 5
+        - reach_region: {x: 115, y: 32, radius: 7}
+        - within_ticks: 32000
+    fail_condition:
+      after_ticks: 32001
+    max_turns: 140
+
+  hard:
+    description: >
+      Short clock (24k ticks), coverage 55%, force >=6, refinery
+      required, both an enemy building discovered AND a unit on the
+      enemy base. An attrition cap prevents brute-force loss-then-win.
+      Skipping the scouting phase to rush tech-then-strike fails the
+      coverage clause; skipping tech to rush units fails the
+      has_building clause.
+    starting_cash: 4500
+    win_condition:
+      all_of:
+        - explored_pct_gte: 55
+        - buildings_discovered_gte: 1
+        - has_building: proc
+        - own_units_gte: 6
+        - reach_region: {x: 115, y: 32, radius: 6}
+        - within_ticks: 24000
+        - units_lost_lte: 4
+    fail_condition:
+      any_of:
+        - after_ticks: 24001
+        - not: {own_units_gte: 1}
+    max_turns: 160
