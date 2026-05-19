@@ -121,6 +121,7 @@ def build() -> str:
                 ob = objective_brief(
                     cl.scenario.description, cl.win_condition,
                     cl.fail_condition, cl.max_turns,
+                    getattr(cl, "objective_coords", "exact"),
                 )
                 parts.append(
                     f"<div class=cell><span class=clab>{label}</span> "

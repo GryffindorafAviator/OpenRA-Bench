@@ -95,41 +95,46 @@ levels:
     max_turns: 36
 
   hard:
+    # Identical setup to MEDIUM (same regions, same enemy pickets, same
+    # deadline + attrition). The ONLY changed variable is disclosure:
+    # objective_coords:relative gives compass labels instead of (x,y),
+    # so the model must ground each target on the minimap itself. An
+    # enemy building still sits in each region (fact NE / proc SE / powr
+    # SW) as the on-map landmark to localize against. A hard failure
+    # therefore attributes to spatial grounding, not extra combat.
+    objective_coords: relative
     description: >
-      Three regions, full force (~10 units) from a seed-chosen corner,
-      gun turrets + infantry on the lanes, tight deadline + strict
-      attrition. Put >=2 units in EACH region before tick 3300 losing
-      <=2. Only genuine parallel multi-group control clears every clause.
+      Three dispersed regions, 8 units, attrition cap — but you are NOT
+      given coordinates. Put >=2 units into EACH of: the NORTH-EAST
+      corner, the SOUTH-WEST (bottom-left) corner, and the SOUTH-EAST
+      corner before tick 2800, losing <=2. Each region holds one enemy
+      building (visible on the minimap once scouted) — use the map to
+      localize the targets. The three lie in three different directions;
+      a single eastward column cannot reach the south-west one, so this
+      needs genuine multi-vector dispatch. Enemy infantry contest the
+      two eastern lanes; the south-west route is clear.
     overrides:
       actors:
-        # spawn_point 0 — full force, northern staging
-        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3, spawn_point: 0}
-        - {type: 1tnk, owner: agent, position: [7, 10], count: 3, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [5, 14], count: 2, spawn_point: 0}
-        - {type: apc,  owner: agent, position: [9, 18], count: 2, spawn_point: 0}
-        # spawn_point 1 — full force, southern staging (same 3 fixed
-        # regions to cover; seed picks the start cluster)
-        - {type: 2tnk, owner: agent, position: [5, 20], count: 3, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [7, 24], count: 3, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [5, 28], count: 2, spawn_point: 1}
-        - {type: apc,  owner: agent, position: [9, 32], count: 2, spawn_point: 1}
-        - {type: fact, owner: enemy, position: [112, 5]}
-        - {type: proc, owner: enemy, position: [112, 35]}
-        - {type: powr, owner: enemy, position: [115, 20]}
-        - {type: gun,  owner: enemy, position: [100, 6]}
-        - {type: gun,  owner: enemy, position: [100, 34]}
-        - {type: e3,   owner: enemy, position: [55, 9],  stance: 2, count: 2}
-        - {type: e3,   owner: enemy, position: [55, 31], stance: 2, count: 2}
-        - {type: e1,   owner: enemy, position: [58, 20], stance: 2, count: 2}
+        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
+        - {type: 1tnk, owner: agent, position: [7, 10], count: 3}
+        - {type: jeep, owner: agent, position: [5, 14], count: 2}
+        - {type: fact, owner: enemy, position: [115, 6]}    # NE corner
+        - {type: proc, owner: enemy, position: [115, 34]}   # SE corner
+        - {type: powr, owner: enemy, position: [20, 36]}     # bottom-left
+        - {type: e1,   owner: enemy, position: [60, 8],  stance: 2, count: 2}
+        - {type: e1,   owner: enemy, position: [60, 31], stance: 2, count: 2}
     win_condition:
       all_of:
-        - {units_in_region_gte: {x: 112, y: 5,  radius: 7, n: 2}}
-        - {units_in_region_gte: {x: 112, y: 35, radius: 7, n: 2}}
-        - {units_in_region_gte: {x: 115, y: 20, radius: 7, n: 2}}
-        - {within_ticks: 3300}
+        - {units_in_region_gte: {x: 115, y: 6,  radius: 7, n: 2,
+            label: "the NORTH-EAST corner of the map"}}
+        - {units_in_region_gte: {x: 20,  y: 36, radius: 7, n: 2,
+            label: "the SOUTH-WEST (bottom-left) corner of the map"}}
+        - {units_in_region_gte: {x: 115, y: 34, radius: 7, n: 2,
+            label: "the SOUTH-EAST corner of the map"}}
+        - {within_ticks: 2800}
         - {units_lost_lte: 2}
     fail_condition:
       any_of:
         - {not: {own_units_gte: 1}}
-        - {after_ticks: 3301}
-    max_turns: 44
+        - {after_ticks: 2801}
+    max_turns: 36

@@ -133,3 +133,29 @@ def test_model_agent_system_is_vendored_v2_with_objective_and_codex():
     assert "{objective}" not in sys
     # scenario unit codex with numbers appended
     assert "UNIT CODEX" in sys and "e1" in sys and "hp" in sys
+
+
+def test_objective_coords_relative_hides_numbers():
+    """objective_coords:relative discloses the authored compass label
+    only — no (x,y) leaks into the briefing the model sees."""
+    import re
+    from openra_bench.game_knowledge import objective_brief
+    wc = {"all_of": [
+        {"units_in_region_gte": {"x": 115, "y": 6, "radius": 7, "n": 2,
+                                 "label": "the NORTH-EAST corner"}},
+        {"within_ticks": 2800},
+    ]}
+    exact = objective_brief("", wc, None, 36, "exact")
+    rel = objective_brief("", wc, None, 36, "relative")
+    assert "(115,6)" in exact
+    assert "the NORTH-EAST corner" in rel
+    assert "115" not in rel and "(115" not in rel
+    # win predicate still drives off the real coords regardless.
+    from openra_bench.scenarios.win_conditions import WinCondition
+    WinCondition(**wc)  # validates with the extra label key present
+
+
+def test_objective_coords_default_is_exact():
+    from openra_bench.game_knowledge import objective_brief
+    wc = {"reach_region": {"x": 9, "y": 9, "radius": 3, "label": "the dot"}}
+    assert "(9,9)" in objective_brief("", wc, None, 5)  # default exact

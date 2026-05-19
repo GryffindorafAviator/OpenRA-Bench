@@ -31,7 +31,6 @@ UPGRADED = [
     "artofwar-indirect-approach",
     "artofwar-lure-the-tiger",
     "artofwar-sequenced-citadel",
-    "action-multiunit-coordination",
     "action-sequenced-execution",
     "strict-sequence",
     "perception-frontier-reading",
@@ -58,6 +57,12 @@ NOT_APPLICABLE = {
     "strategy-twobody": "win redesigned to fact+proc; two "
     "simultaneously-controlled groups IS the task — spawn-alternatives "
     "would break intent",
+    "action-multiunit-coordination": "hard is held byte-identical to "
+    "medium's setup by design; the SOLE controlled variable vs medium "
+    "is objective_coords:relative (spatial grounding from the minimap "
+    "instead of handed coordinates). Adding seed-driven spawn variation "
+    "would introduce a second uncontrolled variable and break the clean "
+    "medium→hard attribution.",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss

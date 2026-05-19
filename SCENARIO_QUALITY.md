@@ -399,3 +399,34 @@ Kept (NOT aimless dup — each serves a purpose):
 
 Active set: 21 distinct decisions. Quarantined packs remain on disk,
 runnable via explicit --packs, excluded from the default sweep.
+
+## Per-scenario closer look — #1 action-multiunit-coordination
+
+Difficulty axis (one new controlled variable per tier, so a tier
+failure attributes to a single capability):
+
+- **easy** — 2 regions, exact `(x,y)`. Tests *parallel dispatch*:
+  serialized one-group-at-a-time touring blows the binding tick
+  deadline (~30+ turns); only genuine simultaneous control (~17–20
+  turns) makes it. Split enforced by `units_in_region_gte n=2` (not
+  `reach_region`, which one touring unit satisfies).
+- **medium** — 3 *dispersed* regions (NE / SW bottom-left / SE),
+  exact `(x,y)`, attrition cap, infantry pickets on the two eastern
+  lanes. Adds *multi-vector* dispatch: a single eastward column
+  cannot reach the SW region.
+- **hard** — byte-identical setup to medium (same regions, pickets,
+  deadline, attrition); the ONLY changed variable is
+  `objective_coords: relative` — the briefing gives compass labels
+  ("the NORTH-EAST corner") instead of coordinates. Tests *spatial
+  grounding*: the model must localize each target on the minimap
+  (each region holds one enemy building as the on-map landmark).
+  Deliberately NOT spawn-varied and NO turrets on the path —
+  introducing either would add a second uncontrolled variable and
+  break the clean medium→hard attribution (recorded as a reasoned
+  exception to the task-#23 spawn-variation contract in
+  `tests/test_hard_tier.py::NOT_APPLICABLE`).
+
+`objective_coords` (`exact|relative`, schema `Level`/`ScenarioConfig`,
+default `exact`) is a reusable knob: any pack can opt into
+coordinate-blind objectives. The win predicate always evaluates
+against the real engine coordinates regardless of disclosure.

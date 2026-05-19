@@ -85,6 +85,11 @@ class Level(BaseModel):
     )
     win_condition: WinCondition
     fail_condition: WinCondition | None = None
+    # How region objectives are disclosed in the briefing. `exact`
+    # gives (x,y) coordinates; `relative` gives only the authored
+    # compass label ("the north-east corner") so the model must
+    # ground the target on the minimap itself (spatial reasoning).
+    objective_coords: Literal["exact", "relative"] = "exact"
     max_turns: int = Field(default=40, ge=1, le=400)
     starting_cash: int | None = Field(
         default=None,
@@ -104,6 +109,8 @@ class ScenarioConfig(BaseModel):
     name: str = Field(..., description="cell suffix, e.g. easy-structured")
     level: LevelName
     fog_mode: Literal["vision", "structured"] = "vision"
+    # Optional override of the level's objective_coords for this cell.
+    objective_coords: Literal["exact", "relative"] | None = None
 
     @field_validator("name")
     @classmethod
@@ -134,6 +141,7 @@ class CompiledLevel(BaseModel):
     # (pack:config_name).
     fog_mode: str = "vision"
     config_name: str | None = None
+    objective_coords: Literal["exact", "relative"] = "exact"
 
 
 class ScenarioPack(BaseModel):
@@ -187,6 +195,7 @@ class ScenarioPack(BaseModel):
             if lvl.starting_cash is not None
             else self.starting_cash,
             map_supported=map_supported,
+            objective_coords=lvl.objective_coords,
         )
 
     def config_names(self) -> list[str]:
@@ -205,4 +214,6 @@ class ScenarioPack(BaseModel):
         cl = self.compile(cfg.level, map_supported=map_supported)
         cl.fog_mode = cfg.fog_mode
         cl.config_name = cfg.name
+        if cfg.objective_coords is not None:
+            cl.objective_coords = cfg.objective_coords
         return cl

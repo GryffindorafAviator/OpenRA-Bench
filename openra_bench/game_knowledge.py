@@ -141,9 +141,20 @@ def scenario_primer(compiled: Any) -> str:
 
 # ── win/fail predicate → plain language ────────────────────────────────────
 
-def _region(x: Any) -> str:
+_REGION_KEYS = ("reach_region", "units_in_region_gte", "all_units_in_region")
+
+
+def _region(x: Any, coords: str = "exact") -> str:
     if isinstance(x, dict):
-        return f"({x.get('x')},{x.get('y')}) r={x.get('radius', 3)}"
+        if coords == "relative":
+            # Disclose only the authored compass label — the model
+            # must localize the target on the minimap itself. Fall
+            # back to coords if a region lacks a label (authoring bug
+            # made visible rather than silently leaking numbers).
+            lbl = x.get("label")
+            if lbl:
+                return str(lbl)
+        return f"region ({x.get('x')},{x.get('y')}) r={x.get('radius', 3)}"
     return str(x)
 
 
@@ -157,12 +168,14 @@ _PHRASES: dict[str, Any] = {
     "explored_pct_gte": lambda v: f"reveal ≥{v}% of the map",
     "enemies_discovered_gte": lambda v: f"spot ≥{v} enemy units",
     "buildings_discovered_gte": lambda v: f"spot ≥{v} enemy buildings",
-    "reach_region": lambda v: f"get a unit into region {_region(v)}",
+    # Region phrases are handled by _REGION_PHRASES (coords-aware);
+    # these fallbacks keep the exact default for any direct use.
+    "reach_region": lambda v: f"get a unit into {_region(v)}",
     "units_in_region_gte": lambda v: (
         f"get ≥{(v if isinstance(v, dict) else {}).get('n', 1)} "
-        f"units into region {_region(v)}"
+        f"units into {_region(v)}"
     ),
-    "all_units_in_region": lambda v: f"get EVERY unit into region {_region(v)}",
+    "all_units_in_region": lambda v: f"get EVERY unit into {_region(v)}",
     "own_units_gte": lambda v: f"keep ≥{v} units alive",
     "cash_gte": lambda v: f"hold ≥{v} credits",
     "resources_gte": lambda v: f"hold ≥{v} stored ore",
@@ -185,20 +198,35 @@ _PHRASES: dict[str, Any] = {
 }
 
 
-def _leaf_phrase(key: str, v: Any) -> str:
+# Coords-aware region phrasing (honours objective_coords).
+_REGION_PHRASES: dict[str, Any] = {
+    "reach_region": lambda v, c: f"get a unit into {_region(v, c)}",
+    "units_in_region_gte": lambda v, c: (
+        f"get ≥{(v if isinstance(v, dict) else {}).get('n', 1)} "
+        f"units into {_region(v, c)}"
+    ),
+    "all_units_in_region": lambda v, c: f"get EVERY unit into {_region(v, c)}",
+}
+
+
+def _leaf_phrase(key: str, v: Any, coords: str = "exact") -> str:
+    if key in _REGION_PHRASES:
+        return _REGION_PHRASES[key](v, coords)
     fn = _PHRASES.get(key)
     return fn(v) if fn else f"{key}={v}"
 
 
-def _describe(node: Any, join: str = " AND ") -> str:
+def _describe(node: Any, join: str = " AND ", coords: str = "exact") -> str:
     if node is None:
         return ""
     if not isinstance(node, dict):
         node = dict(getattr(node, "__pydantic_extra__", {}) or {})
     if "all_of" in node:
-        return join.join(_describe(c) for c in node["all_of"])
+        return join.join(_describe(c, coords=coords) for c in node["all_of"])
     if "any_of" in node:
-        return "(" + " OR ".join(_describe(c) for c in node["any_of"]) + ")"
+        return "(" + " OR ".join(
+            _describe(c, coords=coords) for c in node["any_of"]
+        ) + ")"
     if "not" in node:
         inner = node["not"]
         inner_d = inner if isinstance(inner, dict) else dict(
@@ -212,21 +240,22 @@ def _describe(node: Any, join: str = " AND ") -> str:
                 "your whole force is destroyed" if int(n) <= 1
                 else f"fewer than {n} of your units remain"
             )
-        return "NOT (" + _describe(inner) + ")"
-    return join.join(_leaf_phrase(k, v) for k, v in node.items())
+        return "NOT (" + _describe(inner, coords=coords) + ")"
+    return join.join(_leaf_phrase(k, v, coords) for k, v in node.items())
 
 
 def objective_brief(description: str, win_condition: Any,
-                     fail_condition: Any, max_turns: int) -> str:
+                     fail_condition: Any, max_turns: int,
+                     objective_coords: str = "exact") -> str:
     """Plain-language objective the model sees every turn: the scenario
     prose PLUS the exact machine win/fail criteria (so success is a
     known target, not a guess)."""
     parts = []
     if description:
         parts.append(description.strip())
-    win = _describe(win_condition)
+    win = _describe(win_condition, coords=objective_coords)
     parts.append(f"WIN WHEN: {win}." if win else "WIN: (none defined)")
-    fail = _describe(fail_condition, join=" AND ")
+    fail = _describe(fail_condition, join=" AND ", coords=objective_coords)
     if fail:
         parts.append(f"YOU LOSE IF: {fail}.")
     parts.append(
