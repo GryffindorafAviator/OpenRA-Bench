@@ -148,9 +148,11 @@ class ScenarioPack(BaseModel):
     """The contributor-authored unit. One file = one decision problem."""
 
     meta: ScenarioMeta
-    base_map: str = Field(
+    base_map: str | dict[str, Any] = Field(
         default="rush-hour-arena",
-        description="Logical map id; loader maps to a Rust-supported map",
+        description="Logical map id, OR a generator spec "
+        "{generator: arena, width:.., height:.., cordon:..} that is "
+        "materialized to a real .oramap at compile time (see mapgen).",
     )
     base: dict[str, Any] = Field(
         ..., description="Shared ScenarioDefinition fields (actors, factions, tools…)"
@@ -180,6 +182,12 @@ class ScenarioPack(BaseModel):
         merged.setdefault("name", f"{self.meta.title} [{level}]")
         merged.setdefault("description", lvl.description)
         merged.setdefault("base_map", self.base_map)
+        # A generator-spec base_map (pack-level or via overrides) is
+        # materialized to a real .oramap id before validation, so the
+        # rest of the pipeline sees an ordinary map id.
+        from ..mapgen import resolve_base_map
+
+        merged["base_map"] = resolve_base_map(merged["base_map"])
         # Validate against the real engine model so a broken level fails
         # at load time, not mid-eval.
         scenario = ScenarioDefinition(**merged)
