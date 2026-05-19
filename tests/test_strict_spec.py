@@ -60,6 +60,67 @@ def test_bom_fail_tree_triggers_on_overproduction():
     assert evaluate(c.win_condition, bad) is False
 
 
+def test_strict_production_bom_enforces_exact_spec_no_cheat():
+    """No-cheat invariant for strict-production-bom: every level's win
+    is `unit_type_count_eq` for the EXACT spec (the no-overproduction
+    teeth) gated by a `within_ticks` deadline that is REACHABLE inside
+    `max_turns` (tick ≈ 93+90·(max_turns-1)) AND ≥ the measured optimal
+    build tick — and the fail tree carries an `after_ticks` timeout one
+    tick past the deadline so a staller / under-deliverer LOSES (never
+    draws), plus a `unit_type_count_gte` clause for every spec'd unit
+    so OVERproduction LOSES too. No `not own_units_gte` clause: this is
+    a production scenario, the agent legitimately starts with zero
+    units (such a clause would fail the episode on turn 1).
+    """
+    from openra_bench.scenarios import load_pack
+    from openra_bench.scenarios.loader import compile_level
+
+    pack = load_pack(PACKS / "strict-production-bom.yaml")
+    # Measured optimal build ticks for the scripted exact-BoM builder
+    # (verified offline against the live engine, seeds 1..4): easy 813,
+    # medium 1083, hard 4773. Deadlines must be ≥ these so the precise
+    # strategy actually wins; ≤ max_turns tick bound so a staller hits
+    # the after_ticks LOSS and not a draw.
+    OPTIMAL = {"easy": 813, "medium": 1083, "hard": 4773}
+    for lvl in ("easy", "medium", "hard"):
+        cc = compile_level(pack, lvl)
+        assert cc.map_supported, lvl
+        win = dict(cc.win_condition.__pydantic_extra__ or {})
+        win_clauses = win["all_of"]
+        # Every spec'd unit type has an exact-count clause in win and a
+        # matching ≥(n+1) clause in fail (overproduction = LOSS).
+        eq_clauses = {
+            c["unit_type_count_eq"]["type"]: c["unit_type_count_eq"]["n"]
+            for c in win_clauses if "unit_type_count_eq" in c
+        }
+        assert eq_clauses, (lvl, "win must include unit_type_count_eq")
+        fail = dict(cc.fail_condition.__pydantic_extra__ or {})
+        fail_clauses = fail["any_of"]
+        gte_caps = {
+            c["unit_type_count_gte"]["type"]: c["unit_type_count_gte"]["n"]
+            for c in fail_clauses if "unit_type_count_gte" in c
+        }
+        for ut, n in eq_clauses.items():
+            assert gte_caps.get(ut) == n + 1, (
+                lvl, ut, "overproduction must trigger fail at exactly n+1"
+            )
+        # Reachable deadline + reachable timeout one tick past it.
+        within = next(c["within_ticks"] for c in win_clauses if "within_ticks" in c)
+        after = next(c["after_ticks"] for c in fail_clauses if "after_ticks" in c)
+        max_tick = 93 + 90 * (cc.max_turns - 1)
+        assert OPTIMAL[lvl] <= within <= max_tick, (
+            lvl, "deadline must be ≥ optimal build tick and ≤ reachable tick"
+        )
+        assert after == within + 1, (lvl, after, within)
+        assert after <= max_tick, (lvl, after, max_tick)
+        # Production scenario: no force-loss clause (the agent starts
+        # with zero combat units; such a clause would mis-fire turn 1).
+        keys = {k for c in fail_clauses for k in c}
+        assert "not" not in keys, (
+            lvl, "no force-loss clause in a production scenario"
+        )
+
+
 @pytest.mark.parametrize("pid", ["strict-production-bom", "strict-sequence"])
 def test_strict_pack_compiles_and_runs(pid):
     pytest.importorskip("openra_train")

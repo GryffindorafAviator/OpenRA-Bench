@@ -70,8 +70,12 @@ def test_objective_brief_translates_win_and_fail_to_plain_language():
     )
     assert "WIN WHEN:" in ob and "YOU LOSE IF:" in ob
     assert "destroy the enemy fact+proc" in ob
-    assert "before game tick 9000" in ob
-    assert "lose ≤4 of your own units" in ob
+    # Hard tier: redesigned to make the timeout/attrition fail conditions
+    # actually reachable within max_turns (the old within_ticks: 9000 was
+    # unreachable in 80 turns → inert deadline, stallers drew rather than
+    # losing). New budget: 2700 ticks, attrition cap 5.
+    assert "before game tick 2700" in ob
+    assert "lose ≤5 of your own units" in ob
     assert "decision turns" in ob  # turn budget surfaced
 
 
@@ -99,6 +103,9 @@ def test_all_predicate_keys_have_a_translation():
         "unit_type_count_eq": {"type": "e1", "n": 3},
         "unit_type_count_gte": {"type": "e3", "n": 2},
         "enemy_key_buildings_destroyed": {"types": ["fact", "proc"]},
+        "enemy_key_buildings_destroyed_in_region": {
+            "x": 24, "y": 21, "radius": 9, "types": ["fact", "proc"],
+        },
     }
     for k in LEAF_KEYS:
         v = sample.get(k, 5)

@@ -3,17 +3,19 @@ meta:
   title: 'Exact Build Order — Produce the Precise Bill of Materials Under Budget'
   capability: action
   real_world_meaning: >
-    Produce an EXACT bill of materials under a hard budget: build only
-    the tech-tree prerequisites needed, in the right order, and produce
-    exactly the specified units — no more, no less. Overproducing one
-    type, or erecting an unnecessary structure, exhausts the budget and
-    fails the spec. The objective is instruction/spec fidelity itself,
-    not combat — the OpenRA analogue of strict tool/function-calling
-    benchmarks (BFCL / τ²-bench): do exactly and only what was asked.
+    Produce an EXACT bill of materials under a hard budget and a
+    deadline: build only the tech-tree prerequisites needed, in the
+    right order, and produce exactly the specified units — no more, no
+    less. Overproducing one type, erecting an unnecessary structure, or
+    under-delivering exhausts the budget / misses the spec and fails.
+    The objective is instruction/spec fidelity itself, not combat — the
+    OpenRA analogue of strict tool/function-calling benchmarks (BFCL /
+    τ²-bench): do exactly and only what was asked, on time.
   robotics_analogue: >
-    Manufacturing-cell order fulfilment under a resource cap: satisfy a
-    precise parts list respecting assembly prerequisites without
-    over-building or wasting stock.
+    Manufacturing-cell order fulfilment under a resource cap and a
+    shift deadline: satisfy a precise parts list respecting assembly
+    prerequisites without over-building, under-building, or wasting
+    stock.
   author: openra-bench
 base_map: rush-hour-arena
 starting_cash: 3000
@@ -44,47 +46,62 @@ base:
 levels:
   easy:
     description: >
-      Spec: exactly 3 e1 rifle infantry — requires building a barracks
-      first (tech prerequisite). Budget covers the barracks + exactly 3
-      e1; a 4th e1 or any extra structure breaks the spec.
+      Spec: build EXACTLY 3 e1 rifles + EXACTLY 1 e2 grenadier —
+      requires erecting a barracks first (the tech prerequisite for
+      both). The budget covers the barracks + the precise mix; a 4th
+      e1, a 2nd e2, or any extra structure breaks the spec. Deliver
+      before the deadline — stalling, under-delivering, or producing
+      the wrong mix (e.g. only e1) is a loss.
     starting_cash: 2200
     win_condition:
       all_of:
         - unit_type_count_eq: {type: e1, n: 3}
-        - within_ticks: 20000
+        - unit_type_count_eq: {type: e2, n: 1}
+        - within_ticks: 2700
     fail_condition:
-      unit_type_count_gte: {type: e1, n: 4}   # overproduction = violation
-    max_turns: 70
+      any_of:
+        - after_ticks: 2701               # missed deadline / stalled / under-built
+        - unit_type_count_gte: {type: e1, n: 4}   # overproduction = violation
+        - unit_type_count_gte: {type: e2, n: 2}
+    max_turns: 40
   medium:
     description: >
-      Spec: exactly 3 e1 + 2 e3 (rocket). e3 shares the barracks tech
-      but costs more — the budget forces correct allocation, no waste.
+      Spec: build EXACTLY 3 e1 + EXACTLY 2 e3 (rocket). e3 shares the
+      barracks tech but costs more — the budget forces correct
+      allocation, no waste. Over- or under-producing either type, or
+      missing the deadline, is a loss.
     starting_cash: 3000
     win_condition:
       all_of:
         - unit_type_count_eq: {type: e1, n: 3}
         - unit_type_count_eq: {type: e3, n: 2}
-        - within_ticks: 18000
+        - within_ticks: 3000
     fail_condition:
       any_of:
+        - after_ticks: 3001
         - unit_type_count_gte: {type: e1, n: 4}
         - unit_type_count_gte: {type: e3, n: 3}
-    max_turns: 80
+    max_turns: 45
   hard:
     description: >
-      Spec: exactly 3 e1 + 2 e3 + 1 tesla coil (tsla). tsla adds a
-      deeper tech path (power-dependent) and a tight budget — any
-      overproduction or unnecessary building exhausts cash and fails.
-    starting_cash: 4200
+      Spec: build EXACTLY 3 e1 + EXACTLY 2 e3, plus a working Tesla
+      Coil (tsla) — a deep soviet tech path (proc → weap → tsla) that
+      also draws heavy power, so extra power plants are required to keep
+      a non-negative power surplus. The tight budget leaves no room for
+      overproduction or an unnecessary structure; under-delivering or
+      missing the deadline is a loss.
+    starting_cash: 7200
     win_condition:
       all_of:
         - unit_type_count_eq: {type: e1, n: 3}
         - unit_type_count_eq: {type: e3, n: 2}
         - building_count_gte: {type: tsla, n: 1}
-        - within_ticks: 16000
+        - power_surplus_gte: 0
+        - within_ticks: 6300
     fail_condition:
       any_of:
+        - after_ticks: 6301
         - unit_type_count_gte: {type: e1, n: 4}
         - unit_type_count_gte: {type: e3, n: 3}
         - building_count_gte: {type: tsla, n: 2}
-    max_turns: 90
+    max_turns: 75
