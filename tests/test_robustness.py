@@ -189,16 +189,30 @@ def test_custom_map_no_enemy_scenario_runs_from_yaml():
     assert mp is not None and mp.name == "singles-maginot.oramap"
 
     # Idle agent: with no enemy the run must survive past tick 0 (the
-    # bug) and only end on win_condition / max_turns.
+    # engine bug) — but the no-cheat redesign now makes idling a real
+    # LOSS via a reachable after_ticks fail (NOT a draw): the tight,
+    # reachable deadline is the anti-stall teeth.
     idle = run_level(c, lambda rs, C: [C.observe()], seed=1)
     assert idle.signals.game_tick > 50, "no-enemy scenario terminated instantly"
     assert idle.turns >= 1
+    assert idle.outcome == "loss", (
+        f"idling must LOSE on the reachable deadline (not draw), "
+        f"got {idle.outcome}"
+    )
 
-    # A scout that drives to the YAML-declared region wins via the
-    # declarative win_condition alone (no combat involved).
+    # The intended committed-navigation policy: drive the force directly
+    # to the YAML-declared goal zone every turn → wins via the
+    # declarative win_condition alone (no combat involved), comfortably
+    # under the tight within_ticks deadline.
     def scout(rs, C):
-        ids = [str(u["id"]) for u in rs.get("units_summary", [])]
-        return [C.move_units(ids, 30, 16)] if ids else [C.observe()]
+        us = rs.get("units_summary", [])
+        return (
+            [C.move_units([str(u["id"])], 55, 16) for u in us]
+            if us else [C.observe()]
+        )
 
     won = run_level(c, scout, seed=1)
-    assert won.outcome == "win", f"YAML reach_region should win, got {won.outcome}"
+    assert won.outcome == "win", (
+        f"committed navigation to the goal zone should win, "
+        f"got {won.outcome}"
+    )

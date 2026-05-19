@@ -1,20 +1,27 @@
 meta:
   id: custom-map-no-enemy
-  title: 'Pure Navigation — Reach the Goal Zone in a Confined Map (No Enemy)'
+  title: 'Pure Navigation — Commit a Route and Reach the Goal Zone Before the Clock (No Enemy)'
   capability: perception
   real_world_meaning: >
     Pure spatial navigation inside a confined custom region with no
-    adversary: read the map, plan a route through the bounded playable
-    area, and reach the designated zone. Success depends only on
-    perceiving the terrain and committing a path — not on combat.
+    adversary: read the map, commit a route through the bounded playable
+    area, and drive the force to the designated zone BEFORE a tight,
+    reachable deadline. There is no combat — discrimination comes only
+    from perceiving the target and committing decisively. Idling,
+    dithering, or wandering toward the nearest unexplored cell never
+    reaches the zone in time and LOSES on the clock.
   robotics_analogue: >
-    Confined-space autonomous navigation (warehouse aisle, indoor map):
-    reach a goal cell within a bounded region from a map read alone.
+    Confined-space autonomous navigation under a deadline (warehouse
+    aisle, indoor map): reach a goal cell within a bounded region from a
+    map read alone, fast enough that hesitation fails the mission.
   author: autonomous-loop
 
-# Custom terrain (NOT rush-hour); singles-maginot has the smallest
-# playable region (bounds 2,2,80,32). Everything below is read from
-# this YAML — no enemy actors at all.
+# Custom terrain (NOT rush-hour). singles-maginot is a confined custom
+# map; the force spawns in the far west and must traverse east to the
+# goal zone. No enemy actors at all — a force-loss fail is impossible by
+# construction (this pack is in tests/test_hard_tier.py::_NO_ENEMY). The
+# only failure mode is missing a TIGHT, REACHABLE deadline, which makes
+# every lazy/stall/wander policy a real LOSS (not a draw).
 base_map: singles-maginot
 starting_cash: 0
 
@@ -43,33 +50,69 @@ base:
       count: 2
 
 levels:
+  # ── EASY ── the bare navigation skill: get ONE unit (the fast jeep
+  # suffices) from the far-west spawn to a far-east goal zone. The
+  # deadline is TIGHT but comfortably reachable by a unit that commits a
+  # direct route immediately (a committed force has a unit in zone by
+  # ~tick 363); idling, stopping short, or wandering toward the nearest
+  # unexplored cell never arrives and LOSES on the clock at tick 901.
   easy:
     description: >
-      Move your units to the goal zone near (30,16). No enemy on this
-      map — success is purely reading the terrain and committing a
-      route. Win: a unit reaches the zone within the time limit.
+      Move a unit to the goal zone near (55,16) at the far east of the
+      playable area. No enemy on this map — success is purely reading
+      the terrain and committing a route immediately. Win: a unit
+      reaches the zone before the deadline. You LOSE if no unit is in
+      the zone by the deadline (idling/stalling/wandering loses).
     win_condition:
       all_of:
-        - reach_region: {x: 30, y: 16, radius: 6}
-        - within_ticks: 12000
-    max_turns: 50
+        - reach_region: {x: 55, y: 16, radius: 5}
+        - within_ticks: 900
+    fail_condition:
+      any_of:
+        - {after_ticks: 901}
+        - {not: {own_units_gte: 1}}
+    max_turns: 14
+  # ── MEDIUM ── +1 controlled variable: a RENDEZVOUS — the WHOLE squad
+  # (every unit, including the slow infantry) must reach a farther goal
+  # zone together, so sending only the fast jeep no longer wins; the
+  # route is longer and the clock is set for a committed full-force
+  # march (all units in zone by ~tick 1173). Stall/wander/jeep-only all
+  # miss the deadline and LOSE.
   medium:
     description: >
-      Same task, harder: the goal zone is farther at (55,18) and the
-      clock is tighter. Plan the longer route and go directly. Win: a
-      unit reaches the zone in time.
+      Same task, harder: the goal zone is farther at (72,16) and EVERY
+      unit must reach it (not just the fast scout). Plan the longer
+      route and march the whole squad directly. Win: every unit is in
+      the zone before the deadline. You LOSE if the whole squad is not
+      in the zone by the deadline.
     win_condition:
       all_of:
-        - reach_region: {x: 55, y: 18, radius: 5}
-        - within_ticks: 10000
-    max_turns: 55
+        - all_units_in_region: {x: 72, y: 16, radius: 5}
+        - within_ticks: 1500
+    fail_condition:
+      any_of:
+        - {after_ticks: 1501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 20
+  # ── HARD ── +1 controlled variable: the goal is given by RELATIVE
+  # description only (objective_coords: relative — the model sees the
+  # label, not coordinates, and must localize the zone on the minimap
+  # itself) AND the force stages from a seed-chosen latitude (two
+  # spawn_point groups, north y~12 / south y~28), so the exact route
+  # can't be replayed from memory. Whole squad must rendezvous in the
+  # zone before a tight, reachable deadline (committed full-force march
+  # arrives by ~tick 1263 from either start). (No adversary → no
+  # force-loss fail; the only failure mode is missing the deadline.)
   hard:
     description: >
-      Whole squad must reach the far corner of the playable bounds
-      together within a short deadline, starting from a seed-chosen
-      position (two spawn_point groups) so the route can't be replayed
-      from memory. (No adversary on this map → no force-loss fail; the
-      only failure mode is missing the deadline.)
+      The whole squad must reach the goal zone at the far east-central
+      edge of the playable area, but you are NOT given its coordinates —
+      localize it on the minimap yourself. You start from a seed-chosen
+      latitude (two spawn_point groups) so the route can't be replayed
+      from memory. Commit a direct full-force march. Win: every unit is
+      in the zone before the deadline. You LOSE if the whole squad is
+      not in the zone by the deadline.
+    objective_coords: relative
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [8, 12], spawn_point: 0}
@@ -78,6 +121,17 @@ levels:
         - {type: e1,   owner: agent, position: [9, 26], count: 2, spawn_point: 1}
     win_condition:
       all_of:
-        - all_units_in_region: {x: 70, y: 24, radius: 6}
-        - within_ticks: 9000
-    max_turns: 60
+        - all_units_in_region:
+            x: 72
+            y: 24
+            radius: 7
+            label: >-
+              the goal zone at the FAR EAST-CENTRAL edge of the playable
+              area (right side of the map, vertically centred — march
+              your whole squad straight east from the spawn)
+        - within_ticks: 1600
+    fail_condition:
+      any_of:
+        - {after_ticks: 1601}
+        - {not: {own_units_gte: 1}}
+    max_turns: 22
