@@ -94,6 +94,25 @@ class Level(BaseModel):
     )
 
 
+class ScenarioConfig(BaseModel):
+    """A named runnable configuration of one pack: pins a difficulty
+    `level` and the observation `fog_mode`. The same setup at
+    `fog_mode: structured` (text 'Unexplored regions') vs `vision`
+    (PNG minimap) becomes two distinct cells, so text-vs-vision is a
+    first-class comparison the YAML declares (not just a CLI flag)."""
+
+    name: str = Field(..., description="cell suffix, e.g. easy-structured")
+    level: LevelName
+    fog_mode: Literal["vision", "structured"] = "vision"
+
+    @field_validator("name")
+    @classmethod
+    def _slug(cls, v: str) -> str:
+        if not v.replace("-", "").replace("_", "").isalnum():
+            raise ValueError(f"config name must be a slug, got {v!r}")
+        return v
+
+
 class CompiledLevel(BaseModel):
     """A single runnable level: validated engine scenario + conditions."""
 
@@ -110,6 +129,11 @@ class CompiledLevel(BaseModel):
     map_supported: bool = Field(
         ..., description="False => Rust lacks this map (Phase 3 gate)"
     )
+    # Observation channel + the cell label. config_name is None for
+    # legacy level cells (pack:level); set for declared configs
+    # (pack:config_name).
+    fog_mode: str = "vision"
+    config_name: str | None = None
 
 
 class ScenarioPack(BaseModel):
@@ -129,6 +153,10 @@ class ScenarioPack(BaseModel):
         description="Pack-wide economy budget; a level may override it.",
     )
     levels: dict[LevelName, Level]
+    # Optional named configurations. When present, the eval runs ONE
+    # cell per config (pack:config_name) instead of the 3 raw levels —
+    # lets a pack declare e.g. easy-structured / easy-vision / medium.
+    configs: list[ScenarioConfig] | None = None
 
     @field_validator("levels")
     @classmethod
@@ -160,3 +188,21 @@ class ScenarioPack(BaseModel):
             else self.starting_cash,
             map_supported=map_supported,
         )
+
+    def config_names(self) -> list[str]:
+        return [c.name for c in (self.configs or [])]
+
+    def compile_config(
+        self, name: str, *, map_supported: bool = True
+    ) -> CompiledLevel:
+        """Compile a declared config: its `level` + `fog_mode`, with
+        the cell label = the config name (pack:config_name)."""
+        cfg = next(
+            (c for c in (self.configs or []) if c.name == name), None
+        )
+        if cfg is None:
+            raise KeyError(f"no config {name!r} in pack {self.meta.id}")
+        cl = self.compile(cfg.level, map_supported=map_supported)
+        cl.fog_mode = cfg.fog_mode
+        cl.config_name = cfg.name
+        return cl

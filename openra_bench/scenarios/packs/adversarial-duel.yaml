@@ -1,17 +1,19 @@
 meta:
   id: adversarial-duel
-  title: 'Adversarial: Force Duel'
+  title: '1v1 Combat Duel — Defeat the Reactive Enemy'
   capability: adversarial
-  real_world_meaning: "Defeat a reactive opposing force of escalating strength:\
-    \ focus-fire, target priority and kiting against an enemy that fights\
-    \ back — head-to-head tactical reasoning, not micro against a dummy."
-  robotics_analogue: "Adversarial multi-agent engagement: prevail over a\
-    \ reactive opponent team whose strength increases each ladder rung."
+  real_world_meaning: >
+    A close-quarters force-on-force fight against an enemy that shoots
+    back: the decision is combat micro — concentrate fire on one
+    target, retreat damaged units, trade favourably. The enemy starts
+    just to the east, in or near sight, so this is a DUEL, not a
+    search (finding scattered enemies on a big map is tested
+    separately). Difficulty escalates the opponent, not the search.
+  robotics_analogue: >
+    Adversarial multi-agent engagement at close range: prevail over a
+    reactive opponent team by target selection and damage trading.
   author: openra-bench
 base_map: rush-hour-arena
-# The ladder: easy/medium/hard are rungs of increasing enemy strength.
-# A model's adversarial rating = the highest rung it can clear (see
-# adversarial.ladder_rating); models are Elo-ranked on shared rungs.
 base:
   agent:
     faction: allies
@@ -20,133 +22,126 @@ base:
     faction: soviet
     cash: 0
     bot_type: ''
+  # Re-decide the instant contact happens or a unit is lost, instead
+  # of only on fixed tick boundaries — combat is reactive.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
   actors:
   - type: 2tnk
     owner: agent
-    position: [6, 8]
+    position: [6, 19]
     stance: 3
     health: 100
     facing: -1
     count: 2
-    randomize:
-      position:
-        base: [6, 8]
-        offset: 2
   - type: 1tnk
     owner: agent
-    position: [6, 11]
+    position: [6, 21]
     stance: 3
     health: 100
     facing: -1
     count: 2
+  # Enemy just east, same latitude — move right to engage.
   - type: e1
     owner: enemy
-    position: [34, 22]
+    position: [17, 20]
     stance: 3
     health: 100
     facing: -1
     count: 3
 levels:
   easy:
-    description: 'Rung 1 — even-ish duel: 4 agent vehicles vs 3 enemy rifle.'
+    description: >
+      Even duel: your 4 vehicles vs 3 enemy rifle infantry a short
+      move east. Win by destroying the enemy force without losing all
+      of yours.
     win_condition:
       all_of:
       - units_killed_gte: 3
       - within_ticks: 14000
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 60
+      not: {own_units_gte: 1}
+    max_turns: 30
   medium:
-    description: 'Rung 2 — outnumbered: same force vs a reactive armour mix.'
+    description: >
+      Tougher opponent: the enemy rifle squad is backed by light
+      armour. Same close engagement; concentrate fire to win the trade.
     overrides:
       actors:
       - type: 2tnk
         owner: agent
-        position: [6, 8]
+        position: [6, 19]
         stance: 3
         health: 100
         facing: -1
         count: 2
-        randomize:
-          position:
-            base: [6, 8]
-            offset: 2
       - type: 1tnk
         owner: agent
-        position: [6, 11]
+        position: [6, 21]
         stance: 3
         health: 100
         facing: -1
         count: 2
       - type: e1
         owner: enemy
-        position: [34, 22]
+        position: [17, 20]
         stance: 3
         health: 100
         facing: -1
-        count: 4
+        count: 3
       - type: 1tnk
         owner: enemy
-        position: [38, 26]
+        position: [19, 21]
         stance: 3
         health: 100
         facing: -1
         count: 2
     win_condition:
       all_of:
-      - units_killed_gte: 6
+      - units_killed_gte: 5
       - within_ticks: 12000
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 70
+      not: {own_units_gte: 1}
+    max_turns: 40
   hard:
     description: >
-      Rung 3 — badly outnumbered + a loss cap, and the agent force
-      starts from a seed-chosen corner (two spawn_point groups → the
-      env round-robins start position by seed, so a single memorised
-      opening can't generalise). Enemy sits mid-map beyond initial
-      sight: must close under fog.
+      Outnumbered + a loss cap, starting from a seed-chosen corner
+      (two spawn_point groups). Win the close fight by maneuver, not
+      attrition.
     overrides:
       actors:
-      # spawn_point 0 — top-left staging
       - type: 2tnk
         owner: agent
-        position: [6, 8]
+        position: [6, 19]
         stance: 3
         health: 100
         facing: -1
         count: 2
         spawn_point: 0
         randomize:
-          position:
-            base: [6, 8]
-            offset: 3
+          position: {base: [6, 19], offset: 3}
       - type: 1tnk
         owner: agent
-        position: [6, 11]
+        position: [6, 21]
         stance: 3
         health: 100
         facing: -1
         count: 2
         spawn_point: 0
-      # spawn_point 1 — lower-left staging (different approach axis)
       - type: 2tnk
         owner: agent
-        position: [6, 40]
+        position: [6, 33]
         stance: 3
         health: 100
         facing: -1
         count: 2
         spawn_point: 1
         randomize:
-          position:
-            base: [6, 40]
-            offset: 3
+          position: {base: [6, 33], offset: 3}
       - type: 1tnk
         owner: agent
-        position: [6, 43]
+        position: [6, 35]
         stance: 3
         health: 100
         facing: -1
@@ -154,14 +149,14 @@ levels:
         spawn_point: 1
       - type: e1
         owner: enemy
-        position: [34, 22]
+        position: [17, 20]
         stance: 3
         health: 100
         facing: -1
         count: 5
       - type: 2tnk
         owner: enemy
-        position: [40, 28]
+        position: [20, 22]
         stance: 3
         health: 100
         facing: -1
@@ -172,6 +167,11 @@ levels:
       - within_ticks: 10000
       - units_lost_lte: 3
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 80
+      not: {own_units_gte: 1}
+    max_turns: 50
+# Runnable configurations (each a distinct cell):
+#   easy   = the duel with STRUCTURED-TEXT fog (no minimap image)
+#   medium = the duel with the PNG MINIMAP fog
+configs:
+- {name: easy,   level: easy,   fog_mode: structured}
+- {name: medium, level: medium, fog_mode: vision}

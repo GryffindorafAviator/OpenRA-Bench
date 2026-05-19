@@ -62,6 +62,7 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
             base_map=compiled.scenario.base_map,
             unit_codex=_codex(_scn_codes(compiled)),
             level=compiled.level,
+            fog_mode=getattr(compiled, "fog_mode", "vision"),
         )
         return agent.agent_fn
 
@@ -163,6 +164,7 @@ def evaluate(
                 base_map=compiled.scenario.base_map,
                 unit_codex=_codex(_scn_codes(compiled)),
                 level=compiled.level,
+                fog_mode=getattr(compiled, "fog_mode", "vision"),
             ).agent_fn
 
     # Run/model identity so a single playback root can hold many runs
@@ -187,12 +189,28 @@ def evaluate(
                 f"{pack.meta.quarantine_reason or 'excluded from default set'})"
             )
             continue
-        for level in levels:
-            compiled = compile_level(pack, level)
+        # Declared configs (pack:config_name, each pins level+fog_mode)
+        # supersede the raw 3-level enumeration when present.
+        if pack.configs:
+            from .scenarios.loader import is_map_supported
+
+            ms = is_map_supported(pack.base_map)
+            unit_iter = [
+                (
+                    pack.compile_config(c.name, map_supported=ms),
+                    f"{pack.meta.id}:{c.name}",
+                )
+                for c in pack.configs
+            ]
+        else:
+            unit_iter = [
+                (compile_level(pack, lv), f"{pack.meta.id}:{lv}")
+                for lv in levels
+            ]
+        for compiled, cell in unit_iter:
             if not compiled.map_supported:
-                skipped.append(f"{pack.meta.id}:{level} (map not Rust-loadable)")
+                skipped.append(f"{cell} (map not Rust-loadable)")
                 continue
-            cell = f"{pack.meta.id}:{level}"
             for split, slist in (("public", seeds), ("held_out", held_out_seeds)):
                 for seed in slist:
                     tasks.append((compiled, cell, split, seed))

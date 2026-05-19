@@ -472,12 +472,15 @@ class ModelAgent:
         base_map: str = "",
         unit_codex: str = "",
         level: str = "",
+        fog_mode: str = "",
     ):
         self.cfg = cfg
         self.objective = objective
         self.tools = _tool_schemas(allowed_tools)
         self.provider = provider or make_provider(cfg)
         self._level = level
+        # Scenario config wins over the model-side cfg default.
+        self._fog_mode = fog_mode or getattr(cfg, "fog_mode", "vision")
         # Real terrain (map.png from the .oramap) for the vendored
         # training bitmap minimap; persistent fog history across turns.
         self._terrain: bytes | None = None
@@ -516,7 +519,7 @@ class ModelAgent:
         # Structured-fog mode: NO image — append the text "Unexplored
         # regions" block instead (text-vs-vision A/B; pair with the
         # easy/medium level of the setup).
-        if getattr(self.cfg, "fog_mode", "vision") == "structured":
+        if self._fog_mode == "structured":
             try:
                 from .prompt_v2 import structured_fog as _v2_fog
 
