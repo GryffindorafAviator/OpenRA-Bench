@@ -50,13 +50,37 @@ def test_sequenced_citadel_credits_only_after_prerequisite_hold():
     assert evaluate(c.win_condition, _ctx(at_c, 999999)) is False
 
 
-def test_indirect_hard_requires_zero_loss_traversal():
+def test_indirect_hard_requires_zero_loss_whole_force_arrival():
     c = compile_level(load_pack(PACKS / "artofwar-indirect-approach.yaml"),
                        "hard")
-    inside = [(46, 26)] * 3
-    assert evaluate(c.win_condition, _ctx(inside, 8000, lost=0)) is True
-    # charging the short lane (any loss) fails the hard rung.
-    assert evaluate(c.win_condition, _ctx(inside, 8000, lost=1)) is False
+    # Redesigned: far-east objective (112,20); the WHOLE surviving force
+    # (every unit, ≥3) must arrive with ZERO losses, in budget.
+    at_obj = [(112, 20)] * 3
+    assert evaluate(c.win_condition, _ctx(at_obj, 4000, lost=0)) is True
+    # charging the lethal short lane (any loss) fails the hard rung.
+    assert evaluate(c.win_condition, _ctx(at_obj, 4000, lost=1)) is False
+    # a stale unit left behind (not all in region) fails all_units_in_region.
+    assert evaluate(
+        c.win_condition, _ctx([(112, 20), (112, 20), (40, 20)], 4000, lost=0)
+    ) is False
+    # past the deadline (within_ticks 5000) → no win.
+    assert evaluate(c.win_condition, _ctx(at_obj, 999999, lost=0)) is False
+
+
+def test_indirect_easy_short_lane_loss_fails_and_timeout_loses():
+    """Easy: loss cap 1; the timeout fail must be reachable in max_turns
+    (no draw degeneracy) — i.e. after_ticks <= 93 + 90*(max_turns-1)."""
+    c = compile_level(load_pack(PACKS / "artofwar-indirect-approach.yaml"),
+                       "easy")
+    arrived = [(112, 20)] * 3
+    assert evaluate(c.win_condition, _ctx(arrived, 1500, lost=0)) is True
+    assert evaluate(c.win_condition, _ctx(arrived, 1500, lost=1)) is True
+    # losing >1 (head-on charge) fails the win and trips the fail clause.
+    assert evaluate(c.win_condition, _ctx(arrived, 1500, lost=2)) is False
+    assert evaluate(c.fail_condition, _ctx(arrived, 1500, lost=2)) is True
+    # timeout is a real LOSS, and reachable within max_turns.
+    assert evaluate(c.fail_condition, _ctx([(6, 20)] * 3, 4001, lost=0)) is True
+    assert 4001 <= 93 + 90 * (c.max_turns - 1)
 
 
 def test_decoy_hard_loss_cap_allows_bait_not_army():

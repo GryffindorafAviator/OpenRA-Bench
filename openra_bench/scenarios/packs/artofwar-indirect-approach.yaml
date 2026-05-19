@@ -3,133 +3,189 @@ meta:
   title: 'The Long Way Round — Take a Costly Detour Because the Direct Path Is Lethal'
   capability: reasoning
   real_world_meaning: >
-    迂直之计 — "make the devious route the most direct." The short path
-    to the objective is a killing ground; the only winning policy is a
-    long detour that looks strictly worse for many turns (objective
-    progress stays flat or dips) before it pays off. Tests temporal
+    迂直之计 — "make the devious route the most direct." A LEASHED GUARD
+    line (engine scripted bot 'guard') walls the short west→east lane to
+    the objective: every guard auto-fires in range, lunges at any unit
+    that comes within its aggro radius, and snaps back to post. Driving
+    the column straight down that lane gets the whole force shot apart in
+    a turn. The only winning policy abandons the short axis entirely —
+    climb to the open flank, run the long way around the END of the
+    wall, then turn in — a route whose progress toward the objective
+    stays flat or dips for ~20 turns before it pays off. Tests temporal
     credit assignment over a long horizon against a greedy
-    shortest-path bias.
+    shortest-path / "just charge it" bias; idling never commits and
+    loses on the clock.
   robotics_analogue: >
     Hazard-aware long-horizon routing: reject the locally optimal short
-    path for a circuitous survivable one whose payoff is far delayed.
+    path through a lethal interdiction zone for a circuitous survivable
+    one (around the obstacle's flank) whose payoff is far delayed.
   author: openra-bench
+
 base_map: rush-hour-arena
+
+# The enemy is a LEASHED GUARD wall (engine scripted bot 'guard'): a
+# dense rocket-infantry (e3) line laid HORIZONTALLY across the direct
+# spawn→objective corridor. Each guard holds post and auto-fires in
+# range, lunges at a foe within an aggro radius, then snaps back past a
+# leash. Charge straight east and the whole line engages the column
+# (anti-tank rockets) — it dies in a turn. The only zero-loss route is
+# the long way: climb to the open flank (north edge), run east PAST the
+# wall's end, then drop down to the objective. Greedy short-path /
+# do-nothing both fail. An unarmed high-HP `fact` marks the objective
+# (and keeps the episode alive — no enemy-elimination auto-terminal).
 base:
-  agent:
-    faction: allies
-    cash: 0
-  enemy:
-    faction: soviet
-    cash: 0
-    bot_type: ''
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 12000}
   actors:
-    - type: 1tnk
-      owner: agent
-      position: [6, 26]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 3
-    - type: e1            # gun line across the SHORT route
-      owner: enemy
-      position: [22, 26]
-      stance: 3
-      health: 100
-      facing: -1
-      count: 6
+    # Main body — durable but slow; THREE must reach the far objective.
+    - {type: 1tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+    # Horizontal guard wall across the direct lane (y=22, x=26..70).
+    # e3 = anti-tank rockets: lethal to an unsupported tank column that
+    # tries to cross it.
+    - {type: e3, owner: enemy, position: [26, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [30, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [34, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [38, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [42, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [46, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [50, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [54, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [58, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [62, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [66, 22], stance: 2}
+    - {type: e3, owner: enemy, position: [70, 22], stance: 2}
+    # Objective marker (far east). Unarmed, high-HP: keeps the episode
+    # alive (no enemy-elimination auto-terminal) and is the landmark.
+    - {type: fact, owner: enemy, position: [112, 20]}
+
 levels:
+  # ── EASY ── the bare indirect-approach skill: a single horizontal
+  # guard wall. A head-on charge is shredded before it crosses; the long
+  # flank route around the wall's east end lands the force. Generous
+  # clock. Loss-cap of 1 (a single clipped tank is forgivable here).
   easy:
     description: >
-      The objective is due east but the direct lane is a gauntlet.
-      Survive to the region — charging straight loses the force.
+      A leashed rocket-infantry wall blocks the direct lane east to the
+      objective and shreds anything that tries to cross it. Get THREE
+      tanks to the objective (far east, marked by the enemy structure).
+      Driving the column straight in loses it in a turn; go the long way
+      — climb to the open flank, run east PAST the end of the wall, then
+      turn down to the objective. Idling never commits and loses on the
+      clock.
+    overrides: {}
     win_condition:
       all_of:
-        - reach_region: {x: 40, y: 26, radius: 4}
-        - within_ticks: 18000
-        - units_lost_lte: 1
+        - {units_in_region_gte: {x: 112, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 4000}
+        - {units_lost_lte: 1}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 80
+      any_of:
+        - {after_ticks: 4001}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 controlled variable: a LONGER wall (extends farther
+  # east, x=26..86) so the survivable flank route is longer and the
+  # detour costs more turns before it pays off; tighter clock; zero-loss.
   medium:
-    description: 'Denser gun line; the detour is longer and costlier.'
+    description: >
+      The guard wall now extends much farther east — the long way round
+      is longer and costlier, and a single clipped tank now fails. Same
+      task: ignore the lethal short lane entirely, take the flank route
+      around the (longer) wall's end, land THREE tanks on the objective
+      before the tighter deadline.
     overrides:
       actors:
-        - type: 1tnk
-          owner: agent
-          position: [6, 26]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-        - type: e1
-          owner: enemy
-          position: [22, 26]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 9
+        - {type: 1tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+        - {type: e3, owner: enemy, position: [26, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [30, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [34, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [38, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [42, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [46, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [50, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [54, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [58, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [62, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [66, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [70, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [74, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [78, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [82, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [86, 22], stance: 2}
+        - {type: fact, owner: enemy, position: [112, 20]}
     win_condition:
       all_of:
-        - reach_region: {x: 44, y: 26, radius: 4}
-        - within_ticks: 16000
-        - units_lost_lte: 1
+        - {units_in_region_gte: {x: 112, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 4600}
+        - {units_lost_lte: 0}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 90
+      any_of:
+        - {after_ticks: 4601}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 66
+
+  # ── HARD ── +1 controlled variable: seed-chosen staging LATITUDE
+  # (two spawn_point groups, in-bounds — north y=10 / south y=30). The
+  # safe flank is always the north edge (the long wall at y=22 leaves a
+  # >aggro gap only along the top); from the SOUTH start the detour is
+  # much longer (cross up to the north edge first), so the exact route
+  # can't be memorised. Strongest/longest wall; strict zero-loss; every
+  # surviving unit must arrive (all_units_in_region) and ≥3 must.
   hard:
     description: >
-      Zero-loss traversal, seed-chosen start latitude. Two spawn_point
-      groups (y26 / y34); the gun line is split to span BOTH corridors
-      so the short route is lethal from either start — the safe detour
-      differs by seed and can't be memorised.
+      Strongest, longest wall; the force stages from a seed-chosen
+      latitude (north or south of the wall), so the length and shape of
+      the long way round varies by seed and can't be memorised. The
+      short lane is lethal from either start. Get the WHOLE force (every
+      surviving tank, ≥3) onto the objective with ZERO losses, via the
+      long way around the wall's end, before the tight deadline.
     overrides:
       actors:
-        # spawn_point 0 — northern start
-        - type: 1tnk
-          owner: agent
-          position: [6, 26]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-          spawn_point: 0
-          randomize:
-            position: {base: [6, 26], offset: 2}
-        # spawn_point 1 — southern start
-        - type: 1tnk
-          owner: agent
-          position: [6, 34]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 3
-          spawn_point: 1
-          randomize:
-            position: {base: [6, 34], offset: 2}
-        # gun line split across BOTH spawn corridors (short route
-        # lethal regardless of seed → detour is the only zero-loss path)
-        - type: e1
-          owner: enemy
-          position: [22, 26]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 5
-        - type: e1
-          owner: enemy
-          position: [22, 34]
-          stance: 3
-          health: 100
-          facing: -1
-          count: 5
+        # spawn_point 0 — northern staging
+        - {type: 1tnk, owner: agent, position: [6, 10], stance: 1, count: 3,
+           spawn_point: 0,
+           randomize: {position: {base: [6, 10], offset: 2}}}
+        # spawn_point 1 — southern staging (longer detour: must cross up
+        # to the same north flank, the only >aggro-radius gap)
+        - {type: 1tnk, owner: agent, position: [6, 30], stance: 1, count: 3,
+           spawn_point: 1,
+           randomize: {position: {base: [6, 30], offset: 2}}}
+        # Long wall at y=22 (x=26..86): the only gap clear of the guard
+        # aggro radius is the north edge — the short lane is lethal from
+        # EITHER staging latitude (north y=10 is 12 cells off-post,
+        # south y=30 is 8 — both well inside aggro).
+        - {type: e3, owner: enemy, position: [26, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [30, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [34, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [38, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [42, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [46, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [50, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [54, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [58, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [62, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [66, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [70, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [74, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [78, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [82, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [86, 22], stance: 2}
+        - {type: fact, owner: enemy, position: [112, 20]}
     win_condition:
       all_of:
-        - all_units_in_region: {x: 46, y: 26, radius: 4}
-        - within_ticks: 14000
-        - units_lost_lte: 0
+        - {all_units_in_region: {x: 112, y: 20, radius: 6}}
+        - {own_units_gte: 3}
+        - {within_ticks: 5000}
+        - {units_lost_lte: 0}
     fail_condition:
-      not:
-        own_units_gte: 1
-    max_turns: 95
+      any_of:
+        - {after_ticks: 5001}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 70
