@@ -539,18 +539,34 @@ def main(argv: list[str]) -> int:
                     help="run exactly one episode (live preflight)")
     ap.add_argument("--dry-run", action="store_true",
                     help="validate/compile + list tasks, no engine/API")
+    ap.add_argument(
+        "--or-provider", default="",
+        help="OpenRouter: pin a provider/quant endpoint, e.g. "
+        "'wandb/bf16' (no fallback) — premium routing off the free pool",
+    )
+    ap.add_argument("--fog-mode", default="vision",
+                    choices=["vision", "structured"],
+                    help="spatial channel: PNG minimap vs text fog")
     a = ap.parse_args(argv[1:])
 
     cfg = None
     if a.provider:
         from .providers import ProviderConfig
 
+        extra_body: dict = {}
+        if a.or_provider:
+            extra_body["provider"] = {
+                "order": [a.or_provider],
+                "allow_fallbacks": False,
+            }
         cfg = ProviderConfig(
             provider=a.provider,
             model=a.model,
             base_url=a.base_url,
             vision=not a.no_vision,
             qps=a.qps,
+            fog_mode=a.fog_mode,
+            extra_body=extra_body,
         )
 
     stats = evaluate(
