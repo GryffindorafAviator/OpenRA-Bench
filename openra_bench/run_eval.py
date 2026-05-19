@@ -555,10 +555,14 @@ def main(argv: list[str]) -> int:
 
         extra_body: dict = {}
         if a.or_provider:
-            extra_body["provider"] = {
-                "order": [a.or_provider],
-                "allow_fallbacks": False,
-            }
+            # OpenRouter routing: `order` takes a provider SLUG;
+            # quantization is a separate filter. Accept
+            # "provider" or "provider/quant" (e.g. wandb/bf16).
+            prov, _, quant = a.or_provider.partition("/")
+            pr: dict = {"order": [prov], "allow_fallbacks": False}
+            if quant:
+                pr["quantizations"] = [quant]
+            extra_body["provider"] = pr
         cfg = ProviderConfig(
             provider=a.provider,
             model=a.model,
