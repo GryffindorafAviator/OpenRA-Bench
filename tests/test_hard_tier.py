@@ -132,6 +132,8 @@ NOT_APPLICABLE = {
     "and adding a seed-varied agent start would dilute that "
     "attribution. Seed-randomised sentry anchors give within-hard "
     "variation without varying the agent's start.",
+    "proc-only-build-no-combat": "non-spatial build task; spawn "
+    "variation would compete with the role-discipline signal",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss
