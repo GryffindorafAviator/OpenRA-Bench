@@ -1,0 +1,343 @@
+# combat-formation-tank-wedge — Move 5× 2tnk in a WEDGE through a
+# bracketing fire corridor and reach the eastern objective intact.
+#
+# Wave-7 Group D combat-micro / formation seed (capability: action).
+#
+# Real-world / benchmark anchors:
+#   - Military "tank wedge" formation doctrine (an inverted-V where
+#     the lead vehicle absorbs/spots fire and the trailing flank
+#     vehicles cover off-axis arcs). A wedge spreads the engagement
+#     across the formation's WIDTH so no single defender's weapon
+#     envelope catches the whole column.
+#   - StarCraft 2 formation micro (army moved as a spread-arc rather
+#     than a single-file column so AoE / focus-fire on the lead unit
+#     can't chain through the stack; the leading unit takes the brunt
+#     while flankers contribute fire from off-axis without being in
+#     the same kill envelope).
+#   - Combined-arms / strike-package geometry: the SHAPE of the
+#     formation controls how many enemy weapons can bear on the
+#     leading unit and how many friendly weapons can bear on the
+#     enemy at any moment.
+#
+# Mechanism (engine-load-bearing physics):
+#   - Five medium tanks (2tnk) start at the west edge. The mission is
+#     to drive east, punch through a bracketing fire corridor (e3
+#     anti-tank rocket soldiers nested above AND below the engagement
+#     axis y=20, plus a single 1tnk light blocker on-axis), and reach
+#     the objective region centred on (80, 20) with ≥4 of 5 tanks
+#     intact (easy) / ≥3 of 5 (medium, hard — see relaxation note
+#     below).
+#   - COLUMN (everyone on y=20, single file): the column squeezes
+#     through the gap on the engagement axis. Lead 2tnk sits inside
+#     Dragon range (~5) of the NORTH e3 cluster at y=16 AND the SOUTH
+#     e3 cluster at y=24 SIMULTANEOUSLY (Manhattan distance 4 each);
+#     concentrated cross-fire on the lead destroys it, then the
+#     second tank inherits the kill envelope. The column bleeds 2-3
+#     tanks before clearing the gap → survival bar busts.
+#   - WEDGE (lead on-axis at y=20, flankers spread to y=18 and y=22
+#     trailing one cell west): the FLANKERS engage the e3 brackets
+#     end-on from off-axis; only 1-2 e3 from EACH bracket fire on a
+#     flanker at any moment (the far e3 in each cluster is out of
+#     Dragon range). The lead absorbs the on-axis 1tnk fire while
+#     the wedge wings dismantle the brackets in sequenced 1-vs-1
+#     trades. ≥4 tanks reach the objective intact.
+#
+# IMPORTANT relaxation (per task spec — "be empirical"):
+#   - On medium and hard the survival bar is "≥3 of 5 tanks alive at
+#     objective" (own_units_gte:3) rather than the unforgiving
+#     "5 survive" bar. The OpenRA-Rust combat numbers for 2tnk-vs-e3
+#     (verified 2026-05-20 in combat-flanking-attack engine notes:
+#     2tnk cannon DPS out-trades e3 Dragon DPS at equal range by a
+#     wide margin) make a strict ≥5-of-5 bar unreachable for ANY
+#     play on medium/hard — even the intended wedge takes ≥1 tank
+#     casualty in the bracketing crossfire. The DISCRIMINATOR is
+#     wedge-vs-column survival differential, not absolute counts:
+#     the column loses ≥3 tanks and busts ≥3-of-5; the wedge keeps
+#     ≥3 tanks and reaches the objective. Easy keeps the ≥4-of-5
+#     "almost everyone survives" bar against a single bracket.
+#
+# Discrimination bar (script-policy proxies — tested in
+# tests/test_combat_formation_tank_wedge.py):
+#   • stall (only observe)             → LOSS. Tanks idle at the
+#     west edge; defenders are stance:2 (no chase); within_ticks
+#     deadline elapses without reaching (80,20) → after_ticks LOSS.
+#   • brute attack_move east (column   → LOSS. All 5 tanks march
+#     on y=20)                            single-file on the
+#     engagement axis; cross-fire from BOTH brackets focused on the
+#     lead destroys ≥3 tanks before the column clears the gap →
+#     own_units_gte:3 fails / region-reach bar unmet → LOSS.
+#   • intended wedge (lead at y=20,    → WIN. Flankers engage
+#     flankers at y=18 & y=22 trailing,   brackets end-on from
+#     drive east as a formation)          off-axis; ≥3 of 5 tanks
+#     reach (80,20) intact → all win clauses satisfied → WIN.
+#
+# Engine guardrails (per CLAUDE.md / SCENARIO_REVIEW_CHECKLIST.md):
+#   - Map: rush-hour-arena (128×40, playable x ∈ [2..126], y ∈ [2..38]).
+#     Strike force at x=6, kill corridor at x=40..50, objective at
+#     (80,20), persistent fact at (120,20).
+#   - All deadlines (after_ticks 4501) reachable within max_turns.
+#     Empirically the brute attack_move column under sustained combat
+#     advances ticks at only ~65-78 per turn (well below the
+#     decision-only nominal of ~90 ticks/turn), so max_turns is set
+#     to 75 — the deadline reliably bites under the lowest observed
+#     in-combat tick-rate (60 t/turn × 75 = 4500). Verified on all
+#     seeds for stall and brute LOSS bars (2026-05-20).
+#   - Persistent far-east enemy `fact` at (120,20) absorbs engine
+#     auto-done on enemy-wipe so the win/fail evaluator sees the
+#     terminal frame.
+#   - All defenders stance:2 (auto-fire in range, no chase — e3 is
+#     infantry so it doesn't lunge; the 1tnk on-axis is stance:1
+#     ReturnFire so it doesn't chase the agent across the map and
+#     collapse the geometry, but DOES fire on whoever shot it last).
+#   - per CLAUDE.md (60,20) is a known silent-fail placement cell.
+#     The corridor brackets sit at x=40..48 (verified safe range);
+#     the on-axis blocker 1tnk sits at (45,20). No actors placed
+#     at the documented bad cells (50,20), (60,28), (90,30).
+
+meta:
+  id: combat-formation-tank-wedge
+  title: 'Combat Micro — Tank Wedge Through a Bracketing Fire Corridor'
+  capability: action
+  real_world_meaning: >
+    Five medium tanks (2tnk) at the west edge must drive east through
+    a bracketing fire corridor (anti-tank rocket soldiers nested
+    above AND below the engagement axis, plus a single light tank
+    blocker on-axis) and reach an objective region in the east with
+    most of the force intact. Marching as a column along y=20 puts
+    the lead tank inside Dragon range of BOTH brackets at once;
+    concentrated cross-fire destroys the lead, then the next tank
+    inherits the kill envelope, and the column bleeds itself dry
+    before clearing the gap. The winning play is the WEDGE — lead
+    tank on-axis at y=20 absorbing the on-axis blocker's fire,
+    flankers offset to y=18 and y=22 trailing one cell west so they
+    engage each bracket END-ON from off-axis (only 1-2 rocket
+    soldiers from each cluster can fire on a flanker at once). The
+    formation's SHAPE controls how much enemy firepower can bear on
+    the lead unit and sequences the bracket engagements into 1-vs-1
+    trades instead of N-vs-1 crossfire.
+  robotics_analogue: >
+    Multi-agent strike-package formation: the geometric SHAPE of the
+    moving formation controls weapon-bearing concurrency on both
+    sides. A column maximises target overlap on the lead unit (worst
+    case for surviving cross-fire); an inverted-V wedge spreads the
+    engagement across the formation's width so each enemy bracket
+    faces only 1-2 of the wedge's units at a time, and the lead's
+    job is to ABSORB the on-axis threat while the flank wings
+    dismantle the off-axis threats. The decision under test is
+    formation discipline: order the force into a wedge BEFORE the
+    contact, not after losses force a retreat.
+  benchmark_anchor:
+    - "military tank-wedge doctrine"
+    - "SC2 formation micro"
+    - "combined-arms"
+    - "strike-package geometry: formation shape vs cross-fire"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant a tank is lost or an enemy is spotted — formation
+  # micro is reactive; without these the model only re-targets on the
+  # next turn boundary and the geometry decisions don't propagate.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Bare wedge skill: a SINGLE bracket (NORTH e3 cluster only) + the
+  # on-axis 1tnk blocker. ≥4 of 5 tanks must reach (80,20). Column
+  # still loses ≥2 tanks on this geometry — the single bracket plus
+  # blocker is enough to bust the ≥4 bar on the on-axis push. Stall
+  # LOSES on the clock (defenders are stance:2, never advance west).
+  easy:
+    description: >
+      Five medium tanks (2tnk) stage at the west edge (x=6, y=18..22).
+      A NORTH bracket of THREE anti-tank rocket soldiers (e3, Dragon
+      launcher, range ~5) sits at x=42..44, y=16, facing south
+      (stance:2 — auto-fire in range, no chase). A single light tank
+      (1tnk, stance:1 — ReturnFire only) sits on the engagement axis
+      at (45, 20) blocking the corridor. The objective is to reach the
+      region centred on (80, 20) (radius 6) with at least FOUR of your
+      five tanks intact, before tick 4500. Marching as a column on
+      y=20 puts the lead tank in Dragon range of the north bracket
+      AND the 1tnk simultaneously → the lead is destroyed and the
+      column busts the ≥4 bar. The intended play is a WEDGE — lead
+      at y=20 absorbing the 1tnk's fire, flankers offset to y=18 and
+      y=22 trailing one cell west so they engage the north bracket
+      end-on from off-axis. Stall LOSES (the region bar is never met
+      on the clock).
+    overrides:
+      actors:
+        # STRIKE FORCE — 5 medium tanks at the west edge, stance:1
+        # ReturnFire (don't lunge; only fire on attackers / explicit
+        # targets — preserves the formation-discipline test).
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
+        # NORTH BRACKET — three e3 at (42..44, 16). Manhattan ≤5 from
+        # any tank on y=20 (distance 4 north + 0..3 east/west) → all
+        # three fire on a tank passing through the corridor at y=20.
+        - {type: e3, owner: enemy, position: [42, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [43, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [44, 16], stance: 2}
+        # ON-AXIS BLOCKER — 1tnk at (45, 20). Stance:1 ReturnFire:
+        # doesn't chase the agent (preserves the corridor geometry)
+        # but fires back on whoever shot it last — the lead tank in
+        # a column sustains 1tnk fire on top of the bracket fire.
+        - {type: 1tnk, owner: enemy, position: [45, 20], stance: 1}
+        # Persistent far-east enemy fact — prevents engine auto-done
+        # on enemy unit wipe collapsing the run to DRAW.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 80, y: 20, radius: 6, n: 4}}
+        - {own_units_gte: 4}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 75
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: BOTH brackets (north AND south)
+  # nest the corridor at y=16 and y=24, creating bracketing cross-fire
+  # on a column at y=20. Survival bar relaxed to ≥3 of 5 (see header
+  # relaxation note). The column LOSES ≥3 tanks under cross-fire from
+  # both brackets simultaneously; the intended wedge with flankers
+  # offset to y=18 and y=22 sequences the brackets 1-vs-1.
+  medium:
+    description: >
+      Five medium tanks (2tnk) stage at the west edge (x=6, y=18..22).
+      A BRACKETING fire corridor stretches across x=42..44 — a NORTH
+      cluster of THREE anti-tank rocket soldiers (e3) at y=16 and a
+      SOUTH cluster of THREE e3 at y=24 (all stance:2, facing the
+      corridor). A light tank (1tnk, stance:1) blocks the on-axis
+      midpoint at (45, 20). The objective is to reach the region
+      centred on (80, 20) (radius 6) with at least THREE of your five
+      tanks intact, before tick 4500. A COLUMN on y=20 sits in Dragon
+      range of BOTH brackets simultaneously → concentrated cross-fire
+      destroys the lead, then the next tank inherits the kill
+      envelope, and ≥3 tanks die before the column clears the gap.
+      The intended play is a WEDGE — lead at y=20 absorbing the 1tnk
+      blocker, flankers offset to y=18 and y=22 trailing one cell
+      west so they engage each bracket end-on (only 1-2 e3 per
+      bracket can fire on a flanker at once). Stall LOSES.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
+        # NORTH BRACKET — three e3 at (42..44, 16). All stance:2.
+        - {type: e3, owner: enemy, position: [42, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [43, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [44, 16], stance: 2}
+        # SOUTH BRACKET — three e3 at (42..44, 24). Symmetric across
+        # y=20. A column on y=20 takes simultaneous Dragon fire from
+        # BOTH brackets (Manhattan 4 each).
+        - {type: e3, owner: enemy, position: [42, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [43, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [44, 24], stance: 2}
+        # ON-AXIS BLOCKER — 1tnk at (45, 20), stance:1 ReturnFire.
+        - {type: 1tnk, owner: enemy, position: [45, 20], stance: 1}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {units_in_region_gte: {x: 80, y: 20, radius: 6, n: 3}}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 75
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. Denser brackets: FOUR e3 per bracket (north y=16 x=41..44,
+  #      south y=24 x=41..44) + a SECOND on-axis 1tnk blocker at
+  #      (47,20) so the corridor traversal is longer and the wedge
+  #      must hold formation through TWO blockers, not one.
+  #   2. TWO agent spawn_point groups (NORTH staging y=10..14 OR
+  #      SOUTH staging y=26..30) round-robined by seed so the wedge
+  #      must form from a flipped starting latitude per seed.
+  #      Enemy placement is symmetric across y=20 so either spawn
+  #      faces an equivalent wedge-vs-column decision (the dominant
+  #      "lead absorbs / flankers bracket" doctrine generalises
+  #      regardless of which y the wedge forms from).
+  hard:
+    description: >
+      Five medium tanks (2tnk) stage at ONE of two west-edge corridors
+      (NORTH staging y=10..14 OR SOUTH staging y=26..30, chosen by
+      seed — anti-memorisation). A dense bracketing corridor stretches
+      across x=41..44: a NORTH cluster of FOUR anti-tank rocket
+      soldiers (e3) at y=16 and a SOUTH cluster of FOUR e3 at y=24
+      (all stance:2). TWO on-axis 1tnk blockers (stance:1) sit at
+      (45, 20) and (47, 20), making the corridor traversal longer.
+      The objective is to reach the region centred on (80, 20)
+      (radius 6) with at least THREE of your five tanks intact,
+      before tick 4500. A column on y=20 takes concentrated cross-
+      fire from BOTH brackets PLUS both blockers; ≥3 tanks die.
+      The intended play is the WEDGE — form an inverted-V (lead at
+      y=20, flankers y=18 and y=22, then y=17 and y=23 trailing),
+      drive east in formation, let the lead absorb the on-axis
+      blocker fire while the flank wings engage each bracket
+      end-on. Stall LOSES.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging corridor (y=10..14). Wedge
+        # must form from a north-of-axis starting latitude; the
+        # corridor's centre is south of the spawn, so the wedge
+        # drives diagonally SE into the gap.
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 13], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 14], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging corridor (y=26..30). Mirror
+        # of spawn 0 across y=20 — the wedge drives NE into the gap.
+        - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, spawn_point: 1}
+        # NORTH BRACKET — four e3 at (41..44, 16). All stance:2.
+        - {type: e3, owner: enemy, position: [41, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [42, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [43, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [44, 16], stance: 2}
+        # SOUTH BRACKET — four e3 at (41..44, 24). Symmetric across
+        # y=20 so either spawn faces an equivalent bracketed corridor.
+        - {type: e3, owner: enemy, position: [41, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [42, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [43, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [44, 24], stance: 2}
+        # ON-AXIS BLOCKERS — two 1tnk at (45,20) and (47,20),
+        # stance:1 ReturnFire. Lengthens the corridor traversal and
+        # forces the wedge to hold formation through TWO blockers.
+        - {type: 1tnk, owner: enemy, position: [45, 20], stance: 1}
+        - {type: 1tnk, owner: enemy, position: [47, 20], stance: 1}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {units_in_region_gte: {x: 80, y: 20, radius: 6, n: 3}}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 75

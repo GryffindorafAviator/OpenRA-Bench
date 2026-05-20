@@ -602,6 +602,15 @@ UPGRADED = [
     # and a memorised "place silo at (14,18)" opening cannot generalise
     # across seeds.
     "econ-silo-vs-spend",
+    # Wave-7 Group D combat-micro / formation pack: military tank-wedge
+    # doctrine / SC2 formation micro / combined-arms anchor. Hard tier
+    # defines two agent spawn_point groups (NORTH staging y=10..14 /
+    # SOUTH staging y=26..30) round-robined by seed; the bracketing
+    # corridor (e3 brackets at y=16 and y=24 plus two on-axis 1tnk
+    # blockers) is symmetric across y=20 so either spawn faces an
+    # equivalent column-vs-wedge decision from a flipped bearing — a
+    # memorised "form wedge from y=14" opening cannot generalise.
+    "combat-formation-tank-wedge",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
