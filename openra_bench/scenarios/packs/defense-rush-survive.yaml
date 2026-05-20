@@ -1,0 +1,236 @@
+meta:
+  id: defense-rush-survive
+  title: 'Hold the Line — Survive an Opening Rush While Sustaining Throughput'
+  capability: reasoning
+  real_world_meaning: >
+    Opening rush-defense while sustaining baseline economy growth: a
+    concentrated enemy charge arrives in the first ~30 turns and a
+    pre-placed base + a fixed budget must both blunt the spike AND keep
+    fielding capability. Cannot pause throughput (the win demands an
+    active force) AND cannot ignore the threat (the win demands the
+    rushers handled before the deadline) — both must be sustained
+    simultaneously inside a tight window. Stalling, all-defense (only
+    static turrets, no force), all-economy (no static defense), and
+    brute-army (no static defense) all fail; the intended balanced
+    spend — one pillbox covering the lane mouth plus a handful of
+    defenders trained from the pre-placed barracks — wins.
+  robotics_analogue: >
+    On-call defending production capacity under a live attack without
+    dropping baseline SLA: a single concentrated incident hits a
+    pre-deployed site (factory floor / web tier), and the operator must
+    both contain the spike (add a hardened defence at the choke) AND
+    keep the line running (deploy active workers / pods) before the
+    incident clock expires. Pausing throughput to fight, or fighting
+    without hardening, both bust the SLA.
+  benchmark_anchor:
+    - 'MicroRTS rush-defense'
+    - 'SC2LE defend-the-cheese tempo'
+    - 'TextStarCraft II opening defense'
+    - 'incident response: production infra under DDoS while sustaining throughput'
+  author: openra-bench
+
+# rush-hour-arena (128×40). Agent base on the west (fact+tent+powr
+# pre-placed at x≈10); rusher band spawns at the lane mouth (x≈40,
+# y≈20) on the same row as the base. The rusher scripted bot
+# concentrates the whole band on the agent's centroid (≈8-tick interval,
+# see scripted_bot.rs::Rusher) — drives straight at the fact unless
+# blunted at the choke. Pillbox = anti-infantry static defence: built
+# from the pre-placed tent (no power chain needed since powr is also
+# pre-placed) and placed at the lane mouth covers the lane.
+base_map: rush-hour-arena
+# Pack-wide budget — covers exactly ONE coherent balanced spend
+# (1 pbox = 400cr + 3 e1 = 300cr + a 4th building for the
+# building_total bar; the remaining ≈700cr funds the throughput
+# sustain — extra e1s / a 2nd powr to keep producing). Spamming
+# defenders without a pbox, or spamming pbox without defenders, runs
+# out before the win bars are met.
+starting_cash: 1800
+
+base:
+  agent:
+    faction: allies
+  # Relentless concentrated charge at the agent's centroid every
+  # ~8 ticks — the canonical rush-defense opponent.
+  enemy:
+    faction: soviet
+    bot_type: rusher
+  tools:
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Re-decide the instant a rusher unit is spotted at the lane mouth or
+  # a defender is lost — opening tempo is reactive, not on fixed ticks.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+  actors:
+    # ── agent base (west) ── fact + tent + powr pre-placed
+    # (3 of the 4 buildings the medium bar requires; the 4th must
+    # be built — e.g. the pillbox). No starting units: the throughput
+    # bar (own_units_gte) is satisfied by trained defenders only.
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: tent, owner: agent, position: [14, 18]}
+    - {type: powr, owner: agent, position: [14, 22]}
+
+levels:
+  # ── EASY ── the bare rush-defense skill. ONE smaller wave (4× e1)
+  # rushes the fact; respond with at least one pbox covering the lane
+  # mouth AND three trained defenders, kill 4 of the rushers before the
+  # deadline. Stall loses (fact razed in ~18 turns / tick ~1600);
+  # all-defense (3 pbox, 0 units) loses on own_units_gte:3 (or fact
+  # razed when pbox alone doesn't blunt the rush); all-economy (no
+  # pbox) loses to the rush; brute-army (e1 only) loses on
+  # building_count_gte:pbox at the deadline. max_turns 60 → reachable
+  # tick ≥4848 in interrupt mode (each step ≤90 ticks; some shorter
+  # due to enemy-spotted/own-destroyed events), comfortably past the
+  # 4801 `after_ticks` fail so a non-winner is a real reachable
+  # timeout LOSS, never a draw. The intended pbox+e1 parallel-queue
+  # play wins by tick ≤528 (every seed), well inside.
+  easy:
+    description: >
+      A single concentrated wave of 4 rifle infantry charges your base
+      (fact+tent+powr already standing). Win by holding the line and
+      sustaining production: build at least one pillbox (pbox) covering
+      the lane mouth AND have ≥3 of your own units alive AND destroy
+      ≥4 of the rushers before tick 4800. Stalling, building only
+      pillboxes (no units), building no pillbox, or spending only on
+      defenders without a pillbox all fail.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        # 1 wave of 4× e1 at the lane mouth, same row as the fact.
+        # Placed at x=60 (mid-map) so the rush needs ~10–12 turns to
+        # reach the agent fact at x=10 — enough budget for the intended
+        # pbox + defender chain to stand up first.
+        - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 4}
+        # Unarmed high-HP enemy marker far east: keeps the episode
+        # alive past the last rusher death (without this, the engine
+        # auto-terminates on enemy-elimination and the win/fail check
+        # never runs — DRAW degeneracy).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 1}
+        - own_units_gte: 3
+        - units_killed_gte: 4
+        - within_ticks: 4800
+    # No `not own_units_gte:1` fail clause: the agent starts unit-less
+    # and the throughput bar is enforced by the WIN condition
+    # (own_units_gte:3). Loss is by clock or by losing the fact.
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 controlled variable: a heavier single wave (the
+  # canonical 6× e1 + 2× e3 rusher band) AND the building_total bar
+  # (≥4 — the pre-placed 3 buildings PLUS at least one new structure,
+  # i.e. the pillbox). Kill bar tightened to 6. Same clock.
+  medium:
+    description: >
+      The full rush band — 6 rifle infantry + 2 rocket soldiers —
+      charges your base in one concentrated wave. Hold the line and
+      keep producing: at least one pillbox at the lane mouth AND ≥3
+      own units AND ≥6 enemy kills AND ≥4 own buildings (the
+      pre-placed fact+tent+powr plus at least one more — the pillbox
+      counts) before tick 4800. The same lazy/single-axis policies that
+      fail easy fail here.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        # Canonical rush band: 6× e1 + 2× e3 at the lane mouth.
+        # Placed at x=60 (mid-map) so the band needs ~10–12 turns to
+        # reach the agent fact at x=10 — enough budget for the intended
+        # pbox(~5 turns) + 3× e1(~3 turns) chain to stand up first.
+        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 6}
+        - {type: e3, owner: enemy, position: [82, 20], stance: 3, count: 2}
+        # Unarmed high-HP enemy marker far east (anti-DRAW): see easy.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 1}
+        - own_units_gte: 3
+        - units_killed_gte: 6
+        - building_total_gte: 4
+        - within_ticks: 4800
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ── +1 controlled variable: TWO staggered rush waves from
+  # two different latitudes (north y=10 and south y=30), declared as
+  # two spawn_point groups so the AGENT base round-robins between two
+  # latitudes by seed (the lane the rushers come down is therefore
+  # seed-varied — single memorised pbox placement cannot generalise),
+  # plus an attrition cap (units_lost_lte:3). Kill bar raised to 8 to
+  # match the larger total enemy force. Same clock; same tick-aligned
+  # fail.
+  hard:
+    description: >
+      Two staggered rush bands hit your base from two different
+      latitudes (north and south). The agent base stages from a
+      seed-chosen latitude (the rush lane that matters varies by seed,
+      so a single memorised pillbox cell cannot generalise). Hold the
+      line, keep producing, and bleed less than four of your own:
+      at least one pillbox at the lane mouth AND ≥3 own units AND ≥8
+      enemy kills AND ≥4 own buildings AND ≤3 own units lost before
+      tick 4800. Stall, defence-only, economy-only, brute-army-only,
+      and over-attrition all fail.
+    overrides:
+      actors:
+        # spawn_point 0 — northern base + the matching rush band.
+        # tent (barracks) and powr are placed WEST of the fact (behind
+        # the front), so the rusher charge — which always targets the
+        # agent centroid (which IS the fact) — has to plough through
+        # the fact first; the barracks stays standing long enough for
+        # the intended pbox+e1 chain to complete. One e1 placeholder
+        # next to the fact gives the seed-driven start position an
+        # observable unit (the hard-tier curation test reads
+        # units_summary).
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: tent, owner: agent, position: [6,  10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  12], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 10], stance: 2, spawn_point: 0}
+        # spawn_point 1 — southern base (same formation, in-bounds).
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [6,  30], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  32], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 30], stance: 2, spawn_point: 1}
+        # Two staggered waves at distinct latitudes (both visible to
+        # rusher targeting — it always charges the agent's centroid).
+        # Placed at x=80 (mid-map) so the bands need ~10–12 turns to
+        # reach the agent fact at x=10 — enough budget for the intended
+        # pbox + defender chain to stand up first.
+        - {type: e1, owner: enemy, position: [80, 10], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [82, 10], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [80, 30], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [82, 30], stance: 3, count: 1}
+        # Unarmed high-HP enemy marker far east (anti-DRAW): see easy.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 1}
+        - own_units_gte: 3
+        - units_killed_gte: 8
+        - building_total_gte: 4
+        - units_lost_lte: 3
+        - within_ticks: 4800
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {units_lost_lte: 3}
+    max_turns: 60

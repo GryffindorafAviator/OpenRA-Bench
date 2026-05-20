@@ -42,6 +42,7 @@ UPGRADED = [
     "tempo-double-window",
     "economy-harvest-timebox",
     "strategy-trilemma",
+    "defense-rush-survive",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
