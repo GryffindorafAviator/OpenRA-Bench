@@ -100,6 +100,9 @@ def test_all_predicate_keys_have_a_translation():
     sample = {
         "reach_region": {"x": 1, "y": 2, "radius": 3},
         "all_units_in_region": {"x": 1, "y": 2, "radius": 3},
+        "units_of_type_in_region_gte": {
+            "type": "jeep", "x": 1, "y": 2, "radius": 3, "n": 3,
+        },
         "building_count_gte": {"type": "powr", "n": 2},
         "building_in_region": {"x": 1, "y": 2, "count": 1},
         "unit_type_count_eq": {"type": "e1", "n": 3},

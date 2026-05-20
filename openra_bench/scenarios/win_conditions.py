@@ -138,6 +138,18 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
         _agent_units(c), int(v["x"]), int(v["y"]), float(v.get("radius", 3))
     )
     >= int(v.get("n", 1)),
+    # Type-filtered region count: ≥ n agent units of a given type within
+    # radius of (x,y). Lets a scenario enforce SQUAD IDENTITY at a
+    # waypoint ("Squad A — 3 jeeps — at P1; Squad B — 3 tanks — at
+    # P2") so a single-squad tour cannot satisfy two type-distinct
+    # clauses in series. Pair with `then:` for ordered squad handoff.
+    # {type, x, y, radius, n}
+    "units_of_type_in_region_gte": lambda c, v: sum(
+        1 for u in _agent_units(c)
+        if str(u.get("type", "")).lower() == str(v["type"]).lower()
+        and (u["cell_x"] - int(v["x"])) ** 2 + (u["cell_y"] - int(v["y"])) ** 2
+        <= float(v.get("radius", 3)) ** 2
+    ) >= int(v.get("n", 1)),
     # Stateful ordered-route latch (see _waypoint_sequence). Lets a
     # scenario require visiting W1→W2→…→Wk IN ORDER (skip/idle ⇒ never
     # satisfied), which stateless region predicates cannot express.

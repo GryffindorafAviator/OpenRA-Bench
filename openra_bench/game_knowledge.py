@@ -142,7 +142,12 @@ def scenario_primer(compiled: Any) -> str:
 
 # ── win/fail predicate → plain language ────────────────────────────────────
 
-_REGION_KEYS = ("reach_region", "units_in_region_gte", "all_units_in_region")
+_REGION_KEYS = (
+    "reach_region",
+    "units_in_region_gte",
+    "units_of_type_in_region_gte",
+    "all_units_in_region",
+)
 
 
 def _region(x: Any, coords: str = "exact") -> str:
@@ -174,6 +179,11 @@ _PHRASES: dict[str, Any] = {
     "reach_region": lambda v: f"get a unit into {_region(v)}",
     "units_in_region_gte": lambda v: (
         f"get ≥{(v if isinstance(v, dict) else {}).get('n', 1)} "
+        f"units into {_region(v)}"
+    ),
+    "units_of_type_in_region_gte": lambda v: (
+        f"get ≥{(v if isinstance(v, dict) else {}).get('n', 1)} "
+        f"'{(v if isinstance(v, dict) else {}).get('type')}' "
         f"units into {_region(v)}"
     ),
     "all_units_in_region": lambda v: f"get EVERY unit into {_region(v)}",
@@ -214,6 +224,11 @@ _REGION_PHRASES: dict[str, Any] = {
     "reach_region": lambda v, c: f"get a unit into {_region(v, c)}",
     "units_in_region_gte": lambda v, c: (
         f"get ≥{(v if isinstance(v, dict) else {}).get('n', 1)} "
+        f"units into {_region(v, c)}"
+    ),
+    "units_of_type_in_region_gte": lambda v, c: (
+        f"get ≥{(v if isinstance(v, dict) else {}).get('n', 1)} "
+        f"'{(v if isinstance(v, dict) else {}).get('type')}' "
         f"units into {_region(v, c)}"
     ),
     "all_units_in_region": lambda v, c: f"get EVERY unit into {_region(v, c)}",
