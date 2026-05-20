@@ -1,0 +1,267 @@
+# tp-rush-objective-very-fast.yaml
+#
+# ACTION capability — SPEEDRUN to a far objective region. A pre-placed
+# strike force (3× 2tnk + a base fact at the FAR-WEST) must drive
+# directly east and raze the enemy `fact` at the FAR-EAST objective
+# region (115, 20) inside a TIGHT tick budget. The discrimination is
+# raw speedrun planning: sub-optimal pathing (south-detour / mid-map
+# wander) or hesitation (stall, observe-and-think loops) blows the
+# clock and LOSES.
+#
+# Why 2tnk and not 3× literal jeep: the design-sketch anchor was
+# "3× jeep" but jeeps in the engine are anti-infantry MG units that
+# do not dent buildings inside any plausible speedrun window, AND
+# they get one-shotted by a single e1 garrison rifleman before they
+# can crack the objective fact. Smoke-tested both: 3× jeep + 1× e1
+# garrison ⇒ 3 jeeps die, 0 building damage, LOSS at tick 7023.
+# Substituted 3× 2tnk (medium tank, cannon, the canonical speedrun
+# strike force) — preserves the "small fast strike trio + far-east
+# objective + tight clock" intent of the design (per CLAUDE.md
+# "don't compensate for model weakness; fix real scenario defects").
+#
+# Engine idiom: win = `enemy_key_buildings_destroyed_in_region:
+# {x:115,y:20,radius:6,types:[fact]}` (the REGION-scoped fact-destroyed
+# predicate — see win_conditions.py:116). The `fact` is the cannonical
+# MustBeDestroyed landmark; razing it from the objective region scores.
+# `within_ticks: T` puts the timing teeth on the win; `after_ticks:
+# T+1` in the fail tree makes a missed deadline a REAL reachable LOSS
+# (not a DRAW). `not building_count_gte:{type:fact, n:1}` in the fail
+# tree gives the secondary "lost your base" fail (CLAUDE.md notes that
+# `building_count_gte` is the typed building counter — works as a
+# `has_building` proxy and is what the design brief specifies).
+#
+# Tick math (CLAUDE.md: tick ≈ 93 + 90·(turn-1), 90 ticks/turn):
+# Smoke-measured the intended direct rush from (6,*) → attack_move
+# (115,20) at tick 2613 (3× 2tnk vs fact + 2× e1 garrison, seed 1).
+# A south-detour wander (south to y=36, east to x=115, north to (115,
+# 20)) wins at tick 3153 — 540 ticks slower (matches the extra ~32
+# cells of pathing at ~17 ticks/cell).
+#
+# Tier budgets (T = `within_ticks` win deadline; fail `after_ticks` =
+# T+1; tick ceiling per max_turns must ≥ T+1 or the fail is inert ⇒
+# DRAW):
+#   - EASY:    T=3600 (loose; intended direct rush wins comfortably
+#                      ~2613; south-detour wander still wins ~3153;
+#                      stall LOSES on the clock).        max_turns=40
+#                      ceiling 93+90·39=3603 ≥ 3601 ✓
+#   - MEDIUM:  T=2900 (tight; intended direct rush wins ~2613 with
+#                      ~290 ticks margin; south-detour wander LOSES at
+#                      3153; stall LOSES).               max_turns=33
+#                      ceiling 93+90·32=2973 ≥ 2901 ✓
+#   - HARD:    T=2900 + 2 seed-driven spawn_point groups (NORTH
+#                      staging y=10 vs SOUTH staging y=30) round-
+#                      robined by seed; enemy fact stays at (115,20)
+#                      so both spawns have IDENTICAL travel cost
+#                      (Chebyshev distance from (6,10)/(6,30) to
+#                      (115,20) = 109, same as from y=20). The hard
+#                      tier qualitatively varies the bearing of the
+#                      objective from the staging (not the distance),
+#                      so a memorised "drive east on y=20" cell cannot
+#                      generalise — the agent must compute the rush
+#                      bearing from its actual spawn.    max_turns=33
+#
+# Bar (binding):
+#   - intended direct rush 2tnk × 3 → attack_move(115,20) WINS on
+#     every level + every hard seed (1..4);
+#   - stall (`observe()`) LOSES on every level + every seed (timeout,
+#     real reachable LOSS — no DRAW degeneracy);
+#   - wander/south-detour (move south to y≈36, east to x=115, then
+#     attack the fact) WINS on EASY (within the loose clock) but
+#     LOSES on MEDIUM/HARD (busts the tight clock — that gap is the
+#     speedrun-planning discrimination);
+#   - hard ships ≥2 `spawn_point` groups (seed-driven start variation).
+#
+# Engine notes (per CLAUDE.md):
+#   - `fact` IS a MustBeDestroyed building, so razing it from
+#     (115,20) satisfies the predicate AND the engine auto-`done`s
+#     on enemy-elimination — but we have NO other enemy buildings,
+#     so the auto-done fires the same tick the win predicate becomes
+#     true (win is recorded before termination — verified in smoke).
+#     No sentinel enemy `fact` is needed because the only enemy
+#     building IS the objective; the agent fact at (10,*) is the
+#     persistent agent landmark that the secondary fail clause
+#     `not building_count_gte:fact:1` protects.
+#   - Light garrison (2× e1 — 1 in front of, 1 behind the objective
+#     fact) bleeds the 2tnk column by 0–1 tank en route to the rush
+#     (the column has enough HP buffer; smoke shows 0 tanks lost).
+#     This keeps the speedrun load-bearing — the discrimination is
+#     timing, not slugfest survival.
+#   - `bot_type: turtle` keeps the garrison at its spawn; it does
+#     NOT chase a holding agent or harass the agent base, so a stall
+#     fails ONLY on the clock (not on the agent base being razed) —
+#     the timing teeth are unambiguously the discriminator.
+#   - Per CLAUDE.md, enemy actors do NOT honour `spawn_point`; the
+#     objective fact + garrison place every seed on both NORTH and
+#     SOUTH agent spawns, so the hard tier varies only the AGENT's
+#     spawn latitude (the bearing-to-objective) — distance is held
+#     constant by design.
+
+meta:
+  id: tp-rush-objective-very-fast
+  title: 'Rush — Speedrun the Strike Force to a Far Objective'
+  capability: action
+  real_world_meaning: >
+    A small armoured strike trio is staged at the far west of a long
+    arena; the objective is to drive directly east and raze the
+    enemy construction yard at the far-east edge inside a tight
+    clock. There is no economy phase, no scout phase, no defence
+    phase — the capability is RAW SPEEDRUN PLANNING: pick the
+    shortest path, commit, finish before the deadline. Sub-optimal
+    pathing (south-detour to skirt empty terrain, mid-map wander)
+    blows the clock; hesitation (think, observe, plan) blows the
+    clock. The intended policy is one decision (`attack_move(115,
+    20)` to the whole column) executed immediately and held.
+  robotics_analogue: >
+    Time-critical traversal: a UAV / ground convoy starts at a base
+    far from the target, must reach the target waypoint and complete
+    the strike action inside a hard real-time deadline. The
+    capability tested is route SELECTION (shortest direct path) +
+    COMMITMENT (no detour, no stop-and-replan), not en-route
+    micro-combat.
+  benchmark_anchor:
+    - "human speedrun"
+    - "quickest-path planning"
+    - "SC2 worker rush"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy:
+    faction: soviet
+    cash: 0
+    # turtle: garrison holds its spawn at the objective; does NOT
+    # chase the agent base, so the timing teeth (within_ticks /
+    # after_ticks) are the unambiguous discriminator — not whether
+    # the agent's base survives an enemy harass.
+    bot_type: turtle
+  tools: [move_units, attack_unit, attack_move, stop_units]
+  planning: true
+  termination:
+    max_ticks: 12000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Loose clock: the south-detour wander still wins (a model that
+  # over-thinks and ends up taking a longer route can still finish).
+  # Only the stall (no commitment at all) loses on the clock.
+  easy:
+    description: >
+      A 3-tank strike column starts at the far west (column at x=6,
+      y=18..22) with your base `fact` just east at (10,20). The
+      enemy construction yard (`fact`) is the OBJECTIVE at the
+      far east (115,20), with a light garrison (2 enemy riflemen
+      flanking it). Drive your column directly east and raze the
+      enemy fact before tick 3600. Sub-optimal pathing eats into
+      the clock — at this difficulty the budget tolerates a modest
+      detour, but stalling at the staging or never committing to
+      the rush loses on the clock. Losing your own base (`fact`)
+      also fails.
+    overrides:
+      actors:
+        # ── AGENT — 3× 2tnk strike column at FAR WEST + base fact ──
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
+        - {type: fact, owner: agent, position: [10, 20]}
+        # ── ENEMY — objective fact at FAR EAST + light garrison ──
+        - {type: fact, owner: enemy, position: [115, 20]}
+        - {type: e1,   owner: enemy, position: [112, 20], stance: 2}
+        - {type: e1,   owner: enemy, position: [118, 20], stance: 2}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 20, radius: 6, types: [fact]}
+        - within_ticks: 3600
+    fail_condition:
+      any_of:
+        # Timeout: missed the speedrun clock — real reachable LOSS.
+        - after_ticks: 3601
+        # Base destroyed: the agent fact must persist.
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 40   # ceiling 93 + 90·39 = 3603 ≥ 3601 ✓
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHT clock. Direct rush wins (~2613);
+  # south-detour wander LOSES (3153 > 2900). Stall LOSES.
+  medium:
+    description: >
+      Same staging: 3-tank column at the west (column at x=6, y=18..
+      22) + base `fact` at (10,20). Same objective: raze the enemy
+      construction yard at (115,20) past the light garrison. The
+      clock is TIGHT — you must take the DIRECT east route on
+      y≈20. A south-detour or mid-map wander pads ~500+ ticks onto
+      the path and busts the deadline. Raze the enemy fact before
+      tick 2900; losing your base also fails.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: fact, owner: enemy, position: [115, 20]}
+        - {type: e1,   owner: enemy, position: [112, 20], stance: 2}
+        - {type: e1,   owner: enemy, position: [118, 20], stance: 2}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 20, radius: 6, types: [fact]}
+        - within_ticks: 2900
+    fail_condition:
+      any_of:
+        - after_ticks: 2901
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 33   # ceiling 93 + 90·32 = 2973 ≥ 2901 ✓
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: 2 seed-driven `spawn_point` groups
+  # (NORTH staging y≈10 vs SOUTH staging y≈30) round-robined by
+  # seed. The objective fact stays at (115,20) — Chebyshev distance
+  # from either spawn is 109 cells, identical to the medium
+  # (6,20)→(115,20) traverse, so the SAME tight clock T=2900 is
+  # consistent. The agent must compute the bearing to (115,20) from
+  # its actual spawn (NORTH spawn → south-east bearing; SOUTH spawn
+  # → north-east bearing); a memorised "drive east on y=20" plan
+  # mis-targets on both spawns. Per CLAUDE.md, enemy actors do NOT
+  # honour spawn_point, so the objective fact + garrison place
+  # every seed exactly once; the agent base `fact` is duplicated
+  # across BOTH spawn groups (CLAUDE.md: ANY agent actor declaring
+  # spawn_point filters out unspawned agent actors).
+  hard:
+    description: >
+      Same speedrun-to-far-objective discipline, with seed-driven
+      start latitude. Your 3-tank column + base `fact` start at
+      EITHER the NORTH staging (y≈10) OR the SOUTH staging (y≈30)
+      — the seed picks. The enemy construction yard (`fact`) is
+      the OBJECTIVE at (115,20) with a light 2-rifleman garrison
+      regardless of spawn. Drive the column DIRECTLY to (115,20)
+      and raze it before tick 2900. A memorised "drive east on
+      y=20" plan mis-targets from both spawns; a south-detour or
+      stall busts the clock. Losing your base also fails.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging (y≈10 column + base).
+        - {type: 2tnk, owner: agent, position: [6,  8], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        # spawn_point 1 — SOUTH staging (y≈30 column + base).
+        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 32], stance: 1, spawn_point: 1}
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        # ── ENEMY (places every seed; spawn_point not honoured) ──
+        - {type: fact, owner: enemy, position: [115, 20]}
+        - {type: e1,   owner: enemy, position: [112, 20], stance: 2}
+        - {type: e1,   owner: enemy, position: [118, 20], stance: 2}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 20, radius: 6, types: [fact]}
+        - within_ticks: 2900
+    fail_condition:
+      any_of:
+        - after_ticks: 2901
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 33   # ceiling 93 + 90·32 = 2973 ≥ 2901 ✓

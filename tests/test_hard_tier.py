@@ -798,6 +798,21 @@ UPGRADED = [
     # spawn variation via units_summary (the scout base is otherwise
     # building-only at reset).
     "scout-jeep-vs-infantry-cost-effective",
+    # Wave-8 ACTION speedrun pack — quickest-path planning to a far
+    # objective (human speedrun / quickest-path planning / SC2 worker
+    # rush anchor). 3× 2tnk pre-staged at the far west (x=6) must drive
+    # directly east and raze the enemy `fact` at the far-east objective
+    # region (115,20) inside a TIGHT clock; sub-optimal pathing
+    # (south-detour wander) busts the deadline. Hard defines TWO agent
+    # spawn_point groups (NORTH staging y≈10 vs SOUTH staging y≈30)
+    # round-robined by seed; the objective fact at (115,20) places
+    # every seed (enemy actors don't honour spawn_point — CLAUDE.md)
+    # and Chebyshev distance from either spawn is identical (109), so
+    # the tight clock is consistent across seeds but the bearing-to-
+    # objective flips (NORTH spawn → south-east; SOUTH spawn → north-
+    # east) and a memorised "drive east on y=20" plan mis-targets
+    # from both spawns.
+    "tp-rush-objective-very-fast",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
