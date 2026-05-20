@@ -83,6 +83,11 @@ UPGRADED = [
     # robins the MCV start latitude (NW vs SW) per seed; agent must
     # IDENTIFY the safe corner from each start, not memorise a path.
     "mcv-deploy-defensible-site",
+    # B2 reasoning pack (Wave-2 then-composite). Hard defines two
+    # agent spawn_point groups (NORTH base / SOUTH base) round-
+    # robined by seed — the "near" enemy composition flips so a
+    # memorised pre-pick from one spawn cannot generalise.
+    "mid-tech-switch-on-scout",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
