@@ -88,6 +88,13 @@ UPGRADED = [
     # robined by seed — the "near" enemy composition flips so a
     # memorised pre-pick from one spawn cannot generalise.
     "mid-tech-switch-on-scout",
+    # Wave-4 perception pack (observation-then-plan / tech-read):
+    # discover ≥3 distinct enemy buildings (fact + weap + tech) under
+    # a tight clock and attrition cap. Hard defines two spawn_point
+    # groups (NW / SW) and TWO tech buildings (north tsla / south sam)
+    # so the natural third discovery flips by seed — a memorised
+    # tech-tile pre-plan misses the seed-appropriate read.
+    "scout-detect-enemy-tech",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

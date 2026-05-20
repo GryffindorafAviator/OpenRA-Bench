@@ -1,0 +1,213 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/scout-detect-enemy-tech.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# PERCEPTION focus, observation-then-plan / tech-read cell of the
+# perception ladder. Siblings: perception-frontier-reading (drive into
+# every fog pocket) and perception-target-vs-fog (infer WHICH fog
+# pocket holds the target). This pack tests a different perception
+# sub-skill: identify enemy COMPOSITION / TECH PATH from observable
+# infrastructure — i.e. read the meaningful set of enemy buildings and
+# conclude what doctrine they imply ("they have a radar dome → expect
+# advanced units"). The agent must scout to DISCOVER three distinct
+# enemy buildings: a construction yard, a war factory, and a tech
+# building whose identity reveals the enemy's tech axis. Discovering
+# any single building is not enough; the win predicate is
+# `buildings_discovered_gte` with K matched to the number of meaningful
+# buildings on the level. Over-scouting (visit every cell, brute-touch
+# every fog pocket) blows the clock; under-scouting (one-cell nudge
+# then stall) misses the K-th building; brute-attacking the buildings
+# bleeds the jeeps (units_lost_lte tooth). Only a just-enough scout
+# that drives into the eastern enemy base sight-cone, lingers long
+# enough to register the tech building too, and disengages WINS.
+#
+# Real-world anchor (PlanBench observation-then-plan; SC2 tech-
+# detection "they're going air"; military tech-read / doctrine-
+# recognition from observable infrastructure; industrial competitive
+# intelligence — detect supplier capacity from observable plant).
+#
+# Hard tier (binding contract): two agent spawn_point groups (NW / SW)
+# round-robined by seed (`tests/test_hard_tier.py::UPGRADED`). The
+# enemy fact+weap pair is fixed, but the seed-varied tech building
+# placement (north band vs south band of the enemy base) shifts where
+# the third discovery is — what counts as "easy reach" from the NW
+# spawn becomes the longer reach from SW, and vice-versa. The agent
+# cannot pre-memorise the tech-building cell; it must scout and read
+# what is actually present. (The Rust engine filters AGENT actors by
+# spawn_point but always places ALL enemy actors — see
+# openra-data/src/oramap.rs::expand_scenario_actors — so seed-varying
+# enemy placement is achieved by symmetric placement + duplicated
+# spawn groups, not by per-seed enemy filtering.)
+
+meta:
+  id: scout-detect-enemy-tech
+  title: 'Detect Enemy Tech — Identify the Doctrine from Observable Buildings'
+  capability: perception
+  real_world_meaning: >
+    Recognising what your opponent is doing — their doctrine, tech
+    path, or build axis — from the buildings you can observe. The
+    binding skill is reading enough of the enemy footprint to identify
+    the meaningful infrastructure (fact + production + tech), not
+    just spotting any one building. Over-scouting wastes the clock
+    and under-scouting commits blind to the wrong counter.
+  robotics_analogue: >
+    Competitive-intelligence overflight: a UAV scout must observe
+    enough of a rival facility (the main yard + the production line +
+    the distinguishing tech installation) to identify the operator's
+    capability tier — a single building is ambiguous, mapping the
+    whole site burns the loiter window.
+  benchmark_anchor:
+    - "PlanBench observation-then-plan"
+    - "SC2 tech detection (recognize enemy build-order from buildings)"
+    - "military doctrine-recognition from observed infrastructure"
+    - "industrial competitive intelligence: detect supplier capacity"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 10000}
+  actors:
+    # 2× jeep, fast and fragile scouts staged at the WEST edge. Stance
+    # 1 (ReturnFire) — scouts do NOT auto-engage on sight so a just-
+    # enough scout glides past the enemy garrison; only an explicit
+    # `attack_unit` (brute-attack failure mode) triggers the
+    # units_lost_lte tooth.
+    - {type: jeep, owner: agent, position: [6, 18], stance: 1, count: 2}
+
+levels:
+  easy:
+    description: >
+      Visible-by-default rehearsal of the tech-read task: only TWO
+      enemy buildings (fact + weap) sit in a tight cluster at the far
+      east. The bare skill: read the brief ("scout the enemy base,
+      register what is there"), drive both jeeps east, register the
+      pair, halt. A stall at spawn never reaches the cluster and LOSES
+      on the clock; a brute attack on the buildings bleeds both jeeps
+      to the garrison. The intended scout-east-and-disengage policy
+      wins comfortably inside the budget.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 18], stance: 1, count: 2}
+        # Enemy base — tight east cluster, two distinct buildings.
+        # stance:0 on the garrison so an honest scout that glides past
+        # does not eat return-fire (preserves the easy-rehearsal
+        # framing); a brute attack on the buildings still pulls the
+        # garrison and kills the jeeps.
+        - {type: fact, owner: enemy, position: [118, 18]}
+        - {type: weap, owner: enemy, position: [114, 20]}
+        # Light passive garrison — present so brute-attack on the
+        # buildings is dangerous (return-fire on the e3 if attacked).
+        - {type: e3,   owner: enemy, position: [116, 16], stance: 1}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 2}
+        - {within_ticks: 2200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2201}
+        - {not: {own_units_gte: 1}}
+    max_turns: 26
+
+  medium:
+    description: >
+      THREE enemy buildings now (fact + weap + a tech building — a
+      radar dome here, the seed-varied identity in hard). They are
+      SPACED across the east strip so a one-cell nudge or a fixed
+      one-corner push cannot reveal all three: the agent must traverse
+      the eastern enemy footprint vertically as well as horizontally.
+      Over-scouting (sweep every quadrant including the empty
+      north/south corners of the map) bleeds the clock. Brute-attacking
+      the buildings pulls the garrison and busts `units_lost_lte:1`.
+      Under-scouting (visit one fog pocket, stop) misses the third
+      building and LOSES on the discovery bar. The intended policy
+      splits the jeeps: one sweeps the NORTH band (weap), one sweeps
+      the SOUTH band (dome), and both cross the MIDDLE band en route
+      to register the fact — three discoveries inside the budget.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 18], stance: 1, count: 2}
+        # Enemy base — three buildings spaced along the eastern edge.
+        # fact at MID-y is naturally registered by EITHER jeep as it
+        # moves east through the middle band before peeling off; weap
+        # is north (only reachable by the north-bound jeep); dome is
+        # south (only reachable by the south-bound jeep). A single
+        # jeep cannot register all three on its own (north + south
+        # round-trip blows the clock); split is mandatory.
+        - {type: fact, owner: enemy, position: [110, 18]}
+        - {type: weap, owner: enemy, position: [116, 10]}
+        - {type: dome, owner: enemy, position: [116, 28]}
+        # Passive light garrison — stance:0 so they never auto-engage
+        # and a passing scout glides through. A brute attack on the
+        # buildings still pulls the e3s into return-fire and bleeds
+        # both jeeps (units_lost_lte:1 tooth).
+        - {type: e3, owner: enemy, position: [113, 13], stance: 0}
+        - {type: e3, owner: enemy, position: [113, 25], stance: 0}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 3}
+        - {units_lost_lte: 1}
+        - {within_ticks: 3600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 40
+
+  hard:
+    description: >
+      Hard binds two axes at once: seed-varied AGENT spawn (NW vs SW)
+      AND seed-varied TECH-BUILDING placement inside the enemy base
+      (north-band tsla vs south-band sam, both physically placed). A
+      memorised reading order from one spawn cannot generalise — the
+      "near" tech building from NW is the "far" one from SW. The agent
+      must scout the actual enemy footprint and register all three
+      meaningful buildings (fact + weap + whichever tech building is
+      reachable in budget) on a tighter attrition cap (≤0 losses):
+      brute-attacking the base wipes the jeeps, over-scouting the
+      whole map exhausts the clock, and a fixed pre-memorised path
+      misses the tech tile the seed actually requires.
+    overrides:
+      actors:
+        # spawn_point 0 — scouts staged NW.
+        - {type: jeep, owner: agent, position: [6, 6],  stance: 1, count: 2, spawn_point: 0}
+        # spawn_point 1 — scouts staged SW. The tech buildings are
+        # fixed (both placed), but the natural-reach pair flips by seed.
+        - {type: jeep, owner: agent, position: [6, 30], stance: 1, count: 2, spawn_point: 1}
+        # Enemy base — fact at mid-east + weap NORTH + two tech
+        # buildings (one in the NORTH band, one in the SOUTH band)
+        # so EITHER spawn group has a natural near-reach pair:
+        #   NW spawn → fact + weap (NORTH) + tsla (NORTH band)
+        #   SW spawn → fact + (passing weap on the way) + sam (SOUTH)
+        # The agent only needs to register THREE distinct buildings;
+        # which third building is the natural read flips by seed, so
+        # a memorised "always go to (118, 6)" pre-plan misses the
+        # tech tile from the SW spawn.
+        - {type: fact, owner: enemy, position: [110, 18]}
+        - {type: weap, owner: enemy, position: [116, 16]}
+        - {type: tsla, owner: enemy, position: [116, 8],  stance: 0}  # NORTH tech
+        - {type: sam,  owner: enemy, position: [116, 28], stance: 0}  # SOUTH tech
+        # Passive light garrison — stance:0 so they NEVER auto-engage
+        # (hard's ≤0-loss cap is unforgiving; the discrimination teeth
+        # are clock + brute-attack-bleed, NOT garrison return-fire on
+        # a passing scout). A brute attack STILL kills the jeeps
+        # because the buildings + e3s out-damage two jeeps before they
+        # can withdraw.
+        - {type: e3, owner: enemy, position: [113, 12], stance: 0}
+        - {type: e3, owner: enemy, position: [113, 26], stance: 0}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 3}
+        - {units_lost_lte: 0}
+        - {within_ticks: 3600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 40
