@@ -294,7 +294,7 @@ def make_provider(cfg: ProviderConfig, *, rate_limiter=None,
                   cost_meter=None) -> ChatProvider:
     if cfg.provider == "bedrock":
         return BedrockProvider(cfg)
-    if cfg.provider in ("openai", "vllm", "openrouter"):
+    if cfg.provider in ("openai", "vllm", "openrouter", "together"):
         return OpenAICompatibleProvider(
             cfg, rate_limiter=rate_limiter, cost_meter=cost_meter
         )
