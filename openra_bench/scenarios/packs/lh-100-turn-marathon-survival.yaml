@@ -1,0 +1,357 @@
+# lh-100-turn-marathon-survival.yaml
+#
+# REASONING capability — Group G long-horizon. Very-Late "marathon
+# survival" pack: keep the base alive UNDER SUSTAINED HUNT PRESSURE
+# for the full 100-turn budget. The win is gated on FOUR things still
+# being true at the end of the run:
+#   1. has_building: fact          # the base still stands
+#   2. own_units_gte: 3            # a minimum garrison is alive
+#   3. building_count_gte pbox 2   # at least two pillboxes were built
+#   4. after_ticks N (survived)    # the agent reached the end of the
+#      AND within_ticks N+x        # episode (no early stop / draw)
+#
+# The discrimination is NOT a single micro decision; it is the
+# SUSTAINED CADENCE over ~100 turns of:
+#   - reinforce: train fresh e1/e3 every few turns to replace losses
+#     (hunt bot trickles enemy units in across the whole episode)
+#   - defend: keep ≥2 pbox up; rebuild a razed one immediately
+#   - repair: keep fact/pbox/proc above critical HP (the `repair` tool
+#     toggles autorepair; without it a stripped pbox lane falls in
+#     the 60-90 turn window)
+#   - economy: keep the harvester(s) flowing — empty silos = no new
+#     units = the garrison bleeds out by turn ~70-80
+#
+# Wave geometry: instead of one large enemy stack closing in turn 1
+# (which would either be blunted forever or roll the base before turn
+# ~25), the pack STAGGERS multiple hunt squads along the east-west
+# axis at increasing x. Each squad arrives at a different time
+# window:
+#   x≈ 60  → reaches base ~tick 1200-1500  (turns ~14-18)
+#   x≈ 80  → reaches base ~tick 1800-2200  (turns ~20-25)
+#   x≈100  → reaches base ~tick 2400-3000  (turns ~27-34)
+#   x≈115  → reaches base ~tick 3000-3600  (turns ~33-40)
+# After the early waves are absorbed the trailing hunt squads keep
+# pressure on through the mid game; the agent's OWN reinforcement
+# cadence is what carries it from turn ~50 through the after_ticks
+# survival gate at tick 8100 (turn ~90).
+#
+# Real-world anchors:
+#   - lmgame-Bench multi-hour endurance benchmarks
+#   - SC2LE full-game / extended-game testing (sustained macro)
+#   - long-horizon credit assignment (survival has no proxy reward)
+#   - SRE extended on-call (sustained incident response, hours)
+#   - military endurance operations (continuous defensive ops)
+#
+# DISCRIMINATIONS (no defect, no cheat):
+#   - stall (observe only): LOSS — hunt rolls fact, no pbox built.
+#   - pure-defense-no-reinforce (build 2 pbox, never train units):
+#     LOSS — starting garrison bleeds out under sustained pressure,
+#     own_units drops below 1 before turn 90 ⇒ fail-clause fires
+#     (or own_units_gte:3 missed at the after_ticks gate).
+#   - pure-build-no-repair (build buildings but no repair / no
+#     unit replacement): LOSS — pbox/fact razed under sustained
+#     attrition; has_building:fact fails or pbox count drops < 2.
+#   - intended sustained-ops (reinforce + defend + repair across all
+#     100 turns): WIN — all four clauses still satisfied at the gate.
+#
+# ENGINE FACTS (CLAUDE.md):
+#   - max_turns 100 → reachable tick ≈ 93 + 90·99 = 9003. The win's
+#     after_ticks: 8100 AND within_ticks: 9003 BAND is reachable.
+#   - after_ticks IN WIN is structurally incompatible with auto-DRAW
+#     on enemy-elim — so we PLACE A PERSISTENT inert enemy `fact` far
+#     east; hunt squads also stay on the map until killed, but the
+#     anti-DRAW marker is the load-bearing one.
+#   - hunt bot: each unit pursues the nearest agent target. Squads
+#     placed at distinct x converge on the base at different times,
+#     giving SUSTAINED (not one-shot) pressure.
+#   - pbox costs 600, needs `tent`; tent is pre-placed.
+#   - tent trains e1 (100cr) and e3 (300cr); separate queue from
+#     defenses so build('pbox') and build('e1') in parallel works.
+#   - `repair` toggles autorepair on a unit/building ID.
+#   - harv → proc economy: pre-placed `harv` + `proc` + 2× mine give
+#     income from turn 1; the agent must KICK the harv at a mine to
+#     start the loop (kick is one harvest order).
+#
+# Validate (no model / no network):
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-100-turn-marathon-survival.yaml
+
+meta:
+  id: lh-100-turn-marathon-survival
+  title: '100-Turn Marathon Survival — Sustain Defence, Reinforcement, and Repair'
+  capability: reasoning
+  real_world_meaning: >
+    A very-late single-episode endurance test: keep the base alive
+    under SUSTAINED enemy pressure for the full 100-turn budget. The
+    win is gated on the base, a minimum garrison, and the pillbox
+    line ALL still being intact at the end of the run, not on a
+    one-shot decision. The intended capability is the cadence of
+    reinforcement (train new infantry every few turns), repair
+    (toggle autorepair on damaged defences), and economic stewardship
+    (keep the refinery's harvester flowing). Stalling, pure defence
+    without reinforcement, and pure construction without repair all
+    lose; only sustained operations survive to the after-ticks gate.
+  robotics_analogue: >
+    Long-horizon autonomous operation under continuous external
+    pressure: an extended on-call / extended deployment where there
+    is no single decisive action, only the discipline of sustained
+    maintenance — repair work, supply replenishment, force
+    rotation — across the entire window. Credit only arrives at the
+    end of the window if every subsystem is still up.
+  benchmark_anchor:
+    - "lmgame-Bench multi-hour endurance"
+    - "SC2LE full-game / extended-game testing"
+    - "long-horizon credit assignment"
+    - "SRE extended on-call / military endurance ops"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: hunt
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - repair
+    - sell
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+starting_cash: 1000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # 90-turn budget → reachable tick ≈ 93 + 90·89 = 8103.
+  # Smaller hunt presence (3 staggered squads), forgiving after_ticks
+  # gate (7200 = ~turn 80), within_ticks 8103 (= max).
+  # Stall / pure-defense / pure-build LOSE; intended sustained WINS.
+  easy:
+    description: >
+      Survive a 90-turn endurance episode under sustained hunt pressure.
+      Pre-placed at the west: construction yard (fact), barracks
+      (tent), power plant (powr), refinery (proc), harvester (harv),
+      two mines, and 4 starting riflemen. THREE staggered enemy
+      squads at increasing distance close in over the course of the
+      game — early ones arrive ~turn 15, late ones ~turn 35, and
+      trailing fire keeps coming. To WIN you must, at tick 7200+,
+      STILL have: the construction yard alive, ≥3 of your own units
+      alive, and ≥2 pillboxes (pbox) you built. Stalling loses to
+      the first wave; only building pbox without ever training fresh
+      infantry leaves the garrison too thin (≥3 units fails); only
+      training infantry without pbox lets the base get rushed down.
+      Use repair to keep the pbox line standing.
+    starting_cash: 1000
+    overrides:
+      actors:
+        # Agent base — vulnerable buildings (fact, proc, powr) WEST;
+        # tent + future pbox lane mouth to the EAST so the hunt squads
+        # hit the defences before the income building.
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [8,  18]}
+        - {type: powr, owner: agent, position: [6,  20]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        - {type: proc, owner: agent, position: [6,  18]}
+        - {type: harv, owner: agent, position: [8,  22]}
+        # Two ore patches WEST of base so the harv loop never crosses
+        # the eastern lane the hunt squads attack down.
+        - {type: mine, owner: neutral, position: [2,  20]}
+        - {type: mine, owner: neutral, position: [2,  18]}
+        # 4 starting defenders (riflemen) at the EAST lane mouth so
+        # `own_units_gte:1` is satisfied on turn 1 and the first wave
+        # has something to engage before the agent's first pbox lands.
+        - {type: e1,   owner: agent, position: [16, 20], stance: 3, count: 4}
+        # THREE staggered hunt squads at increasing x → arrive in
+        # successive time windows.
+        - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 2}
+        # Inert enemy `fact` marker far east — prevents engine
+        # auto-DRAW on enemy-elim once the hunt squads die. Without
+        # this the after_ticks-in-win gate collapses to DRAW.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {own_units_gte: 3}
+        - {building_count_gte: {type: pbox, n: 2}}
+        - {after_ticks: 7200}
+        - {within_ticks: 8103}
+    # Fail must fire whenever the survival gate is reached without
+    # ALL win clauses also being true (else the episode ends as a DRAW
+    # — CLAUDE.md rule 3). Win is evaluated FIRST in eval_core, so the
+    # broad `after_ticks: 7200` fail only bites if win is false; that
+    # gives us "didn't keep all four things alive ⇒ LOSS, not draw".
+    fail_condition:
+      any_of:
+        - {after_ticks: 7200}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 90
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVIER staggered pressure (5 squads, e1+e3
+  # mix) and the FULL 100-turn budget. The after_ticks gate (8100 =
+  # ~turn 90) sits comfortably under reachable tick 9003 = max.
+  medium:
+    description: >
+      Survive a full 100-turn endurance episode under sustained
+      hunt pressure. Pre-placed at the west: construction yard
+      (fact), barracks (tent), power plant (powr), refinery (proc),
+      harvester (harv), two mines, and 4 starting riflemen.
+      FIVE staggered enemy squads (rifle + rocket mix) close in
+      over the course of the game — early squads arrive ~turn 15,
+      mid ~turn 25-35, trailing ~turn 40-50 and pressure continues
+      through the late game. To WIN you must, at tick 8100+, STILL
+      have: the construction yard alive, ≥3 of your own units alive,
+      and ≥2 pillboxes (pbox) you built, AND survive until tick
+      9003 (turn 100). Stalling loses to the first wave; building
+      only pbox without retraining infantry leaves the garrison
+      bled below 3 by the late game; building only infantry without
+      pbox loses the base to the rocket squads. Use repair to keep
+      the pbox line standing.
+    starting_cash: 1000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [8,  18]}
+        - {type: powr, owner: agent, position: [6,  20]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        - {type: proc, owner: agent, position: [6,  18]}
+        - {type: harv, owner: agent, position: [8,  22]}
+        - {type: mine, owner: neutral, position: [2,  20]}
+        - {type: mine, owner: neutral, position: [2,  18]}
+        # 4 starting riflemen (own_units_gte:1 satisfied turn 1).
+        - {type: e1,   owner: agent, position: [16, 20], stance: 3, count: 4}
+        # FIVE staggered hunt squads at distinct x positions for
+        # SUSTAINED (not one-shot) pressure across all 100 turns.
+        # Mix in 1 e3 (rocket) per mid/late squad so a pbox without
+        # repair gets bled down.
+        - {type: e1, owner: enemy, position: [60,  20], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [75,  18], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [75,  22], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [90,  20], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [90,  18], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [105, 20], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [105, 22], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [115, 20], stance: 3, count: 2}
+        # Inert enemy `fact` marker (anti-DRAW).
+        - {type: fact, owner: enemy, position: [120, 22]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {own_units_gte: 3}
+        - {building_count_gte: {type: pbox, n: 2}}
+        - {after_ticks: 8100}
+        - {within_ticks: 9003}
+    # Fail bites the moment the survival gate opens (after_ticks: 8100)
+    # — win is evaluated FIRST so the fail only fires if the win
+    # all-of is unsatisfied at that tick (CLAUDE.md rule 3: non-win
+    # must be a real LOSS, not a draw).
+    fail_condition:
+      any_of:
+        - {after_ticks: 8100}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 100
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVIER pressure (six staggered squads,
+  # more e3 rockets) AND ≥2 agent spawn_point groups (NORTH y=12 /
+  # SOUTH y=28) so a single memorised opening can't generalise.
+  # Budget extended to 120 turns → reachable tick ≈ 93 + 90·119 =
+  # 10803; after_ticks gate at 9900 (= ~turn 110) sits comfortably
+  # below. Two parallel sets of hunt squads (north + south latitudes)
+  # always place — enemy actors ignore spawn_point — so whichever
+  # latitude the agent occupies catches one converging band while
+  # the OTHER also turns inward.
+  hard:
+    description: >
+      Survive a 120-turn endurance episode under sustained pressure
+      from TWO latitudes. Your base stages from a seed-chosen
+      latitude (NORTH or SOUTH) — a single memorised pbox cell cannot
+      generalise. Pre-placed at your west base: construction yard
+      (fact), barracks (tent), power plant (powr), refinery (proc),
+      harvester (harv), two mines, and 4 starting riflemen. SIX
+      staggered hunt squads (rifle + rocket mix) close in across
+      BOTH latitudes — the converging band hits early ~turn 15 and
+      pressure trickles through the late game. To WIN you must, at
+      tick 9900+, STILL have: the construction yard alive, ≥3 of
+      your own units alive, and ≥2 pillboxes (pbox) you built, AND
+      survive until tick 10803 (turn 120). Stall / pure-defense /
+      pure-build all lose; only sustained reinforcement + repair +
+      defence carry the agent through the gate.
+    starting_cash: 1500
+    overrides:
+      actors:
+        # NORTH base spawn (spawn_point 0). Layout: fact, proc, powr
+        # WEST; tent + pbox lane mouth EAST.
+        - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: tent, owner: agent, position: [8,  10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [6,  10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [8,  14], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [16, 12], stance: 3, count: 6, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [16, 13], stance: 3, count: 2, spawn_point: 0}
+        # SOUTH base spawn (spawn_point 1) — symmetric.
+        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [8,  30], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [6,  30], spawn_point: 1}
+        - {type: harv, owner: agent, position: [8,  26], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [16, 28], stance: 3, count: 6, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [16, 27], stance: 3, count: 2, spawn_point: 1}
+        # Two ore patches, one per latitude (neutral actors are not
+        # spawn-filtered — both always placed). Mines WEST of base so
+        # the harv loop doesn't cross the lane.
+        - {type: mine, owner: neutral, position: [2,  12]}
+        - {type: mine, owner: neutral, position: [2,  28]}
+        # Staggered hunt squads at TWO latitudes. Enemy actors don't
+        # honour spawn_point — all placed. The hunt bot drives each
+        # unit at the nearest agent target, so whichever latitude the
+        # agent base occupies will be hit by the matching band first;
+        # the OTHER band's units also turn inward over time (they
+        # don't respect lanes — closest-target-pursuit). Composition
+        # is tuned so the intended sustained-ops policy CAN survive
+        # all 120 turns from EITHER spawn — the redundancy across
+        # latitudes is the seed-driven uncontrolled variable, not a
+        # raw-count amplifier.
+        - {type: e1, owner: enemy, position: [70,  12], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [70,  28], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [90,  12], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [90,  14], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [90,  28], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [90,  26], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [110, 12], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [110, 28], stance: 3, count: 2}
+        # Inert enemy `fact` marker far east (anti-DRAW).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {own_units_gte: 3}
+        - {building_count_gte: {type: pbox, n: 2}}
+        - {after_ticks: 9900}
+        - {within_ticks: 10803}
+    # Fail bites the moment the survival gate opens (after_ticks:
+    # 9900) — win is evaluated FIRST so the fail only fires if the
+    # win all-of is unsatisfied at that tick (CLAUDE.md rule 3).
+    fail_condition:
+      any_of:
+        - {after_ticks: 9900}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 120

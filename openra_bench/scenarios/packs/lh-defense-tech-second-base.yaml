@@ -1,0 +1,370 @@
+# lh-defense-tech-second-base.yaml
+#
+# REASONING capability — Group G long-horizon "secure-expand-with-tech"
+# 3-phase chain. The agent must (1) harden base #1 with pillboxes,
+# (2) tech up to a war factory, then (3) drive the spare MCV east and
+# deploy it as a second Construction Yard inside the briefed target
+# region.
+#
+# Uses the Wave-2 `then:` happened-before composite to ENFORCE STRICT
+# ORDER:
+#   PHASE 1: building_count_gte:{type:pbox, n:3}        # defend
+#   PHASE 2: has_building: weap                          # tech
+#   PHASE 3: building_in_region:{x:130,y:30,r:8,
+#            type:fact,count:1}                          # 2nd base
+# Per the `then` semantics each clause must be observed-true IN
+# SEQUENCE — pre-expanding before tech, or pre-teching before defence,
+# cannot satisfy the chain.
+#
+# A `patrol` scripted bot drips light, predictable harassment on
+# base #1 throughout the run — pure-expand (skip defences) loses the
+# base to the patrol; pure-defence (no MCV move + no weap) leaves the
+# chain stuck at phase 1 or 2; only the intended secure-expand-with-
+# tech sequence WINS.
+#
+# Sister packs:
+#   - `lh-opening-to-tech-to-army` (Wave-4 macro chain, 4 phases —
+#     proc → weap → ≥N 2tnk → attack enemy fact)
+#   - `tech-turtle-defensive-tech` (defence-then-tech with hunt-bot
+#     pressure)
+# This pack is the secure-expand-with-tech analogue: the terminal
+# clause is a SECOND BASE in a far region (multi-site ramp-up), not
+# a destroy clause.
+#
+# Real-world anchors (`meta.benchmark_anchor`):
+#   - SC2 secure-expand-with-tech (multi-base macro): harden home
+#     base, tech up, expand to a second base.
+#   - PlanBench multi-stage credit assignment.
+#   - Product roadmap: harden (perimeter/SLO) → R&D (tech upgrade)
+#     → new geography (second region).
+#   - Industrial: secure plant → R&D → build second plant.
+#
+# DISCRIMINATIONS (CLAUDE.md bar — no defect, no cheat):
+#   - stall (observe only): LOSS — clock + patrol razes fact.
+#   - pure-expand-skip-defence (move MCV east + deploy, skip pbox /
+#     weap): LOSS — chain stuck at phase 1 (pbox never built); the
+#     patrol also chews the base.
+#   - pure-defence-no-expand (build pbox+weap, never move MCV): LOSS —
+#     chain stuck at phase 3 (no 2nd fact in east region); clock
+#     expires.
+#   - intended secure-expand-with-tech (pbox×3, weap, then move MCV
+#     east + deploy): WIN.
+#
+# Engine facts used (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - `pbox` cost 600, prereq `tent` (allied barracks pre-placed),
+#     defence queue.
+#   - `weap` cost ~2000, prereq `proc` (allied refinery — pre-placed
+#     so the queue accepts weap from turn 1 once cash is available).
+#   - MCV deploy: `Command.deploy([mcv_id])` removes the MCV and
+#     spawns an agent `fact` at (mcv_x-1, mcv_y-1). To land the new
+#     fact at e.g. (130,30) — the centre of the east target region —
+#     the MCV must reach (131,31) before deploying.
+#   - `patrol` scripted bot: hunts outward in alternating patrol
+#     legs from its spawn; light, predictable home-base pressure
+#     (per `openra-sim/src/scripted_bot.rs`).
+#   - Inert enemy `fact` marker far east prevents engine auto-DRAW
+#     on enemy-elim (CLAUDE.md auto-done footgun).
+#   - `then:` greedy advance: once a prior clause latches, any
+#     currently-true later clauses latch in the same evaluation.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_lh_defense_tech_second_base.py -q
+
+meta:
+  id: lh-defense-tech-second-base
+  title: 'Secure → Tech → Second Base — 3-Phase Long-Horizon Chain'
+  capability: reasoning
+  real_world_meaning: >
+    A long single-episode macro plan whose final win depends on each
+    intermediate phase being observed-true in order: harden the home
+    base with static defences (pillboxes) under live patrol pressure,
+    unlock the tech tree (war factory), then commit the spare MCV
+    eastward to stand up a second Construction Yard inside the
+    briefed expansion region. The Wave-2 `then:` composite enforces
+    strict happened-before — a policy that expands before tech, or
+    teches before defences, cannot satisfy the chain.
+  robotics_analogue: >
+    Multi-site ramp-up of a long-horizon mission with strict stage
+    gating: harden the home site against active adversarial pressure,
+    bring the upgraded production capability online, then deploy a
+    base-builder platform to the designated expansion sector and
+    convert it into a second operational site — all within one
+    budget. Out-of-order completion (expand before hardening, or
+    expand before the upgraded capability is online) forfeits the
+    chain.
+  benchmark_anchor:
+    - "SC2 secure-expand-with-tech (multi-base macro)"
+    - "PlanBench multi-stage credit assignment"
+    - "product roadmap: harden → R&D → new market"
+    - "industrial: secure plant → R&D → second plant"
+  author: openra-bench
+
+# Pack-level base_map is the `rush-hour-arena` sentinel so the loader
+# can map-resolve before per-level overrides materialise the actual
+# 160x60 generator-spec arena .oramap (same pattern as
+# mfb-base-1-defend-base-2-build, expansion-balanced-2-base-defended).
+base_map: rush-hour-arena
+
+starting_cash: 3000
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: patrol
+  tools:
+    - observe
+    - build
+    - place_building
+    - deploy
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  # Each level supplies its own actor list via overrides — keeps the
+  # per-tier patrol density / spawn variation audit-explicit.
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare-skill rehearsal: looser bar (pbox≥2 instead of ≥3), a single
+  # light patrol band, generous clock. The chain still bites
+  # (pbox-first, weap-then, 2nd-base-finally) — pure-expand, pure-
+  # defence, stall all LOSE; intended secure-expand-with-tech WINS.
+  # max_turns 90 → reachable tick 93 + 90·89 = 8103 > 8000 ✓.
+  easy:
+    description: >
+      You hold base #1 in the WEST — a Construction Yard (fact),
+      barracks (tent), power plants (powr ×2), refinery (proc), a
+      harvester pre-kicked on the local ore patch, and 3 rifleman
+      defenders on AttackAnything. A spare MCV is staged east of
+      base #1 (~(40,30)) for your eventual expansion. A light Soviet
+      `patrol` band drips harassment on base #1. The mission is a
+      strict 3-phase chain (you must complete them IN THIS ORDER):
+      (1) build at least 2 pillboxes (pbox) at the home base,
+      (2) build a war factory (weap), (3) drive the spare MCV east
+      to the target region centred at (130,30) (radius 8) and
+      DEPLOY it there to stand up the SECOND Construction Yard.
+      Win = the 3-phase chain completed AND base #1 still standing
+      (fact present) before tick 8000. Stalling, skipping defences,
+      and never expanding all LOSE.
+    starting_cash: 3500
+    overrides:
+      base_map:
+        generator: arena
+        name: lh-defense-tech-second-base-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # Agent base #1 (WEST). fact / tent / powr per spec, PLUS
+        # proc + harv + mine so income flows from turn 1 (the chain
+        # needs ~3800 cash on top of the cushion). Without harv
+        # income the bare starting_cash cannot reliably fund the
+        # pbox×2 + weap + MCV-fuel chain in budget.
+        - {type: fact, owner: agent, position: [10, 30]}
+        - {type: tent, owner: agent, position: [8,  28]}
+        - {type: powr, owner: agent, position: [6,  30]}
+        # Second powr — 2 pbox (-40) + weap (-30) drains ~70 power;
+        # one powr (+100 default) just covers it, but a second powr
+        # protects against the patrol shaving the first one (CLAUDE.md
+        # underpowered-queue footgun).
+        - {type: powr, owner: agent, position: [6,  32]}
+        - {type: proc, owner: agent, position: [6,  26]}
+        - {type: harv, owner: agent, position: [8,  32]}
+        - {type: mine, owner: neutral, position: [2,  30]}
+        # 3 rifleman defenders on AttackAnything at the EAST lane
+        # mouth to blunt the patrol's leading edge while pbox stand
+        # up.
+        - {type: e1, owner: agent, position: [16, 30], stance: 3, count: 3}
+        # Spare MCV staged ~30 cells east of base #1. To win, the
+        # agent must drive it ~90 cells further east and deploy at
+        # (131,31) → fact lands at (130,30) — exactly the target
+        # region centre.
+        - {type: mcv, owner: agent, position: [40, 30]}
+        # Light Soviet patrol band — easy: 2× e1 starting mid-map
+        # so the patrol bot drips harassment on base #1 (`patrol`
+        # bot alternates patrol legs outward from spawn; the
+        # nearest agent unit / structure attracts pressure).
+        - {type: e1, owner: enemy, position: [80, 30], stance: 3, count: 2}
+        # Persistent unarmed enemy `fact` marker far east — outside
+        # both the target region (radius 8 around (130,30)) and the
+        # patrol band, so it doesn't satisfy any agent predicate
+        # and doesn't perturb the patrol behaviour. Prevents engine
+        # auto-DRAW on enemy-elim (the patrol band could otherwise
+        # be killed and end the episode prematurely).
+        - {type: fact, owner: enemy, position: [154, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: defense-tech-second-base-easy
+            clauses:
+              - {building_count_gte: {type: pbox, n: 2}}
+              - {has_building: weap}
+              - {building_in_region:
+                   {x: 130, y: 30, radius: 8, type: fact, count: 1}}
+        - {has_building: fact}
+        - {within_ticks: 8000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8001}
+        - {not: {has_building: fact}}
+    max_turns: 90
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Full 3-phase chain at the spec bar (pbox≥3) under a slightly
+  # heavier patrol band (3× e1 + 1× e3) on a tighter clock.
+  # max_turns 80 → reachable tick 93 + 90·79 = 7203 > 7200 ✓.
+  medium:
+    description: >
+      Same secure-expand-with-tech setup, tighter clock and heavier
+      patrol pressure. You hold base #1 in the WEST (fact, tent,
+      proc, harv, 2× powr, 3 defenders). A spare MCV is staged east
+      of base #1. A Soviet `patrol` band — 3 rifle infantry + 1
+      rocket soldier (e3) — drips pressure on base #1. The mission
+      is a strict 3-phase chain (IN THIS ORDER):
+      (1) at least 3 pillboxes (pbox) at base #1,
+      (2) a war factory (weap),
+      (3) the spare MCV deployed inside the eastern target region
+      centred at (130,30), radius 8 — the new fact lands at
+      (mcv_x-1, mcv_y-1), so drive the MCV to ~(131,31) and deploy.
+      Win = the chain completed AND base #1 still standing before
+      tick 7200. Stall, pure-expand-skip-defences, and pure-defence-
+      no-expand all LOSE.
+    starting_cash: 3000
+    overrides:
+      base_map:
+        generator: arena
+        name: lh-defense-tech-second-base-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        - {type: fact, owner: agent, position: [10, 30]}
+        - {type: tent, owner: agent, position: [8,  28]}
+        - {type: powr, owner: agent, position: [6,  30]}
+        - {type: powr, owner: agent, position: [6,  32]}
+        - {type: proc, owner: agent, position: [6,  26]}
+        - {type: harv, owner: agent, position: [8,  32]}
+        - {type: mine, owner: neutral, position: [2,  30]}
+        - {type: e1, owner: agent, position: [16, 30], stance: 3, count: 3}
+        - {type: mcv, owner: agent, position: [40, 30]}
+        # Heavier patrol band — 3 e1 + 1 e3 (rocket soldier adds
+        # anti-armour pressure if the MCV is exposed en route).
+        - {type: e1, owner: enemy, position: [80, 30], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [82, 30], stance: 3, count: 1}
+        # Persistent unarmed enemy `fact` marker far east (anti-DRAW).
+        - {type: fact, owner: enemy, position: [154, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: defense-tech-second-base-medium
+            clauses:
+              - {building_count_gte: {type: pbox, n: 3}}
+              - {has_building: weap}
+              - {building_in_region:
+                   {x: 130, y: 30, radius: 8, type: fact, count: 1}}
+        - {has_building: fact}
+        - {within_ticks: 7200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {has_building: fact}}
+    max_turns: 80
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis vs medium: a FOURTH phase (rebuild the proc — the
+  # secure-expand-with-tech chain extended to a "harden → tech →
+  # expand → re-secure income" sequence) AND TWO patrol bands hitting
+  # from TWO latitudes (north + south), AND ≥2 spawn_point groups so
+  # the agent base latitude varies by seed.
+  #
+  # The fourth chain clause is `building_count_gte: {type: proc, n: 2}`
+  # — the agent must build a SECOND refinery at the new eastern base
+  # to stabilise income on the expansion (a real "second plant comes
+  # online" semantic, not just a re-place of the home refinery).
+  #
+  # max_turns 80 → reachable tick 93 + 90·79 = 7203 > 7200 ✓.
+  hard:
+    description: >
+      Same secure-expand-with-tech mission under richer pressure and
+      with a fourth phase tacked on. Your base #1 stages from a
+      seed-chosen latitude (NORTH y=22 or SOUTH y=38) so a single
+      memorised pillbox placement cannot generalise. Two Soviet
+      `patrol` bands hit from two different latitudes (north and
+      south). The mission is a strict 4-phase chain (IN THIS ORDER):
+      (1) at least 3 pillboxes (pbox) at base #1,
+      (2) a war factory (weap),
+      (3) the spare MCV deployed inside the eastern target region
+      centred at (130,30), radius 8,
+      (4) at least 2 refineries (proc) own — i.e. a SECOND refinery
+      online to stabilise income on the new expansion.
+      Win = the chain completed AND base #1 still standing before
+      tick 7200. Stall, pure-expand, pure-defence, and skip-proc-2
+      all LOSE.
+    starting_cash: 3500
+    overrides:
+      base_map:
+        generator: arena
+        name: lh-defense-tech-second-base-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # NORTH base spawn (spawn_point 0). Layout mirrors easy/
+        # medium at y=22.
+        - {type: fact, owner: agent, position: [10, 22], spawn_point: 0}
+        - {type: tent, owner: agent, position: [8,  20], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  22], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  24], spawn_point: 0}
+        - {type: proc, owner: agent, position: [6,  18], spawn_point: 0}
+        - {type: harv, owner: agent, position: [8,  24], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [16, 22], stance: 3, count: 3, spawn_point: 0}
+        - {type: mcv,  owner: agent, position: [40, 22], spawn_point: 0}
+        # SOUTH base spawn (spawn_point 1). Symmetric at y=38.
+        - {type: fact, owner: agent, position: [10, 38], spawn_point: 1}
+        - {type: tent, owner: agent, position: [8,  40], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  38], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  36], spawn_point: 1}
+        - {type: proc, owner: agent, position: [6,  42], spawn_point: 1}
+        - {type: harv, owner: agent, position: [8,  36], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [16, 38], stance: 3, count: 3, spawn_point: 1}
+        - {type: mcv,  owner: agent, position: [40, 38], spawn_point: 1}
+        # Two ore patches — one per spawn cluster — placed west of
+        # each base so the harv loop doesn't cross the patrol lane.
+        # (Neutral actors are not filtered by spawn_point — both
+        # always place, per CLAUDE.md.)
+        - {type: mine, owner: neutral, position: [2,  22]}
+        - {type: mine, owner: neutral, position: [2,  38]}
+        # Two patrol bands at distinct latitudes (both ALWAYS placed
+        # — enemy actors with no spawn_point are not filtered, per
+        # CLAUDE.md). Whichever lane the agent's base occupies is
+        # hit; the OTHER band wanders the off-axis half of the map.
+        - {type: e1, owner: enemy, position: [80, 22], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [82, 22], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [80, 38], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [82, 38], stance: 3, count: 1}
+        # Persistent unarmed enemy `fact` marker far east (anti-DRAW).
+        - {type: fact, owner: enemy, position: [154, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: defense-tech-second-base-hard
+            clauses:
+              - {building_count_gte: {type: pbox, n: 3}}
+              - {has_building: weap}
+              - {building_in_region:
+                   {x: 130, y: 30, radius: 8, type: fact, count: 1}}
+              - {building_count_gte: {type: proc, n: 2}}
+        - {has_building: fact}
+        - {within_ticks: 7200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {has_building: fact}}
+    max_turns: 80

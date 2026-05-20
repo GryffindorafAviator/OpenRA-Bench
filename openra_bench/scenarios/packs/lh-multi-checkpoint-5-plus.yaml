@@ -1,0 +1,324 @@
+# lh-multi-checkpoint-5-plus.yaml
+#
+# ACTION capability — Group G long-horizon. The Late-tier sibling of
+# `lh-opening-to-tech-to-army` (4-phase chain) that goes one further:
+# a Wave-2 `then:` happened-before chain of FIVE+ ordered checkpoints
+# in a single episode. This is the PERT critical-path / PlanBench
+# long-sequencing anchor — a "5+ ordered checkpoints" test that the
+# 4-phase pack cannot express on its own.
+#
+# The chain genuinely needs order because it MIXES checkpoint kinds:
+#   - building states (has_building: proc, weap)
+#   - quantitative production (unit_type_count_gte: 2tnk)
+#   - episode-aggregate combat (units_killed_gte: 3)
+#   - terminal destruction (enemy_key_buildings_destroyed: fact)
+# A policy that scores kills BEFORE the army exists cannot satisfy
+# clause-4 BEFORE clause-3; the `then:` latch advances index-by-index
+# only, so out-of-order completion stalls forever.
+#
+# Sister pack to `lh-opening-to-tech-to-army` (4-phase econ→tech→army→
+# engage) — this pack tightens the same idiom by stretching it to
+# 5 (medium) / 6 (hard) checkpoints, which is the regime that
+# discriminates models on long ordered SOP execution / PERT critical
+# path planning. Easy reverts to 3 phases (the baseline) so the
+# difficulty axis is "phase count" rather than "phase kind".
+#
+# Real-world anchors:
+#   - PERT/CPM project management (each milestone gates the next)
+#   - PlanBench long-sequencing (5+ step ordered plans)
+#   - long SOP execution (5+ phase ordered procedures)
+#   - military operation: phase lines (PL ALPHA → ... → PL FOXTROT)
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - `then:` advances clause-by-clause; a satisfied earlier clause
+#     stays latched even if its predicate later becomes false (e.g.,
+#     proc gets destroyed) — only the order matters.
+#   - The agent has 4 pre-placed combat units; phase-4 (3 kills) is
+#     satisfied by attacking the static defenders next to the enemy
+#     fact. The defenders are HOLD-FIRE (stance:0) so a "rush the
+#     fact and kill 3" play CAN score kills early — but the `then:`
+#     latch will not credit those kills towards clause-4 until clauses
+#     1-3 (proc → weap → 2 tanks) have latched in order.
+#   - `bot_type: ''` (no scripted bot) — the enemy is static so the
+#     anti-stall pressure comes purely from the `within_ticks: 7200`
+#     clock, not from incoming raiders.
+#   - `harvest` is intentionally omitted from tools; the auto-harvester
+#     spawned by `proc` near the ore patch covers income without the
+#     agent needing to micro-manage it. This keeps the tool surface
+#     focused on the action / sequencing axis.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-multi-checkpoint-5-plus.yaml
+
+meta:
+  id: lh-multi-checkpoint-5-plus
+  title: 'Multi-Checkpoint 5+ — Strict Long-Sequencing Chain (PERT / PlanBench)'
+  capability: action
+  real_world_meaning: >
+    A long single-episode operation whose final win depends on FIVE or
+    more intermediate checkpoints being observed-true in order: stand
+    up the economy (refinery), unlock the tech (war factory), produce
+    a real fighting force (≥2 medium tanks), engage and accumulate
+    kills (≥3), then commit to the terminal objective (raze the enemy
+    headquarters). The Wave-2 `then:` composite enforces strict
+    happened-before — an out-of-order completion (kills before the
+    army, attack before the tech) cannot advance the chain past the
+    skipped clause and forfeits the episode on the clock.
+  robotics_analogue: >
+    Long sequenced operation with strict checkpoint gating: a mission
+    that runs through 5+ phases that must complete in order (sensor
+    coverage → infrastructure → fleet provisioning → contact →
+    objective), inside a single budget window. Credit at episode end
+    requires every phase to have happened in sequence — out-of-order
+    completion forfeits the whole chain. Standard PERT / CPM critical-
+    path execution where a downstream task cannot start (and cannot
+    earn credit) until its upstream predecessor has finished.
+  benchmark_anchor:
+    - "PlanBench long-sequencing"
+    - "PERT critical path"
+    - "PERT/CPM project management"
+    - "long SOP execution"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Loose-bar rehearsal: 3-phase chain (proc → weap → engage). Cash
+  # is loose, the static enemy fact has no defenders, and the chain
+  # is short enough that a competent build-order + attack wins. The
+  # `then:` idiom is taught here so the medium tier (5 phases) and
+  # hard tier (6 phases) are pure phase-count escalations.
+  easy:
+    description: >
+      Pre-placed: agent fact + tent + powr + fix at the west base,
+      plus 4 medium tanks (2tnk) for the engagement. An enemy fact
+      sits undefended at the far east (your terminal target). The
+      three checkpoints (`then:` chain) are: build a refinery (proc),
+      then a war factory (weap), then destroy the enemy fact. Phases
+      MUST happen IN THIS ORDER — stalling or skipping any phase
+      loses (the chain never advances), and any non-win on the clock
+      is a real LOSS. All within 7200 ticks.
+    starting_cash: 4000
+    overrides:
+      actors:
+        # Agent base — fact, tent, powr, fix (the 2tnk tech-prereq,
+        # pre-placed because the easy tier doesn't include a tank-
+        # production checkpoint; keeping `fix` matches the medium
+        # tier's geometry so cash budgeting transfers cleanly).
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: tent, owner: agent, position: [10, 22]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        - {type: fix,  owner: agent, position: [14, 22]}
+        # 4 pre-placed medium tanks — the strike force for the
+        # engagement checkpoint. Positioned just east of the base
+        # so they have a clear corridor to the enemy fact.
+        - {type: 2tnk, owner: agent, position: [18, 18]}
+        - {type: 2tnk, owner: agent, position: [18, 20]}
+        - {type: 2tnk, owner: agent, position: [18, 22]}
+        - {type: 2tnk, owner: agent, position: [20, 20]}
+        # Near ore patch so a built proc auto-spawns a harv with
+        # somewhere to harvest from (income for weap).
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Enemy: fact at far east (terminal target). No defenders on
+        # easy — the engage clause is geometric only (drive tanks
+        # east, raze fact). A SENTINEL fact at the far north-east
+        # corner persists past the terminal fact-kill so the engine
+        # does NOT auto-`done` on enemy-elimination before the
+        # `then:` chain (and the within_ticks predicate) gets a turn
+        # to evaluate — see CLAUDE.md auto-terminate footgun.
+        - {type: fact, owner: enemy, position: [115, 30]}
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: multi-check-easy
+            clauses:
+              - {has_building: proc}                               # P1: econ
+              - {has_building: weap}                               # P2: tech
+              - {enemy_key_buildings_destroyed: {types: [fact]}}   # P3: engage
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 85
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # 5-phase chain (the headline cell): proc → weap → 2× 2tnk → ≥3
+  # kills → enemy fact. The chain MIXES checkpoint kinds (buildings +
+  # quantitative production + combat-aggregate + terminal destruction)
+  # so the ordering is genuinely load-bearing — a "kill 3 then build
+  # then attack" play cannot satisfy clause-4 BEFORE clause-3 (the
+  # `then:` latch only advances when each clause is observed-true in
+  # order). Cash is tight (2500) so the chain must be executed
+  # efficiently; the 4 pre-placed tanks cover the kill+engage clauses,
+  # the auto-harvester from the built proc funds weap + the 2 new
+  # tanks for clause 3.
+  medium:
+    description: >
+      Pre-placed: agent fact + tent + powr + fix at the west base,
+      plus 4 medium tanks (2tnk) for the engagement. An enemy fact
+      sits at the far east defended by a handful of HOLD-FIRE rifle/
+      rocket soldiers (your kill targets). The five checkpoints
+      (`then:` chain) are: build a refinery (proc), then a war
+      factory (weap), then have ≥2 medium tanks (2tnk) standing,
+      then accumulate ≥3 unit kills, then destroy the enemy fact.
+      Phases MUST happen IN THIS ORDER — `then:` enforces strict
+      happened-before. A "rush the fact and kill on the way" play
+      scores kills early but the latch will not credit them until
+      proc + weap + 2tnk have latched in order; skipping any clause
+      stalls the chain. All within 7200 ticks.
+    starting_cash: 2500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: tent, owner: agent, position: [10, 22]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        # `fix` (Service Depot) is the 2tnk tech-prereq; pre-placed
+        # so the chain's PHASE 2 only needs the agent to build the
+        # war factory (weap) — not a Service Depot too.
+        - {type: fix,  owner: agent, position: [14, 22]}
+        # 4 pre-placed medium tanks — the strike force for the
+        # kills + engagement checkpoints. Two start tanks already
+        # SATISFY the unit_type_count_gte:{2tnk,n:2} clause at t=0,
+        # so the agent does NOT need to build more for clause 3 —
+        # but the `then:` latch only advances to clause-3 once the
+        # earlier proc + weap clauses have latched.
+        - {type: 2tnk, owner: agent, position: [18, 18]}
+        - {type: 2tnk, owner: agent, position: [18, 20]}
+        - {type: 2tnk, owner: agent, position: [18, 22]}
+        - {type: 2tnk, owner: agent, position: [20, 20]}
+        # Ore patch — auto-harv from the built proc funds weap.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Enemy: fact at far east + 4 HOLD-FIRE defenders (kills for
+        # phase 4). HoldFire (stance:0) means the defenders won't
+        # path-find west — the agent must come to them. Defender
+        # count = 4 so the ≥3 kills clause is generously satisfiable.
+        - {type: fact, owner: enemy, position: [115, 30]}
+        - {type: e1,   owner: enemy, position: [110, 28], stance: 0}
+        - {type: e1,   owner: enemy, position: [110, 30], stance: 0}
+        - {type: e1,   owner: enemy, position: [110, 32], stance: 0}
+        - {type: e3,   owner: enemy, position: [112, 30], stance: 0}
+        # Sentinel: a far isolated enemy fact so razing the assault
+        # target doesn't auto-`done` the engine before the win
+        # predicate evaluates (CLAUDE.md auto-terminate footgun).
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: multi-check-medium
+            clauses:
+              - {has_building: proc}                               # P1: econ
+              - {has_building: weap}                               # P2: tech
+              - {unit_type_count_gte: {type: 2tnk, n: 2}}          # P3: army
+              - {units_killed_gte: 3}                              # P4: engage
+              - {enemy_key_buildings_destroyed: {types: [fact]}}   # P5: finish
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 85
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # 6-phase chain + 2 spawn_point groups. One extra checkpoint
+  # (≥4 tanks AFTER the kills) makes the chain genuinely longer than
+  # medium's 5 (the chain demands MORE tanks be produced even after
+  # the first kills land — a tank-count regression check that the
+  # army was rebuilt after attrition). The agent spawns NORTH (y=14)
+  # or SOUTH (y=26) by seed; the per-seed base latitude flips so a
+  # memorised opening cannot generalise.
+  hard:
+    description: >
+      Pre-placed: agent base (fact + tent + powr + fix) at the west,
+      round-robined between a NORTH base and a SOUTH base by seed,
+      plus 4 medium tanks (2tnk). An enemy fact at the far east is
+      defended by HOLD-FIRE defenders (your kill targets). The six
+      checkpoints (`then:` chain) are: build a refinery (proc), then
+      a war factory (weap), then have ≥2 medium tanks (2tnk), then
+      accumulate ≥3 unit kills, then have ≥4 medium tanks (rebuild
+      after attrition), then destroy the enemy fact. Phases MUST
+      happen IN STRICT ORDER (`then:` composite). Pre-build / out-of-
+      order / skip-tech / kill-without-army all stall the chain.
+      The seed-varied spawn means a memorised opening cannot
+      generalise. All within 7200 ticks.
+    starting_cash: 3000
+    overrides:
+      actors:
+        # NORTH base spawn (spawn_point 0)
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [14, 18], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [18, 14], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [18, 16], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [18, 18], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 16], spawn_point: 0}
+        # SOUTH base spawn (spawn_point 1)
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 22], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [14, 22], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [18, 26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [18, 24], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [18, 22], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 24], spawn_point: 1}
+        # Shared ore geography — two patches between the two bases
+        # so harv income is symmetric whichever spawn is chosen.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Enemy: fact at far east + HOLD-FIRE defenders for the kill
+        # clause. 5 defenders so the ≥3 kills clause is generously
+        # satisfiable on either spawn. Placed near the enemy fact so
+        # a stall loses on the clock, not on the agent base getting
+        # overrun first (no bot, so this is structural anyway).
+        - {type: fact, owner: enemy, position: [115, 20]}
+        - {type: e1,   owner: enemy, position: [110, 18], stance: 0}
+        - {type: e1,   owner: enemy, position: [110, 20], stance: 0}
+        - {type: e1,   owner: enemy, position: [110, 22], stance: 0}
+        - {type: e3,   owner: enemy, position: [112, 19], stance: 0}
+        - {type: e3,   owner: enemy, position: [112, 21], stance: 0}
+        # Sentinel: a far isolated enemy fact so razing the assault
+        # target doesn't auto-`done` the engine before the win
+        # predicate evaluates (CLAUDE.md auto-terminate footgun).
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: multi-check-hard
+            clauses:
+              - {has_building: proc}                               # P1: econ
+              - {has_building: weap}                               # P2: tech
+              - {unit_type_count_gte: {type: 2tnk, n: 2}}          # P3: army
+              - {units_killed_gte: 3}                              # P4: engage
+              - {unit_type_count_gte: {type: 2tnk, n: 4}}          # P5: rebuild
+              - {enemy_key_buildings_destroyed: {types: [fact]}}   # P6: finish
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 85

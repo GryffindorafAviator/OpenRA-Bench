@@ -1,0 +1,330 @@
+# coord-cover-and-move — bounding overwatch across a fire zone.
+#
+# ACTION focus: two squads must cross a centre-of-map fire zone defended
+# by static anti-tank infantry. Charging both squads together stacks
+# every cluster's fire on the SAME column — the e3 anti-tank rocket
+# soldiers focus the dense formation and bust the attrition cap (≥2
+# tanks lost). Sending one squad alone leaves the other idle and the
+# moving squad eats ALL the cluster's fire (≥2 lost). Stalling burns
+# the clock. The intended idiom is military FIRE-AND-MANEUVER bounding
+# overwatch: one squad stops just outside the fire zone, anchors to
+# DRAW fire, and engages the cluster from the closer flank while the
+# other squad sweeps WIDE through the unoccupied periphery (y outside
+# the cluster's ~5-cell sight). The cluster's attention splits between
+# the firing "cover" team and the (invisible / out-of-range) "move"
+# team; the move team crosses safely. Then the roles alternate so the
+# cover team can also cross. Each squad takes at most 1 loss because
+# enemy fire is divided per phase, not stacked on a single column.
+#
+# Real-world anchor: US Army FM 3-21.8 bounding overwatch — one fire
+# team in a stationary OVERWATCH posture provides suppressive fire
+# while the BOUNDING fire team moves forward by short rushes through
+# the danger zone; roles alternate ("leapfrog") as the bounding team
+# reaches its next covered position and assumes overwatch for the
+# previously-overwatching team. SC2 tank micro encodes the same
+# pattern as the siege-tank "leapfrog" advance.
+#
+# Discrimination (the four script-policy bar):
+#   • stall (observe-only): no squad crosses → win region empty →
+#     after_ticks LOSS.
+#   • both-charge-together: all 6 tanks rush a single eastward column
+#     through the fire zone; 4× e3 stance:3 (medium) auto-fire on the
+#     densest cluster and bust units_lost_lte:1 → LOSS.
+#   • single-squad-only: send Squad A through alone (Squad B idle west);
+#     A absorbs ALL the cluster's fire across its crossing and loses
+#     ≥2 → busts units_lost_lte:1 → LOSS.
+#   • intended bound-and-cover: A anchors at (45,15) firing on the
+#     cluster (drawing fire from the closer flank); B swings WIDE
+#     through y=8..10 (outside e3 sight 5 from the cluster centre at
+#     y=20) to (90,15); then B opens fire from the east edge of the
+#     cluster while A relocates north and crosses through y=8..10.
+#     Cluster fire is split per phase; each squad takes ≤1 loss; ≥4
+#     tanks land in the win region within the deadline → WIN.
+#
+# Why the spec works (engine combat sheet):
+#   • e3 = anti-tank rocket soldier (rng4c, dps12, sight5c, hp45).
+#     Effective vs 2tnk armour. 4× e3 firing on a single dense column
+#     stacks ~48 dps onto whichever tank is nearest; a column charging
+#     through the cluster spends ~3-4 decision turns in range and the
+#     stacked dps cleans off ≥2 tanks (busts units_lost_lte:1).
+#   • 2tnk = medium tank (rng4.75c, dps22, sight6c, hp400). Marginally
+#     out-ranges e3 (4.75 vs 4), so a tank that STOPS just at the edge
+#     of e3 range (~dist 5 from cluster) can fire back without being
+#     in e3 range itself — the OVERWATCH posture. Its dps22 plus the
+#     other overwatch tank chips down the cluster across the bound,
+#     reducing fire on the second-phase bounding team.
+#   • Sight-line geometry: with the cluster at y=19..21 (sight 5), e3s
+#     see roughly y=14..26. A squad routing through y=8..10 is OUTSIDE
+#     enemy sight and OUTSIDE enemy range — it takes ZERO fire while
+#     moving, even though its straight-line distance is ~10 cells.
+#     That's the "bounding lane" geometry — outside the fire envelope.
+#
+# Engine guardrails (per CLAUDE.md):
+#   • Map: rush-hour-arena (128 × 40 playable; x in [2..126], y in
+#     [2..38]). All actor / region cells are inside.
+#   • CLAUDE.md footgun: enemy clusters at (50,20) silently FAIL to
+#     place. Cluster cells are (49,19), (49,21), (51,19), (51,21) —
+#     verified-placeable neighbours used by other packs.
+#   • A persistent far enemy `fact` at (120,20) prevents engine auto-
+#     done when the central cluster is cleaned out (so the win/fail
+#     evaluator sees the terminal frame instead of a DRAW collapse).
+#   • after_ticks fail clauses are reachable within max_turns
+#     (tick ≤ 93 + 90·(max_turns-1)); within_ticks 4500 < 4503 at
+#     max_turns 50; staller hits after_ticks 4501 and LOSES, not draws.
+
+meta:
+  id: coord-cover-and-move
+  title: 'Bounding Overwatch — One Squad Covers While the Other Moves'
+  capability: action
+  real_world_meaning: >
+    Two armoured squads must cross a centre-of-map FIRE ZONE held by
+    static anti-tank infantry. Charging both squads through together
+    stacks every enemy's fire onto a single dense column and busts the
+    attrition cap. Sending one squad alone leaves the other idle and
+    the lone column still absorbs ALL the cluster's fire. The intended
+    capability is bounding overwatch: one squad stops just OUTSIDE the
+    cluster's range and acts as the COVER team — firing on the cluster
+    to draw its attention from the closer flank — while the BOUNDING
+    team sweeps WIDE through the periphery (outside enemy sight) to a
+    forward position; then the roles alternate so the cover team can
+    also cross safely. The cluster's fire is split per phase rather
+    than stacked on one column, so each squad takes at most one loss.
+  robotics_analogue: >
+    Multi-agent traversal of a contested corridor where defenders have
+    a fixed effective range envelope and concentrate fire on whichever
+    cluster is closest. Single-team traversal eats the full defensive
+    fire envelope; the joint policy alternates an OVERWATCH role
+    (suppressive fire drawing defender attention from a flank) with a
+    BOUNDING role (sweep through the cleared periphery). The
+    coordination is the role-alternation — leapfrogging cover and
+    move — not just splitting the force.
+  benchmark_anchor:
+    - "US Army FM 3-21.8 bounding overwatch (fire-and-maneuver doctrine)"
+    - "SC2 siege-tank leapfrog advance under enemy fire"
+    - "SMAC coordinated cross of a danger zone with split defender fire"
+    - "MicroRTS multi-squad alternating cover-and-move"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant the moving squad takes a hit or first contact is
+  # made — bounding overwatch is REACTIVE micro (the cover team must
+  # re-target as bounding-team contact opens up). Without these
+  # interrupts the role-alternation only re-evaluates on fixed turn
+  # boundaries and the e3 cluster gets free shots through every gap.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare bound-and-cover skill: 4× e1 rifle infantry at centre (NOT
+  # the anti-tank e3 — easy uses the weaker rifle, low DPS vs armour
+  # so the cap is forgiving). Both-charge-together may squeak by on
+  # luck (e1 vs 2tnk armour is poor); stall and single-squad both
+  # still LOSE via the timeout / kill geometry.
+  easy:
+    description: >
+      Two squads (Squad A at (10,15), Squad B at (10,25), 3 medium
+      tanks each) must cross a centre-of-map fire zone defended by
+      static rifle infantry (e1) at roughly (50,20), then land ≥4
+      tanks in the EAST gathering region (x ≈ 100, y ≈ 20, radius 6)
+      before tick 4500, losing ≤1 tank in total. The rifle infantry
+      do limited damage to armour on easy, but charging both squads
+      together still stacks their fire onto the densest cluster and
+      a single column alone absorbs every shot — alternate ROLES:
+      one squad anchors at the edge of enemy range to draw fire
+      while the other sweeps through the periphery (y outside enemy
+      sight) and crosses; then switch.
+    overrides:
+      actors:
+        # Squad A — northern fire team, staged at (10, 15).
+        - {type: 2tnk, owner: agent, position: [10, 14], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 15], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1}
+        # Squad B — southern fire team, staged at (10, 25).
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 25], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 26], stance: 1}
+        # Centre fire zone: 4× rifle infantry stance:3 (AttackAnything
+        # in range). Cells avoid (50,20) — CLAUDE.md footgun: enemy
+        # clusters at (50,20) silently fail to place. Off-axis
+        # neighbours (49/51 × 19/21) are verified-placeable.
+        - {type: e1, owner: enemy, position: [49, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [51, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [51, 21], stance: 3}
+        # Persistent far enemy `fact` — keeps the episode alive past
+        # the central cluster being cleaned out so the win/fail
+        # evaluator sees the terminal frame (no DRAW collapse).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 100, y: 20, radius: 6, n: 4}}
+        - {units_lost_lte: 1}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: ANTI-TANK rocket soldiers (e3) replace rifle infantry,
+  # so the fire zone is genuinely lethal to 2tnk armour. Both-charge-
+  # together LOSES (4× e3 stacked dps onto a dense column busts
+  # units_lost_lte:1); single-squad alone LOSES (lone column absorbs
+  # every shot). Only true bound-and-cover (squads alternate roles
+  # so cluster fire is SPLIT per phase) keeps each squad to ≤1 loss.
+  medium:
+    description: >
+      Two squads (Squad A at (10,15), Squad B at (10,25), 3 medium
+      tanks each) must cross a centre-of-map FIRE ZONE defended by
+      four static anti-tank rocket soldiers (e3) at roughly (50,20),
+      then land ≥4 tanks in the EAST gathering region (x ≈ 100,
+      y ≈ 20, radius 6) before tick 4500, losing ≤1 tank in total.
+      Charging BOTH squads through the centre stacks all four e3s'
+      anti-armour fire on a single dense column and busts the cap.
+      Sending one squad alone leaves the other idle and the lone
+      column absorbs every shot. The intended idiom is BOUNDING
+      OVERWATCH: one squad anchors at the EDGE of enemy range
+      (around x ≈ 45, y ≈ 15 — close enough to fire back, far
+      enough to suppress) drawing the cluster's attention from the
+      closer flank, while the other squad sweeps WIDE through the
+      periphery (around y ≈ 8..10, OUTSIDE the cluster's sight
+      range) to the east. Then the roles ALTERNATE — the team that
+      moved opens fire from the east edge of the cluster while the
+      original cover team relocates north and crosses through the
+      same outside-sight band. Each squad takes ≤1 loss because
+      cluster fire is SPLIT per phase, not stacked.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [10, 14], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 15], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 25], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 26], stance: 1}
+        # Centre fire zone: 4× anti-tank rocket soldiers stance:3.
+        - {type: e3, owner: enemy, position: [49, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [49, 21], stance: 3}
+        - {type: e3, owner: enemy, position: [51, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [51, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 100, y: 20, radius: 6, n: 4}}
+        - {units_lost_lte: 1}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 axes vs medium:
+  #   1. ZERO attrition cap (units_lost_lte: 0) — any tank loss
+  #      fails. The cover team's overwatch fire must SUPPRESS the
+  #      cluster enough that the bounding team takes no hits at all
+  #      (the wide-flank route via y=8..10 already keeps the bounding
+  #      team out of e3 sight — the zero-loss bar makes the geometry
+  #      load-bearing instead of a margin-of-error luxury).
+  #   2. An additional e1 RIFLE-INFANTRY swarm extends the fire
+  #      envelope (3× e1 north of the cluster + 3× e1 south),
+  #      tightening the periphery-route corridor: a squad that drifts
+  #      to y=12 or y=28 brushes the rifle screens. The bounding lane
+  #      is narrower — bound through y=6..9 or y=31..34, not y=12+ or
+  #      y=27- — and the cover team must keep the rocket cluster
+  #      ITSELF suppressed (overwatch on the e3, not the e1s, since
+  #      the e3 is the priority anti-armour threat).
+  #   3. Strike force stages from TWO seed-driven spawn_point groups
+  #      (NORTH-WEST y=12..16 OR SOUTH-WEST y=24..28), round-robined
+  #      by seed. The cluster and the win region are symmetric across
+  #      y=20 so EITHER spawn faces an equivalent bounding decision
+  #      (cover from the closer flank, bound around the FAR
+  #      periphery), but a single memorised bound vector cannot
+  #      generalise across seeds.
+  hard:
+    description: >
+      Two squads (3 medium tanks each, staged at the NW or SW
+      corner, chosen by seed for anti-memorisation) must cross a
+      centre-of-map FIRE ZONE — four anti-tank rocket soldiers (e3)
+      at roughly (50,20), flanked by two rifle-infantry SCREENS that
+      extend the fire envelope north and south — and land ≥4 tanks
+      in the EAST gathering region (x ≈ 100, y ≈ 20, radius 6)
+      before tick 4500, losing ZERO tanks in total. The intended
+      idiom is BOUNDING OVERWATCH with the wide-flank route
+      tightened by the rifle screens: the cover team anchors at the
+      edge of e3 range (within tank range, OUT of e3 range) and
+      suppresses the rocket cluster (the priority anti-armour
+      threat); the bounding team sweeps through the FAR periphery
+      (around y ≈ 6..9 from the NORTH spawn, or y ≈ 31..34 from the
+      SOUTH spawn — outside both the rocket-cluster sight envelope
+      AND the rifle-screen weapon range) to the east. Then the
+      roles alternate. Zero loss is only achievable when the cover
+      team's overwatch fire keeps the cluster suppressed during the
+      bounding team's transit.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH-WEST staging (Squad A at (10,12)
+        # north, Squad B at (10,16) south of A but still north of
+        # centre — they bound through the far NORTH periphery
+        # y ≈ 6..9 outside both rifle-screen and rocket sight).
+        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 13], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 15], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 17], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH-WEST staging (mirrored across y=20).
+        # The cover/bound decision is symmetric: cover at south
+        # edge of e3 range, bound through y ≈ 31..34.
+        - {type: 2tnk, owner: agent, position: [10, 23], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 25], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 29], stance: 1, spawn_point: 1}
+        # Centre rocket cluster — same 4× e3 as medium, symmetric
+        # across y=20 so EITHER spawn faces an equivalent geometry.
+        - {type: e3, owner: enemy, position: [49, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [49, 21], stance: 3}
+        - {type: e3, owner: enemy, position: [51, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [51, 21], stance: 3}
+        # Rifle-infantry SCREENS — extend the fire envelope north
+        # and south of the rocket cluster, tightening the bounding
+        # lane. y=14 / y=26 are within e3 cluster's sight (5c) so
+        # the screens reinforce the same envelope — a squad
+        # bounding through y=12 or y=28 would be in screen range
+        # (e1 rng4c sees out to ~y=10 from y=14). The intended
+        # bounding lane is OUTSIDE that envelope: y ≈ 6..9 (NORTH)
+        # or y ≈ 31..34 (SOUTH).
+        - {type: e1, owner: enemy, position: [49, 14], stance: 3}
+        - {type: e1, owner: enemy, position: [51, 14], stance: 3}
+        - {type: e1, owner: enemy, position: [50, 13], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 26], stance: 3}
+        - {type: e1, owner: enemy, position: [51, 26], stance: 3}
+        - {type: e1, owner: enemy, position: [50, 27], stance: 3}
+        # Persistent far enemy fact — engine auto-done mitigation.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 100, y: 20, radius: 6, n: 4}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50

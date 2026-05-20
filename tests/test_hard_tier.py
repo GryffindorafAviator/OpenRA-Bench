@@ -321,6 +321,41 @@ UPGRADED = [
     # relative-to-base placement that lands in the same world cell on
     # every seed cannot generalise.
     "def-tower-line-vs-cluster",
+    # Wave-5 Group F cash-reserve / treasury management pack (SC2 cash
+    # overflow / financial runway / operational reserve anchor). Hard
+    # tier defines two agent spawn_point groups (NORTH base y=14 /
+    # SOUTH base y=28) round-robined by seed; the two near patches
+    # sit on the spawn-matched row so throughput is symmetric per
+    # spawn, but a memorised opening cannot generalise across seeds.
+    "econ-cash-reserve-management",
+    # Wave-5 Group F cash-bar-by-deadline pack (SC2 econ-by-tick /
+    # budget-by-date / fundraising milestone / OR throughput-with-
+    # deadline anchor). Hard tier defines two agent spawn_point groups
+    # (NORTH y=10..14 / SOUTH y=28..32) round-robined by seed with
+    # symmetric near-patch ore geometry at both latitudes — so the
+    # reinvestment-vs-baseline decision is the same per spawn but a
+    # memorised "build at (8,18)" opening cannot generalise across
+    # seeds.
+    "econ-target-cash-amount-by-deadline",
+    # Wave-5 Group G observation-driven 3-phase chain pack (SC2 reactive
+    # macro / CICERO information-action loop / PlanBench replanning /
+    # threat-intel-driven defense anchor). Hard tier defines two agent
+    # spawn_point groups (NORTH base y=10 / SOUTH base y=30) round-
+    # robined by seed; three enemy bases (NE/MID/SE) plus a SHARED
+    # forward outpost at (60,20) always place (enemy actors don't
+    # honour spawn_point — CLAUDE.md), so the nearest-corner assault
+    # target flips per seed and a memorised "scout-then-attack-NE"
+    # opening cannot generalise across spawn variants.
+    "lh-scout-react-counter",
+    # Wave-5 salvaged-from-worktree packs: agents finished authoring
+    # YAML+tests but didn't push (multiple agents ran into push-blocked
+    # / output-truncation states). Salvaged from the untracked working
+    # tree and committed from the main session. All 4 have ≥2 spawn
+    # groups on hard.
+    "coord-cover-and-move",
+    "coord-diversionary-attack",
+    "def-in-depth",
+    "def-surprise-flank-react",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

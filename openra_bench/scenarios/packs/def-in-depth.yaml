@@ -1,0 +1,284 @@
+meta:
+  id: def-in-depth
+  title: 'Defense in Depth — Two Layers, Not One Thick Wall'
+  capability: reasoning
+  real_world_meaning: >
+    Defense-in-depth doctrine: against a massed concentrated rush, a
+    front line plus a second line at greater depth shreds the attacker
+    after the first layer falls, where a single fortified line — even
+    one with the same brick count — eventually collapses under sustained
+    pressure and razes the base behind it. Picking concentration vs
+    distribution is the reasoning load: the same four pillboxes massed
+    in one cluster lose, the same four pillboxes spread thin in one
+    long line lose, and only a 2+2 layered topology survives.
+  robotics_analogue: >
+    Multi-layer security architecture (defense-in-depth): a single
+    perimeter firewall, however thick, eventually gets breached; the
+    same defensive capacity deployed as outer + inner layers (each
+    covering the same arc) absorbs the breach. Same total resources,
+    different topology, qualitatively different survivability. Also:
+    medieval keep + outer-wall design (attackers must take BOTH);
+    redundant systems architecture (one component failure ≠ system
+    failure).
+  benchmark_anchor:
+    - 'military defense-in-depth doctrine'
+    - 'security multi-layer architecture (defense-in-depth)'
+    - 'medieval keep + outer wall design'
+    - 'redundant systems architecture'
+  author: openra-bench
+
+# rush-hour-arena (128×40, playable x in [2..126], y in [2..38]). Agent
+# base on the west (fact at (10,20) + tent + powr + 3 e1 defenders
+# pre-placed); rusher band spawns at the lane mouth (x≈70, y≈20) on the
+# same row as the base. Rusher scripted bot concentrates the band on
+# the agent centroid every ~8 ticks (scripted_bot.rs::Rusher) — drives
+# straight at the fact unless blunted in depth.
+#
+# Defense-in-depth geometry (medium/easy):
+#   • FRONT region centred at (25,20), radius 4 → x in [21..29]:
+#     2 pbox here form the OUTER layer that absorbs the first impact.
+#   • REAR region centred at (15,20), radius 4 → x in [11..19]:
+#     2 pbox here form the INNER layer that shreds the rushers that
+#     break through the front.
+#   • Radii intentionally tight (r=4) so the two regions DO NOT overlap
+#     (x=20 falls in neither). A single 4-pbox cluster cannot satisfy
+#     both region predicates — the model has to choose the layered
+#     topology, not a tall stack at one x.
+#
+# Failure topologies (every one is a real reachable LOSS):
+#   • STALL: no buildings → win is unsatisfied AND the rusher band
+#     reaches the fact ~turn 20 (tick ~1800) → fact razed → LOSS via
+#     `not has_building:fact`.
+#   • SPREAD-THIN (1 long line, 4 pbox at x=15..18 in one column):
+#     rear-region count satisfied but front-region count = 0 → win
+#     unsatisfied; under sustained pressure the line falls too →
+#     fact razed → LOSS.
+#   • SINGLE-CLUSTER (4 pbox at x=15, no front layer): the massed
+#     attack attrites the single cluster faster than it can kill,
+#     final rushers reach the fact → LOSS; even if the cluster
+#     survives, front-region count = 0 → win unsatisfied.
+#   • SINGLE-LINE-AT-FRONT (4 pbox at x=25): rear-region count = 0 →
+#     win unsatisfied; breakthrough sails past undefended to the fact.
+#   • INTENDED 2+2 LAYERED: front layer takes the spike, rear layer
+#     finishes the survivors at greater depth → fact intact, all four
+#     in-region predicates satisfied → WIN.
+#
+# Budget: 2400cr — exactly 4 pbox (4×400 = 1600) plus 8 e1 (8×100 =
+# 800) headroom for replacement defenders, OR 4 pbox alone with 800cr
+# slack. The win does NOT require trained units beyond the pre-placed
+# 3 (the `not own_units_gte:1` fail clause is satisfied by them) —
+# the discriminator is topology, not throughput.
+base_map: rush-hour-arena
+starting_cash: 2400
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: rusher
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Re-decide on rusher spotted at the lane mouth (the cue to commit
+  # placement) and on own loss (a defender or a pbox just fell).
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 14000
+  actors:
+    # ── agent base (west) ── fact + tent + powr pre-placed (tent is
+    # the production queue for e1; powr removes the early power-stall;
+    # ONE rear defender at x=3 covers the `own_units_gte:1` fail
+    # clause from turn 1 WITHOUT interposing on the rush corridor —
+    # three close defenders would trivially shred the band on their
+    # own and the layered-defense capability would never be tested.
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: tent, owner: agent, position: [6,  18]}
+    - {type: powr, owner: agent, position: [6,  22]}
+    - {type: e1,   owner: agent, position: [3,  20], stance: 2}
+
+levels:
+  # ── EASY ── the bare defense-in-depth skill. Single rush band (8 e1
+  # + 2 e3) at x=70. The 2+2 layout (front=(25,20) and rear=(15,20),
+  # each radius 4) is required. max_turns 60 → reachable tick ≥4848
+  # in interrupt mode, comfortably past the 5401 fail (with interrupt
+  # turns sometimes <90 ticks each, easy=5400 budget needs the larger
+  # 60-turn cap to make the after_ticks fail truly reachable).
+  easy:
+    description: >
+      A single massed rush band — 8 rifle infantry + 2 rocket soldiers
+      — drives straight at your base. The base (fact+tent+powr+3
+      defenders) is pre-placed. Win by building 4 pillboxes in TWO
+      LAYERS: 2 at the FRONT line near (25,20) AND 2 at the REAR line
+      near (15,20); keep the fact alive and a defender on the field
+      before tick 5400. A single cluster at one x, or a long thin line,
+      eventually breaks under the concentrated attack.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [6,  18]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        # FRONT LINE pre-placed (2 pbox at x=25): the agent inherits a
+        # front-line firewall. The capability test is whether the agent
+        # recognises that a single-thick line will eventually fall and
+        # *adds depth* (a REAR layer at x=15) — NOT whether the agent
+        # can serial-build 4 pboxes inside a tight clock (a question
+        # of throughput, not topology).
+        - {type: pbox, owner: agent, position: [25, 19]}
+        - {type: pbox, owner: agent, position: [25, 21]}
+        # ONE rear defender at x=3 (behind the fact) — covers a unit
+        # presence from turn 1 without interposing on the rush corridor.
+        - {type: e1,   owner: agent, position: [3,  20], stance: 2}
+        # Massed rush band: 8 e1 + 2 e3 concentrated at the lane mouth.
+        # At x=110 (far east) the band needs ~20+ turns to reach the
+        # front line at x=25 — enough budget for the intended 2-rear-pbox
+        # chain to complete (2 pbox × 9 turns ≈ 18 turns of build) and
+        # for the rear layer to fire as the rush breaches the front line.
+        - {type: e1, owner: enemy, position: [110, 20], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [112, 20], stance: 3, count: 1}
+        # Unarmed high-HP enemy marker far east keeps the episode alive
+        # past the last rusher death (without this, engine auto-done on
+        # enemy-elimination collapses the run to DRAW).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 4}
+        - building_in_region: {x: 25, y: 20, radius: 4, type: pbox, count: 2}
+        - building_in_region: {x: 15, y: 20, radius: 4, type: pbox, count: 2}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 110
+
+  # ── MEDIUM ── +1 controlled variable: tighter clock (within_ticks
+  # 4500 instead of 5400). Same band, same layout, less slack — the
+  # agent has to commit to the layered topology immediately; any
+  # detour into "build a wall first then rethink" busts the clock.
+  medium:
+    description: >
+      Same massed rush band (8 rifle infantry + 2 rocket soldiers) and
+      same layered-defense requirement, but the deadline is tighter:
+      build 4 pillboxes in TWO LAYERS (2 at FRONT (25,20), 2 at REAR
+      (15,20)), keep the fact alive and a defender on the field, all
+      before tick 4500. Stalling, single-cluster, or single-thin-line
+      placements all fail.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [6,  18]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        # FRONT LINE pre-placed (as easy); medium tightens the clock.
+        - {type: pbox, owner: agent, position: [25, 19]}
+        - {type: pbox, owner: agent, position: [25, 21]}
+        - {type: e1,   owner: agent, position: [3,  20], stance: 2}
+        - {type: e1, owner: enemy, position: [110, 20], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [112, 20], stance: 3, count: 1}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 4}
+        - building_in_region: {x: 25, y: 20, radius: 4, type: pbox, count: 2}
+        - building_in_region: {x: 15, y: 20, radius: 4, type: pbox, count: 2}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 110
+
+  # ── HARD ── +1 controlled variable: the layered requirement becomes
+  # 3 FRONT + 2 REAR (5 pbox total, 5×400 = 2000cr — well under the
+  # 2400 budget), AND the rush arrives as TWO staggered bands from
+  # two latitudes (north y=14 and south y=26), declared as two
+  # spawn_point groups so the AGENT base round-robins by seed. The
+  # rush lane that bites varies per seed — a single memorised layout
+  # cannot generalise. The layered topology generalises (it covers
+  # the lane in depth regardless of which side staged) — that is the
+  # capability the hard tier tests.
+  hard:
+    description: >
+      Two staggered rush bands hit your base from two latitudes (north
+      and south). The base stages from a seed-chosen latitude (the
+      rush lane that matters varies by seed). Build 5 pillboxes in a
+      3-FRONT + 2-REAR layered topology (3 at FRONT (25,y), 2 at REAR
+      (15,y) where y matches the stage latitude), keep the fact alive
+      and a defender on the field, before tick 4500. Any single-layer
+      topology or single-cluster topology fails to absorb the staggered
+      pressure.
+    overrides:
+      # spawn_point 0 — NORTH base (y=14). All buildings/units that
+      # belong to the north spawn carry spawn_point: 0; same for south.
+      # The two front/rear regions also follow the spawn latitude
+      # (front_y=14 for spawn 0, front_y=26 for spawn 1 — see the
+      # any_of split in the win predicate below).
+      actors:
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [6,  12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  16], spawn_point: 0}
+        # FRONT line pre-placed at BOTH latitudes (2 pbox each). Enemy
+        # bands at the opposite latitude still march on the fact
+        # (rusher targets the agent centroid; enemy actors ignore
+        # spawn_point — CLAUDE.md) so without the opposite latitude
+        # also being front-defended, the OTHER band would loop around
+        # and raze the fact regardless of layout choice. The agent
+        # inherits front coverage at BOTH y; the test is whether they
+        # ADD DEPTH (rear layer) at their OWN spawn latitude — the
+        # spawn-varied lane is which rear y to build at.
+        - {type: pbox, owner: agent, position: [25, 13], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [25, 15], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [25, 25], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [25, 27], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [3,  14], stance: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=26). Same dual-front coverage.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [6,  24], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  28], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [25, 13], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [25, 15], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [25, 25], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [25, 27], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [3,  26], stance: 2, spawn_point: 1}
+        # Two staggered bands at distinct latitudes (enemy actors are
+        # not honoured by spawn_point — CLAUDE.md — so both bands
+        # always arrive regardless of which agent spawn was picked).
+        # The agent's chosen layer position must cover the relevant
+        # lane; the OTHER lane's band attrites past the agent base
+        # (the fact still has to survive).
+        - {type: e1, owner: enemy, position: [110, 14], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [112, 14], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [110, 26], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [112, 26], stance: 3, count: 1}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    # The agent inherits FRONT coverage at BOTH latitudes (4 pbox);
+    # the test is whether it ADDS DEPTH at its OWN spawn latitude by
+    # building 2 REAR pbox at the matching y. Either rear-region
+    # (north y=14 OR south y=26) satisfies the layered bar — the model
+    # must pick the rear y that matches its own fact position
+    # (the spawn-varied lane). Plain "build 4 rear at one latitude"
+    # also wins (count≥2 in region is satisfied) — that's fine, the
+    # CAPABILITY tested is "add depth at the live lane".
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 6}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4500
+        - any_of:
+          - building_in_region: {x: 15, y: 14, radius: 4, type: pbox, count: 2}
+          - building_in_region: {x: 15, y: 26, radius: 4, type: pbox, count: 2}
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 110

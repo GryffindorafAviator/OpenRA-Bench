@@ -1,0 +1,232 @@
+meta:
+  id: econ-cash-reserve-management
+  title: Economy — Cash Reserve Management (Spend Without Going Broke)
+  capability: reasoning
+  real_world_meaning: >
+    A treasury-management decision under a deadline. The agent has a
+    productive operation (two harvesters on two near patches feeding a
+    refinery — steady income), starting cash 1500, and a hard win
+    requirement to grow operations (build MORE buildings) WHILE also
+    finishing the episode with a positive operating reserve in the
+    bank (cash ≥ 300). The classic anti-patterns:
+    1) STALL — preserve every credit, build nothing. The reserve stays
+       safe but operations never grow → the "build more buildings" bar
+       is never met → LOSS.
+    2) OVER-SPEND — spend everything (and then some, by chaining a
+       1400cr refinery and any other expensive build) on construction
+       and dip the reserve to zero. Income eventually refills but the
+       window between buildings-met and reserve-refilled may not close
+       before the deadline → LOSS.
+    3) PURE-HOLD — harvest and sit on the cash forever, never building.
+       Same as STALL on the building-growth axis → LOSS.
+    The intended capability is the SC2 cash-overflow / corporate
+    treasury discipline: spend ENOUGH to keep growing (buildings) while
+    keeping ENOUGH liquid (cash) to weather the next shock — never let
+    the operating reserve hit zero, never sit on idle capital. With a
+    pre-placed 2× harv income engine the model gets ~190 cr/turn of
+    inflow, so any modest spend (1-2 powr at 300cr each) is recovered
+    in a handful of turns and the reserve closes the episode well
+    above 300.
+  robotics_analogue: >
+    Operating-reserve management in an autonomous fleet's treasury:
+    revenue from collectors flows into a single pool that must fund
+    both ongoing capacity expansion (added depot / processing / defence
+    nodes) AND a minimum operating reserve (covering the next
+    contingency — a damaged collector, a sudden parts order). A pure-
+    hoarding policy fails the growth mandate; a blow-the-reserve policy
+    succumbs to the next shock. The discipline being measured is the
+    operations-finance loop: spend at the income-replenishment rate, not
+    above and not below.
+  author: catalog-f8
+  benchmark_anchor:
+    - SC2 cash management (spend while not overflowing)
+    - financial runway management (operate while keeping reserve)
+    - "treasury management: cash conversion cycle"
+    - operational reserve / working capital
+
+# ENGINE NOTE (verified 2026-05-20 against installed openra_train wheel,
+# post-S0/S1 harvest income — Task #14, scripted run_level seeds 1-4):
+# 1. Pre-placed 2× harv on 2× mine (NEAR cells) yields ~190 cr/turn
+#    sustained against the single pre-placed `proc` at (12,18). Over
+#    a 60-turn (5400-tick) window that's ~11400 cr of income inflow,
+#    on top of the starting_cash 1500.
+# 2. Cost table (verified against gamerules.rs / game_data.py):
+#       powr = 300  (no prereq, +100 power)
+#       tent = 500  (prereq powr, −20 power) — PRE-PLACED here
+#       proc = 1400 (prereq powr, −30 power) — PRE-PLACED here
+#       pbox = 600  (prereq tent) — only buildable because tent is
+#                                    pre-placed
+#       silo = 150  (prereq proc) — cheap storage
+#       harv = 1100 (prereq proc)
+#    With tent pre-placed, the agent can queue powr/pbox/silo/harv in
+#    parallel to the existing fact+proc+tent+powr base.
+# 3. The decision under test is "how much to spend": starting_cash 1500
+#    funds:
+#       2× powr (600) → cash 900 → reserve safe, building_total 6
+#       2× pbox (1200) → cash 300 → reserve at the bar, building_total 6
+#       1× proc (1400) → cash 100 → BELOW the 300 reserve bar
+#       1× proc + 1× powr (1700) → impossible until income refills
+#    The lazy "build something cheap" play (2 powr) wins comfortably;
+#    the "blow the bank" play (proc immediately) goes below the reserve
+#    bar at the moment building_total reaches 6 and must wait for
+#    income to refill — which can happen well before the 5400-tick
+#    deadline, so we DOCUMENT this is a SOFT failure mode (a slow
+#    rebuilder still wins) rather than predicate-enforced.
+# 4. Tick budget: engine advances ~90 ticks per decision turn.
+#    Easy uses max_turns 60 → ceiling 5403 > 5400 (within_ticks 5400)
+#    — generous, the loose-bar tier. Medium tightens to max_turns 14
+#    → ceiling 1263 > 1200 (within_ticks 1200) so an over-spending
+#    policy (proc 1400 + another building → cash dips to 0, must wait
+#    ~10+ turns of income to refill above the 300 reserve) cannot
+#    recover before the deadline; the lean 2× powr commit (600 spend,
+#    cash 900) wins at tick ~450. Hard tightens further to max_turns
+#    12 → ceiling 1083 > 1080 (within_ticks 1080) AND raises the
+#    reserve to 500 so even less recovery slack exists. fail_condition
+#    uses after_ticks = within_ticks + 1 (a non-finisher LOSES, not
+#    draws — engine ceiling stays one tick past after_ticks so the
+#    fail clause fires).
+# 5. The `harvest` order with a target cell directs the existing harvs
+#    onto the mines; the auto-cycle continues. Pre-placed harvs at
+#    (14,18) and (14,20) bind to mines at (22,18) and (22,20)
+#    respectively. The pre-placed e1 at (120,36) stance:0 prevents
+#    ConquestVictoryConditions from auto-`done`ing the episode before
+#    the win/fail predicate evaluates (CLAUDE.md engine footgun).
+base_map: rush-hour-arena
+starting_cash: 1500
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    # Pre-placed: 4 buildings (fact + proc + tent + powr) and 2 harvs
+    # on 2 near mines. The agent starts at building_total=4 and must
+    # build ≥2 more to reach the building_total_gte:6 bar without
+    # busting the cash_gte:300 reserve.
+    - {type: fact, owner: agent, position: [10, 22]}
+    - {type: proc, owner: agent, position: [12, 18]}
+    - {type: tent, owner: agent, position: [10, 18]}
+    - {type: powr, owner: agent, position: [14, 22]}
+    - {type: harv, owner: agent, position: [14, 18]}
+    - {type: harv, owner: agent, position: [14, 20]}
+    # Two near ore patches — steady ~190cr/turn income for the two
+    # pre-placed harvs.
+    - {type: mine, owner: neutral, position: [22, 18]}
+    - {type: mine, owner: neutral, position: [22, 20]}
+    # Inert far enemy marker keeps the episode from auto-terminating
+    # on "all enemies dead" before the win/fail predicate fires.
+    - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+
+levels:
+  easy:
+    description: >
+      Loose-bar cash-reserve test. You start with 4 buildings (fact,
+      proc, tent, powr), 2 harvesters on 2 near ore patches, and
+      $1500. Build at least ONE more building (the cheapest is a
+      Power Plant at $300) AND keep at least $300 in the bank at the
+      moment the bar latches AND keep both harvesters alive — all
+      within tick 5400. Stalling (build nothing) loses on the
+      building bar; the harvesters keep refilling cash, so any modest
+      spend wins. Pure-hold and over-spend (a $1400 refinery dips
+      cash below the reserve at the latch moment) both fail.
+    starting_cash: 1500
+    win_condition:
+      all_of:
+        - building_total_gte: 5
+        - cash_gte: 300
+        - unit_type_count_gte: {type: harv, n: 2}
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+    max_turns: 60
+  medium:
+    description: >
+      Tighter clock, same income engine: build at least TWO more
+      buildings (building_total ≥ 6, i.e. add at least 2 — e.g. two
+      Power Plants at $300 each, or one Pillbox at $600 plus a Power
+      Plant) AND keep $300 in the bank AND keep both harvesters
+      alive — within tick 810 (≈ 10 turns). The cheap 2× powr
+      commit costs $600, leaves $900 cash (well above the 300
+      reserve), and finishes by tick ~450 — comfortable slack.
+      Over-spending on a 2nd refinery ($1400) dips cash to $100 at
+      the latch moment; an extra build at $300+ pushes it lower.
+      Income refills cash at ~95 cr/turn so re-clearing the reserve
+      after over-spend takes ≥3-4 turns, pushing the win past tick
+      810. Stall and pure-hold lose on the building bar.
+    starting_cash: 1500
+    win_condition:
+      all_of:
+        - building_total_gte: 6
+        - cash_gte: 300
+        - unit_type_count_gte: {type: harv, n: 2}
+        - within_ticks: 810
+    fail_condition:
+      any_of:
+        - after_ticks: 811
+        - not: {has_building: fact}
+    max_turns: 10
+  hard:
+    description: >
+      Tightest growth bar, larger reserve, and seed-varied starts.
+      Build at least THREE more buildings (building_total ≥ 7) AND
+      keep $500 in the bank AND keep both harvesters alive — within
+      tick 1080 (≈ 12 turns). The cheapest 3-building commit (3×
+      powr = $900) leaves $600 cash, just above the $500 reserve;
+      mixing a Pillbox in ($600 + $600 = $1200) leaves $300, BELOW
+      the $500 reserve until income refills. Over-spending on a 2nd
+      refinery ($1400) dips cash far below 500 and cannot recover
+      inside 1080 ticks. The base is round-robined between NORTH
+      (proc/tent/powr/harvs around y=14) and SOUTH (around y=28)
+      per seed; the two near patches (y=14 and y=28) sit on the
+      spawn-matched row so the throughput is symmetric per spawn,
+      but a memorised opening cannot generalise across seeds.
+    starting_cash: 1500
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base, harvs on the y=14 patches.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 15], spawn_point: 0}
+        # spawn_point 1 — SOUTH base, harvs on the y=28 patches.
+        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 24], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 29], spawn_point: 1}
+        # Two mine pairs — one for each spawn row. spawn_point filter
+        # applies ONLY to agent actors (CLAUDE.md engine fact), so
+        # both pairs always place; the spawn-matched pair feeds the
+        # spawn-matched harvs.
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 15]}
+        - {type: mine, owner: neutral, position: [22, 28]}
+        - {type: mine, owner: neutral, position: [22, 29]}
+        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+    win_condition:
+      all_of:
+        - building_total_gte: 7
+        - cash_gte: 500
+        - unit_type_count_gte: {type: harv, n: 2}
+        - within_ticks: 1080
+    fail_condition:
+      any_of:
+        - after_ticks: 1081
+        - not: {has_building: fact}
+    max_turns: 12

@@ -1,0 +1,203 @@
+# Validate: python -m openra_bench.scenarios.validate packs/coord-squad-handoff.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ACTION focus — SQUAD HANDOFF via the Wave-2 `then:` happened-before
+# composite. Two physically-distinct squads (Squad A = jeeps, Squad B
+# = medium tanks) must deliver SEQUENCED objectives across the map:
+# Squad A reaches the FIRST waypoint, the latch fires, THEN Squad B
+# reaches the SECOND waypoint and takes over. Difficulty stacks
+# additional alternating handoffs (A→P1→B→P2→A→P3→B→P4).
+#
+# Squad identity is enforced by the type-filtered region predicate
+# `units_of_type_in_region_gte` (added with this pack): clause 1 only
+# counts JEEPS at P1, clause 2 only counts MEDIUM TANKS (2tnk) at P2,
+# etc. This is the missing piece that makes "squad handoff" a real
+# capability (without it, a single jeep squad touring P1→P2 satisfies
+# both clauses and the relay collapses to a single-column tour).
+#
+# The clauses are wrapped in `then:` so order is enforced (B-first
+# never latches — B's clause is index 1; reaching it before A latches
+# index 0 advances nothing). Stalling never advances. The intended
+# play is parallel dispatch: launch BOTH squads at once, each toward
+# its OWN waypoint; B arrives at P2 and HOLDS there (the `then:`
+# latch advances the instant A's earlier clause becomes true).
+#
+# Real-world anchor: relay race / construction-site handoff; military
+# "passage of lines" doctrine where unit B passes through unit A's
+# secured line to continue the advance. Benchmark anchor: the
+# Watch-And-Help concurrent-multi-agent / SMAC squad-handoff family.
+
+meta:
+  id: coord-squad-handoff
+  title: 'Squad Handoff — Squad A Delivers, Squad B Takes Over (Wave-2 then:)'
+  capability: action
+  real_world_meaning: >
+    Sequenced multi-team operations: team A delivers the first
+    objective, team B takes over for the next, and so on — the order
+    of arrival matters, and a single team cannot serve both legs
+    because each leg requires a SPECIFIC kind of unit. Relay race
+    (baton handoff), construction site handoff (steelworker phase
+    finishes, electrician phase begins), and supply-chain ordered
+    handoff are the everyday analogues.
+  robotics_analogue: >
+    Multi-robot fleet with role specialisation and sequenced subtasks:
+    the survey drone must reach landmark A before the delivery
+    truck is dispatched to landmark B (the delivery is meaningless
+    without the survey). One fleet cannot do both legs because the
+    drone and the truck are physically different vehicles for
+    different jobs.
+  benchmark_anchor:
+    - "Watch-And-Help concurrent multi-agent handoff"
+    - "SMAC squad sequencing"
+    - "military passage of lines doctrine"
+    - "relay race / construction handoff"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ──────────────────────────────────────────────────────────
+  # The bare squad-handoff skill: ONE handoff (Squad A → Squad B).
+  # Squad A = 3 jeeps in the NW corner; Squad B = 3 medium tanks in
+  # the SW corner. The agent's only correct play is to launch BOTH
+  # squads in parallel — Squad A to P1 (50,10), Squad B to P2
+  # (90,30). The `then:` latch fires when A's "≥3 jeeps at P1"
+  # clause latches AND B's "≥3 tanks at P2" clause latches in
+  # order. A B-first dash never advances the chain (B's clause is
+  # index 1; reaching it before A's clause latches gives zero
+  # credit). A single-squad tour cannot satisfy clause 2 at all
+  # (clause 2 demands TANKS at P2; jeeps don't count).
+  easy:
+    description: >
+      Squad A is 3 jeeps in the NW corner; Squad B is 3 medium tanks
+      (2tnk) in the SW corner. FIRST get ≥3 jeeps into the region
+      around P1 (50,10); THEN get ≥3 medium tanks into the region
+      around P2 (90,30). The order is enforced (B-first does not
+      count). Launch BOTH squads in parallel — Squad B can arrive at
+      P2 and hold; the latch advances the instant A's clause
+      becomes true. Single-squad tours never satisfy the second
+      clause because P2 needs tanks, not jeeps. Lose if the
+      deadline passes.
+    overrides:
+      actors:
+        # Squad A — 3 jeeps in the NW corner (fast scouts/runners).
+        - {type: jeep, owner: agent, position: [5, 5],  count: 3}
+        # Squad B — 3 medium tanks in the SW corner (heavy follow-up).
+        - {type: 2tnk, owner: agent, position: [5, 33], count: 3}
+    win_condition:
+      all_of:
+        - then:
+            id: coord-handoff-easy
+            clauses:
+              - {units_of_type_in_region_gte:
+                  {type: jeep, x: 50, y: 10, radius: 8, n: 3}}
+              - {units_of_type_in_region_gte:
+                  {type: 2tnk, x: 90, y: 30, radius: 8, n: 3}}
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52
+
+  # ── MEDIUM ────────────────────────────────────────────────────────
+  # +1 controlled variable: a THIRD waypoint (Squad A must return to
+  # the action and deliver P3 after the B handoff). The chain is now
+  # A→P1 → B→P2 → A→P3. The jeeps must NOT bleed out of P1 forever
+  # — they have to redeploy to P3 (60,20) after Squad B has taken
+  # over at P2. A single-squad tour still cannot satisfy the
+  # tank-only clause (clause 2). Stalling, B-first, or "park A at
+  # P1 and ignore P3" all lose.
+  medium:
+    description: >
+      Squad A is 3 jeeps in the NW corner; Squad B is 3 medium tanks
+      (2tnk) in the SW corner. FIRST get ≥3 jeeps into the region
+      around P1 (50,10); THEN get ≥3 medium tanks into the region
+      around P2 (90,30); THEN get ≥3 jeeps into the region around
+      P3 (60,20). The order is enforced (skipping does not count).
+      Launch both squads in parallel; after Squad B reaches P2,
+      redeploy Squad A from P1 to P3. A single-squad tour cannot
+      satisfy the tank-only clause (clause 2 needs tanks at P2,
+      not jeeps); B-first never latches the chain; stalling loses
+      on the deadline.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [5, 5],  count: 3}
+        - {type: 2tnk, owner: agent, position: [5, 33], count: 3}
+    win_condition:
+      all_of:
+        - then:
+            id: coord-handoff-medium
+            clauses:
+              - {units_of_type_in_region_gte:
+                  {type: jeep, x: 50, y: 10, radius: 8, n: 3}}
+              - {units_of_type_in_region_gte:
+                  {type: 2tnk, x: 90, y: 30, radius: 8, n: 3}}
+              - {units_of_type_in_region_gte:
+                  {type: jeep, x: 60, y: 20, radius: 8, n: 3}}
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52
+
+  # ── HARD ──────────────────────────────────────────────────────────
+  # +1 controlled variable: FOUR alternating waypoints
+  # (A→P1→B→P2→A→P3→B→P4) AND ≥2 seed-driven spawn_point groups
+  # (NW staging vs SW staging — round-robin per seed). The four-leg
+  # chain forces the agent to genuinely interleave the squads:
+  # Squad A at P1, B passes through to P2, A redeploys to P3, B
+  # passes again to P4. Spawn round-robin (per
+  # tests/test_hard_tier.py::UPGRADED) flips the staging corner so
+  # a single memorised opening cannot generalise.
+  hard:
+    description: >
+      Squad A is 3 jeeps; Squad B is 3 medium tanks (2tnk). The
+      starting corner (NW or SW) varies by seed. FOUR sequenced
+      handoffs in order: (1) ≥3 jeeps at P1 (50,10); (2) ≥3 medium
+      tanks at P2 (90,30); (3) ≥3 jeeps at P3 (60,20); (4) ≥3
+      medium tanks at P4 (100,15). The order is enforced — skipping
+      or reaching a later waypoint before its predecessor latches
+      gives no credit. The intended play is fully interleaved
+      parallel dispatch: launch both squads at once, hold at each
+      waypoint until the latch advances, then redeploy. A single
+      squad cannot tour the chain — clauses 2 and 4 demand TANKS;
+      clauses 1 and 3 demand JEEPS.
+    overrides:
+      actors:
+        # spawn_point 0 — NW staging.
+        - {type: jeep, owner: agent, position: [5, 5],  count: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [5, 12], count: 3, spawn_point: 0}
+        # spawn_point 1 — SW staging (mirrored). Now the long-haul
+        # leg flips per seed so a memorised opening cannot
+        # generalise across seeds.
+        - {type: jeep, owner: agent, position: [5, 28], count: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [5, 33], count: 3, spawn_point: 1}
+    win_condition:
+      all_of:
+        - then:
+            id: coord-handoff-hard
+            clauses:
+              - {units_of_type_in_region_gte:
+                  {type: jeep, x: 50, y: 10, radius: 8, n: 3}}
+              - {units_of_type_in_region_gte:
+                  {type: 2tnk, x: 90, y: 30, radius: 8, n: 3}}
+              - {units_of_type_in_region_gte:
+                  {type: jeep, x: 60, y: 20, radius: 8, n: 3}}
+              - {units_of_type_in_region_gte:
+                  {type: 2tnk, x: 100, y: 15, radius: 8, n: 3}}
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52

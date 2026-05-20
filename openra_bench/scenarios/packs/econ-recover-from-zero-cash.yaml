@@ -1,0 +1,285 @@
+# Validate: python -m openra_bench.scenarios.validate packs/econ-recover-from-zero-cash.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ECON-RECOVER-FROM-ZERO-CASH (Group F — turtle-recovery / bankruptcy
+# turnaround from a minimum-viable kit and ZERO cash).
+#
+# Real-world anchor: SC2 turtle-back-to-eco (lost everything, rebuild
+# slowly with a sole surviving worker), business bankruptcy turnaround
+# (one operating asset left, no working capital, rebuild revenue first
+# then reinvest), military recovery from defeat (rebuild force structure
+# starting from a skeleton crew), startup pivot after a runway crisis.
+#
+# Pack frame: the agent starts with a MINIMUM VIABLE KIT (fact + proc +
+# one harvester + one mine) and **0 cash**. There is no enemy aggression.
+# The decision is the RECOVERY PROFILE — commit to harvest first, let
+# income accumulate, then reinvest in the next productive asset (a war
+# factory + a second harvester) so the income channel actually scales
+# past a non-trivial revenue bar. A model that:
+#   * stalls (zero income forever) ⇒ never harvests, EV stays at 0, LOSS
+#   * builds-too-soon (e.g. queues a SECOND refinery or buys army)
+#     ⇒ drains harvest cash to the wrong asset, never funds the weap+harv
+#     chain, fails the 2-harv requirement ⇒ LOSS
+#   * builds-army-from-zero (powr → tent → spam e1 instead of weap+harv)
+#     ⇒ never builds a 2nd harv ⇒ LOSS
+# all miss the bar. The intended slow-and-steady recovery (harvest,
+# accumulate to 2000, build('weap'), then build('harv'), redirect the
+# new harv to the patch, keep harvesting) WINS.
+#
+# Why this pack is different from `economy-harvest-timebox`:
+#   * `economy-harvest-timebox` starts with 300-1500 cash and only tests
+#     "commit to harvest" (or build a 2nd harv with the starting budget).
+#   * `econ-recover-from-zero-cash` starts with **0 cash** and forces
+#     the agent to COMPLETE the income-then-reinvest loop: there is no
+#     starting buffer to spend, so the test is the recovery DISCIPLINE —
+#     do not spend before income flows; do not spend on the wrong asset
+#     when income arrives; commit to the harvest→weap→harv sequence.
+#
+# Why this pack is different from `econ-startup-from-scratch`:
+#   * `econ-startup-from-scratch` tests the COLD-START opening (deploy
+#     MCV → powr → proc → harv) from a 1900-cash budget. The agent has
+#     no buildings.
+#   * `econ-recover-from-zero-cash` tests RECOVERY FROM SETBACK (you
+#     once had a base, now you have only fact+proc+1 harv and 0 cash —
+#     rebuild revenue and re-scale the worker count). The chain is
+#     harvest → weap → harv (the cold-start "powr → proc" part is
+#     already paid for by the survived infrastructure).
+#
+# ENGINE FACTS verified (CLAUDE.md):
+#  1. starting_cash: 0 is supported (see mcv-deploy-relocate-under-pressure,
+#     mfb-base-1-defend-base-2-build). The `build` order with insufficient
+#     cash defers production (the queue waits until cash is available).
+#  2. harv prereq is `weap` (gamerules.rs line 328-330). weap (cost 2000)
+#     prereq is `proc` (already pre-placed). harv cost is 1400.
+#  3. tent prereq is `powr` (gamerules.rs line 340) and we do NOT pre-
+#     place powr, so the brute "build army" path requires building powr
+#     (300) → tent (400) → e1 (100 each) — but this never funds weap
+#     (2000) + harv (1400) within budget, so the 2-harv requirement is
+#     never met ⇒ LOSS.
+#  4. Harvest income is distance-dependent: with the proc immediately
+#     adjacent to a near patch, one harv sustains ~150-200 cr per
+#     decision turn (verified by economy-harvest-investment and
+#     economy-harvest-timebox tuning notes). At 70 turns × ~150 cr ≈
+#     ~10,500 ev gross, comfortably above the chain spend (2000+1400 =
+#     3400) plus the 2000 EV bar; a hard tier (3 harvs, 4800 chain
+#     spend, 3000 EV bar) is solvable inside 70 turns with 2 patches.
+#  5. Newly-built harv spawns at the weap and does NOT auto-path to a
+#     distant patch from a bare `harvest` order (engine quirk noted in
+#     econ-startup-from-scratch and economy-harvest-investment). The
+#     intended chain `move_units(harv, patch_x, patch_y)` first, then
+#     `harvest(harv, patch_x, patch_y)` once the harv is on the patch.
+#  6. Persistent unarmed enemy `fact` marker far east prevents engine
+#     auto-`done` via the all-enemies-eliminated path (CLAUDE.md
+#     auto-done footgun) — so a non-finisher LOSES on the deadline
+#     (never DRAWS).
+#  7. Tick alignment: max_turns 70 → ceiling 93 + 90·69 = 6303 > 6300 ✓.
+#     within_ticks 6300; fail after_ticks 6301 (deadline bites as a
+#     reachable LOSS).
+#  8. The hard tier's two agent spawn_point groups (NORTH/SOUTH base)
+#     satisfy the spawn-variation contract (test_hard_tier.py).
+#     Neutral `mine` actors always place regardless of spawn_point
+#     filter (CLAUDE.md), so each spawn has its own near patch geometry.
+
+meta:
+  id: econ-recover-from-zero-cash
+  title: 'Recover From Zero Cash — Rebuild Revenue From a Minimum-Viable Kit'
+  capability: reasoning
+  real_world_meaning: >
+    Turtle-recovery / bankruptcy turnaround from a minimum-viable kit
+    and zero working capital. The agent inherits ONE refinery, ONE
+    harvester, and ONE ore patch — but no cash, no spare workers, no
+    army. The decision is the RECOVERY PROFILE — commit to harvest
+    FIRST (the only income channel), accumulate cash, and then
+    reinvest in the NEXT productive asset (a war factory and a second
+    harvester) so the income channel actually scales past a non-
+    trivial revenue bar before the deadline. Stalling (no income),
+    spending the accumulated cash on the wrong asset (a second
+    refinery, army units), or trying to build an army from zero all
+    miss the bar.
+  robotics_analogue: >
+    Post-crisis operations restart: an autonomous operator has lost
+    most of its infrastructure and is reduced to one processing unit,
+    one collector, and one known source — with no operating capital.
+    It must commit to running the collector to refill the cash
+    reserve, then deploy the saved capital to acquire a second
+    collector before the recovery deadline. Spending on defensive /
+    expansion hedges before the income channel has refilled the
+    reserve misses the bar.
+  author: groupF-econ-seed
+  benchmark_anchor:
+    - "SC2 turtle-back-to-economy / recovery from setback"
+    - "business bankruptcy turnaround planning"
+    - "military recovery from defeat (rebuild force structure)"
+    - "startup pivot after runway crisis"
+
+base_map: rush-hour-arena
+# 0 cash — the entire pack is the recovery-from-zero-capital test. The
+# agent CANNOT spend a starting buffer; the only path to a 2nd harv is
+# to harvest first, then reinvest the accumulated cash on weap+harv.
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Spec-required toolset: NO `deploy` (we already have fact pre-placed);
+  # the agent must commit to harvest and reinvest with the production
+  # chain (`build` + `place_building`).
+  tools: [observe, build, place_building, harvest, move_units, stop]
+  # Default `spawn_mcvs: false` — we declare actors ourselves per level
+  # so the engine doesn't add a phantom MCV.
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Minimum-viable kit (fact + proc + 1 harv + 1 mine); 0 cash; loose
+  # bar (1500 EV) and NO second-harv requirement. The skill being
+  # tested is the floor: commit to the existing harvester so income
+  # actually flows (the pre-placed harv near the patch sustains
+  # ~150-200 cr/turn). Stall (zero income) LOSES; any committed
+  # harvest WINS. max_turns 70 → ceiling 93 + 90·69 = 6303 > 6300 ✓.
+  easy:
+    description: >
+      You start with a Construction Yard ('fact'), an Ore Refinery
+      ('proc'), one Ore Truck ('harv'), and one ore patch ('mine'),
+      with $0 cash. There is no enemy aggression. To start the
+      harvester collecting, first `move_units` it onto the patch cell
+      (22,18), then issue `harvest` with that cell as the target (the
+      auto-cycle continues on its own). Win = economy_value (cash +
+      stored ore) ≥ 1500 before tick 6300, AND you still own a 'fact'
+      AND ≥1 'harv'. Stalling (only `observe`) earns nothing and
+      loses on the clock.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - economy_value_gte: 1500
+        - has_building: fact
+        - unit_type_count_gte: {type: harv, n: 1}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {has_building: fact}
+        - not: {unit_type_count_gte: {type: harv, n: 1}}
+    max_turns: 70
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable on top of easy: the win predicate adds a
+  # 2-HARV requirement, so a "harvest only with the starting harv"
+  # policy LOSES on the structural clause regardless of EV. The
+  # intended recovery chain is: harvest (income flows) → save 2000 →
+  # build('weap') (prereq for harv) + place_building → save 1400 →
+  # build('harv') + place_building → move_units the new harv to the
+  # patch → harvest. Bar 2000 EV requires committed harvesting after
+  # the chain spend (cash post-chain is ~0; ≥2000 ev = the bar must
+  # be reached via the resumed harvest income).
+  medium:
+    description: >
+      You start with a Construction Yard ('fact'), an Ore Refinery
+      ('proc'), one Ore Truck ('harv'), and one ore patch ('mine'),
+      with $0 cash. To rebuild revenue: (1) `move_units` the harv
+      onto the patch cell (22,18) then `harvest` it (the auto-cycle
+      sustains income on its own); (2) once you have $2000, queue a
+      War Factory ('weap', cost 2000, prereq is the existing
+      refinery) and place it adjacent to the fact; (3) once the
+      'weap' is up and you have $1400, queue a second Ore Truck
+      ('harv'); (4) `move_units` the new harv to the patch and
+      `harvest` it. Win = economy_value ≥ 2000 AND ≥ 2 harvesters
+      alive AND you still own 'fact', before tick 6300. Stalling,
+      building army units (powr → tent → e1) instead of the weap+harv
+      chain, or building a second refinery instead of a second harv
+      all miss the 2-harv requirement and LOSE.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - economy_value_gte: 2000
+        - has_building: fact
+        - unit_type_count_gte: {type: harv, n: 2}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {has_building: fact}
+        - not: {unit_type_count_gte: {type: harv, n: 1}}
+    max_turns: 70
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. Higher bar (3000 EV) AND 3-harv requirement — the chain spend
+  #      is now weap (2000) + harv (1400) + harv (1400) = 4800,
+  #      requiring sustained throughput AFTER the chain to clear the
+  #      3000 EV bar. Two ore patches double the income ceiling so
+  #      the bar is still reachable inside 70 turns.
+  #   2. TWO agent spawn_point groups (NORTH base y=14 vs SOUTH base
+  #      y=26) round-robined by seed — a memorised "place weap at
+  #      (8,18)" opening cannot generalise. Each spawn has its own
+  #      symmetric two-patch geometry. Neutral mine actors always
+  #      place regardless of spawn_point filter (CLAUDE.md engine
+  #      footgun), so BOTH patch pairs exist in the world; the
+  #      irrelevant pair sits far from each spawn's harv lane.
+  hard:
+    description: >
+      Same recovery from $0 cash, but the bar is higher (3000 EV)
+      AND you need THREE harvesters, AND there are TWO ore patches
+      near your base. Your base orientation varies by seed (NORTH or
+      SOUTH); both halves have the same per-spawn patch geometry.
+      Intended chain: (1) commit the starting harv to a near patch
+      (use `move_units` to nudge it onto the patch cell, then
+      `harvest`); (2) save $2000, build a War Factory ('weap',
+      prereq is the existing refinery) adjacent to the fact; (3)
+      save $1400, build a 2nd harv, move it to the other near patch,
+      `harvest`; (4) save $1400, build a 3rd harv, route it back to
+      the first patch (or feed the second), `harvest`. Win =
+      economy_value ≥ 3000 AND ≥ 3 harvs AND own 'fact' before tick
+      6300. Stalling, building army, or building only 2 harvs all
+      miss the 3-harv requirement and LOSE.
+    starting_cash: 0
+    overrides:
+      actors:
+        # ── spawn_point 0: NORTH base, near patches at y=14 / y=16 ──
+        - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        # ── spawn_point 1: SOUTH base, near patches at y=26 / y=28 ──
+        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
+        # Neutral mines ALWAYS place regardless of spawn_point filter
+        # (CLAUDE.md). Place a symmetric two-patch pair at each
+        # latitude; the other-spawn pair sits 12 cells away (far
+        # enough to be irrelevant to the spawn-local harv throughput).
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 16]}
+        - {type: mine, owner: neutral, position: [22, 26]}
+        - {type: mine, owner: neutral, position: [22, 28]}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - economy_value_gte: 3000
+        - has_building: fact
+        - unit_type_count_gte: {type: harv, n: 3}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {has_building: fact}
+        - not: {unit_type_count_gte: {type: harv, n: 1}}
+    max_turns: 70

@@ -1,0 +1,197 @@
+meta:
+  id: econ-target-cash-amount-by-deadline
+  title: 'Econ — Hit a Cash Target by a Hard Deadline'
+  capability: reasoning
+  real_world_meaning: >
+    Budget-by-date target: the operation must reach a stated cash bar
+    by a stated deadline, the way a startup must hit a quarterly
+    revenue target / a fundraising milestone / a quarterly closeout.
+    Pre-placed harvester+refinery+barracks are the running pipeline;
+    the agent must reason about whether the current capacity will
+    clear the bar on time, and if not, reinvest into harvesting
+    capacity (build extra harvesters) — not into army units that drain
+    the cash account without growing income. Idling, over-spending on
+    the wrong line item, or under-investing in capacity all miss the
+    bar.
+  robotics_analogue: >
+    Throughput-by-deadline planning in an autonomous pipeline: hit a
+    revenue/output target by a hard date by deciding when to scale up
+    collectors (capacity capex) vs hold (stay lean) vs spend on
+    unrelated capacity (army units / non-revenue line items). Capex
+    timing is the decision — over-spend on the wrong line and the
+    deadline passes with the books short.
+  author: wave-5
+  benchmark_anchor:
+    - SC2 econ-by-tick target
+    - "budget-by-date / quarterly revenue target"
+    - fundraising milestone planning
+    - OR throughput optimization with deadline
+
+# ENGINE NOTE (verified 2026-05-20 against installed openra_train wheel):
+# 1. `cash_gte: N` reads c.signals.cash (spendable cash only, NOT
+#    cash+resources EV — see win_conditions.py). Building units
+#    DEDUCTS cash, so an "army drain" policy (spam e1 alongside
+#    harvest) treads water at ~starting_cash (income ≈ unit cost)
+#    and never reaches the bar.
+# 2. Harv build requires fact + powr + weap (war factory) as the
+#    Vehicle queue prereqs; tent is included for `e1` so the army-
+#    drain decoy can actually issue StartProduction (so it loses
+#    DRAINING cash, not silently no-oping).
+# 3. Income rate from one harv on the rush-hour-arena near patches
+#    (22,18)/(22,22) is ~1.1 cash/tick after a ~450-tick warmup;
+#    so baseline 1-harv ramp in 4500 ticks ≈ 600 + 4500·1.1 ≈ 5550.
+#    Medium target=5500 is right at the baseline's max reach (so
+#    it loses on the deadline by ~3 ticks), and one extra harv
+#    accelerates to the bar by tick ~2900 (comfortable win).
+# 4. Hard tier: target=6500 in 4000 ticks beats the baseline (which
+#    plateaus at ~4100 cash by 4053 ticks), 2 symmetric spawn_point
+#    groups (NORTH y=10..14 / SOUTH y=28..32) so a memorised "build
+#    at (8,18)" opening cannot generalise across seeds. Both spawn
+#    groups carry their own fact+proc+tent+powr+weap+harv +
+#    near-mine pair (shared mine geometry replicated at both
+#    latitudes per the spawn_point filter rule — only AGENT actors
+#    are filtered by spawn_point; neutral mines always place, but
+#    we keep the geometry symmetric so DEEP throughput is equal).
+# 5. Tick/turn alignment: easy max_turns=21 → ceiling 1893 ticks
+#    ≥ within_ticks 1800; medium max_turns=51 → ceiling 4593 ≥ 4500;
+#    hard max_turns=46 → ceiling 4143 ≥ 4000. fail_condition uses
+#    after_ticks = within_ticks + 1 so a non-finisher is a real
+#    LOSS (the deadline bites).
+# 6. Far enemy `e1` at (120,36) stance:0 keeps the engine from
+#    auto-`done`ing on no-enemy-actors (CLAUDE.md footgun).
+base_map: rush-hour-arena
+starting_cash: 600
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    # Pre-placed running pipeline: fact + proc + tent (army decoy) +
+    # powr + weap (Vehicle queue for harv) + 1× harv + 2× mines.
+    - {type: fact, owner: agent, position: [8, 18]}
+    - {type: proc, owner: agent, position: [12, 18]}
+    - {type: tent, owner: agent, position: [12, 22]}
+    - {type: powr, owner: agent, position: [8, 22]}
+    - {type: weap, owner: agent, position: [16, 22]}
+    - {type: harv, owner: agent, position: [14, 18]}
+    - {type: mine, owner: neutral, position: [22, 18]}
+    - {type: mine, owner: neutral, position: [22, 22]}
+    # Far inert enemy marker — prevents engine auto-done on
+    # no-enemy-actors (CLAUDE.md). stance:0 + far position so it
+    # cannot influence the run.
+    - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+
+levels:
+  easy:
+    description: >
+      Loose deadline cash target. The pipeline (1× harv + 1× proc +
+      2× mine) is already running; the bar (1500 cash by tick 1800)
+      is reachable just by committing to harvest with the pre-placed
+      harvester — no reinvestment needed. Stall idles at the 600
+      starting cash and LOSES; an "army drain" policy (spam e1) that
+      harvests AND spends every spare credit on infantry treads
+      water at starting_cash (income ≈ unit cost) and LOSES; the
+      intended `harvest` commitment WINS by ~tick 900. This is the
+      bare cash-target reasoning skill (notice the bar, run the
+      pipeline, hit it before the deadline).
+    starting_cash: 600
+    win_condition:
+      all_of:
+        - cash_gte: 1500
+        - within_ticks: 1800
+    # within_ticks ≤ 93+90·20 = 1893 ⇒ deadline bites inside max_turns;
+    # after_ticks=1801 ⇒ non-finisher is a real LOSS, not a draw.
+    fail_condition:
+      any_of:
+        - after_ticks: 1801
+        - not: {has_building: fact}
+        - not: {unit_type_count_gte: {type: harv, n: 1}}
+    max_turns: 21
+  medium:
+    description: >
+      Mid bar — 5500 cash by tick 4500 — that the pre-placed
+      pipeline CANNOT meet by itself. One harvester on the two near
+      patches yields ~1.1 cash/tick after deductions, so 600 +
+      4500·1.1 ≈ 5550 — at tick 4500 the bar is just out of reach
+      and the deadline bites (baseline LOSES at cash ≈ 5600 at tick
+      4503). The intended play is to reinvest: build an extra harv
+      (cost 1100, prereq fact+weap+powr) so the post-warmup income
+      doubles and the bar clears by ~tick 2900. Stall (no income)
+      LOSES; "army drain" (spend every credit on e1) treads water
+      at ~starting_cash and LOSES; baseline (no reinvestment) just
+      misses and LOSES. Reinvestment WINS.
+    starting_cash: 600
+    win_condition:
+      all_of:
+        - cash_gte: 5500
+        - within_ticks: 4500
+    # within_ticks ≤ 93+90·50 = 4593 ⇒ reachable in max_turns;
+    # after_ticks=4501 ⇒ non-finisher is a real LOSS.
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {has_building: fact}
+        - not: {unit_type_count_gte: {type: harv, n: 1}}
+    max_turns: 51
+  hard:
+    description: >
+      Tighter bar (6500 cash) in a tighter clock (4000 ticks) with
+      seed-varied starts. Two spawn_point groups (NORTH y=10..14 /
+      SOUTH y=28..32) each carry their own fact+proc+tent+powr+
+      weap+harv; both latitudes have a symmetric near-patch pair so
+      the reinvestment economics are equal per spawn (a memorised
+      "build at (8,18)" opening cannot generalise — the model must
+      identify its base each episode). The baseline pipeline
+      plateaus at ~4100 cash by tick 4053 (LOSES on every seed);
+      stall and army-drain LOSE on every seed; reinvesting into
+      ≥1 extra harv WINS on every seed by tick ≤3800.
+    starting_cash: 600
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base (y=10..14); near patches at y=10/14.
+        - {type: fact, owner: agent, position: [8, 10], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: tent, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: weap, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 10], spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=28..32); near patches at y=28/32.
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [12, 32], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 32], spawn_point: 1}
+        - {type: weap, owner: agent, position: [16, 32], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 28], spawn_point: 1}
+        # Symmetric near-patch ore geometry — placed at BOTH
+        # latitudes so the income loop is equal per spawn (neutral
+        # actors aren't filtered by spawn_point, so duplicating
+        # both pairs is correct).
+        - {type: mine, owner: neutral, position: [22, 10]}
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 28]}
+        - {type: mine, owner: neutral, position: [22, 32]}
+        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+    win_condition:
+      all_of:
+        - cash_gte: 6500
+        - within_ticks: 4000
+    # within_ticks ≤ 93+90·45 = 4143 ⇒ reachable in max_turns;
+    # after_ticks=4001 ⇒ non-finisher is a real LOSS.
+    fail_condition:
+      any_of:
+        - after_ticks: 4001
+        - not: {has_building: fact}
+        - not: {unit_type_count_gte: {type: harv, n: 1}}
+    max_turns: 46

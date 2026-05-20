@@ -1,0 +1,368 @@
+# lh-scout-react-counter.yaml
+#
+# REASONING capability — observation-driven 3-phase chain:
+# SCOUT (discover ≥2 enemy buildings) → REACT (engage and kill ≥3
+# enemy units) → COUNTER (raze the enemy construction yard).
+# The agent starts late-game with a small force (1× jeep scout +
+# 3× medium tanks) and a starter fact at the west edge; cash 1500
+# is too lean to fund a meaningful new production line, so the
+# capability under test is the REACTIVE INFORMATION-ACTION LOOP on
+# the existing force — not build-out, not tech-pivot. The model
+# must observe what the enemy actually has, engage it, then
+# commit to razing the construction yard inside the deadline.
+#
+# Distinct from sibling Wave-4 `lh-tech-pivot-attack`:
+#   - lh-tech-pivot-attack: tech is already standing; the pivot
+#     is BUILD-the-correct-counter then attack. The middle phase
+#     is a PRODUCTION decision.
+#   - lh-scout-react-counter (this pack): tech is NOT standing;
+#     the army is pre-deployed; the middle phase is a TACTICAL
+#     ENGAGEMENT decision (which enemy cluster to engage, in what
+#     order). Cash is intentionally too lean to fund building
+#     more of the army — the capability is the observation-driven
+#     three-phase chain on a FIXED FORCE.
+# Distinct from sibling Wave-2 `mid-tech-switch-on-scout`:
+#   - mid-tech-switch-on-scout: scout-then-counter (2-phase) with
+#     either counter satisfying the win via units_killed_gte:3.
+#   - lh-scout-react-counter (this pack): EXPLICIT 3-phase chain
+#     where SCOUTING (≥2 buildings, not ≥1) is the load-bearing
+#     first phase, REACT is killing units mid-chain, and COUNTER
+#     is razing the FACT (not just hitting the kill bar).
+#
+# Real-world anchors: SC2 reactive macro (scout enemy strategy
+# mid-game, pivot composition, counter-attack); CICERO
+# information-action loop (gather state, update belief, commit to
+# action); PlanBench replanning (mid-plan observation forces
+# re-plan); threat-intel-driven defence (a SOC analyst confirms
+# the indicator-of-compromise from telemetry, takes containment
+# action, then patches the upstream attack vector).
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - Enemy actors with spawn_point are NOT reliably filtered per
+#     seed (openra-data/src/oramap.rs::expand_scenario_actors); we
+#     vary the AGENT spawn instead (medium/hard) to flip which
+#     enemy composition is the "near" reachable one.
+#   - The enemy `fact` is MustBeDestroyed → razing it satisfies
+#     enemy_key_buildings_destroyed but would auto-`done` the
+#     engine if it were the LAST enemy building standing. A
+#     second isolated enemy `fact` at the FAR corner persists as
+#     an anti-auto-`done` anchor (unreachable inside the clock).
+#   - `then:` is the Wave-2 happened-before composite: clauses
+#     latch IN ORDER, so a SKIP-SCOUT-ATTACK-BLIND play that
+#     razes the fact (auto-discovering 1 building en route) does
+#     NOT satisfy the first clause (≥2 buildings discovered) —
+#     keeping scouting load-bearing.
+#   - `unit_killed_gte:3` is the REACT phase: it requires the
+#     agent's force to actually engage; a scout-only-no-attack
+#     play stalls at clause 2.
+#   - Tools omit `harvest` / `train` deliberately: this pack does
+#     not test the economic loop. `build`/`place_building` are
+#     kept so an opportunistic emergency defence (e.g. a pbox /
+#     gun) is buildable from the starter fact + powr if the model
+#     elects to spend the lean cash that way.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-scout-react-counter.yaml
+
+meta:
+  id: lh-scout-react-counter
+  title: 'Scout, React, Counter — Observation-Driven 3-Phase Chain'
+  capability: reasoning
+  real_world_meaning: >
+    Reactive macro on a fixed force: the agent must drive the
+    observation-action-counter loop end-to-end inside one budget.
+    Phase 1 (scout) is mandatory — the deeper enemy posture
+    (≥2 buildings worth of structure) must be observed before any
+    commit is informed; phase 2 (react) requires the army to
+    actually engage the cluster, not merely walk past; phase 3
+    (counter) is the production-yard kill that ends the threat at
+    its source. Pre-committing to attack the construction yard
+    without scouting cannot satisfy the chain — the scout latch
+    is the load-bearing first link.
+  robotics_analogue: >
+    Threat-intel-driven incident response: SOC analyst confirms
+    multiple indicators of compromise from telemetry (scout),
+    contains the active attacker on the network (react / engage),
+    then patches the upstream attack vector / takes down the
+    command-and-control host (counter). Skipping the confirmation
+    step and going straight to take-down acts on stale belief and
+    misses the root cause; scouting forever bleeds the response
+    window.
+  benchmark_anchor:
+    - "SC2 reactive macro (scout-pivot-counter)"
+    - "CICERO information-action loop"
+    - "PlanBench replanning"
+    - "threat-intel-driven defense"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Plan-and-execute rehearsal: ONE fixed enemy composition (the
+  # construction yard + an attached barracks defended by a passive
+  # rifle/rocket cluster) at the far east. The brief explicitly
+  # names the composition so the model can pre-plan; the
+  # then-chain still enforces scout (≥2 buildings) before react
+  # (≥3 kills) before counter (raze fact) to teach the idiom.
+  # Stalling loses on the clock; a skip-scout-attack-blind play
+  # races at the fact with the starter tanks but the cluster
+  # blunts it — and even on success the discovery clause needs
+  # ≥2 buildings, which a single fact-rush only registers 1.
+  easy:
+    description: >
+      Your starter force sits at the west edge: a scout jeep and
+      three medium tanks (2tnk). A single enemy construction yard
+      (fact) sits at the far east on the central y-band, defended
+      by a passive rifle cluster (four e1). A SEPARATE enemy
+      barracks (tent) sits as a forward outpost in the south
+      mid-section, OFF the main assault axis. Drive the jeep
+      FIRST through the southern outpost to register the tent,
+      then on to the far east to register the fact (≥2 buildings
+      discovered), then commit your tanks to destroy ≥3 enemy
+      units, then RAZE the enemy construction yard. All within
+      6300 ticks. Rushing the tanks straight at the fact only
+      registers the fact under attack (the outpost is well off
+      the assault axis — out of tank sight) — the discovery
+      latch stalls at 1 and the chain never completes; stalling
+      at spawn loses on the clock.
+    starting_cash: 1500
+    overrides:
+      actors:
+        # Agent: starter fact + powr at the west (the powr lets a
+        # building like pbox/gun be placed if the model elects;
+        # not load-bearing for the intended play).
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        # 1× scout jeep + 3× medium tanks at the west edge,
+        # stance:1 (ReturnFire) so they don't path-find east on
+        # their own and so the engagement is the agent's choice.
+        - {type: jeep, owner: agent, position: [20, 16], stance: 1}
+        - {type: 2tnk, owner: agent, position: [20, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [20, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [20, 20], stance: 1}
+        # Enemy main: construction yard at the far east on the
+        # central y-band, plus a passive rifle cluster (e1) at
+        # stance:0 (HoldFire) guarding it. The cluster does NOT
+        # path-find west; the agent must come to them.
+        - {type: fact, owner: enemy, position: [122, 18]}
+        - {type: e1,   owner: enemy, position: [118, 18], stance: 0, count: 4}
+        # Enemy forward outpost: an isolated barracks (tent) FAR
+        # off the main assault axis (mid-x, far south). A blind
+        # tank rush at the fact (path y≈18) never approaches
+        # (60, 36) — tank sight ~6 cells, distance from any rush
+        # waypoint is >>15. The jeep, however, can deliberately
+        # detour through (60, 36) before continuing east to see
+        # the main fact. This makes the ≥2-buildings discovery
+        # latch genuinely require a scout phase: the second
+        # building is geographically unreachable on the assault
+        # path.
+        - {type: tent, owner: enemy, position: [60, 36]}
+        # Sentinel: a second isolated enemy fact at the far north,
+        # unreachable inside the clock budget, so razing the near
+        # fact does NOT auto-`done` the engine before the win
+        # predicate evaluates (defence-in-depth per CLAUDE.md
+        # auto-terminate footgun).
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: scout-react-counter-easy
+            clauses:
+              - {buildings_discovered_gte: 2}
+              - {units_killed_gte: 3}
+              - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 6300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 6301}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+    max_turns: 75
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: HIDDEN COMPOSITION (the near enemy
+  # posture varies by seed). Two enemy fact+tent+defender clusters
+  # sit at the NE and SE corners; the agent's start latitude
+  # round-robins between a NORTH spawn (y=10) and a SOUTH spawn
+  # (y=30) so the natural "near" composition flips per seed. The
+  # scout phase now requires actually driving the jeep into the
+  # near corner (not just guessing) to register ≥2 buildings; a
+  # blind rush at the FAR corner overruns the clock; a
+  # scout-then-no-attack stalls at the react clause.
+  medium:
+    description: >
+      Your starter force sits at the west edge: a scout jeep and
+      three medium tanks (2tnk). Two enemy construction yards
+      (fact) sit hidden at the far NE and SE corners, each
+      defended by a passive infantry cluster. A SEPARATE enemy
+      barracks (tent) sits as a forward outpost at mid-x mid-y,
+      off the assault axis from either spawn. Drive the jeep
+      FIRST through the mid outpost to register the tent, then
+      east to the near corner to register the fact (≥2 buildings
+      discovered), then commit your tanks to destroy ≥3 enemy
+      units, then RAZE the near construction yard. All within
+      6300 ticks. Pre-rushing tanks at the fact only registers
+      the fact (1 building); scouting forever bleeds the clock;
+      stalling at spawn never advances the chain.
+    starting_cash: 1500
+    overrides:
+      actors:
+        # North-base spawn (spawn_point 0).
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [20, 8],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 12], stance: 1, spawn_point: 0}
+        # South-base spawn (spawn_point 1).
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 30], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [20, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 31], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 32], stance: 1, spawn_point: 1}
+        # NE enemy base: fact + defending e1 cluster.
+        - {type: fact, owner: enemy, position: [122, 5]}
+        - {type: e1,   owner: enemy, position: [118, 5], stance: 0, count: 4}
+        # SE enemy base: fact + defending e3 cluster (anti-
+        # vehicle, stance:0 HoldFire — equivalent posture to NE
+        # so the seed-rotated near base presents an equivalent
+        # scout/react/counter task).
+        - {type: fact, owner: enemy, position: [122, 38]}
+        - {type: e3,   owner: enemy, position: [118, 38], stance: 0, count: 4}
+        # Shared FORWARD OUTPOST: a lone enemy barracks (tent) at
+        # mid-x, mid-y. From EITHER spawn, the tank rush path
+        # stays inside its own y-band (N: y≈5..12, S: y≈30..38)
+        # and never approaches (60, 20) within tank sight ~6
+        # (closest the rush gets is ~8 cells, still out of
+        # sight). The jeep must deliberately detour through
+        # (60, 20) to register the tent, then continue east to
+        # register the near fact — making ≥2 buildings discovered
+        # require an EXPLICIT scout phase.
+        - {type: tent, owner: enemy, position: [60, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: scout-react-counter-medium
+            clauses:
+              - {buildings_discovered_gte: 2}
+              - {units_killed_gte: 3}
+              - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 6300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 6301}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+    max_turns: 75
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 controlled variable: an ATTRITION CAP (units_lost_lte:3,
+  # so the agent cannot trade tanks freely). The map adds a
+  # MIDDLE pocket (a third fact+tent cluster at mid-latitude) so
+  # the scout phase has THREE candidate posture readings, not two
+  # — even on a fixed spawn the jeep must actually identify the
+  # nearest reachable cluster before committing. 2 spawn_point
+  # groups satisfy `tests/test_hard_tier.py::UPGRADED`. Blind
+  # rush busts the discovery latch AND the attrition cap; a
+  # scout-then-trade-everything play busts the attrition cap; an
+  # over-scout that runs the jeep to all three pockets bleeds
+  # the clock.
+  hard:
+    description: >
+      Your starter force at the west edge — a scout jeep and
+      three medium tanks (2tnk) — round-robined between a NORTH
+      base and a SOUTH base by seed. Three enemy construction
+      yards (fact) sit hidden at the far east (NE, MID, SE),
+      each with a passive defending cluster. A SEPARATE enemy
+      barracks (tent) sits as a forward outpost at mid-x mid-y,
+      off the assault axis from either spawn. Drive the jeep
+      through the mid outpost to register the tent and then to
+      the NEAREST corner (compass-only briefing, no coordinates)
+      to register the fact (≥2 buildings discovered), then
+      engage with the tanks to destroy ≥3 enemy units, and RAZE
+      the near construction yard — all while losing no more
+      than three of your own. All within 6300 ticks. Blind
+      rushing fails the discovery latch; reckless engagements
+      bust the attrition cap; an over-scout that touches all
+      three corners AND the outpost bleeds the clock.
+    starting_cash: 1500
+    objective_coords: relative
+    overrides:
+      actors:
+        # North-base spawn (spawn_point 0).
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [20, 8],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 12], stance: 1, spawn_point: 0}
+        # South-base spawn (spawn_point 1).
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 30], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [20, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 31], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 32], stance: 1, spawn_point: 1}
+        # NE enemy base: fact + e1 cluster.
+        - {type: fact, owner: enemy, position: [122, 5]}
+        - {type: e1,   owner: enemy, position: [118, 5], stance: 0, count: 4}
+        # SE enemy base: fact + e3 cluster.
+        - {type: fact, owner: enemy, position: [122, 38]}
+        - {type: e3,   owner: enemy, position: [118, 38], stance: 0, count: 4}
+        # MID enemy base — the third compositional reading on the
+        # tighter attrition tier. fact + cluster at mid-latitude;
+        # unreachable as the "near" base from either NORTH (y=10)
+        # or SOUTH (y=30) spawn inside the tighter attrition
+        # budget (units_lost_lte:3) — the over-scout penalty is
+        # precisely the diversion to the mid pocket.
+        - {type: fact, owner: enemy, position: [122, 22]}
+        - {type: e1,   owner: enemy, position: [118, 22], stance: 0, count: 4}
+        # Shared FORWARD OUTPOST: lone enemy tent at mid-x AND
+        # mid-y. The rush axis from either spawn stays inside
+        # its own y-band and never approaches (60, 20) within
+        # tank sight ~6; the jeep must detour through (60, 20)
+        # for the second building. Sits 5 cells north of the
+        # MID base fact (122, 22) so it cannot be confused with
+        # the MID base — the jeep at (60, 20) sees the outpost
+        # but the MID fact at distance √(62²+2²)≈62 is far out
+        # of jeep sight.
+        - {type: tent, owner: enemy, position: [60, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: scout-react-counter-hard
+            clauses:
+              - {buildings_discovered_gte: 2}
+              - {units_killed_gte: 3}
+              - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 6300}
+        - {units_lost_lte: 3}
+    fail_condition:
+      any_of:
+        - {after_ticks: 6301}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+        - {not: {units_lost_lte: 3}}
+    max_turns: 75

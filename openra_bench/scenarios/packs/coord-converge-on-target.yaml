@@ -1,0 +1,263 @@
+# coord-converge-on-target.yaml
+#
+# ACTION capability — triple-prong convergent attack. Three armoured
+# squads start at three different bearings (NORTH, WEST-of-objective,
+# SOUTH) and must CONVERGE simultaneously on a single defended enemy
+# objective (`fact`) at mid-east. Each squad ALONE is killed by the
+# leashed `guard` defenders before the fact falls; TWO squads
+# converging may destroy the fact but trade out the strike force
+# (surviving tank count in the objective region falls below n=6); only
+# when ALL THREE squads arrive within a tight common window do they
+# overwhelm the defenders cleanly enough to leave ≥6 tanks in the
+# objective region with the yard destroyed.
+#
+# Real-world anchor: military convergent / envelopment attack and SC2
+# triple-prong assault — multiple columns striking from different
+# bearings at the same instant to overwhelm a defender that would
+# defeat any single column. Robotics analogue: synchronous multi-team
+# rendezvous on a shared objective under a tight common deadline.
+#
+# Engine notes (per CLAUDE.md):
+#   - `fact` is `MustBeDestroyed`: razing it would auto-`done` the
+#     engine and a within-ticks check could collapse to DRAW. A
+#     SENTINEL enemy `fact` is placed in the far north (out of the
+#     combat zone) so the episode persists past the objective fact's
+#     destruction long enough for the win/fail predicates to evaluate.
+#   - Bot `guard` (GUARD_AGGRO ≈ 16, GUARD_LEASH ≈ 18) holds post,
+#     auto-fires in range, lunges at the nearest foe within ≈16
+#     cells, snaps back past ≈18. The e3 rocket infantry is the
+#     anti-tank Dragon: each guard chews a 2tnk in a handful of
+#     shots, so a single squad's commit on the cluster is lethal.
+#   - `units_in_region_gte` ≥6 on the 9 tanks is load-bearing: a
+#     two-squad converge (6 tanks) typically destroys the fact but
+#     trades the whole strike force (≤0 tanks left in region), so a
+#     partial converge LOSES on the predicate even when the fact
+#     happens to fall. A single squad alone is wiped before the fact
+#     falls. Three squads converging arrive together and overwhelm:
+#     ≥6 tanks survive inside the (100,20, r=8) region while the
+#     cluster + fact go down.
+#   - Squad positions are balanced equidistant (~32-34 cells from the
+#     objective) so a naive simultaneous attack-move from all three
+#     squads ACTUALLY ARRIVES TOGETHER; widely-unbalanced edge spawns
+#     would force the closer squads into the cluster alone first and
+#     a 3-prong policy would degenerate to a serial 1-then-1-then-1
+#     attack defeated piecewise (the calibration bar still requires
+#     simultaneous arrival).
+#   - Enemy actors are NOT filtered by `spawn_point` (CLAUDE.md). The
+#     hard tier varies the AGENT staging — the lateral (third) squad
+#     starts WEST of objective in spawn 0 and EAST of objective in
+#     spawn 1, flipping its ingress bearing — while the defender
+#     cluster stays symmetric.
+
+meta:
+  id: coord-converge-on-target
+  title: 'Convergent Attack — Three Squads, One Defended Target'
+  capability: action
+  real_world_meaning: >
+    Three armoured columns start on three different bearings (NORTH,
+    WEST-of-objective, SOUTH) and must converge on a single defended
+    enemy construction yard from three different directions AT THE
+    SAME TIME. Any one column alone is killed by the defenders before
+    the yard falls; two columns may destroy the yard but trade out
+    the strike force (surviving tank count in the objective region
+    drops below the required threshold); only when all three columns
+    arrive on the objective within a tight common window does the
+    combined force overwhelm the defenders cleanly. The advertised
+    capability is synchronous multi-fleet convergence on a shared
+    objective — a single-column tour or a serialized two-column
+    attempt loses on attrition, a stall loses on the clock.
+  robotics_analogue: >
+    Synchronous multi-robot rendezvous on a contested objective: each
+    team must dispatch on a different ingress vector so that all
+    teams arrive at the goal within a bounded common window;
+    serialising one team after another lets the contesting agents
+    defeat each team in detail and prevents the joint payload
+    threshold (≥n teammates surviving on the goal) from holding.
+  benchmark_anchor:
+    - "SC2 triple-prong assault timing"
+    - "military convergent attack / pincer movement"
+    - "SMAC squad convergence"
+    - "envelopment doctrine: hit from multiple directions simultaneously"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 12000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare convergent-attack skill: 3 leashed guards (distributed
+  # around the objective fact), 9 tanks total. A single squad of 3
+  # tanks alone is wiped by the 3 anti-tank guards before the fact
+  # falls; 2-prong or 3-prong both succeed (easy is lenient on the
+  # n=6 region clause). A stall (no movement) loses on the clock.
+  easy:
+    description: >
+      THREE squads of medium tanks (3× 2tnk each, 9 tanks total) start
+      at three different bearings around the enemy construction yard
+      (`fact` at ~100,20): NORTH (~70,6), WEST (~66,20), SOUTH
+      (~70,34). The yard is defended by 3 leashed rocket-infantry
+      guards (e3, bot_type guard) that hold post, auto-fire in range,
+      and lunge at the nearest approaching foe. Win when at least 6
+      of your 9 tanks are inside an 8-cell radius of (100,20) AND the
+      enemy construction yard is destroyed, before tick 4500. A
+      single squad alone is killed by the guard cluster before the
+      yard falls. A stall loses on the clock.
+    overrides:
+      actors:
+        # NORTH squad — 3 medium tanks at (70,6).
+        - {type: 2tnk, owner: agent, position: [70, 6],  stance: 1, count: 3}
+        # WEST squad — 3 medium tanks at (66,20). Equidistant from
+        # the objective (~34 cells) so a naive simultaneous launch
+        # arrives together.
+        - {type: 2tnk, owner: agent, position: [66, 20], stance: 1, count: 3}
+        # SOUTH squad — 3 medium tanks at (70,34).
+        - {type: 2tnk, owner: agent, position: [70, 34], stance: 1, count: 3}
+        # The OBJECTIVE: enemy construction yard.
+        - {type: fact, owner: enemy, position: [100, 20]}
+        # 3 GUARDS distributed around the objective (W / E / N faces)
+        # so every ingress bearing enters guard aggro.
+        - {type: e3, owner: enemy, position: [98, 18]}
+        - {type: e3, owner: enemy, position: [102, 22]}
+        - {type: e3, owner: enemy, position: [100, 17]}
+        # SENTINEL: persistent enemy fact in the far north so the
+        # engine does not auto-`done` the instant the objective fact
+        # dies; lets within_ticks / region predicates evaluate
+        # cleanly on the terminal frame.
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 100, y: 20, radius: 8, n: 6}}
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 54
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: 4 guards (one per cardinal face of the
+  # objective) and a tighter trade. A single squad alone is destroyed.
+  # Two squads converging arrive piecewise — the closer squad enters
+  # the cluster first and is ground down by 4 anti-tank guards
+  # before the second squad arrives; the joint surviving in-region
+  # count never reaches n=6 (the trade typically destroys the fact
+  # but leaves 0 tanks in region). Three squads converging mass
+  # enough simultaneous DPS to overrun the cluster cleanly (≥6
+  # tanks survive in region while the cluster + fact fall).
+  medium:
+    description: >
+      THREE squads of medium tanks (3× 2tnk each, 9 tanks total) from
+      NORTH (~70,6), WEST (~66,20), SOUTH (~70,34) must converge on
+      the enemy construction yard (`fact` at ~100,20) defended by 4
+      leashed rocket-infantry guards (one on each cardinal face). A
+      single squad alone is killed by the guards; two squads
+      converging destroy the yard but trade out the whole strike
+      force (no tanks survive inside the objective region). All
+      three squads must arrive together: win when ≥6 of your 9 tanks
+      are inside an 8-cell radius of (100,20) AND the yard is
+      destroyed, before tick 4500. A stall loses on the clock.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [70, 6],  stance: 1, count: 3}
+        - {type: 2tnk, owner: agent, position: [66, 20], stance: 1, count: 3}
+        - {type: 2tnk, owner: agent, position: [70, 34], stance: 1, count: 3}
+        - {type: fact, owner: enemy, position: [100, 20]}
+        # 4 guards: one on each cardinal face of the objective.
+        - {type: e3, owner: enemy, position: [98, 20]}
+        - {type: e3, owner: enemy, position: [102, 20]}
+        - {type: e3, owner: enemy, position: [100, 17]}
+        - {type: e3, owner: enemy, position: [100, 23]}
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 100, y: 20, radius: 8, n: 6}}
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 54
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 more controlled variable: TWO seed-driven agent spawn groups
+  # round-robined per seed. Group 0 places the lateral (third) squad
+  # WEST of the objective at (66,20); group 1 places it EAST of the
+  # objective at (134,20). The defender cluster stays symmetric (4
+  # guards, one on each cardinal face) so both spawns face the same
+  # convergent geometry but the lateral squad's ingress bearing
+  # flips per seed (W → E). A single memorised "3-prong from W/N/S"
+  # opening cannot generalise. NORTH and SOUTH squads are common to
+  # both groups (placed without spawn_point — but the documented
+  # filter rule in CLAUDE.md ("if ANY agent actor declares
+  # spawn_point, every agent actor WITHOUT spawn_point is filtered
+  # OUT") means N/S MUST be duplicated across spawn groups; both
+  # copies are placed at identical coords so the contract is met
+  # without changing the geometry per seed.
+  hard:
+    description: >
+      THREE squads of medium tanks (3× 2tnk each, 9 tanks total) must
+      converge on the enemy construction yard (`fact` at ~100,20)
+      defended by 4 leashed rocket-infantry guards (one on each
+      cardinal face). The squad layout flips per seed: one spawn
+      stages NORTH (~70,6) / WEST (~66,20) / SOUTH (~70,34); the
+      other stages NORTH (~74,8) / EAST (~126,20) / SOUTH (~74,32).
+      Both layouts are balanced equidistant (~26-34 cells per
+      squad) so a synchronised launch arrives together. A single
+      squad alone is
+      destroyed by the guards; two squads converging trade out the
+      strike force before satisfying the region threshold. Win when
+      ≥6 of your 9 tanks are inside an 8-cell radius of (100,20) AND
+      the yard is destroyed, before tick 4500.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH / WEST-of-objective / SOUTH.
+        - {type: 2tnk, owner: agent, position: [70, 6],  stance: 1, count: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [66, 20], stance: 1, count: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [70, 34], stance: 1, count: 3, spawn_point: 0}
+        # spawn_point 1 — NORTH / EAST-of-objective / SOUTH.
+        # NORTH and SOUTH are duplicated at identical coords so the
+        # spawn-filter rule (CLAUDE.md) doesn't drop them from group 1;
+        # the WEST squad is relocated to EAST at (134,20) — equidistant
+        # from the objective on the opposite bearing, flipping the
+        # lateral ingress direction. The seed-chosen ingress geometry
+        # cannot be memorised: a fixed "drive west squad east" opening
+        # is wrong half the seeds.
+        # NORTH and SOUTH in group 1 are pulled in slightly to
+        # (74, 8) / (74, 32) so their distance to the objective (~29
+        # cells) closely matches the EAST squad's distance from
+        # (126, 20) (~26 cells) — a naive simultaneous launch from
+        # group 1 has all three squads arrive together (group 0
+        # already balanced at ~34 from each of W / N / S).
+        - {type: 2tnk, owner: agent, position: [74, 8],   stance: 1, count: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [126, 20], stance: 1, count: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [74, 32],  stance: 1, count: 3, spawn_point: 1}
+        # The OBJECTIVE.
+        - {type: fact, owner: enemy, position: [100, 20]}
+        # 4 guards: one on each cardinal face. Symmetric: equally
+        # covers both lateral ingress bearings (W and E).
+        - {type: e3, owner: enemy, position: [98, 20]}
+        - {type: e3, owner: enemy, position: [102, 20]}
+        - {type: e3, owner: enemy, position: [100, 17]}
+        - {type: e3, owner: enemy, position: [100, 23]}
+        # SENTINEL: persistent enemy fact in the far north so the
+        # engine does not auto-`done` on objective raze.
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 100, y: 20, radius: 8, n: 6}}
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 54
