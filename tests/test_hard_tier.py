@@ -621,6 +621,20 @@ UPGRADED = [
     # equivalent column-vs-wedge decision from a flipped bearing — a
     # memorised "form wedge from y=14" opening cannot generalise.
     "combat-formation-tank-wedge",
+    # Wave-7 Group D combat-micro pack: SC2 mirror micro / Lanchester
+    # square law / concentration-of-force doctrine. ASYMMETRIC geometry
+    # (3 agent tanks bunched at (30,*) vs 3 enemy tanks spread across
+    # 3 latitudes at (50,15)/(51,20)/(50,25)) so focus-fire on the
+    # closest enemy preserves the force while spread-fire (each tank
+    # picks its own nearest enemy) collapses to Lanchester linear and
+    # loses 2 of 3 tanks (the load-bearing discrimination on medium).
+    # Hard tier defines two agent spawn_point groups (NORTH y=11..13 /
+    # SOUTH y=27..29) round-robined by seed; the enemy line always
+    # places (enemy actors don't honour spawn_point — CLAUDE.md) so
+    # both spawns face the same focus-fire decision from a flipped
+    # bearing. Hard discriminates via kill-speed (tight within_ticks
+    # 1200) + spawn-variation generalisation.
+    "combat-tank-vs-tank-engagement",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
