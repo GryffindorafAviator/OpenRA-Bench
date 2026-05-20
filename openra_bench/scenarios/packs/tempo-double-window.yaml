@@ -1,0 +1,217 @@
+# Validate: python -m openra_bench.scenarios.validate packs/tempo-double-window.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# REASONING focus (cross-cutting tempo): pulsed-load orchestration —
+# strike Cluster A in window 1, then IDLE through a lull window (no
+# pressure on the through-route), then strike Cluster B in window 2.
+# Continuous attack between windows BREACHES the lull constraint and
+# bleeds units on a Tesla emplacement (`tsla`) sitting on the through-
+# route — the loss-cap (`units_lost_lte`) is the teeth that punishes a
+# greedy "just keep firing" policy.
+#
+# Predicate composition note: `all_of[{units_killed_gte: 3},
+# {units_killed_gte: 7}, {after_ticks: T}]` semantically collapses (the
+# higher kill bar subsumes the lower) so the temporal structure
+# ("≥3 kills BEFORE the lull, ≥4 more AFTER") cannot be expressed by
+# stacking `units_killed_gte`. The strict double-window is therefore
+# enforced via the stateful `waypoint_sequence` latch: the agent must
+# touch the Cluster-A strike region FIRST, then the lull region
+# (forcing retreat off the through-route), and only then can the
+# Cluster-B strike region count. Combined with:
+#   * `after_ticks` — window 2 cannot open before the lull is timed,
+#   * `units_killed_gte` — both clusters must actually be engaged,
+#   * `units_lost_lte` + the tsla on the route — continuous pressure
+#     gets shredded between the clusters,
+# the four illegal policies (stall / continuous-attack / all-in-window-1
+# / brute-rush) all LOSE, and the intended strike-lull-strike policy
+# WINS. The episode auto-terminate is prevented by an unarmed `fact`
+# landmark behind Cluster B.
+#
+# Tick budget note: engine advances ~90 ticks per decision turn
+# (tick ≈ 93 + 90·(turn-1)). Every `after_ticks` fail clause is set so
+# it is reachable within `max_turns` — otherwise a staller would draw,
+# not lose. Re-verified per level.
+
+meta:
+  id: tempo-double-window
+  title: 'Pulsed Tempo — Strike, Idle Through the Lull, Strike Again'
+  capability: reasoning
+  real_world_meaning: >
+    Pulsed-load orchestration: a batch-job operator must hit a
+    peak-hour quota (window 1), idle through a constrained lull window
+    (a billing cap, a hardware cool-down, a regulator window) — no
+    continuous firing through the lull — then hit a second post-lull
+    quota (window 2). Naively running flat-out across the lull breaches
+    the on-route constraint and is penalised. The capability is timing
+    a deliberate ON-OFF-ON duty cycle, not raw throughput.
+  robotics_analogue: >
+    Pulsed-load workflow with a strict on/off duty cycle — a robot or
+    automation cell that has to complete a peak-window task, retreat
+    to a safe pose during a forbidden interval, then re-engage to
+    finish a post-interval task. Continuous operation through the
+    forbidden interval bleeds resources / trips a safety interlock.
+  benchmark_anchor:
+    - "TextStarCraft II tempo"
+    - "OSWorld scheduled-task chains"
+    - "PlanBench temporally-extended goals"
+    - "pulsed-load orchestration with billing-cap lulls"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 12000}
+  actors:
+    # Agent column — west side, mid-y.
+    - {type: 2tnk, owner: agent, position: [6, 20], stance: 3, count: 4}
+    - {type: 1tnk, owner: agent, position: [7, 22], stance: 3, count: 2}
+    # Cluster A (NEAR) — 4 pickets around (35, 20). Window-1 target.
+    - {type: e1, owner: enemy, position: [33, 18], stance: 2, count: 2}
+    - {type: e1, owner: enemy, position: [37, 22], stance: 2, count: 2}
+    # Cluster B (FAR) — 4 pickets around (105, 20). Window-2 target.
+    - {type: e1, owner: enemy, position: [103, 18], stance: 2, count: 2}
+    - {type: e1, owner: enemy, position: [107, 22], stance: 2, count: 2}
+    # Construction-yard landmark behind Cluster B: unarmed, high-HP.
+    # Prevents the enemy-elimination auto-terminate (so the win/fail
+    # tree gets evaluated even if Cluster B is razed before the lull).
+    - {type: fact, owner: enemy, position: [118, 20]}
+
+levels:
+  # ── EASY ── no through-route Tesla. Strike A, retreat to the lull
+  # safe-point (south), then strike B after the lull opens. The lull
+  # waypoint is what enforces the duty cycle; the tick band enforces
+  # the timing. Continuous pressure simply never wins (it skips the
+  # lull WP — the ordered latch never advances) and runs out the clock.
+  easy:
+    description: >
+      Pulsed strike: hit Cluster A first, then PULL BACK to the lull
+      safe-point (south of the through-route) while the lull window
+      passes, then push on and hit Cluster B. Order matters: the win
+      only counts if you visit A → lull safe-point → B in that order.
+      Continuous attack through the centre skips the lull and never
+      wins. You need ≥7 kills across both windows and ≤4 own losses.
+      Window 2 cannot open before tick 3000.
+    overrides: {}
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: T
+            radius: 6
+            points:
+              - {x: 35, y: 20}    # Cluster A strike region (window 1)
+              - {x: 55, y: 36}    # Lull safe-point (south, off route)
+              - {x: 105, y: 20}   # Cluster B strike region (window 2)
+        - {after_ticks: 3000}
+        - {units_killed_gte: 7}
+        - {units_lost_lte: 4}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 4}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 52
+
+  # ── MEDIUM ── +1 controlled variable: a single `tsla` on the
+  # through-route at (80, 20). Continuous pressure (no retreat to
+  # lull) now bleeds units on the Tesla and busts `units_lost_lte`.
+  # The intended retreat to (55, 36) keeps the column south of the
+  # Tesla's arc during the lull.
+  medium:
+    description: >
+      Same pulsed cycle (A → lull safe-point → B) but the through-
+      route now has a Tesla coil (tsla, anti-everything) at the
+      narrow point. Trying to keep firing between the clusters runs
+      your column past the Tesla and burns through the loss cap.
+      Pull back south to the lull safe-point during the lull window
+      and stay out of the Tesla's arc; push on to Cluster B only
+      after the lull opens. ≥7 kills, ≤4 losses, in budget.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 4}
+        - {type: 1tnk, owner: agent, position: [7, 22], stance: 1, count: 2}
+        - {type: e1, owner: enemy, position: [33, 18], stance: 2, count: 2}
+        - {type: e1, owner: enemy, position: [37, 22], stance: 2, count: 2}
+        - {type: e1, owner: enemy, position: [103, 18], stance: 2, count: 2}
+        - {type: e1, owner: enemy, position: [107, 22], stance: 2, count: 2}
+        # Lull-zone Tesla: sits on the central through-route between
+        # clusters. Continuous pressure must cross its arc; the
+        # south lull safe-point at (55, 36) is comfortably outside.
+        - {type: tsla, owner: enemy, position: [80, 20], stance: 3, health: 100}
+        - {type: fact, owner: enemy, position: [118, 20]}
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: T
+            radius: 6
+            points:
+              - {x: 35, y: 20}
+              - {x: 55, y: 36}
+              - {x: 105, y: 20}
+        - {after_ticks: 3000}
+        - {units_killed_gte: 7}
+        - {units_lost_lte: 4}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 4}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 52
+
+  # ── HARD ── +1 controlled variable: TWO Tesla emplacements
+  # bracketing the through-route (a wider lethal corridor) AND the
+  # agent column starts from a seed-chosen latitude (two spawn_point
+  # groups — north vs south). Loss cap tightens to ≤2.
+  hard:
+    description: >
+      Two Tesla coils now bracket the through-route — the lethal
+      corridor is wider, and any attempt to push through it during
+      the lull will shred the column. You may also start from the
+      NORTH or the SOUTH staging (seed-chosen). Strike Cluster A,
+      pull back to the lull safe-point south of the corridor, wait
+      out the lull, then advance to Cluster B. ≥7 kills, ≤2 losses,
+      in budget.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging (seed may pick this)
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 3, count: 4, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [7, 12], stance: 3, count: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging (same pulsed task)
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 3, count: 4, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [7, 28], stance: 3, count: 2, spawn_point: 1}
+        # Cluster A
+        - {type: e1, owner: enemy, position: [33, 18], stance: 2, count: 2}
+        - {type: e1, owner: enemy, position: [37, 22], stance: 2, count: 2}
+        # Cluster B
+        - {type: e1, owner: enemy, position: [103, 18], stance: 2, count: 2}
+        - {type: e1, owner: enemy, position: [107, 22], stance: 2, count: 2}
+        # TWO Tesla coils bracketing the through-route. The south
+        # lull safe-point at (55, 36) is far enough below the
+        # corridor to be outside both arcs.
+        - {type: tsla, owner: enemy, position: [75, 18], stance: 3, health: 100}
+        - {type: tsla, owner: enemy, position: [85, 22], stance: 3, health: 100}
+        - {type: fact, owner: enemy, position: [118, 20]}
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: T
+            radius: 6
+            points:
+              - {x: 35, y: 20}
+              - {x: 55, y: 36}
+              - {x: 105, y: 20}
+        - {after_ticks: 3000}
+        - {units_killed_gte: 7}
+        - {units_lost_lte: 2}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 52

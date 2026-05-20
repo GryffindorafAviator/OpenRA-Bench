@@ -38,6 +38,7 @@ UPGRADED = [
     "reasoning-frontier-commit",
     "rush-hour",
     "custom-map-no-enemy",
+    "tempo-double-window",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
