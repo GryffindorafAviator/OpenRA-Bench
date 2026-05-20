@@ -1,0 +1,258 @@
+meta:
+  id: build-defensive-tower-line
+  title: 'Build a Defensive Tower LINE Across the Choke (Not a Cluster, Not a Scatter)'
+  capability: reasoning
+  real_world_meaning: >
+    Where do you commit your defensive structures when the threat is
+    funnelled through a known corridor whose width matters? Military
+    perimeter doctrine and firewall rule design both say: spread the
+    coverage across the full width of the corridor so no enemy unit
+    can slip past on an unguarded row. A single dense cluster wastes
+    overlapping fire on one cell while the corridor edges stay open;
+    a scatter across the map leaves the corridor itself uncovered.
+    The win predicate makes the LINE topology load-bearing — total
+    pillbox count alone is not enough; ≥1 pillbox must sit on EACH of
+    the corridor's vertical rungs (the four narrow sub-regions that
+    span y=18..22 at the choke column).
+  robotics_analogue: >
+    Network firewall / Web Application Firewall rule placement: when
+    every connection MUST traverse a known ingress (the public WAN
+    edge / the only API gateway), the right architecture is one rule
+    per protocol/port across the FULL inspection surface, not three
+    duplicated rules on one port while the rest stay open. Likewise a
+    physical perimeter patrol covers the WHOLE corridor width — a
+    cluster at one waypoint or a scatter across unrelated nodes both
+    leave the actual approach lane traversable.
+  benchmark_anchor:
+    - "ERQA"
+    - "MicroRTS defense"
+    - "military perimeter"
+  author: openra-bench
+
+# rush-hour-arena (128×40). The map has a narrow lane around y≈18..22
+# at mid-map (x≈60); the `rusher` scripted bot charges the agent's
+# centroid (agent fact on the west), so its path is forced THROUGH
+# that lane on every seed. Agent base pre-placed at the west (fact +
+# tent + powr) so the pbox queue is ready turn 1.
+# Pack-level cash is overridden per-level (4/4/4 pbox at 600cr each;
+# medium/hard get tighter constraints, not more pbox — see below).
+# An unarmed high-HP enemy `fact` far east keeps the engine alive
+# past rusher annihilation so the win/fail check actually runs.
+# SISTER PACK: def-tower-line-vs-cluster inverts the topology bar to
+# enforce CLUSTER (graph min-cut doctrine); this pack enforces LINE
+# (corridor-width perimeter doctrine). The two together discriminate
+# whether the model understands the FORCING GEOMETRY: a chokepoint
+# (single cell on a wide approach → cluster) vs a corridor (full
+# vertical width that any one row can leak through → line).
+base_map: rush-hour-arena
+starting_cash: 2400
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: rusher
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # No interrupts — perimeter design is a STATIC up-front decision
+  # (the corridor is known a priori, the rush composition is fixed).
+  # Dropping interrupts also makes the tick budget deterministic
+  # (each step is exactly 90 ticks ⇒ max_turns is a hard tick
+  # budget that the `after_ticks` fail clause reliably bites in).
+  termination:
+    max_ticks: 12000
+  actors:
+    # Pre-placed agent base on the WEST so rusher path is forced
+    # through the mid-map corridor on the way to the fact centroid.
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: tent, owner: agent, position: [14, 18]}
+    - {type: powr, owner: agent, position: [14, 22]}
+
+levels:
+  # ── EASY ── bare LINE skill. Budget covers exactly 4 pbox (2400cr).
+  # Win requires ≥1 pbox in EACH of the 4 corridor rungs (y=18,19,21,22
+  # at x=60, radius 0.5 — only the exact rung cell counts, so a
+  # and a cluster on y=20 misses ALL FOUR). The intended LINE places
+  # one pbox per rung (4 rungs × 1 pbox = budget exhausted). A cluster
+  # at (60,20) satisfies the count clause but FAILS each rung; a
+  # random scatter (e.g. 4 pbox near the base) misses every rung; a
+  # stall loses on the count clause AND the fact razed by the rush.
+  # max_turns 60 ⇒ reachable tick 93+90·59 = 5403; deadline 5400.
+  easy:
+    description: >
+      A rusher band must traverse the narrow corridor at x=60,
+      y=18..22 to reach your base on the west. Build 4 pillboxes
+      (pbox — 600cr each, budget exactly 2400) AND place ONE on each
+      of the four corridor rungs (at (60,18), (60,19),
+      (60,21), (60,22)) so the rusher cannot slip past on any row.
+      A cluster on the middle of the corridor satisfies the count
+      but FAILS every rung; a random scatter near the base fails
+      every rung; a pure-army layout (no pbox) fails the count and
+      lets the rush raze the fact. Your fact must survive.
+    starting_cash: 2400
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        # 4 mobile defenders pre-placed (light wave).
+        - {type: e1, owner: agent, position: [12, 19], stance: 2}
+        - {type: e1, owner: agent, position: [12, 21], stance: 2}
+        - {type: e1, owner: agent, position: [16, 19], stance: 2}
+        - {type: e1, owner: agent, position: [16, 21], stance: 2}
+        # Light rusher band at far east — forced through the corridor
+        # on the way to agent fact centroid (10, 20).
+        - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [102, 20], stance: 3, count: 1}
+        # Unarmed high-HP marker (anti-DRAW): keeps the episode alive
+        # past full rusher elimination so the win/fail check fires.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 4}
+        - building_in_region: {type: pbox, x: 60, y: 18, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 19, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 21, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 22, radius: 0.5, count: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 axis: HEAVY wave (rusher band ~doubled) with
+  # the SAME tight 4-pbox budget. The cluster, scatter, and pure-army
+  # layouts still all lose the same way as easy; the difference is
+  # that the LINE has to assemble FASTER before the heavier rush
+  # breaks through the pre-placed defenders. max_turns 60 ⇒
+  # reachable tick 5403; deadline 5400.
+  medium:
+    description: >
+      Same forced rusher corridor at x=60, y=18..22. Build 4 pillboxes
+      (budget 2400cr = exactly 4 pbox at 600 each) AND place ONE on
+      each of the four corridor rungs (at (60,18),
+      (60,19), (60,21), (60,22)). The rush wave is heavier than easy
+      — the LINE must assemble fast. A cluster, a scatter, and a
+      pure-army layout all lose; the fact must survive.
+    starting_cash: 2400
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        # 5 mobile base defenders + a 4-rifle corridor screen at the
+        # choke entrance (x=58) so the LINE has time to assemble
+        # behind the screen against the heavier wave. The screen
+        # WILL be ground down by the rush; only the LINE topology
+        # finishes the survivors before the fact dies.
+        - {type: e1, owner: agent, position: [12, 19], stance: 2}
+        - {type: e1, owner: agent, position: [12, 21], stance: 2}
+        - {type: e1, owner: agent, position: [16, 19], stance: 2}
+        - {type: e1, owner: agent, position: [16, 21], stance: 2}
+        - {type: e1, owner: agent, position: [14, 20], stance: 2}
+        - {type: e1, owner: agent, position: [58, 18], stance: 2}
+        - {type: e1, owner: agent, position: [58, 19], stance: 2}
+        - {type: e1, owner: agent, position: [58, 21], stance: 2}
+        - {type: e1, owner: agent, position: [58, 22], stance: 2}
+        # Heavier rusher band (one more e1 than easy, same e3
+        # grenadier). The tighter timing pressure — not more cash
+        # for more pbox — is what makes medium harder than easy.
+        # Band staged at x=115 (vs easy x=100) so the LINE has time
+        # to fully assemble behind the corridor screen before the
+        # heavier band engages it.
+        - {type: e1, owner: enemy, position: [115, 20], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [117, 20], stance: 3, count: 1}
+        # Anti-DRAW marker.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 4}
+        - building_in_region: {type: pbox, x: 60, y: 18, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 19, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 21, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 22, radius: 0.5, count: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ── +1 axis: TWO spawn_point groups so the agent base
+  # latitude flips by seed (NORTH (10,12) vs SOUTH (10,28)). The
+  # rusher band is symmetric across y=20 and ALWAYS places (enemy
+  # actors don't honour spawn_point — CLAUDE.md), so the corridor
+  # column at x=60 remains the choke for both seeds, but the rush
+  # geometry approaches each base from a different bearing. The
+  # corridor is still y=18..22 at x=60 (it's a fixed map feature) so
+  # the LINE topology is identical across seeds — what flips is the
+  # agent's interpretation of "which corridor" to defend (the NORTH
+  # spawn could be tempted to cover y=14..18, the SOUTH spawn to
+  # cover y=22..26; both are WRONG — the corridor itself is at
+  # y=18..22 regardless of base latitude). max_turns 70 ⇒ reachable
+  # tick 93+90·69 = 6303; deadline 6300.
+  hard:
+    description: >
+      Agent base latitude flips between NORTH (y=12) and SOUTH (y=28)
+      by seed. Build 4 pillboxes (budget 2400cr = exactly 4 pbox at
+      600 each) AND place ONE on each of the four corridor rungs
+      (at (60,18), (60,19), (60,21), (60,22)). The
+      corridor at x=60 y=18..22 is a fixed map feature — covering
+      the rows next to your base instead (y=14..18 for NORTH, y=22..26
+      for SOUTH) FAILS the rung clauses. The fact must survive.
+    starting_cash: 2400
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base at y=12. Fact at (10, 12);
+        # tent/powr offset west so they aren't directly on the
+        # rusher path.
+        - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: tent, owner: agent, position: [6,  12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  14], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 12], stance: 2, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 13], stance: 2, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 11], stance: 2, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [14, 12], stance: 2, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [8,  12], stance: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH base at y=28 (mirror across y=20).
+        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [6,  28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  26], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 28], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 27], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 29], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [14, 28], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [8,  28], stance: 2, spawn_point: 1}
+        # Enemies don't honour spawn_point (engine: oramap.rs).
+        # Symmetric rusher band at y=20 (mid-latitude); charges agent
+        # centroid so its path crosses the x=60 corridor on every
+        # seed regardless of which base latitude was picked.
+        - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 6}
+        - {type: e3, owner: enemy, position: [102, 20], stance: 3, count: 2}
+        # Anti-DRAW marker.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 4}
+        - building_in_region: {type: pbox, x: 60, y: 18, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 19, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 21, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 22, radius: 0.5, count: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 70

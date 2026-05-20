@@ -117,6 +117,14 @@ UPGRADED = [
     # flips per seed ((16,14) for NORTH, (16,28) for SOUTH), so a
     # memorised "always send to (16,14)" cannot generalise.
     "econ-multi-patch-allocation",
+    # Wave-7 econ reasoning: split-routing under heterogeneous
+    # round-trip cost (OR vehicle-routing / SC2 worker-distribution /
+    # M/M/c). Hard defines two agent spawn_point groups (NORTH base
+    # y=14 / SOUTH base y=28) round-robined by seed; four neutral
+    # mines stay fixed but the SPAWN-MATCHED (A,B) pair flips per
+    # seed (NORTH → (16,14)+(80,14); SOUTH → (16,28)+(80,28)), so a
+    # memorised single-pair split cannot generalise.
+    "econ-harvester-pathing-optimization",
     # Group F opening greenfield seed (Wave-4): cold-start from a
     # single MCV with no buildings / no harvester / no income. Hard
     # tier defines 2 agent spawn_point groups (NORTH (20,14) / SOUTH
