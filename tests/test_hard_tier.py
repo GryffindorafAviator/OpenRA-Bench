@@ -915,6 +915,17 @@ UPGRADED = [
     # scout-then-build discipline generalises across spawns but a
     # memorised "scout at y=20" opening cannot.
     "scout-count-defenders",
+    # Wave-8 long-horizon 3-phase macro pack (SC2 macro / military
+    # operational planning / PlanBench long-sequencing anchor). Hard
+    # defines two agent spawn_point groups (NORTH base y=14 / SOUTH
+    # base y=22) round-robined by seed; spawn-matched ore patches at
+    # y=14 and y=22 keep per-spawn harvest throughput symmetric, but
+    # a memorised opening cannot generalise across seeds. Enemies at
+    # the far east always place (enemy actors don't honour
+    # spawn_point — CLAUDE.md); stance:0 (HoldFire) on the kill
+    # targets so the agent's infantry strike force racks up kills
+    # without being attrited in transit.
+    "lh-econ-army-victory",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

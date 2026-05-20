@@ -1,0 +1,287 @@
+# lh-econ-army-victory.yaml
+#
+# REASONING capability — Wave-8 long-horizon 3-phase macro chain:
+#   PHASE 1 (ECON):   accumulate economy_value ≥ M  (cash + resources)
+#   PHASE 2 (ARMY):   own ≥ 6 units total                (force composition)
+#   PHASE 3 (VICTORY):≥ K enemy units killed             (terminal action)
+#
+# The Wave-2 `then:` happened-before composite GATES each phase: the
+# chain only advances once the preceding clause has been observed
+# true at least once. A policy that "skips the econ build-up and
+# pumps army immediately" cannot satisfy phase 1 (M is tuned ABOVE
+# starting_cash, so real harvest income is needed); a policy that
+# "builds econ but never an army" stalls at phase 2; a policy that
+# "builds the army but never engages" stalls at phase 3. Only the
+# intended econ → army → victory chain WINS within the tick budget.
+#
+# Sister pack to `lh-opening-to-tech-to-army` (4-phase macro chain
+# proc → weap → 2tnk → engage). This pack uses the CASH/UNITS/KILLS
+# trio rather than building/tech milestones — the SC2 macro-game /
+# PlanBench long-sequencing anchor of "income → force → victory".
+#
+# Real-world anchors:
+#   - SC2 macro game (canonical income → army → win sequence)
+#   - PlanBench long-sequencing (each stage gates the next)
+#   - Military operational planning: logistics → readiness → action
+#   - Startup ramp: revenue → team → market entry
+#
+# ENGINE NOTES (verified against installed openra_train wheel, post-
+# S0/S1 harvest income — Task #14, scripted run_level seeds 1-4):
+# 1. Pre-placed harv on a near `mine` yields ~95 cr/turn sustained
+#    (economy-harvest-investment ENGINE NOTE #1). Over a 50-turn
+#    window that's ~4750 cr of income, plus the starting cash.
+# 2. Cost table (openra-sim/src/gamerules.rs / game_data.py):
+#       e1   = 100  (prereq tent)         — cheap rifleman
+#       e3   = 300  (prereq tent)         — rocket soldier
+#       powr = 300  pbox = 600  tent = 500
+#       proc = 1400 harv = 1100
+#    A 6-rifleman army at e1=100 costs $600 total — fits inside the
+#    cash that accumulates after M latches.
+# 3. M (economy_value_gte) is set ABOVE starting_cash so phase-1
+#    REQUIRES real harvest income to clear — a policy that races
+#    to spend the starting cash on units cannot satisfy phase-1
+#    without waiting for harvest. This is the "tune so it doesn't
+#    pass without harvest" requirement (per the wave-8 spec).
+# 4. The persistent unarmed enemy `fact` marker at the far east
+#    prevents engine auto-`done` via the all-enemies-eliminated
+#    path (CLAUDE.md engine-auto-done footgun). Killable enemy
+#    riflemen near the fact provide phase-3 kill targets.
+# 5. Tick alignment: engine advances ~90 ticks per decision turn,
+#    so within_ticks ≤ 93 + 90·(max_turns − 1) is required
+#    (CLAUDE.md). fail_condition uses `after_ticks: T+1` so a
+#    non-finisher LOSES (never draws).
+# 6. `building_count_gte: {type: fact, n: 1}` in fail_condition
+#    catches the agent base getting razed (a real LOSS path);
+#    the `after_ticks` clause covers the timeout LOSS path.
+# 7. `spawn_point` filter applies ONLY to AGENT actors (CLAUDE.md
+#    engine footgun); enemy/neutral always place. Hard tier's two
+#    spawn groups duplicate the base buildings at NORTH (y=14) and
+#    SOUTH (y=22) with paired ore patches so per-spawn throughput
+#    is symmetric.
+#
+# Validate (no engine):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-econ-army-victory.yaml
+
+meta:
+  id: lh-econ-army-victory
+  title: 'Econ → Army → Victory — Strict 3-Phase Macro Chain'
+  capability: reasoning
+  real_world_meaning: >
+    A long single-episode macro plan whose final win depends on three
+    sequenced milestones: first accumulate enough economy_value
+    (cash + uncashed resources) via harvest income; then assemble a
+    real fighting force (≥6 own units); then commit them to terminal
+    action (≥K enemy kills). The Wave-2 `then:` composite enforces
+    happened-before sequencing — pre-spending all cash on an army
+    before income tops up the M bar cannot complete phase 1, and
+    building economy without ever fielding/attacking with an army
+    cannot complete phases 2-3. Only the intended econ → army →
+    victory chain WINS inside the tick budget.
+  robotics_analogue: >
+    Long-horizon agentic operation with strict stage gating in an
+    industrial / military context: revenue / fuel / logistics must
+    clear a readiness bar BEFORE a fleet is provisioned, which must
+    be provisioned BEFORE a terminal action (sortie / market entry /
+    mission execution). The credit at episode end requires each
+    stage to have happened, in order, inside one budget window —
+    skipping any stage forfeits the chain.
+  benchmark_anchor:
+    - "SC2 macro game (income → army → win)"
+    - "military operational planning (logistics → readiness → action)"
+    - "PlanBench long-sequencing"
+    - "startup ramp: revenue → team → market entry"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Loose-bar rehearsal of the 3-phase chain: generous tick budget,
+  # modest M and K. The chain still bites: skip econ ⇒ M unmet
+  # (cash spent on units, can't refill past M without harvest time);
+  # skip army ⇒ own_units never hits 6; skip victory ⇒ no kills.
+  # Only the phased play WINS.
+  easy:
+    description: >
+      Pre-placed: agent base (fact + proc + powr + tent) at the west
+      with one harvester on one near ore patch (~95 cr/turn income).
+      Far-east enemy: an unarmed `fact` marker (so the episode does
+      not auto-terminate) plus two stance:0 riflemen as kill targets.
+      Three phases IN STRICT ORDER (`then:` composite):
+        1. ECON  — economy_value (cash + resources) ≥ 1500
+        2. ARMY  — own ≥ 6 units total
+        3. VICTORY — kill ≥ 2 enemy units
+      Build infantry (`build('e1')`, $100 each) once cash accrues,
+      then `attack_move` them east onto the enemy riflemen.
+      Stalling LOSES on the clock (army never reaches 6); skipping
+      the econ phase and pumping units LOSES because M cannot be
+      met without harvest time; building only econ LOSES because
+      the army/kills bars never latch. Within tick 4500.
+    starting_cash: 800
+    overrides:
+      actors:
+        # Agent base: fact + proc + powr + tent + 1 harv on 1 near
+        # mine. tent is pre-placed so e1/e3 builds are gated only
+        # by cash, not by an extra tech step.
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: tent, owner: agent, position: [10, 22]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        # Enemy: persistent unarmed fact at the far east keeps the
+        # engine from auto-`done`ing on all-enemies-eliminated. Two
+        # stance:0 riflemen near the fact are the kill targets.
+        - {type: fact, owner: enemy, position: [115, 30]}
+        - {type: e1,   owner: enemy, position: [80, 30], stance: 0}
+        - {type: e1,   owner: enemy, position: [80, 32], stance: 0}
+    win_condition:
+      all_of:
+        - then:
+            id: econ-army-victory-easy
+            clauses:
+              - {economy_value_gte: 1500}                 # P1: econ
+              - {own_units_gte: 6}                        # P2: army
+              - {units_killed_gte: 2}                     # P3: victory
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: tighter M (2200) + K=3 + tighter clock
+  # (50 turns). M is tuned so the agent needs ~17 turns of harvest
+  # income on top of the starting cash to clear it. One more enemy
+  # rifleman (3 vs 2 on easy) tightens the K bar.
+  medium:
+    description: >
+      Pre-placed: agent base (fact + proc + powr + tent) at the west
+      with one harvester on one near ore patch (~95 cr/turn income).
+      Enemy: unarmed `fact` marker + three stance:0 riflemen kill
+      targets at (80, 28..32). Three phases IN STRICT ORDER
+      (`then:` composite):
+        1. ECON  — economy_value (cash + resources) ≥ 2200
+        2. ARMY  — own ≥ 6 units total
+        3. VICTORY — kill ≥ 3 enemy units
+      Stalling LOSES on the clock; skipping econ and pumping units
+      cannot reach M because starting_cash (600) plus the cash that
+      survives a 6×e1 spend is well below 2200 — only ~17 turns of
+      harvest income clears it. Pure-econ LOSES because the army/
+      kills bars never latch. Within tick 4500.
+    starting_cash: 600
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: tent, owner: agent, position: [10, 22]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: fact, owner: enemy, position: [115, 30]}
+        - {type: e1,   owner: enemy, position: [80, 30], stance: 0}
+        - {type: e1,   owner: enemy, position: [80, 32], stance: 0}
+        - {type: e1,   owner: enemy, position: [80, 28], stance: 0}
+    win_condition:
+      all_of:
+        - then:
+            id: econ-army-victory-medium
+            clauses:
+              - {economy_value_gte: 2200}
+              - {own_units_gte: 6}
+              - {units_killed_gte: 3}
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: ≥2 spawn_point groups (NORTH y=14 /
+  # SOUTH y=22) round-robined by seed. The base layout (and the
+  # spawn-matched ore patch) flips per seed — a memorised opening
+  # cannot generalise. Larger M (2500) and longer clock (60 turns)
+  # match the extra travel-time cost from the off-axis spawn.
+  hard:
+    description: >
+      Pre-placed: agent base (fact + proc + powr + tent + 1 harv on
+      a near mine) at the west, round-robined between a NORTH (y=14)
+      and SOUTH (y=22) layout per seed. Enemy: unarmed `fact` marker
+      + four stance:0 riflemen kill targets at (80, 28..34). Three
+      phases IN STRICT ORDER (`then:` composite):
+        1. ECON  — economy_value (cash + resources) ≥ 2500
+        2. ARMY  — own ≥ 6 units total
+        3. VICTORY — kill ≥ 3 enemy units
+      The seed-varied spawn means a memorised "place units at
+      (10,18)" opening misses one of the two spawn groups. Stalling
+      LOSES; pre-spending all cash on units cannot clear M (needs
+      ~20+ turns of harvest income on top of starting_cash); pure-
+      econ LOSES because army/kills never latch. Within tick 5400.
+    starting_cash: 500
+    overrides:
+      actors:
+        # NORTH base spawn (spawn_point 0)
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 14], spawn_point: 0}
+        # SOUTH base spawn (spawn_point 1)
+        - {type: fact, owner: agent, position: [10, 22], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 22], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 22], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 22], spawn_point: 1}
+        # Spawn-matched ore patches (neutral; always place regardless
+        # of spawn_point — CLAUDE.md engine footgun). The harv of the
+        # active spawn cycles to its own matched patch.
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Enemy: persistent unarmed fact at the far east + 4 stance:0
+        # riflemen kill targets. Enemies always place (no spawn_point
+        # honoured); stance:0 means they HoldFire so the agent's
+        # offensive force can engage and rack up kills without being
+        # picked off in transit (the e1 vs e1 attrition is otherwise
+        # very slow and the budget can run out before K is met).
+        - {type: fact, owner: enemy, position: [115, 30]}
+        - {type: e1,   owner: enemy, position: [80, 30], stance: 0}
+        - {type: e1,   owner: enemy, position: [80, 32], stance: 0}
+        - {type: e1,   owner: enemy, position: [80, 28], stance: 0}
+        - {type: e1,   owner: enemy, position: [80, 34], stance: 0}
+    win_condition:
+      all_of:
+        - then:
+            id: econ-army-victory-hard
+            clauses:
+              - {economy_value_gte: 2500}
+              - {own_units_gte: 6}
+              - {units_killed_gte: 3}
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
