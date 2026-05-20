@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.pairwise import pairwise_elo, run_pairwise
 
 PACKS = Path(__file__).parent.parent / "openra_bench" / "scenarios" / "packs"

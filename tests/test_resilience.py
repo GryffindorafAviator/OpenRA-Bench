@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.resilience import (
     BudgetExceeded,
     CostMeter,

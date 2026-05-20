@@ -17,6 +17,7 @@ import json
 
 import pytest
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.goal_tracker import leaf_progress, reward_vector, turn_goal
 from openra_bench.providers import ChatReply, OpenAICompatibleProvider, ProviderConfig
 from openra_bench.scenarios.win_conditions import WinContext

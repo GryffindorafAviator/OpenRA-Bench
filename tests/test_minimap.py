@@ -9,6 +9,7 @@ import io
 
 import pytest
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.minimap import render_png_b64
 
 PIL = pytest.importorskip("PIL")

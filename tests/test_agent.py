@@ -15,6 +15,7 @@ import pytest
 
 ot = pytest.importorskip("openra_train", reason="Rust env wheel not installed")
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.agent import ModelAgent, build_briefing, _to_commands, _tool_schemas
 from openra_bench.providers import ChatProvider, ChatReply, ProviderConfig
 

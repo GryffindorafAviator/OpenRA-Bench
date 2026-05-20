@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.run_eval import _load_dotenv
 
 

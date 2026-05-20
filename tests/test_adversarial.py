@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.adversarial import (
     RUNGS,
     adversarial_summary,

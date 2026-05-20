@@ -10,6 +10,7 @@ import zipfile
 
 import pytest
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.mapgen import materialize, resolve_base_map, spec_id
 from openra_bench.scenarios import load_pack
 from openra_bench.scenarios.loader import PACKS_DIR, compile_level, resolve_map_path
