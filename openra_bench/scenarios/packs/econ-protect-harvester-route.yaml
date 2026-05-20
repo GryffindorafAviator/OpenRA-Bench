@@ -1,0 +1,367 @@
+# econ-protect-harvester-route — defend the harv supply line en route.
+#
+# ACTION capability — convoy / supply-line protection (military
+# "protect the convoy on the road, not at the warehouse" doctrine;
+# SC2 harvester-harass defense; supply-line patrolling anchor).
+#
+# A single ore harvester (harv) commutes long-distance proc↔mine.
+# The proc is at the west base; the ore patch is FAR east on the
+# same y-band (~50 cells away). The raider scripted bot (worker-
+# priority — see openra-sim/src/scripted_bot.rs / botgen.py) drives
+# a LIGHT tank (1tnk) straight at the harv from the east — it
+# intercepts the harv MID-ROUTE, far from base sight, while the
+# harv is on its way to refine. Two pre-placed 2tnk defenders sit
+# at the base on stance:3 (AttackAnything / Hunt) so they auto-
+# engage anything in sight — but base sight (~6 cells around y=20)
+# does not cover the kill zone (raider engages the harv at
+# x≈40..50). The defenders MUST be MOVED east along the route to
+# INTERCEPT the raider before it reaches the commuting harv.
+# Standing the defenders idle at base ⇒ raider reaches harv ⇒
+# `not unit_type_count_gte:{harv,1}` fires ⇒ LOSS.
+#
+# Real-world anchor: military convoy protection on the road
+# (escorts ride WITH the convoy on the route, not at the depot);
+# SC2 harvester-harass defense (defenders must contest the harass
+# vector, not turtle at the main); supply-line doctrine (a supply
+# line is only safe if patrolled along its length).
+#
+# Discrimination (the four-script bar — scripted, no model):
+#   • stall (observe-only): defenders sit idle at base AND the
+#     harv is never given a harvest order — no income at all; the
+#     within_ticks 4500 (easy) / 5400 (medium/hard) bar lapses on
+#     the after_ticks fail clause → timeout LOSS. (The harv itself
+#     also dies because the raider beelines on it; the LOSS is
+#     hit by whichever clause fires first.)
+#   • defenders-stand-at-base (the lazy "turtle" inversion the
+#     scenario is engineered against): `harvest` IS re-issued to
+#     the harv but the defenders are explicitly held at base; the
+#     defender sight envelope at the base column does not reach
+#     the kill zone at x=40..50; the raider kills the commuting
+#     harv on the route around tick ~900 (turn ~11) → harv count
+#     drops to 0 → `not unit_type_count_gte:{harv,1}` fires → LOSS.
+#   • intended intercept-on-route: defenders attack_move east
+#     along the harv's commute axis (the y-band of the agent's
+#     own harv) — they meet the raider mid-route (around x=45..50),
+#     engage on stance:3 (2× 2tnk dps44 vs 1tnk hp 230 → 5 ticks),
+#     destroy the raider before it reaches the harv. The harv
+#     continues to commute; throughput accumulates at ~500 cr per
+#     round trip (~20 turns); the economy bar clears before the
+#     deadline → WIN.
+#
+# Why this is NOT economy-harvest-investment / mid-economy-under-fire:
+#   • economy-harvest-investment is a build-order/macroeconomic
+#     decision (when to expand harv count) — no live combat.
+#   • mid-economy-under-fire stages the kill zone INSIDE base sight
+#     (patches at x=22 adjacent to the defender ring at x=26) so
+#     defenders auto-engage from spawn without moving — the
+#     "ring the patch with defenders" intent is sustained
+#     throughput, not en-route intercept. THIS pack stages the
+#     kill zone WAY beyond base sight (raider intercepts harv at
+#     x≈45..50 — the harv commutes ~50 cells one-way to the far
+#     patch) so the "stay at base" failure mode is structurally
+#     forced and the LOAD-BEARING action is moving the defenders
+#     east onto the route.
+#
+# Engine notes (verified 2026-05-20 with scripted run_level):
+#   • The raider is a 1tnk (light tank, hp 230, dps14, rng 4c)
+#     rather than a 2tnk (hp 400). A 2tnk raider proves uncatchable
+#     by 2× 2tnk defenders racing along the same y-band: the harv
+#     dies in ~90 ticks (~1 decision turn) of solo raider fire,
+#     and the defenders cannot kill a hp 400 target inside that
+#     window even at point-blank. With a 1tnk raider, the 2tnk
+#     defender pair (dps44 combined) kills the 230-hp raider in
+#     ~5 ticks once in range — leaving the harv intact.
+#   • Hard tier uses ONE central 1tnk raider at y=20 (between the
+#     two spawn latitudes) rather than two on-latitude raiders.
+#     With two raiders both bee-lining on the single active harv,
+#     the harv dies at ~turn 6 even with perfect intercept —
+#     two attackers vs one defender pair is structurally
+#     unwinnable on this geometry. A single central raider keeps
+#     the same intercept-on-route capability test while staying
+#     solvable: the raider beelines toward whichever harv exists
+#     (on y=14 or y=26 per seed), and the on-spawn defender pair
+#     must move east along ITS OWN y-band to intercept.
+#   • Tick budget: max_turns=50 (easy) ⇒ ceiling tick 4503;
+#     within_ticks 4500 and after_ticks 4501 both fit; max_turns
+#     60 (medium/hard) ⇒ ceiling 5403; within_ticks 5400 and
+#     after_ticks 5401 both fit. Stall hits after_ticks and LOSES,
+#     not draws.
+#   • CLAUDE.md footgun: enemy clusters at (50,20) silently FAIL
+#     to place — every enemy actor cell avoids that exact column.
+#   • Persistent far enemy `fact` at (120,20) keeps the episode
+#     alive past the raider being destroyed (no DRAW collapse on
+#     auto-done).
+#   • stance:3 (AttackAnything / Hunt) for the defenders is what
+#     this pack specifically tests: stance:1 (ReturnFire) means
+#     defenders never engage because the raider attacks the harv
+#     only and never fires on the tanks — so stance:1 collapses to
+#     "no engagement possible" regardless of defender position.
+#     stance:3 makes the auto-engage real WHEN defenders are in
+#     SIGHT of the raider; the agent's load-bearing decision is
+#     "drive the defenders into raider sight on the route".
+#   • Hard tier defines 2 agent spawn_point groups (NORTH route
+#     y=14 / SOUTH route y=26) round-robined by seed. The
+#     defender pair must intercept on the ACTIVE base's y-band —
+#     the memorisable "send defenders east on y=20" opening from
+#     easy/medium does NOT generalise to either hard spawn.
+
+meta:
+  id: econ-protect-harvester-route
+  title: 'Protect the Harvester Route — Intercept Raiders on the Supply Line'
+  capability: action
+  real_world_meaning: >
+    Defend a long-distance supply line by intercepting the threat
+    ON the route, not at the depot. A single harvester commutes
+    far between refinery and ore patch; a worker-priority raider
+    drives at it from the far end. Defenders pre-placed at the
+    base have no line of sight to the mid-route kill zone — they
+    must be moved out along the harvester's commute axis to
+    intercept the raider before it reaches the harvester.
+    Stalling or holding defenders at base lets the raider kill
+    the harvester on the road; the income bar is unmet; the run
+    loses.
+  robotics_analogue: >
+    Convoy / supply-line protection on the road. The protective
+    detail rides WITH the convoy along the route, not at the
+    warehouse: a threat that enters the route's mid-span and the
+    escorts that stayed at the depot are out of contact and out
+    of position. The supply line is only safe if patrolled along
+    its full length.
+  benchmark_anchor:
+    - "SC2 harass defense"
+    - "military convoy protection"
+    - "supply-line doctrine"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+starting_cash: 0  # all income must come from harvesting
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: raider}
+  tools: [observe, harvest, move_units, attack_unit, attack_move, stop]
+  planning: true
+  # Interrupts LEFT DISABLED — a long-distance commute under
+  # raider pressure would trip enemy_unit_spotted repeatedly and
+  # the per-turn tick rate would collapse via step_until_event
+  # (~5 ticks per interrupt). The model still sees the full per-
+  # turn state on every decision boundary; reactive micro is not
+  # the controlled capability of this pack — convoy-route
+  # LEADERSHIP (drive escorts onto the route, not idle at base) is.
+  interrupts: {}
+  termination: {max_ticks: 7000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare skill: ONE harvester commutes proc↔mine across ~50 cells
+  # of exposed route. ONE 1tnk raider drives at it from the east.
+  # Two 2tnk defenders start at the base on stance:3 (auto-engage
+  # ANYTHING in sight). The agent must move the defenders east
+  # onto the route to intercept the raider before it reaches the
+  # harv. Economy bar is gentle (1000 EV = 2 round-trip refines).
+  easy:
+    description: >
+      A single ore harvester at your base (8,20) must commute east
+      to the FAR ore patch (mine at (60,20)) and refine back to
+      the refinery (proc at (12,20)). An enemy light tank (raider
+      bot, worker-priority — drives straight at your harvester) is
+      staged at (90,20). Two 2tnk defenders are pre-placed at your
+      base on AttackAnything stance, but base sight (~6 cells)
+      does NOT cover the mid-route kill zone around x=40..50 where
+      the raider intercepts the harvester. Win when economy value
+      reaches 1000 AND your harvester is alive AND your factory
+      and refinery are intact, before tick 4500. Standing the
+      defenders idle at base lets the raider kill the commuting
+      harvester on the route; intended play is to MOVE the
+      defenders east along the harvester's lane to intercept the
+      raider before contact.
+    starting_cash: 0
+    overrides:
+      actors:
+        # Agent base — fact + proc + powr. fact is the build seed
+        # marker; proc is the refinery (the harv refines its
+        # loads here); powr keeps the base powered. The pack does
+        # not require building, but a powered base keeps the
+        # harvest loop behaving canonically.
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: proc, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        # The single harvester — pre-placed adjacent to the proc.
+        # The intended `harvest` order commutes it to (60,20) and
+        # back; one round trip yields ~500 cr.
+        - {type: harv, owner: agent, position: [14, 20]}
+        # Two defender 2tnks at the base on stance:3
+        # (AttackAnything / Hunt). stance:3 is REQUIRED — stance:1
+        # (ReturnFire) means the defenders never engage because
+        # the raider attacks the harv only and never fires on the
+        # defenders. With stance:3 the defenders auto-engage the
+        # raider WHEN they're in sight of it; the agent's load-
+        # bearing decision is moving them onto the route.
+        - {type: 2tnk, owner: agent, position: [15, 19], stance: 3}
+        - {type: 2tnk, owner: agent, position: [15, 21], stance: 3}
+        # Neutral ore patch — placed FAR east so the commute is
+        # long (~50 cells one-way) and the kill zone is well
+        # beyond base sight.
+        - {type: mine, owner: neutral, position: [60, 20]}
+        # Raider 1tnk staged east of the patch. The `raider` bot
+        # (botgen.py) targets the nearest harv; this tank drives
+        # west at the commuting harv and intercepts around
+        # x=45..50. 1tnk (hp 230, dps 14) is the right weight
+        # class — a 2tnk raider (hp 400) defeats the 2× 2tnk
+        # defender pair in the inevitable mid-route brawl (the
+        # harv dies before the defenders kill the heavier raider).
+        - {type: 1tnk, owner: enemy, position: [90, 20]}
+        # Persistent far enemy fact — engine auto-done mitigation
+        # (the raider being destroyed must not collapse the run
+        # to DRAW before the economy bar evaluates).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 1000}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: fact}
+        - {has_building: proc}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: fact}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: TIGHTER bar (1500 EV = 3 round trips) so the harv
+  # must complete several uninterrupted round trips — defenders
+  # idle at base never engage (sight envelope doesn't reach the
+  # kill zone at x=40..50) and the raider kills the harv on the
+  # route. The intended intercept-on-route policy meets the raider
+  # on the lane and kills it before contact; the harv then cycles
+  # uninterrupted for the rest of the budget.
+  medium:
+    description: >
+      Same setup as easy — one harvester commuting between proc
+      (12,20) and the far ore patch (mine at (60,20)), one
+      raider light tank driving at the harvester from the east
+      (90,20), two pre-placed 2tnk defenders at the base on
+      AttackAnything stance. Bar tightened to economy value 1500
+      (the harvester must complete several uninterrupted round
+      trips) within tick 5400. Standing the defenders idle at
+      base lets the raider intercept the harvester on the route;
+      the income loop breaks and the bar stays unmet. The
+      intended play is to attack_move the defenders east along
+      the harvester's lane and intercept the raider on the road.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: proc, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: 2tnk, owner: agent, position: [15, 19], stance: 3}
+        - {type: 2tnk, owner: agent, position: [15, 21], stance: 3}
+        - {type: mine, owner: neutral, position: [60, 20]}
+        - {type: 1tnk, owner: enemy, position: [90, 20]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 1500}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: fact}
+        - {has_building: proc}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: fact}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis vs medium: TWO seed-driven AGENT spawn_point groups
+  # (NORTH supply route y=14 vs SOUTH supply route y=26 — round-
+  # robined per seed). Each spawn has its OWN harv, proc,
+  # defenders, AND its OWN ore patch on its OWN y-band; the harv
+  # commutes along its base's latitude. The memorisable "send
+  # defenders east on y=20" opening (the easy/medium latitude)
+  # does NOT match either hard spawn (the active harv is on y=14
+  # or y=26).
+  #
+  # The raider is a SINGLE central 1tnk at y=20 (between the two
+  # spawn latitudes). It places every seed (enemy actors do NOT
+  # honour spawn_point — CLAUDE.md oramap.rs footgun) and
+  # beelines toward whichever harv exists (on the seed-chosen
+  # y-band); the on-spawn defender pair must intercept on that
+  # SAME y-band, not the central y=20 corridor where the raider
+  # starts. A second raider would make the geometry unwinnable
+  # with only 2 defenders per spawn (verified — see ENGINE
+  # NOTES); the single-raider design preserves the "intercept-
+  # on-route" capability test while keeping the bar reachable.
+  hard:
+    description: >
+      Tougher version: TWO possible base orientations — NORTH
+      supply route (base at y=14) OR SOUTH supply route (base at
+      y=26), chosen by seed for anti-memorisation. Each
+      orientation has its OWN harvester commuting between its
+      OWN refinery and its OWN ore patch (mine at (60,14) for
+      NORTH; mine at (60,26) for SOUTH). One enemy raider light
+      tank is staged at (90,20) on the central y=20 corridor; it
+      beelines toward whichever harvester exists on the seed-
+      chosen y-band. Two 2tnk defenders are pre-placed at YOUR
+      base on AttackAnything stance. Win when economy value
+      reaches 1500 AND your harvester is alive AND your factory
+      and refinery are intact, before tick 5400. You must move
+      the defenders east along YOUR base's latitude to intercept
+      the raider; driving them to the wrong y-band leaves the
+      active harvester unprotected on its own lane.
+    starting_cash: 0
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH supply route (y=14). All agent
+        # actors (base + harv + defenders) duplicated for the
+        # SOUTH group below at y=26. CLAUDE.md: if ANY agent
+        # actor declares spawn_point, every agent actor WITHOUT
+        # spawn_point is filtered out — so duplicate every
+        # agent-side actor across BOTH spawn groups.
+        - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [15, 13], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [15, 15], stance: 3, spawn_point: 0}
+        # spawn_point 1 — SOUTH supply route (y=26). Mirrored
+        # base + harv + defenders on the south latitude.
+        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [15, 25], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [15, 27], stance: 3, spawn_point: 1}
+        # Neutral ore patches — one per route latitude. Both
+        # place every seed (mine is neutral, not agent-side, so
+        # the spawn_point filter only applies to OWN/agent
+        # actors).
+        - {type: mine, owner: neutral, position: [60, 14]}
+        - {type: mine, owner: neutral, position: [60, 26]}
+        # Single central raider 1tnk at y=20 (between the two
+        # spawn latitudes). It places every seed and beelines on
+        # whichever harv exists (on y=14 or y=26 per seed); the
+        # defender pair must move east on the harv's OWN y-band
+        # to intercept (not the central y=20 where the raider
+        # starts).
+        - {type: 1tnk, owner: enemy, position: [90, 20]}
+        # Persistent far enemy fact — engine auto-done mitigation.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 1500}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: fact}
+        - {has_building: proc}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: fact}}
+    max_turns: 60

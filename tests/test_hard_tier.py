@@ -510,6 +510,7 @@ UPGRADED = [
     # (SC2 harass defense / military convoy protection / supply-line
     # doctrine anchor). A single harv commutes proc↔mine on a long
     # exposed route; raider 2tnks specifically target the harv.
+    # exposed route; a `raider` 1tnk specifically targets the harv.
     # Defenders at base never engage (raider intercepts harv beyond
     # base sight); intended play is to move escorts east to intercept
     # on the route. Hard tier defines two agent spawn_point groups
@@ -680,6 +681,11 @@ UPGRADED = [
     # memorised "always flank via the north" opening cannot
     # generalise across seeds.
     "combat-prevent-retreat",
+    # a single central raider at y=20 always places (enemy actors
+    # don't honour spawn_point — CLAUDE.md) and beelines on whichever
+    # harv exists, so each spawn defends its OWN supply lane on its
+    # OWN y-band and a memorised opening cannot generalise.
+    "econ-protect-harvester-route",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
