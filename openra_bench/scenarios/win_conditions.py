@@ -202,7 +202,52 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
 }
 
 LEAF_KEYS = frozenset(_PREDICATES)
-COMPOSITE_KEYS = frozenset({"all_of", "any_of", "not"})
+COMPOSITE_KEYS = frozenset({"all_of", "any_of", "not", "then"})
+
+
+def _then(ctx: WinContext, v: Any) -> bool:
+    """Happened-before composite: each clause must become true IN ORDER
+    over the course of the episode. Stateful: the latch persists on
+    ``signals.then_progress[id]`` so an early clause that stopped being
+    true still counts (analogous to ``waypoint_sequence``).
+
+    YAML form::
+
+        then:
+          id: scout-then-counter            # stable key (per-episode)
+          clauses:
+            - {buildings_discovered_gte: 1}    # FIRST
+            - {unit_type_count_gte: {type: e3, n: 4}}  # THEN
+
+    Satisfied once every clause has been observed-true AT LEAST ONCE,
+    in order. Reaching a later clause without the earlier one being
+    latched does NOT advance — this is what makes "counter chosen
+    AFTER scout" enforceable (vs the stateless ``all_of`` which is
+    satisfied by any state where every clause happens to be true now).
+    """
+    if not isinstance(v, dict):
+        raise ValueError("then: expects a dict with id + clauses")
+    clauses = v.get("clauses") or []
+    if not clauses:
+        return False
+    store = getattr(ctx.signals, "then_progress", None)
+    if store is None or not isinstance(store, dict):
+        store = {}
+        try:
+            ctx.signals.then_progress = store  # type: ignore[attr-defined]
+        except Exception:  # frozen/stub signals in unit tests
+            pass
+    key = str(v.get("id", id(v)))
+    idx = int(store.get(key, 0))
+    # Advance through every consecutive clause currently satisfied
+    # (typically ≤1 per evaluation, like waypoint_sequence).
+    while idx < len(clauses):
+        if WinCondition(**clauses[idx]).evaluate(ctx):
+            idx += 1
+        else:
+            break
+    store[key] = idx
+    return idx >= len(clauses)
 
 
 class WinCondition(BaseModel):
@@ -241,6 +286,8 @@ class WinCondition(BaseModel):
             return any(WinCondition(**c).evaluate(ctx) for c in node["any_of"])
         if "not" in node:
             return not WinCondition(**node["not"]).evaluate(ctx)
+        if "then" in node:
+            return _then(ctx, node["then"])
         return all(_PREDICATES[k](ctx, v) for k, v in node.items())
 
 

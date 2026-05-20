@@ -131,6 +131,12 @@ class EpisodeSignals:
     # waypoint_sequence's ordered-visit progress, keyed by sequence id).
     # Reset for free: EpisodeSignals is reconstructed each episode.
     seq_progress: dict = field(default_factory=dict)
+    # Per-episode latch for the `then:[A,B]` happened-before composite
+    # (clauses-satisfied-so-far index, keyed by the `then.id`). Lets a
+    # scenario require "scout → THEN commit counter" instead of
+    # ``all_of`` which is satisfied by any state where both happen to
+    # be true. See win_conditions._then.
+    then_progress: dict = field(default_factory=dict)
     # Per-episode tool-use accounting for the strict-toolban / procedural-
     # compliance family. tools_called counts each tool name the agent
     # invoked this episode; tool_violations counts how many of those calls

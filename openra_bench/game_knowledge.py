@@ -259,6 +259,19 @@ def _describe(node: Any, join: str = " AND ", coords: str = "exact") -> str:
                 else f"fewer than {n} of your units remain"
             )
         return "NOT (" + _describe(inner, coords=coords) + ")"
+    if "then" in node:
+        # The happened-before composite. Read each clause as a stage
+        # in an enforced ordered chain.
+        v = node["then"] or {}
+        clauses = v.get("clauses") or []
+        if not clauses:
+            return "(empty then:)"
+        return (
+            "in this exact order: "
+            + " → THEN → ".join(
+                _describe(c, coords=coords) for c in clauses
+            )
+        )
     return join.join(_leaf_phrase(k, v, coords) for k, v in node.items())
 
 
