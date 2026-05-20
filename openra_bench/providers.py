@@ -74,6 +74,12 @@ class ProviderConfig:
     #                            "allow_fallbacks": True}}
     # (premium/paid routing also needs account credits).
     extra_body: dict = field(default_factory=dict)
+    # Streaming: some models (notably together.ai's Qwen3.6-Plus and
+    # other newer ones) refuse non-streaming requests with
+    # `streaming_required` 400. Set True to send `"stream": true` and
+    # accumulate the SSE chunks into a single ChatReply. The non-
+    # streaming path is the default for backward compatibility.
+    stream: bool = False
     # Resilience (real OpenRouter runs): bounded retry, throttle, price.
     max_retries: int = 5
     retry_base_s: float = 1.0
@@ -198,14 +204,134 @@ class OpenAICompatibleProvider(ChatProvider):
         url = f"{cfg.resolved_base_url()}/chat/completions"
 
         self._rl.acquire()
-        resp = retry_call(
-            lambda: self._post_once(url, headers, body), self._policy
-        )
-        reply = self._reply_from_data(resp.json())
+        if cfg.stream:
+            body["stream"] = True
+            # together.ai gates usage emission on this flag (otherwise
+            # usage is null in streaming mode → cost-meter sees zero).
+            body.setdefault(
+                "stream_options", {"include_usage": True}
+            )
+            reply = retry_call(
+                lambda: self._stream_once(url, headers, body), self._policy
+            )
+        else:
+            resp = retry_call(
+                lambda: self._post_once(url, headers, body), self._policy
+            )
+            reply = self._reply_from_data(resp.json())
         u = reply.usage or {}
         self._cost.add(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
         self._cost.check()  # raises BudgetExceeded → evaluate finalizes
         return reply
+
+    def _stream_once(self, url, headers, body) -> ChatReply:
+        """Streaming POST: accumulate SSE chunks into a single ChatReply.
+
+        OpenAI's stream format yields chunks with `choices[0].delta`
+        containing partial `content`, partial `tool_calls`, and
+        eventually `finish_reason`. Tool-call `function.arguments`
+        arrives as a stream of JSON-string fragments that must be
+        concatenated per `index`. The final chunk (with
+        `stream_options: include_usage`) carries the usage dict.
+        """
+        from .resilience import FatalProviderError
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        # tool_calls accumulator keyed by delta.tool_calls[i].index
+        # — providers stream calls in any interleaving; we re-assemble
+        # by index, then materialise to a list in index order.
+        tcs_acc: dict[int, dict[str, Any]] = {}
+        usage: dict[str, int] | None = None
+        finish_reason: str | None = None
+
+        try:
+            with self._client.stream(
+                "POST", url, headers=headers, json=body
+            ) as resp:
+                if resp.status_code >= 400:
+                    body_text = resp.read().decode("utf-8", errors="replace")
+                    ra = resp.headers.get("retry-after")
+                    try:
+                        retry_after = float(ra) if ra is not None else None
+                    except ValueError:
+                        retry_after = None
+                    transient = self._policy.is_transient_status(
+                        resp.status_code
+                    )
+                    cls = RuntimeError if transient else FatalProviderError
+                    exc = cls(
+                        f"{resp.status_code} from provider: "
+                        f"{body_text[:800]}"
+                    )
+                    exc.transient = transient  # type: ignore[attr-defined]
+                    exc.retry_after = retry_after  # type: ignore[attr-defined]
+                    raise exc
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line[5:].lstrip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+                    for ch in chunk.get("choices") or []:
+                        d = ch.get("delta") or {}
+                        if d.get("content"):
+                            content_parts.append(d["content"])
+                        # vLLM / DeepSeek-style reasoning channel
+                        rc = d.get("reasoning_content") or d.get("reasoning")
+                        if rc:
+                            reasoning_parts.append(
+                                rc if isinstance(rc, str) else str(rc)
+                            )
+                        for tc in d.get("tool_calls") or []:
+                            idx = tc.get("index", 0)
+                            slot = tcs_acc.setdefault(
+                                idx, {"id": "", "type": "function",
+                                      "function": {"name": "",
+                                                   "arguments": ""}}
+                            )
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["function"]["name"] = fn["name"]
+                            if fn.get("arguments") is not None:
+                                slot["function"]["arguments"] += fn[
+                                    "arguments"
+                                ]
+                        if ch.get("finish_reason"):
+                            finish_reason = ch["finish_reason"]
+        except httpx.TimeoutException as e:
+            e.transient = True  # type: ignore[attr-defined]
+            e.retry_after = None  # type: ignore[attr-defined]
+            raise
+        except httpx.TransportError as e:
+            e.transient = True  # type: ignore[attr-defined]
+            e.retry_after = None  # type: ignore[attr-defined]
+            raise
+
+        # Re-pack into the non-streaming response shape and re-use
+        # the existing _reply_from_data parser (which already handles
+        # tool_call argument JSON-decoding).
+        tool_calls_list = [tcs_acc[i] for i in sorted(tcs_acc)]
+        message: dict[str, Any] = {"role": "assistant"}
+        if content_parts:
+            message["content"] = "".join(content_parts)
+        if tool_calls_list:
+            message["tool_calls"] = tool_calls_list
+        if reasoning_parts:
+            message["reasoning"] = "".join(reasoning_parts)
+        data = {
+            "choices": [{"message": message, "finish_reason": finish_reason}],
+            "usage": usage,
+        }
+        return self._reply_from_data(data)
 
     # Keys the OpenAI Chat Completions wire format accepts per message.
     # `history` carries extra playback-only keys (notably "reasoning");
@@ -295,6 +421,13 @@ def make_provider(cfg: ProviderConfig, *, rate_limiter=None,
     if cfg.provider == "bedrock":
         return BedrockProvider(cfg)
     if cfg.provider in ("openai", "vllm", "openrouter", "together"):
+        # together.ai's newer Qwen3.x and Llama-3.x families gate on
+        # streaming (`streaming_required` 400 in non-stream mode); flip
+        # the default on for that provider so the SSE-accumulating path
+        # in OpenAICompatibleProvider takes over. Users can still
+        # force-disable via cfg.stream=False at construction.
+        if cfg.provider == "together" and cfg.stream is False:
+            cfg.stream = True
         return OpenAICompatibleProvider(
             cfg, rate_limiter=rate_limiter, cost_meter=cost_meter
         )
