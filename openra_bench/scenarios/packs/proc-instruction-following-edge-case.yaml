@@ -1,0 +1,245 @@
+# proc-instruction-following-edge-case — IFBench conditional / negative-
+# instruction adherence (selective-action discipline).
+#
+# The mission brief carries an EXPLICIT CONDITIONAL RULE — "do X, but
+# NOT Y" — and the bench measures whether the agent honours the
+# carve-out. The intended capability is *selective action*: identify
+# the units the instruction targets, act on those, and LEAVE THE OTHER
+# UNITS WHERE THEY STARTED. Touching the prohibited group at all
+# (even moving them a single cell) is a procedural violation and
+# fails the mission outright, regardless of what the jeeps achieve.
+#
+# Concretely: the agent owns a mixed column — JEEPS and MEDIUM TANKS
+# (2tnk) — at the west edge (x=8, y∈[18..22]). The brief says:
+#   "Move the JEEP units to (90, 20). Do NOT move the TANK units."
+# The win predicate uses the type-filtered region predicate
+# `units_of_type_in_region_gte` to check BOTH halves of the
+# instruction simultaneously:
+#
+#   1. ≥3 JEEPS in region around (90, 20) — the positive instruction.
+#   2. ≥3 TANKS still in region around (8, 20) — the negative
+#      instruction (the tanks must remain at their start).
+#
+# Both clauses must hold at the same observation tick — a "move tanks
+# then later return them" play is structurally hard within the budget
+# and is the wrong skill anyway (the brief forbade the move). The
+# failure side mirrors clause 2 as a `not units_of_type_in_region_gte`
+# clause so a single tank dragged out of the start cluster trips fail
+# IMMEDIATELY (no need to wait for the deadline). This is the
+# IFBench-style "instruction-precision" teeth: violation is detected
+# the moment the agent acts on the prohibited group.
+#
+# Failure modes (all real, reachable LOSSES; no draw degeneracy):
+#   • STALL (only `observe`): jeeps never reach (90,20); the
+#     within_ticks deadline fires → after_ticks fail.
+#   • MOVE-ALL (the model treats the order as "move everything east"
+#     and ignores the carve-out): the tanks leave the start cluster
+#     within a few turns → `not units_of_type_in_region_gte 2tnk` fail
+#     fires as soon as <3 tanks remain near (8,20). Even if the jeeps
+#     reach (90,20), the run is forfeit — the brief said "do NOT move
+#     the tanks" and the agent moved them.
+#   • TANKS-ONLY (the model fixates on the wrong half — only
+#     tanks moved): the tanks leave the start AND the jeeps never
+#     reach the goal → both fail clauses fire.
+#   • INTENDED (move JEEPS east to (90,20), issue NO order to the
+#     tanks): jeeps arrive on time, tanks remain at start → WIN.
+#
+# Real-world anchor: IFBench / instruction-precision benchmarks
+# ("output only X, do not include Y"); BFCL V4 negative-instruction
+# compliance ("call this tool but DO NOT call that one"); conditional
+# SOP ("perform action A on units of class C, leave class D
+# untouched"); robotic mixed-asset selective-task execution.
+#
+# Distinct from:
+#   • proc-no-attack-passive-only (B0): forbids a tool entirely
+#     (attack_unit / attack_move) — the carve-out is on TOOLS, not on
+#     a subset of UNITS. Here the agent IS allowed `move_units`; the
+#     constraint is the SET OF UNITS that may receive that command.
+#   • proc-strict-toolban-under-pressure: also a tool-level ban.
+#   • coord-squad-handoff: positive sequenced relay (both squads must
+#     move). Here exactly one squad must move and the other must NOT.
+#
+# Tick budget note: ~90 ticks/turn (tick ≈ 93 + 90·(turn-1)). With
+# max_turns=55 the reachable max tick is 4953, so the fail
+# `after_ticks: 4501` bites well within the budget (no draw). The
+# intended jeep convoy travels ~82 cells; jeep speed is ~12 cells/turn
+# so it arrives in ~7-10 turns (~tick 700-1000), well under the
+# deadline.
+#
+# Hard-tier curation: hard defines 2 agent spawn_point groups for the
+# JEEPS (NW vs SW staging — y=8 vs y=32), round-robined by seed; the
+# TANKS are duplicated at the SAME start cell (8,20) across BOTH
+# spawn groups (the must-not-move group is anchored to ONE region so
+# the negative-instruction predicate is well-defined). This pack is
+# in `tests/test_hard_tier.py::UPGRADED`.
+
+meta:
+  id: proc-instruction-following-edge-case
+  title: 'Selective Action — Move the Jeeps, Do NOT Move the Tanks'
+  capability: action
+  real_world_meaning: >
+    Conditional standard-operating-procedure: the order has both a
+    positive and a negative clause ("do X to units of class C; do NOT
+    do anything to units of class D"). The operator's skill is to
+    identify the targeted subset, act on it, and leave the rest
+    untouched. Spraying the same action over the whole fleet is the
+    classic failure mode — and is what the IFBench / BFCL V4
+    negative-instruction families measure.
+  robotics_analogue: >
+    Mixed-asset fleet with a per-class action allowlist for this
+    mission: forklifts may move pallets; the autonomous floor
+    scrubber must stay docked. The fleet controller must NOT issue
+    a move command to the scrubber even if the scene is messy and
+    the scrubber would naively be the "obvious next agent" to act.
+  benchmark_anchor:
+    - "IFBench conditional / edge-case instruction"
+    - "BFCL V4 negative instruction compliance"
+    - "conditional SOP compliance"
+    - "selective-action discipline"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+# Shared engine fields. The agent's tools are the bare action set —
+# move/attack/observe/stop — and the instruction's teeth are in the
+# WIN PREDICATE (must keep the tanks at start), not a forbidden-tools
+# list. This is deliberate: the IFBench / BFCL V4 anchor is
+# "everything is technically *allowed*, but the brief forbids it" —
+# the bench measures whether the agent self-restrains.
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0}
+  tools: [move_units, attack_unit, observe, stop]
+  planning: true
+  termination: {max_ticks: 6000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare selective-action skill: ONLY the positive clause is
+  # tested. 3 jeeps + 3 tanks at the west edge; jeeps must reach
+  # (90,20); no negative-clause teeth. A naive "move everything"
+  # policy CAN win on easy — easy is the calibration tier (the
+  # capability is the difficulty step on medium).
+  easy:
+    description: >
+      Move ALL THREE JEEP units to the region around (90, 20) within
+      radius 6, before tick 4500. The TANK units may be ignored
+      (easy tier: no negative-instruction teeth). Stalling and
+      timeout LOSE.
+    overrides:
+      actors:
+        # 3 jeeps + 3 medium tanks at the west edge.
+        - {type: jeep, owner: agent, position: [8, 18]}
+        - {type: jeep, owner: agent, position: [8, 19]}
+        - {type: jeep, owner: agent, position: [8, 21]}
+        - {type: 2tnk, owner: agent, position: [8, 20]}
+        - {type: 2tnk, owner: agent, position: [9, 20]}
+        - {type: 2tnk, owner: agent, position: [10, 20]}
+    win_condition:
+      all_of:
+        - {units_of_type_in_region_gte:
+            {type: jeep, x: 90, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 55
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: the NEGATIVE INSTRUCTION teeth come in.
+  # The brief now explicitly forbids moving the tanks. The win
+  # condition adds a second clause ("≥3 tanks still at start") and
+  # the fail condition adds the symmetric `not` clause so a single
+  # tank dragged out of the start cluster trips an IMMEDIATE fail
+  # (no need to wait for the deadline). This is the IFBench /
+  # BFCL V4 anchor cell — measuring whether the model honours the
+  # carve-out under no other pressure than the brief itself.
+  medium:
+    description: >
+      Move ALL THREE JEEP units to the region around (90, 20) within
+      radius 6, before tick 4500. Do NOT move the TANK units — all
+      three TANK (2tnk) units must remain in the start region around
+      (8, 20) within radius 6. Issuing ANY move order to a tank
+      breaks the tank-at-start clause as soon as a tank leaves the
+      cluster and FAILS the mission immediately. Stalling, moving a
+      tank, force-loss, and timeout all LOSE.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [8, 18]}
+        - {type: jeep, owner: agent, position: [8, 19]}
+        - {type: jeep, owner: agent, position: [8, 21]}
+        - {type: 2tnk, owner: agent, position: [8, 20]}
+        - {type: 2tnk, owner: agent, position: [9, 20]}
+        - {type: 2tnk, owner: agent, position: [10, 20]}
+    win_condition:
+      all_of:
+        - {units_of_type_in_region_gte:
+            {type: jeep, x: 90, y: 20, radius: 6, n: 3}}
+        - {units_of_type_in_region_gte:
+            {type: 2tnk, x: 8, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+        - {not: {units_of_type_in_region_gte:
+            {type: 2tnk, x: 8, y: 20, radius: 6, n: 3}}}
+    max_turns: 55
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable vs medium: the JEEP starting corner is
+  # seed-randomised (NW staging y=8 vs SW staging y=32 — 2 agent
+  # spawn_point groups, round-robined by seed). The TANKS always
+  # start clustered at (8..10, 20) — the must-not-move group is
+  # ANCHORED to one region so the negative-instruction predicate is
+  # well-defined and identical across seeds. The selective-action
+  # skill is unchanged; the spawn variation prevents memorised
+  # opening generalisation (test_hard_tier.py::UPGRADED contract).
+  hard:
+    description: >
+      Move ALL THREE JEEP units to the region around (90, 20) within
+      radius 6, before tick 4500 — your jeeps may start at the
+      NORTHWEST (y≈8) OR SOUTHWEST (y≈32) corner depending on the
+      seed; route accordingly. Do NOT move the TANK units — all
+      three TANK (2tnk) units must remain in the start region around
+      (8, 20) within radius 6. Issuing any move order to a tank
+      breaks the tank-at-start clause as soon as a tank leaves the
+      cluster and FAILS the mission immediately. Stalling, moving a
+      tank, force-loss, and timeout all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — NW jeep staging (y≈8).
+        - {type: jeep, owner: agent, position: [8, 7],  spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 8],  spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 9],  spawn_point: 0}
+        # spawn_point 1 — SW jeep staging (y≈32).
+        - {type: jeep, owner: agent, position: [8, 31], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 32], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 33], spawn_point: 1}
+        # TANKS are anchored at (8..10, 20) in BOTH spawn groups
+        # (the must-not-move region is identical across seeds).
+        # CLAUDE.md: if ANY agent actor declares spawn_point, every
+        # agent actor WITHOUT spawn_point is filtered OUT — so the
+        # tanks are duplicated across both groups at identical coords.
+        - {type: 2tnk, owner: agent, position: [8, 20],  spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [9, 20],  spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 20], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [8, 20],  spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [9, 20],  spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 20], spawn_point: 1}
+    win_condition:
+      all_of:
+        - {units_of_type_in_region_gte:
+            {type: jeep, x: 90, y: 20, radius: 6, n: 3}}
+        - {units_of_type_in_region_gte:
+            {type: 2tnk, x: 8, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+        - {not: {units_of_type_in_region_gte:
+            {type: 2tnk, x: 8, y: 20, radius: 6, n: 3}}}
+    max_turns: 55

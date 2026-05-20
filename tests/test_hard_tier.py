@@ -359,6 +359,18 @@ UPGRADED = [
     # sit on the spawn-matched row so throughput is symmetric per
     # spawn, but a memorised opening cannot generalise across seeds.
     "econ-cash-reserve-management",
+    # Wave-6 IFBench / BFCL V4 negative-instruction seed — conditional
+    # SOP / selective-action discipline anchor. The brief carries an
+    # explicit carve-out ("move the JEEPS to (90,20); do NOT move the
+    # TANKS"); win checks BOTH halves via type-filtered region
+    # (`units_of_type_in_region_gte`). Hard tier defines 2 agent
+    # spawn_point groups (NW jeep staging y≈8 / SW jeep staging y≈32)
+    # round-robined by seed; the TANKS are duplicated at (8..10, 20)
+    # across BOTH groups so the must-not-move region is identical and
+    # well-defined across seeds. The spawn variation prevents memorised
+    # opening generalisation without diluting the selective-action
+    # signal.
+    "proc-instruction-following-edge-case",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
