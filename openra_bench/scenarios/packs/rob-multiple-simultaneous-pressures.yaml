@@ -1,0 +1,396 @@
+# rob-multiple-simultaneous-pressures — compound-incident triage
+#
+# REASONING capability — Wave-6 "multi-front simultaneous pressure"
+# pack. The agent must hold THREE pressures simultaneously, none of
+# which can be sequenced or paused:
+#
+#   1. DEFENCE — the agent fact is under a `hunt` charge that always
+#      picks the nearest agent target. Even if the harvesters die, the
+#      hunters keep coming for the fact / proc.
+#   2. ECONOMY — pre-placed harvesters (`harv`) work the patch east of
+#      the proc and are the closest agent target to the raider tanks
+#      lined up at the lane mouth. Stop harvesting and income stops;
+#      lose a harv and the win predicate breaks (harv≥1).
+#   3. TECH — a war factory (`weap`, cost 2000, prereq `proc`) must be
+#      built and standing by tick 5400. starting_cash 2000 covers the
+#      base weap exactly; the chain only closes if the harvesters keep
+#      running through the raid (so cash is in the tin when defence
+#      tightens). Skipping the tech to focus on combat fails the win.
+#
+# Real-world anchor: ops triage during a compound incident — multiple
+# system failures at once. SC2 multi-front simultaneous pressure. DR
+# multi-system failure response. The discriminating policies:
+#
+#   • stall (only observe): LOSS — no weap built, harvs don't deliver
+#     (`harvest` order needed each turn), eventually clock expires.
+#   • focus-defence-skip-tech (queue defenders, hold the line, never
+#     start weap): LOSS — weap never appears ⇒ the has_building:weap
+#     clause never latches ⇒ timeout LOSS via after_ticks.
+#   • focus-tech-lose-econ (queue weap immediately, pull defenders
+#     back to base, abandon the harvs / never issue harvest orders):
+#     LOSS — the post-weap EV bar (economy_value_gte: 1000) never
+#     latches because starting_cash 2000 is consumed by weap and
+#     the idle harvs add no income ⇒ timeout LOSS via after_ticks.
+#     (Lose-the-harv mode is also possible if the raiders reach
+#     the unprotected harvs, but the EV teeth bite first.)
+#   • intended multi-handle (keep harv ring on the patch, defenders
+#     intercept raiders, queue weap from turn 1, fund it with the
+#     harv income that keeps flowing): WIN.
+#
+# DESIGN
+# ──────
+# - bot_type: `hunt`. Each enemy unit attacks its OWN nearest agent
+#   target (Infantry / Vehicle / MCV / Building per scripted_bot.rs
+#   `foes()`). The TANK raiders are lined up directly east of the
+#   harv lane (their nearest agent target is the harv at the patch
+#   ⇒ economy harassment); the INFANTRY hunters are staged on
+#   FLANKING latitudes where the nearest agent target is the fact /
+#   proc / powr (⇒ base-hunt pressure). Same bot, two threat axes
+#   driven by geometry — the "raider for econ + hunt for base" of
+#   the spec is realised by positioning, not by two bot types.
+# - starting_cash: 2000 — exactly the weap cost. The intended play
+#   queues weap immediately and tops up cash from the running harv
+#   loop while the defenders intercept the raiders. Stalling lets
+#   the cash sit unused; spending it on defenders pre-empts weap.
+# - Tools: full set (observe + build + place_building + harvest +
+#   move_units + attack_unit + attack_move + stop). The pack tests
+#   simultaneous management, not tool restriction.
+# - Pre-placed: fact + proc + powr (power for the queue) + 2 harv +
+#   2 mines + 4 1tnk defenders. Powr is included because weap is
+#   queued from the Building list — without power the build is
+#   silently slow / blocked (CLAUDE.md underpowered-queue footgun).
+#   The spec lists "fact + proc + 2 harv + 2 mines + 4 defenders" as
+#   the core seed; powr is treated as core infrastructure (proc
+#   itself needs powr per gamerules.rs).
+# - Anti-DRAW: unarmed enemy `fact` marker far east — the engine
+#   auto-`done`s on enemy-MustBeDestroyed wipe before the win/fail
+#   check otherwise (CLAUDE.md auto-done footgun).
+#
+# Engine facts used (CLAUDE.md / gamerules.rs):
+#   - weap cost 2000, prereq `proc` (pre-placed ⇒ available T1).
+#   - proc prereq is `powr` (pre-placed ⇒ proc functions).
+#   - hunt bot's foes() includes Building, so flanking infantry that
+#     have the fact as their nearest target attack the base.
+#   - `harv` Command.harvest(uid, mx, my) per turn keeps the harvest
+#     loop running; idle harvs ⇒ no income.
+#   - place_building has no adjacency requirement; weap can be
+#     placed anywhere in-bounds (we pre-pick a safe spot via the
+#     description's coordinate hint).
+#   - hard tier: ≥2 agent spawn_point groups (UPGRADED contract,
+#     tests/test_hard_tier.py) — north-flank vs south-flank base.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_rob_multiple_simultaneous_pressures.py -q
+
+meta:
+  id: rob-multiple-simultaneous-pressures
+  title: 'Compound Incident — Multi-Front Simultaneous Pressure (Defence + Economy + Tech)'
+  capability: reasoning
+  real_world_meaning: >
+    Ops triage during a compound incident — three independent failures
+    must be handled simultaneously, none of which can be sequenced or
+    paused. Your base is under a hunt charge (defence), the harvesters
+    feeding income are being raided (economy), and a tech objective
+    (war factory) must be completed before a hard deadline. Focusing
+    on any single pressure forfeits the others; the intended play
+    keeps all three loops running in parallel, funding the tech with
+    the harvest income that the defenders are simultaneously
+    protecting.
+  robotics_analogue: >
+    Disaster-recovery multi-system failure — a control room handles
+    a security event (perimeter under attack), a throughput event
+    (data pipeline workers under harassment), and a planned upgrade
+    (capability rollout) at the same time. Pausing the upgrade to
+    fight the security incident misses the rollout SLA; abandoning
+    the pipeline to harden the perimeter starves the upgrade of
+    resources. The capability under test is parallel-task triage
+    under genuine simultaneous pressure.
+  benchmark_anchor:
+    - 'SC2 multi-front simultaneous pressure'
+    - 'ops triage during compound incident'
+    - 'DR multi-system failure'
+    - 'military theater-wide simultaneous threats'
+  author: openra-bench
+
+base_map: rush-hour-arena
+# Exactly enough for the weap (cost 2000). The intended play funds
+# any extra defender / structure spend from the harvest loop income
+# that runs THROUGH the raid. Anything more than 2000 lets a
+# focus-defence policy buy out the threat without ever touching tech.
+starting_cash: 2000
+
+base:
+  agent:
+    faction: allies
+  # `hunt`: each enemy unit attacks its OWN nearest agent target
+  # (Infantry/Vehicle/MCV/Building). The geometry of the placed
+  # enemy units splits the pressure into two axes — tanks at the
+  # patch lane hunt the harvs (economy raid), flanking infantry
+  # hunt the fact/proc (base hunt).
+  enemy:
+    faction: soviet
+    bot_type: hunt
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # No interrupts: fixed-cadence steps give the predictable
+  # ~90 ticks/turn we need to align the after_ticks 5401 fail
+  # clause with max_turns 61 (93+90·60=5493 ≥ 5401 ✓). Interrupt
+  # mode shortens the per-step advance and would make a stall
+  # episode draw before the deadline bites.
+  termination:
+    max_ticks: 12000
+  # Per-level actors via overrides — keeps the audit explicit for
+  # each tier's threat composition.
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare three-pressure skill: ONE flanking hunt group (only the base
+  # pressure axis), pre-placed defenders blunt the raid mouth, weap
+  # is the sole tech clause. Stall / focus-defence-skip-tech /
+  # focus-tech-lose-econ all LOSE; the intended multi-handle WINS.
+  # max_turns 61 → reachable tick 93 + 90·60 = 5493 > 5401 ✓.
+  easy:
+    description: >
+      Compound incident. You hold a base on the west — Construction
+      Yard (fact at 10,18), refinery (proc at 8,18), power plant
+      (powr at 8,20), and 2 harvesters working an ore patch east of
+      the proc (mines at 24,16 and 24,22). Four light tank defenders
+      ring the patch at x=18. You start with $2000 — exactly enough
+      for a war factory. THREE pressures are live AT THE SAME TIME:
+      (1) DEFEND — a single hunt squad of 3 rifle infantry is staged
+          NORTH of the base; they charge whatever agent target is
+          nearest, including the fact.
+      (2) ECONOMY — one enemy tank (raider) is at the lane mouth
+          east of the patch; under the hunt bot it targets the
+          harvester nearest to it. If the harvs die the win breaks.
+      (3) TECH — you must have a war factory (weap, cost 2000, prereq
+          proc) standing by tick 5400.
+      Win = `weap` AND `proc` AND ≥1 harvester AND `fact` still
+      standing, before tick 5400. Stalling, focusing on defence and
+      skipping tech, and focusing on tech while abandoning the
+      harvesters all LOSE.
+    overrides:
+      actors:
+        # Agent base on the west — fact + proc + powr + 2 harv +
+        # 2 mines + 4 defenders per the pack core.
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: proc, owner: agent, position: [8,  18]}
+        - {type: powr, owner: agent, position: [8,  20]}
+        - {type: harv, owner: agent, position: [14, 16]}
+        - {type: harv, owner: agent, position: [14, 22]}
+        - {type: mine, owner: neutral, position: [24, 16]}
+        - {type: mine, owner: neutral, position: [24, 22]}
+        # Four 1tnk defenders ringing the patch lane at x=18
+        # (between the harvs and the raider mouth). Tank-on-tank
+        # is required to actually kill a raider 1tnk (rifle e1 dies
+        # before it can do it).
+        - {type: '1tnk', owner: agent, position: [18, 16]}
+        - {type: '1tnk', owner: agent, position: [18, 22]}
+        - {type: '1tnk', owner: agent, position: [22, 18]}
+        - {type: '1tnk', owner: agent, position: [22, 20]}
+        # ECONOMY-RAID PRESSURE — 1 raider tank at the lane mouth.
+        # Its nearest agent target is the harv at (14,16) ⇒ raids the
+        # economy under hunt semantics.
+        - {type: '1tnk', owner: enemy, position: [60, 18]}
+        # BASE-HUNT PRESSURE — 3 e1 infantry staged on the NORTHERN
+        # flank. Their nearest agent target is fact/powr (no harv
+        # between them and the base from y=4), so under hunt the
+        # group charges the base buildings directly.
+        - {type: e1, owner: enemy, position: [40, 4], stance: 3, count: 3}
+        # Anti-DRAW: persistent unarmed enemy `fact` marker far east.
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {has_building: weap}
+        - {has_building: proc}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: fact}
+        # ECONOMY teeth: post-weap residual EV bar. starting_cash 2000
+        # exactly funds the weap (cost 2000) ⇒ to clear this 1000-EV
+        # bar the harvesters MUST be in `harvest` mode through the
+        # raid so cash refills. A focus-tech policy that queues weap
+        # and pulls the harvs home (no harvest order) drains cash to
+        # 0 and never re-fills ⇒ this clause never latches ⇒ LOSS by
+        # the after_ticks fail clause.
+        - {economy_value_gte: 1000}
+        - {within_ticks: 5400}
+    # 5401 ≤ 93 + 90·60 = 5493 ⇒ deadline bites inside max_turns.
+    # Loss is reachable: clock OR fact razed OR harvs eradicated.
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {has_building: fact}}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+    max_turns: 61
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: the raid axis now has TWO raider
+  # tanks (one at each patch latitude — the harv ring can't ignore
+  # either) AND the hunt squad is heavier (4× e1 + 1× e3). Same
+  # clock; the budget is still 2000 ⇒ no slack on the cash side.
+  medium:
+    description: >
+      The same compound incident, scaled up on both pressure axes.
+      Base layout unchanged (fact+proc+powr at the west, 2 harvs on
+      the patch east of proc, 4 light tank defenders on the ring).
+      Pressures:
+      (1) DEFEND — a heavier hunt squad of 4 rifle infantry + 1
+          rocket soldier (e3) on the northern flank charges the base.
+      (2) ECONOMY — TWO raider tanks are staged at the patch lane
+          mouth, one on each harv latitude (y=16 and y=22) — the
+          harv ring can't ignore either.
+      (3) TECH — war factory (`weap`) by tick 5400.
+      Win = `weap` AND `proc` AND ≥1 harvester AND `fact` standing
+      before tick 5400. Stall, focus-defence-skip-tech,
+      focus-tech-lose-econ all LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: proc, owner: agent, position: [8,  18]}
+        - {type: powr, owner: agent, position: [8,  20]}
+        - {type: harv, owner: agent, position: [14, 16]}
+        - {type: harv, owner: agent, position: [14, 22]}
+        - {type: mine, owner: neutral, position: [24, 16]}
+        - {type: mine, owner: neutral, position: [24, 22]}
+        - {type: '1tnk', owner: agent, position: [18, 16]}
+        - {type: '1tnk', owner: agent, position: [18, 22]}
+        - {type: '1tnk', owner: agent, position: [22, 18]}
+        - {type: '1tnk', owner: agent, position: [22, 20]}
+        # ECONOMY-RAID — two raiders, one per harv latitude.
+        - {type: '1tnk', owner: enemy, position: [60, 16]}
+        - {type: '1tnk', owner: enemy, position: [60, 22]}
+        # BASE-HUNT — 4 e1 + 1 e3 on the northern flank.
+        - {type: e1, owner: enemy, position: [40, 4], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [42, 4], stance: 3, count: 1}
+        # Anti-DRAW marker.
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {has_building: weap}
+        - {has_building: proc}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: fact}
+        # See easy: post-weap EV bar makes the harvest loop load-
+        # bearing so focus-tech-lose-econ cannot satisfy the win.
+        - {economy_value_gte: 1000}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {has_building: fact}}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+    max_turns: 61
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium (per the spec "hunt + raider +
+  # tighter clock + 2 spawn groups"):
+  #   1. TIGHTER clock (within_ticks 4500; max_turns 51 → reachable
+  #      tick 93+90·50 = 4593 ≥ 4501 ✓). The tech window shrinks so a
+  #      sequenced "defend then tech" attempt runs out of clock.
+  #   2. TWO spawn_point groups (north y=14 base vs south y=26 base)
+  #      — the BASE LATITUDE flips by seed, so a single memorised
+  #      ring / weap placement cannot generalise. Both spawns face
+  #      the SAME enemy composition (enemy actors are not spawn-
+  #      filtered, per oramap.rs): the medium pack's 2 raider tanks
+  #      and one heavy hunt squad, plus a mirrored off-axis hunt
+  #      squad so the seed that lands on the off-axis flank still
+  #      gets a same-latitude charge (otherwise the off-axis flank
+  #      would have noticeably lighter pressure than the on-axis
+  #      one). Same composition as medium per axis — the discriminator
+  #      is clock-tightness + spawn variation, not enemy-count
+  #      escalation.
+  hard:
+    description: >
+      The compound incident on a tighter clock and a seed-varied
+      start. Your base stages from a seed-chosen latitude (NORTH
+      y=14 or SOUTH y=26) — both formations cover the same patch
+      column (mines at x=24, two per latitude). Pressures:
+      (1) DEFEND — a hunt squad of 4 rifle infantry + 1 rocket
+          soldier charges from the centre-line; whichever base
+          latitude you got is the one it heads for.
+      (2) ECONOMY — TWO raider tanks at the patch lane mouth on
+          the centre-line; they hunt the nearest harv (which is
+          always the active spawn's, since the off-axis spawn
+          isn't placed).
+      (3) TECH — war factory (`weap`) by tick 4500 (clock down from
+          5400).
+      Win = `weap` AND `proc` AND ≥1 harvester AND `fact` standing
+      before tick 4500. Stall, focus-defence-skip-tech,
+      focus-tech-lose-econ, and slow-multi-handle (over-budget on
+      clock) all LOSE.
+    overrides:
+      actors:
+        # Spawn 0 — NORTH base (y centered on 14). Four 1tnk
+        # defenders ring the two harv latitudes (12 and 16).
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [8,  14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8,  16], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 12], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: '1tnk', owner: agent, position: [18, 12], spawn_point: 0}
+        - {type: '1tnk', owner: agent, position: [18, 16], spawn_point: 0}
+        - {type: '1tnk', owner: agent, position: [22, 13], spawn_point: 0}
+        - {type: '1tnk', owner: agent, position: [22, 15], spawn_point: 0}
+        # Spawn 1 — SOUTH base (y centered on 26). Mirror of spawn 0
+        # at y=24/28.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [8,  26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8,  28], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [18, 24], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [18, 28], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [22, 25], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [22, 27], spawn_point: 1}
+        # Mines — neutrals are NOT spawn-filtered (per CLAUDE.md);
+        # one set per latitude so each spawn has a workable patch
+        # on each of its two harv rows.
+        - {type: mine, owner: neutral, position: [24, 12]}
+        - {type: mine, owner: neutral, position: [24, 16]}
+        - {type: mine, owner: neutral, position: [24, 24]}
+        - {type: mine, owner: neutral, position: [24, 28]}
+        # ECONOMY-RAID — TWO raider tanks (matching medium) at the
+        # patch lane mouth. Placed at the centre-line latitudes
+        # (y=18, y=22) so they sit equidistant from the two
+        # possible base latitudes (y=14 north / y=26 south) and the
+        # hunt bot resolves each raider to whichever harv is
+        # currently nearest. (Enemy actors are not spawn-filtered.)
+        - {type: '1tnk', owner: enemy, position: [60, 18]}
+        - {type: '1tnk', owner: enemy, position: [60, 22]}
+        # BASE-HUNT — one heavy hunt squad (matching medium: 4 e1 +
+        # 1 e3) at the centre-line so it charges the nearest base
+        # buildings whichever latitude the agent is on (the e1 at
+        # the centre is ≤12 cells from either spawn's fact, and the
+        # rotation between spawns is the seed-driven variation).
+        - {type: e1, owner: enemy, position: [40, 20], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [42, 20], stance: 3, count: 1}
+        # Anti-DRAW marker.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: weap}
+        - {has_building: proc}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: fact}
+        # See easy: post-weap EV bar makes the harvest loop load-
+        # bearing so focus-tech-lose-econ cannot satisfy the win.
+        # Bar held at 1000 (same as easy/medium) — the discriminator
+        # on hard is the tighter clock + spawn variation, not a
+        # harder EV target.
+        - {economy_value_gte: 1000}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+    max_turns: 51

@@ -486,6 +486,12 @@ UPGRADED = [
     # assignment flips per seed and a memorised "which jeep to which
     # corner" plan cannot generalise.
     "scout-map-reveal-percent-target",
+    # Wave-6 compound-incident triage pack (defence + economy + tech
+    # under simultaneous pressure). Hard tier defines two agent
+    # spawn_point groups (NORTH y=14 / SOUTH y=26) round-robined by
+    # seed; the centre-line raider tanks and centre-line hunt squad
+    # face the seed-chosen latitude with equal pressure.
+    "rob-multiple-simultaneous-pressures",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
