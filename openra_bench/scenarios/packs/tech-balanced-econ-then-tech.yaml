@@ -1,0 +1,220 @@
+# tech-balanced-econ-then-tech.yaml
+#
+# REASONING capability — Wave-4 BALANCED variant of the tech triple.
+# The agent must build the economy FLOOR first (a refinery `proc` that
+# actually accrues income), THEN tech up (`weap`, then `dome`). The
+# Wave-2 `then:[A,B,…]` happened-before composite enforces this order:
+#   1. has_building: proc          # phase 1 — build the econ floor
+#   2. economy_value_gte: <bar>    # phase 2 — actually USE the proc
+#   3. has_building: weap          # phase 3 — tech step 1
+#   4. has_building: dome          # phase 4 — deeper tech
+# The clock is tuned so:
+#   - Pure AGGRO (skip proc, race tech): weap/dome both require `proc`
+#     as engine prereq, so the chain never advances past phase 0 — LOSS.
+#   - Pure TURTLE (only defenses, no tech buildings): the then-clauses
+#     never latch — LOSS on clock.
+#   - Stall: trivially LOSS.
+#   - BALANCED (proc → run income → weap → dome): WIN inside the clock.
+#
+# Real-world anchor: SC2 macro-tech standard timing (proc-first then
+# tech); PlanBench sequenced-prerequisite chain; product roadmap
+# foundation → R&D; industrial capacity-before-research doctrine.
+#
+# ENGINE FACTS used (CLAUDE.md / gamerules.rs):
+#   - proc cost 1400, prereq powr (preplaced)
+#   - weap cost 2000, prereq proc
+#   - dome cost 2800, prereq proc
+#   - harvest income ~95 cr/turn per active harv+proc+mine triple
+#     (verified in economy-harvest-investment / economy-harvest-timebox)
+#   - `fact` is cost 0 → not buildable; we pre-place it as the base seed
+#   - tick reachable at max_turns N: 93 + 90·(N-1)
+#
+# A pre-placed `harv` is included so income flows the moment `proc`
+# completes. Without proc the harv has nowhere to deliver, so building
+# proc is the gate to ALL income (and to ALL deeper tech). A model that
+# pre-builds weap/dome without proc cannot — prereq fails silently.
+#
+# Validate (no model / no network — CLAUDE.md):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/tech-balanced-econ-then-tech.yaml
+
+meta:
+  id: tech-balanced-econ-then-tech
+  title: 'Tech Balanced — Econ Floor First, THEN Tech Up'
+  capability: reasoning
+  real_world_meaning: >
+    Balanced macro-tech sequencing: build the economy floor (a working
+    refinery accruing real income) BEFORE committing to deeper tech
+    buildings. Pure aggro (skip the refinery and race tech) cannot
+    advance because tech buildings depend on the refinery; pure turtle
+    (defenses only, no tech) never satisfies the tech goals; only the
+    foundation-then-research sequence wins within the deadline.
+  robotics_analogue: >
+    Industrial capacity-before-research doctrine: stand up productive
+    capacity (and let it actually produce) before sinking the budget
+    into R&D capability. A roadmap that funds research before the
+    operating capacity that pays for it stalls at the first capability
+    gate; a roadmap that only funds operations never reaches research.
+  benchmark_anchor:
+    - "SC2 macro-tech standard timing (proc-first then tech)"
+    - "PlanBench sequenced-prerequisite chain"
+    - "product roadmap: foundation → R&D"
+    - "industrial capacity-before-research doctrine"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  # Default actors — overridden per-level for hard (seed-varied spawns).
+  # No enemy units / bot: this is a pure macro-tech sequencing test,
+  # not a combat scenario. An inert enemy `fact` marker far east keeps
+  # the engine from auto-terminating on enemy-elimination before the
+  # win/fail is evaluated (CLAUDE.md engine footgun).
+  actors:
+    - {type: fact, owner: agent, position: [10, 18]}
+    - {type: tent, owner: agent, position: [10, 22]}
+    - {type: powr, owner: agent, position: [14, 18]}
+    - {type: harv, owner: agent, position: [14, 22]}
+    - {type: mine, owner: neutral, position: [22, 20]}
+    - {type: fact, owner: enemy, position: [120, 20]}
+
+starting_cash: 2800
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Bar reduced to 800 (well under starting_cash 2800), generous
+  # clock. Phase 2 (economy_value_gte: 800) is satisfied immediately
+  # the moment `proc` finishes (cash still well above 800 after the
+  # 1400cr spend → 1400 cash ev=1400 ≥ 800). The teeth are still in
+  # the order: proc must latch BEFORE weap; weap and dome are
+  # engine-gated on the proc prereq either way. Generous clock
+  # (8100 ticks, max_turns 90 → ceiling 8103) covers a slow / over-
+  # cautious build chain so easy is the rehearsal tier.
+  easy:
+    description: >
+      Build the economy floor FIRST, then tech up — in this order:
+      (1) build a refinery (proc), (2) let it accrue some income
+      (economy_value ≥ 800), (3) build a war factory (weap),
+      (4) build a radar dome (dome). Skipping the refinery never
+      yields weap or dome (both require a refinery — engine
+      prerequisite); defenses-only never builds the tech chain;
+      stalling loses on the clock.
+    starting_cash: 2800
+    win_condition:
+      all_of:
+        - then:
+            id: econ-then-tech-easy
+            clauses:
+              - {has_building: proc}            # phase 1: econ floor
+              - {economy_value_gte: 800}         # phase 2: used the proc
+              - {has_building: weap}             # phase 3: tech step 1
+              - {has_building: dome}             # phase 4: tech step 2
+        - {within_ticks: 8100}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8101}
+        - {not: {has_building: fact}}
+    max_turns: 90
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER ECONOMY BAR. Phase 2 demands
+  # economy_value ≥ 1500. After building proc (-1400cr → 1400 cash),
+  # the model needs the harvester to deliver ~100cr of income (≤2
+  # turns at ~95cr/turn) before phase 2 latches. Then the model
+  # needs to refill the ~600cr gap to afford weap (2000cr) and
+  # another 2800cr for dome. Clock 6300 ticks (max_turns 70 →
+  # ceiling 6303). Stall / aggro-skip-proc / turtle-defenses LOSE.
+  medium:
+    description: >
+      Build the economy floor FIRST, then tech up — in this order:
+      (1) build a refinery (proc), (2) run the harvester long enough
+      to push economy_value to 1500 (cash + ore stored), (3) build a
+      war factory (weap), (4) build a radar dome (dome). Skipping
+      the refinery cannot build weap or dome (both require a
+      refinery as an engine prerequisite); defenses-only never
+      builds the tech chain; stalling loses on the clock.
+    starting_cash: 2800
+    win_condition:
+      all_of:
+        - then:
+            id: econ-then-tech-medium
+            clauses:
+              - {has_building: proc}
+              - {economy_value_gte: 1500}
+              - {has_building: weap}
+              - {has_building: dome}
+        - {within_ticks: 6300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 6301}
+        - {not: {has_building: fact}}
+    max_turns: 70
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 controlled variable: HIGHER ECONOMY BAR (2200) + TIGHTER CLOCK
+  # (5400) + 2 seed-driven spawn_point groups (north vs south base)
+  # so a memorised opening cannot generalise. The 2200cr bar means
+  # the model must let the harvester deliver enough income (after
+  # proc) BEFORE phase 2 latches — ≥9 turns of post-proc income at
+  # ~95cr/turn from the base 1400cr leftover. The tighter clock
+  # punishes any wasted turn. Max tick at max_turns 60: 93+90·59=5403.
+  hard:
+    description: >
+      Build the economy floor FIRST, then tech up — in this order:
+      (1) build a refinery (proc), (2) run the harvester long enough
+      to push economy_value to 2200, (3) build a war factory (weap),
+      (4) build a radar dome (dome). The clock is tight (5400 ticks)
+      so a slow / dithering build chain loses. Skipping the refinery
+      never builds weap or dome (engine prerequisite); defenses-only
+      never builds the tech chain; stalling loses on the clock.
+    starting_cash: 2800
+    overrides:
+      actors:
+        # North-base spawn (spawn_point 0). Mine sits east; harv next
+        # to the proc-build site.
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        # South-base spawn (spawn_point 1). Symmetric layout.
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 30], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
+        # Two ore patches, one per spawn cluster (engine doesn't filter
+        # neutral actors by spawn_point — both placed). The far one is
+        # too far to reach from the wrong spawn to matter.
+        - {type: mine, owner: neutral, position: [22, 12]}
+        - {type: mine, owner: neutral, position: [22, 28]}
+        # Inert enemy marker — keeps the episode alive.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: econ-then-tech-hard
+            clauses:
+              - {has_building: proc}
+              - {economy_value_gte: 2200}
+              - {has_building: weap}
+              - {has_building: dome}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {has_building: fact}}
+    max_turns: 60

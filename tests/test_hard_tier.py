@@ -123,6 +123,11 @@ UPGRADED = [
     # so the deploy site + near-patch geometry flips per seed and a
     # memorised "(20,20) deploy" opening cannot generalise.
     "econ-startup-from-scratch",
+    # Wave-4 BALANCED tech-triple pack. Hard defines two agent
+    # spawn_point groups (NORTH base / SOUTH base) so the harv-to-
+    # proc geometry differs per seed; a memorised opening cannot
+    # generalise.
+    "tech-balanced-econ-then-tech",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
