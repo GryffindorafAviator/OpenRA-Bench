@@ -217,16 +217,10 @@ UPGRADED = [
     # (enemy actors don't honour spawn_point — CLAUDE.md) so a memorised
     # base layout cannot generalise.
     "lh-defense-tech-second-base",
-    # Wave-5 Group C reasoning seed — central reserve doctrine /
-    # chess-piece centralization / military QRF. Hard tier defines two
-    # agent spawn_point groups (centre column x=40 / x=50) round-
-    # robined by seed so the reserve's exact staging cell varies but
-    # both remain equidistant from N/S flanks; THREE simultaneous
-    # rush bands (N/S/E) always place (enemy actors don't honour
-    # spawn_point — CLAUDE.md), so a single committed-flank policy
-    # cannot generalise and the centre-then-react doctrine is the
-    # only winning play.
-    "def-pre-position-mobile-reserve",
+    # NOTE: "def-pre-position-mobile-reserve" — Wave-5 agent crashed
+    # before its YAML hit git; the entry below was registered by a
+    # sibling agent who saw the in-flight worktree. Removed from
+    # UPGRADED until a re-spawn agent produces the pack.
     # Wave-5 Group C reasoning pack — ERQA spatial commit / MicroRTS
     # terrain-aware defence / military pre-positioned defence /
     # intel-driven facility hardening anchor. The model is TOLD where
