@@ -3,6 +3,7 @@ solvency/stability after the fix."""
 from __future__ import annotations
 from pathlib import Path
 import pytest
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.scenarios import load_pack
 from openra_bench.scenarios.loader import compile_level
 from openra_bench.scenarios.win_conditions import WinContext, evaluate

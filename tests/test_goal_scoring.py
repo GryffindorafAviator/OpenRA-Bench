@@ -8,6 +8,8 @@ objective mean and the cumulative reward-vector signature.
 
 from __future__ import annotations
 
+import pytest
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.eval_core import EpisodeResult
 from openra_bench.leaderboard import _capability_breakdown, ingest_run
 from openra_bench.rust_adapter import EpisodeSignals

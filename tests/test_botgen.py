@@ -9,6 +9,7 @@ from __future__ import annotations
 import yaml
 import pytest
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.botgen import BEHAVIORS, read_enemy_bot, validate_enemy_bot
 from openra_bench.scenarios.loader import PACKS_DIR
 from openra_bench.scenarios.schema import ScenarioPack

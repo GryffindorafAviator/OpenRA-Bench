@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.scenarios.win_conditions import WinContext, evaluate
 
 PACKS = Path(__file__).parent.parent / "openra_bench" / "scenarios" / "packs"

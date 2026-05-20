@@ -11,6 +11,7 @@ import pytest
 
 pytest.importorskip("openra_train", reason="Rust env wheel not installed")
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.eval_core import run_level
 from openra_bench.playback import Playback
 from openra_bench.run_eval import evaluate

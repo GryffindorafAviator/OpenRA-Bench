@@ -8,6 +8,8 @@ cascade, per-turn assembly, clamping, and the compare-pairing rule
 
 from __future__ import annotations
 
+import pytest
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.battle_viewer import (
     compare_candidates,
     episode_view,

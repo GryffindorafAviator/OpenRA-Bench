@@ -4,6 +4,8 @@ Gradio."""
 
 from __future__ import annotations
 
+import pytest
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.leaderboard import build_table, ingest_run
 
 

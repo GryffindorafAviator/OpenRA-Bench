@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
 from openra_bench.botgen import BEHAVIORS, validate_enemy_bot
 
 
