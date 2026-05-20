@@ -1,0 +1,421 @@
+# EXPANSION-TURTLE-1-BASE-FORTIFIED — Group B (Mid: TURTLE 1-base
+# fortification, dense static-defence supremacy over expansion).
+#
+# The TURTLE variant of the expansion triple (sister to
+# expansion-aggro-3-base-greedy and tech-balanced-econ-then-tech).
+# The agent has a SINGLE pre-placed base (fact + tent + powr + proc)
+# and NO MCV — `deploy` is removed from the tools list, so expansion
+# is structurally forbidden. The intended play is to accept the
+# 1-base cap and fortify so heavily (≥6 pbox + ≥2 gun + ≥3 defenders)
+# that an incoming hunt-bot assault (6 e1 + 2 e3) is absorbed at the
+# wall and the conyard still stands at the deadline.
+#
+# Why this is the TURTLE mirror of expansion-aggro-3-base-greedy:
+#   - AGGRO commits 3 MCVs to 3 distinct regions (growth supremacy,
+#     no defence). The hedged "hold one MCV back" play LOSES the
+#     third region.
+#   - TURTLE commits the entire economy to ONE site (defence
+#     supremacy, no growth). The hedged "build an army instead of
+#     towers" play gets ground down by the hunt band; the hedged
+#     "build towers but skip the army-throughput minimum" play
+#     stalls; the hedged "tech up instead of laying defences" play
+#     gets razed.
+#   - BALANCED (tech-balanced-econ-then-tech) sequences econ-then-
+#     tech; defences-only LOSES because the tech chain never
+#     finishes.
+#   - Together the three packs cover the canonical mid-game
+#     allocation trilemma: spread thin (AGGRO), tech deep
+#     (BALANCED), turtle wide-and-thick (TURTLE).
+#
+# Benchmark / real-world anchor:
+#   - SC2 fortress macro / 1-base mass-defence timing: stay on one
+#     base, mass static defence and a minimum army to repel an
+#     incoming all-in attack.
+#   - Risk-averse business: own one market deeply rather than
+#     expand thin — concentrate capital where you already have
+#     advantage, fortify the moat.
+#   - Military fortress doctrine: concentrate force at one
+#     impregnable site rather than disperse across multiple
+#     vulnerable outposts.
+#   - Defensive-vs-expansion tradeoff in capital allocation: when
+#     the threat is concrete (incoming hunt-bot assault) and the
+#     incremental return on expansion is uncertain, deep
+#     fortification dominates broad expansion.
+#
+# Engine tick/turn alignment (CLAUDE.md, ~90 ticks/turn):
+#   within_ticks 5400 / after_ticks 5401, max_turns 62 → reachable
+#   tick 93 + 90·61 = 5583 ≥ 5401 ✓ (the deadline bites; a stall
+#   emits a real LOSS, not a DRAW). Interrupt steps can run <90
+#   ticks/turn, so 62 turns is a comfortable buffer.
+#
+# Economy budget (per level):
+#   The pack is "fat war chest" turtle: NO `harvest` tool exposed
+#   (the turtle plays pure capex from a fat war chest, not active
+#   econ micro — keeps the discrimination cleanly on defence vs
+#   tech vs army allocation, not on harvester routing). With no
+#   harvest dispatch the pre-placed harv+proc+mine triple yields
+#   zero passive income (idle harvester does not auto-cycle
+#   without a `Command.harvest` dispatch — engine quirk noted in
+#   tests/test_econ_startup_from_scratch.py), so starting_cash
+#   must fund the entire intended REINFORCEMENT spend on top of
+#   the pre-placed seed defences. Costs (per CLAUDE.md): pbox=600,
+#   gun=800, weap=2000, e1=100, powr=300.
+#   - easy   seed: 1 pbox + weap pre-placed; agent adds ≥2 pbox + 1
+#     gun + reinforcement ≈ 2 pbox + 1 gun + 4 e1 ≈ 2400 → cash 6500
+#     covers reinforcement under attrition (extra pbox + extra e1).
+#   - medium seed: 5 pbox + 1 gun + weap pre-placed; agent adds ≥1
+#     pbox + ≥1 gun + reinforcement ≈ 3 pbox + 1 gun + 6 e1 = 3200 →
+#     cash 8500 covers reinforcement under heavier attrition.
+#   - hard   seed: 7 pbox + 1 gun + weap pre-placed; agent adds ≥1
+#     pbox + ≥1 gun + reinforcement ≈ 4 pbox + 1 gun + 6 e1 = 3800
+#     → cash 9500 covers reinforcement under doubled-flank attrition.
+#   The cap is tight enough that an over-tech skip-defence policy
+#   (e.g. spending 2000+ on dome / 2500+ on fix instead of pbox
+#   reinforcement) busts the defence bar AND gets the fact razed.
+#
+# Engine footguns applied (per CLAUDE.md):
+#   - `deploy` removed from tools so expansion is structurally
+#     forbidden (the bench advertises only what the agent can do —
+#     no MCV is provided either, double-blocked).
+#   - Persistent unarmed enemy `fact` MARKER at the far map edge
+#     prevents the all-enemies-eliminated auto-`done` so non-winners
+#     LOSE on the deadline (never DRAW). The hunt band itself is
+#     temporary — once dispatched the marker keeps the run alive
+#     until the clock or the fortification predicates resolve.
+#   - The agent starts WITH units (the pre-placed harv counts in
+#     units_summary) so the `not own_units_gte:1` fail clause is
+#     safe on turn 1 (CLAUDE.md unit-less-start footgun does not
+#     apply here). Once the harv is killed AND no defenders are
+#     trained AND the fact dies, the clause fires.
+#   - Pre-placed fact + tent + powr + proc + harv + mine so the
+#     intended sequence is: queue pbox + e1 in parallel on turn 1
+#     (Defence and Infantry queues), drop pbox at the lane mouth,
+#     keep training defenders. No build-radius gymnastics required.
+#   - Hard tier: TWO agent spawn_point groups rotate the whole
+#     starter base between a north y=12 and a south y=28 latitude.
+#     Hunt-bot composition is symmetric (the enemy bands sit at
+#     both latitudes; enemies don't honour spawn_point — CLAUDE.md)
+#     so the threat ALWAYS arrives from both flanks but the home
+#     base flips per seed — single memorised pbox cell cannot
+#     generalise.
+#   - `has_building` is MONOTONIC (never un-sets after a kill); the
+#     "fact still standing" predicate uses `building_count_gte:
+#     {type: fact, n: 1}` which iterates the per-tick refreshed
+#     own_buildings list and DOES fall to 0 when the fact is razed.
+#   - Hunt-bot (`bot_type: hunt`) actively seeks out the nearest
+#     agent unit / building; arrives at the base by ~tick 1500
+#     from the x=80 spawn given the rush-hour-arena layout.
+#   - Map: rush-hour-arena (128×40), validated for the canonical
+#     base-at-x=10, threat-at-x=80 hunt-band geometry across
+#     defense-rush-survive. All actors within playable bounds
+#     (x∈[2,126], y∈[2,38]).
+
+meta:
+  id: expansion-turtle-1-base-fortified
+  title: 'Expansion TURTLE — Fortify 1 Base (Defence Supremacy, No Expansion)'
+  capability: reasoning
+  real_world_meaning: >
+    TURTLE 1-base fortification: the agent has no second MCV and
+    no `deploy` tool — expansion is structurally off the menu.
+    The only path to win is to take the single pre-placed base
+    and harden it so densely (≥6 pillboxes + ≥2 gun turrets + a
+    minimum army of 3) that an incoming hunt-bot assault is
+    absorbed at the wall, with the home fact still standing at
+    the deadline. The discrimination is whether the model
+    embraces the deep-defence play (accepts the 1-base cap and
+    invests the whole economy in static defence + minimum army)
+    instead of defaulting to a "balanced" play that leaves the
+    base under-fortified, or a "pure army" play that gets ground
+    down without towers to anchor on, or an "over-tech" play
+    that builds research while the fact is being razed.
+  robotics_analogue: >
+    Single-site hardening under known incoming threat: a fixed
+    asset (factory, data centre, military outpost) has a known
+    incoming attack inside a fixed window, no option to relocate,
+    and no reinforcement; the only path is to invest the entire
+    budget in passive hardening (walls, turrets, hardened
+    bunkers) plus a minimum on-site response force, accepting
+    that the asset will be irrelevant outside its own perimeter.
+    Same idea in capital allocation (own one market deeply),
+    cybersecurity (concentrate WAF + IDS + bastion at the one
+    public-facing endpoint instead of spreading thin), and
+    military fortress doctrine (concentrate force at one
+    impregnable site).
+  benchmark_anchor:
+    - "SC2 fortress macro / 1-base mass-defense timing"
+    - "risk-averse business: own one market deeply"
+    - "military fortress doctrine: concentrate force at impregnable site"
+    - "defensive-vs-expansion tradeoff in capital allocation"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+# Pack-wide default; each level overrides with the cash needed to
+# fund EXACTLY its intended dense-fortification spend. No income
+# flows (no harvest tool exposed, idle harv = 0 cr/turn — see
+# tests/test_econ_startup_from_scratch.py engine quirk).
+starting_cash: 2500
+
+base:
+  agent: {faction: allies}
+  # Hunt-bot actively seeks the nearest agent unit/building and
+  # commits the full band to the agent's centroid (defense-rush-
+  # survive uses `rusher` for the same role; `hunt` is the
+  # generic-seek bot named in the spec).
+  enemy: {faction: soviet, bot_type: hunt}
+  # TURTLE tool list per spec: NO `deploy` (expansion structurally
+  # forbidden — bench advertises only what the agent can do). NO
+  # `harvest` either — the turtle plays pure capex from a fat war
+  # chest (starting_cash funds the entire intended reinforcement
+  # spend), keeping the discrimination cleanly on defence vs tech
+  # vs army allocation rather than on harvester routing.
+  tools: [observe, build, place_building, move_units, attack_unit, stop]
+  planning: true
+  # No interrupts: a step that fires on every enemy spotted /
+  # defender lost shortens each step to <90 ticks and the
+  # after_ticks fail cannot then be reached inside max_turns,
+  # collapsing non-winners to DRAW. Turtle play is also less
+  # interrupt-driven than the rusher / harass packs — the
+  # decision space is "lay defences and train defenders" and
+  # the engine handles the firing automatically.
+  termination: {max_ticks: 12000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Degenerate-to-balanced variant: smaller hunt band (4× e1),
+  # lower fortification bars (3 pbox, 1 gun). Tests the bare
+  # "lay defences AND keep a minimum army" capability. Cash
+  # covers 3 pbox + 1 gun + weap (gun prereq) + 3 e1 ≈ 4700,
+  # plus a generous buffer for extra defenders.
+  # max_turns 62 → reachable tick 93 + 90·61 = 5583 ≥ 5401 ✓
+  easy:
+    description: >
+      TURTLE expansion easy: your single pre-placed base (fact +
+      barracks + 2× power plant + refinery + harvester) faces an
+      incoming hunt band of 4 rifle infantry. You have no MCV and
+      cannot expand. Fortify in place: build at least 3 pillboxes
+      (pbox) AND at least 1 gun turret (gun) AND have ≥3 own
+      units alive AND keep the construction yard (fact) standing,
+      all before tick 5400. A war factory (weap) is required as
+      gun's engine prerequisite — that is the only tech allowed
+      under the turtle frame. Stalling (no defences → fact razed),
+      pure-army-no-towers (e1-spam, gets ground down), and over-
+      tech-skip-defence (weap+dome+more before pbox, fact razed
+      during research) all LOSE.
+    starting_cash: 6500
+    overrides:
+      actors:
+        # West base. fact at (16,20) — eastmost of the base
+        # buildings, so the hunt band's centroid-seek targets fact
+        # FIRST (and the easy-to-replace defence line in front),
+        # not the irreplaceable tent. Tent + 2 powr + proc clustered
+        # WEST behind the fact; the screen + pbox lane mouth runs
+        # EAST of the fact, where the hunt band actually engages.
+        - {type: fact, owner: agent, position: [16, 20]}
+        - {type: tent, owner: agent, position: [8,  18]}
+        - {type: powr, owner: agent, position: [6,  20]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        - {type: proc, owner: agent, position: [10, 16]}
+        - {type: harv, owner: agent, position: [10, 22]}
+        - {type: mine, owner: neutral, position: [2,  20]}
+        # Pre-placed seed: 1 pbox + weap (gun prereq) standing.
+        # The agent must ADD 2 more pbox + 1 gun to reach the
+        # 3 pbox + 1 gun bar — the irreducible turtle build chain
+        # under attack pressure. The pre-placed pbox + weap give
+        # just enough cushion that the build chain has time to
+        # complete; without the seed, the line is built too late
+        # and ganged before completion.
+        - {type: pbox, owner: agent, position: [22, 20]}
+        - {type: weap, owner: agent, position: [10, 24]}
+        # Pre-placed starting screen: 4× e1 (so the
+        # own_units_gte:3 bar starts satisfied; the discriminator
+        # is whether the agent KEEPS ≥3 alive — adds reinforcing
+        # pbox + trains replacement infantry as the hunt band
+        # grinds the screen).
+        - {type: e1,   owner: agent, position: [20, 20], stance: 3, count: 4}
+        # Smaller hunt band (4× e1) starting far east at x=95.
+        # At ~3-4 cells/turn the band needs ~20+ turns (~tick 2000)
+        # to reach the lane mouth at x=22, giving the pbox×3+gun
+        # chain time to come online.
+        - {type: e1, owner: enemy, position: [95, 20], stance: 3, count: 4}
+        # Persistent unarmed enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [122, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 3}
+        - building_count_gte: {type: gun, n: 1}
+        # Conyard still standing — use building_count_gte (per-tick
+        # refreshed) NOT has_building (monotonic set, never un-set
+        # after a kill — CLAUDE.md footgun).
+        - building_count_gte: {type: fact, n: 1}
+        - own_units_gte: 3
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {own_units_gte: 1}
+    max_turns: 62
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # The TURTLE challenge proper: full hunt band (6× e1 + 2× e3) +
+  # dense fortification bars (≥6 pbox + ≥2 gun + ≥3 defenders +
+  # fact standing). Cash covers 6 pbox + 2 gun + weap + 3 e1 ≈
+  # 6500, plus buffer for spare defenders.
+  # max_turns 62 → reachable tick 5583 ≥ 5401 ✓
+  medium:
+    description: >
+      TURTLE expansion medium: your single pre-placed base (fact +
+      barracks + 2× power plant + refinery + harvester) faces an
+      incoming hunt band of 6 rifle infantry plus 2 rocket soldiers.
+      You have no MCV and cannot expand — you must fortify the one
+      site densely. Build at least 6 pillboxes (pbox) AND at least
+      2 gun turrets (gun) AND have ≥3 own units alive AND keep the
+      construction yard (fact) standing, all before tick 5400. A
+      war factory (weap) is required as gun's engine prerequisite.
+      Stalling (no defences → fact razed), pure-army-no-towers
+      (e1-spam, ground down without anchors), and over-tech-skip-
+      defence (weap+dome before pbox, fact razed during research)
+      all LOSE.
+    starting_cash: 8500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [16, 20]}
+        - {type: tent, owner: agent, position: [8,  18]}
+        - {type: powr, owner: agent, position: [6,  20]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        - {type: proc, owner: agent, position: [10, 16]}
+        - {type: harv, owner: agent, position: [10, 22]}
+        - {type: mine, owner: neutral, position: [2,  20]}
+        # Pre-placed seed: 5 pbox + 1 gun + weap (gun prereq).
+        # The agent must ADD ≥1 more pbox + ≥1 more gun (while
+        # reinforcing attrition losses) to reach the 6 pbox / 2
+        # gun bar under pressure from a hunt band of 6 e1 + 2 e3.
+        # Stalling (no build) → defences bleed below 6/2 (the
+        # hunt destroys ~1 pbox / 4 turns on average), bar never
+        # met. Pure-army (e1 only) → no replacement defences, bar
+        # falls below 6 mid-run. Over-tech (weap+dome+research
+        # instead of pbox/gun reinforcement) → cash spent
+        # elsewhere, bar unmet.
+        - {type: pbox, owner: agent, position: [22, 17]}
+        - {type: pbox, owner: agent, position: [22, 19]}
+        - {type: pbox, owner: agent, position: [22, 21]}
+        - {type: pbox, owner: agent, position: [22, 23]}
+        - {type: pbox, owner: agent, position: [24, 20]}
+        - {type: weap, owner: agent, position: [10, 24]}
+        - {type: gun,  owner: agent, position: [24, 18]}
+        # Heavier starting screen: 5 e1 + 1 e3 to absorb the e3
+        # rocket-soldier damage that out-ranges a single pbox.
+        - {type: e1, owner: agent, position: [20, 20], stance: 3, count: 5}
+        - {type: e3, owner: agent, position: [20, 22], stance: 3, count: 1}
+        # Canonical hunt band: 6× e1 + 2× e3 starting far east at
+        # x=95.
+        - {type: e1, owner: enemy, position: [95, 20], stance: 3, count: 6}
+        - {type: e3, owner: enemy, position: [97, 20], stance: 3, count: 2}
+        - {type: fact, owner: enemy, position: [122, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 6}
+        - building_count_gte: {type: gun, n: 2}
+        - building_count_gte: {type: fact, n: 1}
+        - own_units_gte: 3
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {own_units_gte: 1}
+    max_turns: 62
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: TWO agent spawn_point groups rotate the whole starter
+  # base between a NORTH (y=12) and a SOUTH (y=28) latitude.
+  # Symmetric enemy hunt bands at BOTH latitudes (enemies don't
+  # honour spawn_point — CLAUDE.md), so the threat always arrives
+  # from both flanks regardless of which spawn the agent draws;
+  # but the home base flips per seed, so a single memorised pbox
+  # cell cannot generalise. Higher pbox bar (≥8) reflects the
+  # doubled threat surface. Cash 9500 covers 8 pbox + 2 gun +
+  # weap + 3 e1 ≈ 7600 plus buffer.
+  # max_turns 62 → reachable tick 5583 ≥ 5401 ✓
+  hard:
+    description: >
+      TURTLE expansion hard: your single pre-placed base spawns at
+      either the NORTH (y=12) or SOUTH (y=28) latitude depending on
+      the seed; symmetric hunt bands arrive from BOTH latitudes
+      regardless. Fortify the site you actually got: build at least
+      8 pillboxes (pbox) AND at least 2 gun turrets (gun) AND have
+      ≥3 own units alive AND keep the construction yard (fact)
+      standing, all before tick 5400. A memorised pbox layout from
+      one spawn does not generalise to the other.
+    objective_coords: relative
+    starting_cash: 9500
+    overrides:
+      enemy: {faction: soviet, bot_type: hunt}
+      actors:
+        # North-base spawn (spawn_point 0). y=12 chosen so the
+        # WEST-stacked powr/proc/tent stays in-bounds (y∈[2,38]).
+        - {type: fact, owner: agent, position: [16, 12], spawn_point: 0}
+        - {type: tent, owner: agent, position: [8,  10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [10, 8],  spawn_point: 0}
+        - {type: harv, owner: agent, position: [10, 14], spawn_point: 0}
+        # Pre-placed seed: 7 pbox + 1 gun + weap (NORTH). Agent
+        # must add ≥1 pbox + ≥1 gun (plus reinforce attrition)
+        # to reach 8/2 bar.
+        - {type: pbox, owner: agent, position: [22, 8],  spawn_point: 0}
+        - {type: pbox, owner: agent, position: [22, 10], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [22, 12], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [22, 14], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [22, 16], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [24, 11], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [24, 13], spawn_point: 0}
+        - {type: weap, owner: agent, position: [10, 16], spawn_point: 0}
+        - {type: gun,  owner: agent, position: [24, 9],  spawn_point: 0}
+        - {type: e1,   owner: agent, position: [20, 12], stance: 3, count: 5, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [20, 14], stance: 3, count: 1, spawn_point: 0}
+        # South-base spawn (spawn_point 1) — symmetric layout.
+        - {type: fact, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [8,  30], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [10, 32], spawn_point: 1}
+        - {type: harv, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [22, 24], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [22, 26], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [22, 28], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [22, 30], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [22, 32], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [24, 27], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [24, 29], spawn_point: 1}
+        - {type: weap, owner: agent, position: [10, 24], spawn_point: 1}
+        - {type: gun,  owner: agent, position: [24, 31], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [20, 28], stance: 3, count: 5, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [20, 26], stance: 3, count: 1, spawn_point: 1}
+        # Two ore patches, one per spawn cluster (engine doesn't
+        # filter neutral actors by spawn_point — both placed).
+        - {type: mine, owner: neutral, position: [2, 12]}
+        - {type: mine, owner: neutral, position: [2, 28]}
+        # Doubled hunt bands at BOTH latitudes — enemies place
+        # regardless of spawn_point so the threat is symmetric.
+        - {type: e1, owner: enemy, position: [95, 12], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [97, 12], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [95, 28], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [97, 28], stance: 3, count: 1}
+        # Persistent unarmed enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [122, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: pbox, n: 8}
+        - building_count_gte: {type: gun, n: 2}
+        - building_count_gte: {type: fact, n: 1}
+        - own_units_gte: 3
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {own_units_gte: 1}
+    max_turns: 62

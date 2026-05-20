@@ -192,6 +192,14 @@ UPGRADED = [
     # flips per seed and no memorised "retreat west on y=20" opening
     # generalises.
     "combat-kite-jeep-vs-tank",
+    # Wave-4 Group B TURTLE node of the expansion triple (SC2 fortress
+    # macro / 1-base mass-defence; military fortress doctrine; risk-
+    # averse single-market deep-investment anchor). Hard tier defines
+    # two agent spawn_point groups (NORTH y=12 / SOUTH y=28) round-
+    # robined by seed; symmetric hunt bands arrive at BOTH latitudes
+    # regardless (enemy actors don't honour spawn_point — CLAUDE.md),
+    # so a memorised pbox layout from one spawn does not generalise.
+    "expansion-turtle-1-base-fortified",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
