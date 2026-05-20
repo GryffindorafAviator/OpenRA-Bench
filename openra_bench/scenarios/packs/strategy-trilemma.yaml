@@ -1,0 +1,200 @@
+meta:
+  id: strategy-trilemma
+  title: 'Capital Trilemma — Commit One Indivisible Quarter to Expand / Tech / Army'
+  capability: reasoning
+  real_world_meaning: >
+    Capital allocation under one indivisible quarter-budget across three
+    mutually exclusive product directions: a startup deciding between
+    hiring (ARMY), R&D (TECH), or geographic expansion (a second base).
+    Choosing two starves the third — and starves all three — because the
+    quarter's burn funds exactly one full path. The test is the commit,
+    not the mechanics of any single path: the binding budget makes
+    hedging a strict loss.
+  robotics_analogue: >
+    Fixed-quarter budget allocation across mutually exclusive product
+    directions in an autonomous fleet: the same burn buys EITHER a
+    forward depot (expansion) OR a new capability module (R&D) OR a
+    larger active worker complement (hiring) — and any split funds none
+    of them before the deadline.
+  benchmark_anchor:
+    - PlanBench cost-optimal planning
+    - lmgame-Bench resource-allocation tracking
+    - ARC-AGI inductive choice under indivisible budget
+    - 'capital allocation: hire vs R&D vs expansion'
+  author: autonomous-loop
+
+# ENGINE NOTES (verified 2026-05 on scripted run_level seeds 1-4):
+# - Three-way mutual exclusion is enforced by `starting_cash` alone
+#   (harvest income is 0 in a runnable pack today). With the medium
+#   budget of 2400 cr:
+#     * EXPAND  = build+place a proc in the far region (cost 1400)
+#     * TECH    = build+place a `weap` war factory (cost 2000)
+#     * ARMY    = field ≥12 e1 (12 × 100 = 1200) AND get one kill credit
+#                 against the hunt harasser (defended harass).
+#   Pairwise sums all exceed 2400 (1400+1200=2600; 2000+1200=3200;
+#   1400+2000=3400), so a hedged spend funds NONE of the three arms in
+#   time. A `proc` at (60,20) auto-spawns a harv (engine
+#   behaviour), but the harv is non-combat and ARMY requires kill
+#   credit — so EXPAND does NOT trivially also satisfy ARMY.
+# - The agent base preplaces fact+powr+proc+tent so every production
+#   prerequisite for every arm is satisfied at t=0 (weap needs proc,
+#   e1 needs tent). Without `tent` a brute army-spam policy is blocked
+#   by the tech tree (verified: a `build('e1')` policy on a base
+#   missing `tent` produces zero units and times out).
+# - An unarmed `fact` is placed on the enemy side at (115,32) as a
+#   persistence marker: the engine auto-ends an episode the moment a
+#   player has zero actors of any kind, which would convert a
+#   defeated-harasser stall into a premature DRAW. The enemy fact has
+#   no weapon and the agent's tools list omits attack so the marker
+#   cannot be eliminated, preserving a real reachable timeout LOSS.
+# - The hunt bot drives a small harasser cell at the agent's base; on
+#   stall (`observe()` only) it whittles powr/proc/tent over the
+#   episode but the high-HP fact survives — the loss arrives via the
+#   tick deadline (`after_ticks > 4500`), which IS a real reachable
+#   loss for max_turns=50 (deadline reaches tick 4503).
+base_map: rush-hour-arena
+starting_cash: 2400
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: hunt
+  tools:
+    - build
+    - place_building
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 30000
+  actors:
+    # Agent base — every production prerequisite met at t=0:
+    #   weap needs proc (✓ at 10,22), e1 needs tent (✓ at 14,22),
+    #   proc needs powr (✓ at 14,18), tent needs powr (✓).
+    - {type: fact, owner: agent, position: [10, 18]}
+    - {type: powr, owner: agent, position: [14, 18]}
+    - {type: proc, owner: agent, position: [10, 22]}
+    - {type: tent, owner: agent, position: [14, 22]}
+    # Unarmed persistence marker (no weapon → cannot wipe the enemy
+    # player; agent tools omit attack so it cannot be eliminated).
+    - {type: fact, owner: enemy, position: [115, 32], stance: 0}
+    # Hunt harasser — places stall under timer pressure; defeating it
+    # gives the ARMY arm its required kill credit.
+    - {type: e1,   owner: enemy, position: [95, 30], stance: 2}
+
+levels:
+  easy:
+    description: >
+      Three mutually exclusive paths to victory. Pick ONE and commit
+      the whole budget to it:
+        EXPAND — build+place a 2nd refinery (proc) at (60,20) in the
+                 far region (cost 1400).
+        TECH   — build+place a war factory (weap, cost 2000).
+        ARMY   — train ≥12 e1 infantry (cost 1200) AND defeat at least
+                 1 enemy unit (the hunt harasser).
+      Easy budget gives small slack (3000 credits vs the binding 2400)
+      and a generous clock so the intended path completes comfortably
+      — but the budget still does not fund any TWO paths together
+      (1400+2000=3400, 1400+1200=2600, 2000+1200=3200), so a hedged
+      "do a bit of each" spend fails every arm.
+    starting_cash: 3000
+    win_condition:
+      any_of:
+        - all_of:
+            - building_in_region: {x: 60, y: 20, radius: 6, type: proc, count: 1}
+            - within_ticks: 5400
+        - all_of:
+            - has_building: weap
+            - within_ticks: 5400
+        - all_of:
+            - own_units_gte: 12
+            - units_killed_gte: 1
+            - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+    max_turns: 60
+
+  medium:
+    description: >
+      Same three arms (EXPAND proc at (60,20) / TECH weap / ARMY ≥12
+      e1 + 1 kill), now under a BINDING budget: 2400 credits funds
+      EXACTLY ONE full path. Any hedged spend (proc + a few units,
+      weap + a few units, etc.) leaves no arm complete before the
+      shorter deadline.
+    starting_cash: 2400
+    win_condition:
+      any_of:
+        - all_of:
+            - building_in_region: {x: 60, y: 20, radius: 6, type: proc, count: 1}
+            - within_ticks: 4500
+        - all_of:
+            - has_building: weap
+            - within_ticks: 4500
+        - all_of:
+            - own_units_gte: 12
+            - units_killed_gte: 1
+            - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {has_building: fact}
+    max_turns: 50
+
+  hard:
+    description: >
+      Tightest version of the trilemma. Budget cut to 2200 (TECH eats
+      91% of it; EXPAND 64%; ARMY 55%), the clock is shorter, AND an
+      attrition cap is added: lose more than 3 units and the raid
+      fails. The hunt harasser is doubled, so the ARMY arm must
+      actually defend its force while completing 12 units + a kill.
+      Two agent spawn_point groups vary the harvester staging by
+      seed (the round-robin start the held-out-seed metric rewards).
+    starting_cash: 2200
+    overrides:
+      actors:
+        # Base buildings duplicated under both spawn_point groups so the
+        # filter (`if any agent actor has spawn_point: keep only the
+        # selected group`) leaves the agent fully provisioned in either
+        # seed branch. Positions are identical across groups — the only
+        # seed-varied actor is the scout, which is enough to satisfy
+        # the hard-tier ≥2-distinct-starts contract.
+        - {type: fact, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 18], spawn_point: 0}
+        - {type: proc, owner: agent, position: [10, 22], spawn_point: 0}
+        - {type: tent, owner: agent, position: [14, 22], spawn_point: 0}
+        # Seed-varied scout — staging position differs per seed.
+        - {type: e1,   owner: agent, position: [16, 20], stance: 2, spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 18], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 18], spawn_point: 1}
+        - {type: proc, owner: agent, position: [10, 22], spawn_point: 1}
+        - {type: tent, owner: agent, position: [14, 22], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [16, 24], stance: 2, spawn_point: 1}
+        - {type: fact, owner: enemy, position: [115, 32], stance: 0}
+        # Doubled hunt harasser — defended harass for the ARMY arm.
+        - {type: e1, owner: enemy, position: [95, 30], stance: 2}
+        - {type: e1, owner: enemy, position: [100, 28], stance: 2}
+    win_condition:
+      any_of:
+        - all_of:
+            - building_in_region: {x: 60, y: 20, radius: 6, type: proc, count: 1}
+            - within_ticks: 3600
+            - units_lost_lte: 3
+        - all_of:
+            - has_building: weap
+            - within_ticks: 3600
+            - units_lost_lte: 3
+        - all_of:
+            - own_units_gte: 12
+            - units_killed_gte: 1
+            - within_ticks: 3600
+            - units_lost_lte: 3
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+        - not: {has_building: fact}
+        - not: {units_lost_lte: 3}
+    max_turns: 40

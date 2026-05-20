@@ -41,6 +41,7 @@ UPGRADED = [
     "custom-map-no-enemy",
     "tempo-double-window",
     "economy-harvest-timebox",
+    "strategy-trilemma",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
