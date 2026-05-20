@@ -387,6 +387,19 @@ UPGRADED = [
     # and a memorised "always defend at y=N" opening cannot
     # generalise.
     "econ-contention-with-enemy",
+    # Wave-6 perception pack — military intelligence reconnaissance
+    # (recon-and-extract) / SC2 scout-and-return for info / drone
+    # surveillance with return-to-base / intel ops: gather then withdraw.
+    # Sibling of scout-and-survive (which permits ANY return of a single
+    # jeep); this pack requires the WHOLE 2-jeep team to extract INTACT
+    # (`units_lost_lte:0` + `units_in_region_gte n:2`) AFTER revealing
+    # the specific far enemy fact. Hard defines two agent spawn_point
+    # groups (NORTH (10,8) / SOUTH (10,32)) round-robined by seed; the
+    # win clause is `any_of` over the two matching corner-return
+    # regions, and a second scattered defender group at the inner
+    # bands (y=12 / y=28) punishes the near-edge shortcut so a
+    # memorised single-detour-band opening cannot generalise.
+    "scout-and-report",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

@@ -1,0 +1,254 @@
+# scout-and-report.yaml
+#
+# PERCEPTION capability — reconnaissance-and-EXTRACT cell. The agent
+# must (a) reach a specific FAR enemy building to surface it AND
+# (b) bring the WHOLE scout team back to the base region. Distinct
+# from the sibling perception packs:
+#
+#   * scout-and-survive       — 1 jeep, ANY return; the SCOUT must
+#                               survive the discovery round-trip.
+#   * scout-detect-enemy-tech — observe N distinct enemy buildings;
+#                               NO return-to-base clause.
+#   * perception-frontier-reading — discover N fog pockets, no return.
+#   * perception-target-vs-fog    — infer WHICH pocket holds the target.
+#
+# This pack is the only perception cell that requires BOTH:
+#   (i) a discovered enemy building (reveal a SPECIFIC far target), AND
+#   (ii) the full team (n:2) returns to the base region INTACT (no
+#       losses — `units_lost_lte:0`).
+#
+# Real-world anchor: military reconnaissance with mandatory recovery
+# AND full-team intact extraction (intel-and-extract ops); SC2 recon-
+# and-report where losing any unit ruins the report channel; drone
+# surveillance with return-to-base + zero-attrition acceptance.
+#
+# Win idiom: `buildings_discovered_gte:1 AND units_in_region_gte
+# {start, n:2} AND within_ticks:K AND units_lost_lte:0`. The discovery
+# clause forces the round-trip out to the far fact; the n:2 return
+# clause forces the WHOLE team back (one jeep stranded east = LOSS);
+# units_lost_lte:0 forces a NO-LOSS extraction (any jeep dies = LOSS).
+# Brute-attacking the en-route defenders kills at least one jeep
+# (jeeps vs an e1 stack — low DPS, fragile chassis) → bust the
+# units_lost_lte:0 tooth. Stalling busts the clock. One-way commit
+# busts the n:2 return clause.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/scout-and-report.yaml
+
+meta:
+  id: scout-and-report
+  title: 'Scout and Report — Reveal the Far Target, Then Extract the Team'
+  capability: perception
+  real_world_meaning: >
+    Military intelligence reconnaissance with mandatory full-team
+    recovery. The scout team must surface a specific FAR enemy
+    installation AND bring the entire team back INTACT for the
+    intelligence to be delivered. Real intel-and-extract doctrine
+    treats neither bare discovery NOR a partial-team return as a
+    success — the channel is the report (requires return) AND the
+    asset is the team (requires zero losses). The pack tests
+    whether the agent treats "saw the target" or "one jeep made it
+    home" as success rather than the binding "discovered AND full
+    team extracted" criterion.
+  robotics_analogue: >
+    Multi-drone reconnaissance overflight with return-to-base + zero-
+    attrition acceptance: the mission counts as a success only if the
+    platforms reveal the named target AND ALL platforms recover. A
+    one-way commit that surfaces the target but loses any drone is a
+    partial failure, not a win — the report channel requires both the
+    data AND the platforms back at base for the next mission.
+  benchmark_anchor:
+    - "military intelligence reconnaissance (recon-and-extract)"
+    - "SC2 scout-and-return for info"
+    - "drone surveillance with return-to-base"
+    - "intel ops: gather then withdraw"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  # The advertised tool surface includes attack_unit (the model CAN
+  # try to attack), but using it on the defenders is the failure
+  # mode the pack is designed to punish — any combat engagement
+  # with the e1 stacks bleeds at least one jeep and busts
+  # units_lost_lte:0.
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 10000}
+  actors:
+    # 2× jeep scout team at the west spawn — the start region the
+    # team must return to (centre of the units_in_region clause on
+    # easy/medium; spawn-matched corner regions on hard).
+    - {type: jeep, owner: agent, position: [10, 20], stance: 1, count: 2}
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # 2 stationary infantry pickets on the direct east lane (y=20).
+  # The fact (discovery target) sits at the far east at (110, 20).
+  # Pickets are easy to detour around (one row north or south
+  # clears them). Generous clock — even a slow detour-and-return
+  # by both jeeps wins. Bruting bleeds a jeep; stalling busts the
+  # clock; reaching the fact but stopping east loses on n:2 return.
+  easy:
+    description: >
+      Two jeep scouts at the west (10, 20). The discovery target —
+      a specific far enemy fact — sits at (110, 20). Two enemy
+      rifle infantry block the direct east lane (around x=60, y=20).
+      Drive AROUND the pickets, reveal the fact, and bring BOTH
+      jeeps BACK to the start region (radius 5 around (10, 20))
+      before the clock expires. Any jeep loss FAILS the mission
+      (zero attrition). Bruting the pickets bleeds a jeep (low
+      jeep DPS vs infantry); stopping after the discovery in
+      enemy territory loses on the n:2 return clause; stalling
+      loses on the clock.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [10, 20], stance: 1, count: 2}
+        # Two stationary pickets directly on the y=20 lane — react
+        # if approached but don't push (stance:1).
+        - {type: e1, owner: enemy, position: [60, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [62, 21], stance: 1}
+        # Discovery target — the FAR fact (unarmed, persistent so
+        # the episode does not auto-end on accidental nearby kills).
+        - {type: fact, owner: enemy, position: [110, 20]}
+        # A second persistent enemy building so destroying the fact
+        # alone can't auto-`done` the run before the return + no-
+        # loss clauses are evaluated.
+        - {type: barr, owner: enemy, position: [113, 22]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {units_in_region_gte: {x: 10, y: 20, radius: 5, n: 2}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: a DEFENDED BOTTLENECK. Four stationary
+  # infantry pickets span y=18..22 around x=60 — the central lane
+  # is closed, the scout pair MUST detour through y<14 or y>26 to
+  # make the round trip. The clock still admits the long detour by
+  # both jeeps, but not a stall and not a brute attempt (4× e1
+  # kills a jeep easily).
+  medium:
+    description: >
+      Two jeep scouts at the west (10, 20). The discovery target —
+      a specific far enemy fact — sits at (110, 20). FOUR enemy
+      rifle infantry form a defended bottleneck across the central
+      lane (around x=58..62, y=16..22), closing the direct east
+      route. Detour AROUND the bottleneck (y<14 or y>26), reveal
+      the fact, and bring BOTH jeeps BACK to the start region
+      (radius 5 around (10, 20)) before the clock. Any jeep loss
+      FAILS the mission. Bruting four e1 with jeeps loses; the
+      central lane is closed. Stalling loses on the clock; one-way
+      commits that strand a jeep east lose on the n:2 return.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [10, 20], stance: 1, count: 2}
+        # Four-infantry bottleneck spanning the central lane.
+        # stance:1 — react/defend in place; they don't pursue out
+        # of range, but a jeep that walks into the cluster eats
+        # four-on-one and dies.
+        - {type: e1, owner: enemy, position: [58, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [62, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [60, 16], stance: 1}
+        - {type: fact, owner: enemy, position: [110, 20]}
+        - {type: barr, owner: enemy, position: [113, 22]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {units_in_region_gte: {x: 10, y: 20, radius: 5, n: 2}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 more controlled variable: TWO SEED-VARIED SPAWN GROUPS
+  # (N start vs S start) AND a SECOND SCATTERED DEFENDER GROUP so
+  # the in-route geometry differs per seed. The bottleneck is also
+  # THICKENED with two flank pickets so the inner detour bands
+  # (y≈12 / y≈28) are no longer safe — only the FAR edge of the
+  # map matching the spawn corner (y≈4 for N start, y≈35 for S
+  # start) clears the bottleneck. The two return regions are
+  # disjoint (N is (10, 8), S is (10, 32)); a wrong-corner return
+  # doesn't satisfy the clause. The discovery target plus a second
+  # persistent enemy building remain at the eastern edge so the
+  # engine doesn't auto-`done` on a chance kill.
+  hard:
+    description: >
+      Two jeep scouts at the west, started at the NORTH (10, 8) or
+      SOUTH (10, 32) corner by seed. The discovery target — a
+      specific far enemy fact — sits at (110, 20). SIX stationary
+      infantry thicken the central bottleneck (spanning y=14..24
+      around x=58..62) and TWO additional flank pickets (one
+      north, one south) sit forward at x≈50 so the inner detour
+      bands are also contested. The scout team must pick the FAR
+      edge of the map matching its spawn corner (y≈4 lane for a
+      NORTH start, y≈35 lane for a SOUTH start), weave east to
+      surface the fact, climb back to that edge, and RETURN BOTH
+      jeeps to the matching corner region (radius 5 around (10, 8)
+      NORTH or (10, 32) SOUTH). Any jeep loss FAILS the mission.
+      Bruting the bottleneck loses; the wrong-corner edge attrites
+      the jeeps before they cross; stalling loses on the clock.
+    overrides:
+      actors:
+        # Two seed-varied agent spawn corners (N vs S). count:2 at
+        # each so each spawn group gets a 2-jeep team.
+        - {type: jeep, owner: agent, position: [10, 8],  stance: 1, count: 2, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [10, 32], stance: 1, count: 2, spawn_point: 1}
+        # Thickened central bottleneck: four central pickets (as in
+        # medium) plus two flank pickets at y=14 / y=24 so the
+        # inner detour bands (y≈12 / y≈28) cannot weave through in
+        # e1's react range (~5 cells). The far-edge bands at
+        # y≈4..5 (north) and y≈34..35 (south) remain safely clear.
+        - {type: e1, owner: enemy, position: [58, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [62, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [60, 16], stance: 1}
+        - {type: e1, owner: enemy, position: [60, 14], stance: 1}
+        - {type: e1, owner: enemy, position: [60, 24], stance: 1}
+        # Second scattered defender group — one forward picket per
+        # band at x≈50, placed in the INNER detour band (y=12 /
+        # y=28) so they punish a near-edge weave (y≈10 / y≈30) but
+        # stay safely OUT of react range from the FAR edge lanes
+        # the intended policy uses: y=12 → y=4 is 8 cells (clear),
+        # y=28 → y=35 is 7 cells (clear), both well past the
+        # ~5-cell e1 react radius. A scout that tries to cut a
+        # shorter inner detour walks right into them.
+        - {type: e1, owner: enemy, position: [50, 12], stance: 1}
+        - {type: e1, owner: enemy, position: [50, 28], stance: 1}
+        - {type: fact, owner: enemy, position: [110, 20]}
+        - {type: barr, owner: enemy, position: [113, 22]}
+    # Hard win: discover + return BOTH jeeps to the spawn-matching
+    # corner. `any_of` over the two corners — the team returns to
+    # its OWN corner. The full-team-intact bar (units_lost_lte:0)
+    # still applies.
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - any_of:
+            - {units_in_region_gte: {x: 10, y: 8,  radius: 5, n: 2}}
+            - {units_in_region_gte: {x: 10, y: 32, radius: 5, n: 2}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52
