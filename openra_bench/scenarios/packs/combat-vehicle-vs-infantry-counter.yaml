@@ -1,0 +1,319 @@
+# combat-vehicle-vs-infantry-counter
+#
+# REASONING capability — rock-paper-scissors hard-counter selection.
+# The agent has cash to commit to EITHER mass anti-tank rocket
+# infantry (e3) OR a small armoured fist (2tnk); the enemy is PURE
+# rifle infantry (e1). Tanks hard-counter rifles (heavy armour
+# absorbs small-arms; tank dps + range shred infantry); rockets
+# are the WRONG counter (anti-tank ordnance against soft targets —
+# short e3 stand-off + slow projectiles + the e1 mass closes inside
+# rocket range and out-DPSes a smaller rocket squad on attrition).
+# Building only e1 from the production queue matches enemy strength
+# 1:1 and loses on attrition. Stalling never reaches the kill bar.
+#
+# Real-world anchor: capability counter-selection in defense
+# procurement — buying anti-tank platforms is wrong against a soft-
+# target infantry threat; armoured vehicles are the right tool. SC2
+# hard-counter doctrine: roach vs marine (the right tier counters
+# the WHOLE army), stalker vs marauder. Military RPS: tank-vs-
+# infantry, infantry-vs-rocket, rocket-vs-tank.
+#
+# Pre-placed (each spawn group): agent `fact` + `tent` (infantry
+# trainer; enables e1 and e3) + `weap` (vehicle trainer; enables
+# 2tnk) + a single starter `jeep` (allies scout vehicle; visibility
+# over the enemy composition + satisfies own_units_gte:1 from turn 0
+# so the unit-less misfire footgun in CLAUDE.md doesn't trip on the
+# fail clause). The tent+weap pair makes BOTH counter compositions
+# buildable from turn 1 — the decision the model faces is
+# composition, not tech-up.
+#
+# Discrimination on EASY / MEDIUM (single enemy cluster, both
+# compositions are buildable from t=1):
+#   • stall (only observe): never reaches the kill bar → after_ticks
+#     LOSS.
+#   • build-only-e1 (match enemy 1:1 with cheap rifles): 25× e1 vs
+#     the enemy e1 mass is a 1:1 attrition; the enemy holds entrenched
+#     while the agent has to MOVE INTO range — moving infantry get
+#     shot first; attrition LOSES, the kill bar is unmet OR the
+#     starter jeep + survivors evaporate before the cap.
+#   • build-only-e3 (anti-armour rockets against infantry — the wrong
+#     counter): 8× e3 ($2400) costs $300/unit to put out the same
+#     anti-infantry DPS that 24× e1 ($2400) would; the rocket squad
+#     is OUT-SHOT by the e1 mass on raw infantry-vs-infantry numbers
+#     (e3 hp45 < e1 hp50; e3 rng4 < tank rng4.75; e3 anti-armour
+#     warhead is overkill on infantry but the same slow projectiles
+#     under-perform vs small targets) → kill bar unmet OR survivors
+#     under N → LOSS.
+#   • intended build-2tnk (3× medium tanks @ $850 = $2550): the right
+#     counter — heavy armour soaks small-arms fire, tank dps22 + rng
+#     4.75 + sight 6c walks through a static e1 mass without losing
+#     a tank → kill bar met, all 3 tanks alive, fact intact → WIN.
+#
+# Discrimination on HARD (+1 axis: 2 agent spawn_point groups):
+#   • The agent base seed-rotates between NORTH (y=12) and SOUTH
+#     (y=28). The enemy cluster always places at centre x=70 (enemy
+#     actors don't honour spawn_point — CLAUDE.md), so the geometry
+#     differs per seed but the composition decision is the same. A
+#     memorised "always tanks" opening generalises across seeds, but
+#     a memorised "tanks at y=12, march east on y=20" opening does
+#     NOT — the agent must derive the lane from its actual spawn
+#     latitude.
+#
+# Engine guardrails (CLAUDE.md):
+#   • Map: rush-hour-arena (128 × 40, playable x in [2..126],
+#     y in [2..38]).
+#   • Far persistent enemy `fact` at (124, 20) prevents engine
+#     auto-done when the live infantry cluster falls (the kill bar
+#     is satisfied on units killed, not buildings; the marker keeps
+#     the episode running through the win/fail evaluator's terminal
+#     frame).
+#   • `after_ticks` fail clauses reachable within max_turns
+#     (within_ticks 5400 ≤ 5403 at max_turns 60): a staller hits
+#     after_ticks 5401 and LOSES, never draws.
+#   • Starting `jeep` ensures own_units_gte:1 is met from t=0 so
+#     the unit-less mis-fire (CLAUDE.md) doesn't trip the fail
+#     clause before the model has built anything.
+#   • Spawn-group footgun (CLAUDE.md oramap): on hard, ANY agent
+#     actor with `spawn_point` filters OUT every agent actor without
+#     one — so BOTH bases (fact + tent + weap + jeep) are
+#     duplicated under BOTH spawn_point groups at their respective
+#     coords. The single far enemy fact at (124,20) and the centre
+#     enemy cluster have NO spawn_point and place on every seed.
+#   • starting_cash $2550 = exactly 3× 2tnk; 8× e3 = $2400 (cash
+#     unspent); 25× e1 = $2500. Neither rocket nor rifle mass is
+#     dominant against the entrenched enemy.
+#   • Faction = allies (so the starter scout `jeep` and barracks
+#     `tent` are native; vehicle queue from `weap` produces 2tnk —
+#     the allies medium tank).
+
+meta:
+  id: combat-vehicle-vs-infantry-counter
+  title: 'Hard-Counter Selection — Tanks vs Rockets vs an Infantry Threat'
+  capability: reasoning
+  real_world_meaning: >
+    A fixed cash budget funds EITHER a small armoured fist (3× 2tnk
+    medium tanks @ $850) OR a mass anti-tank rocket squad (8× e3
+    rocket soldiers @ $300) OR a rifle company (up to 25× e1 @ $100).
+    The enemy is PURE rifle infantry (e1 mass entrenched at centre).
+    The correct rock-paper-scissors counter is armour: heavy tanks
+    soak small-arms fire and shred soft targets at range. Rockets
+    are the WRONG counter — anti-tank munitions against soft
+    infantry waste cost-per-effect and the rocket squad's short
+    stand-off + low HP gets out-DPSed by the rifle mass on
+    attrition. Matching the enemy with own rifles is a 1:1 trade
+    with no positional advantage and loses. Stalling never reaches
+    the kill bar. The capability under test is hard-counter
+    SELECTION: scout the threat composition, infer it has no anti-
+    armour, and commit the WHOLE budget to the dominant counter.
+  robotics_analogue: >
+    Capability counter-selection in defense procurement / fleet
+    composition: buying anti-tank guided missiles is wrong against
+    a soft-target infantry threat (cost-per-effect waste), buying
+    rifle squads matches the threat 1:1 with no advantage, buying
+    armoured vehicles is the dominant choice. The decision under
+    test is reading the threat profile and committing the whole
+    capital budget to the dominant counter rather than hedging
+    across categories.
+  benchmark_anchor:
+    - "SC2 hard-counter"
+    - "military RPS counter"
+    - "capability-based defense"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 2550
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [build, place_building, move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 8000}
+  # Default base (overridden on hard). The starter jeep gives turn-1
+  # scouting (sight 7c) AND satisfies own_units_gte:1 from t=0 so the
+  # fail clause's not own_units_gte:1 doesn't mis-fire on turn 1.
+  actors:
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: tent, owner: agent, position: [14, 18]}
+    - {type: weap, owner: agent, position: [14, 22]}
+    - {type: jeep, owner: agent, position: [12, 20]}
+    # Far persistent enemy marker — prevents engine auto-done when
+    # the live infantry cluster falls so the win/fail evaluator sees
+    # the terminal frame.
+    - {type: fact, owner: enemy, position: [124, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare counter-selection skill: a small visible enemy infantry
+  # cluster (8× e1) on the centre lane. Cash $2550 funds 3× 2tnk
+  # (the right counter) cleanly. Loss cap is generous via the
+  # own_units_gte:1 floor only (any survivor counts). Stall: kill bar
+  # unmet → after_ticks LOSS.
+  easy:
+    description: >
+      Cash $2550. The enemy is a small cluster of 8 rifle infantry
+      (e1) entrenched at the centre of the map. You start with a
+      construction yard (fact), a barracks (tent), a war factory
+      (weap), and a single scout jeep. The barracks and war factory
+      are both ONLINE from turn 1 — you can build EITHER mass anti-
+      tank rocket soldiers (e3 @ $300, up to 8 for $2400) OR a small
+      armoured fist (2tnk @ $850, exactly 3 for $2550) OR rifle
+      infantry (e1 @ $100, up to 25). Scout the enemy with the jeep,
+      pick the correct hard counter, and commit the whole budget.
+      Win when 6 enemy units are killed AND ≥1 of your units are
+      alive AND your construction yard still stands, before tick
+      5400. Stalling, picking the wrong counter, or letting your
+      force evaporate fails the bar.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: weap, owner: agent, position: [14, 22]}
+        - {type: jeep, owner: agent, position: [12, 20]}
+        # 8× e1 entrenched cluster — stance:3 (attack anything in
+        # range). Spread over a 3×3 grid centred on (70,20) so the
+        # mass can be engaged from any approach axis.
+        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {own_units_gte: 1}
+        - {has_building: fact}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+    max_turns: 60
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: heavier enemy (12× e1) AND the composition is fogged.
+  # The model must scout (the starter jeep) to read the threat — the
+  # brief tells the model the enemy is "pure infantry" but the
+  # specific composition (no e3, no tanks) is something the model
+  # has to verify on the minimap. Both pure-rocket and pure-rifle
+  # build LOSE; 3× 2tnk WINS cleanly.
+  medium:
+    description: >
+      Cash $2550. The enemy holds a centre garrison (~12 rifle
+      infantry) entrenched on the central lane; their exact
+      composition is fogged — scout with the starter jeep to verify
+      they are anti-armour-WEAK (no anti-tank rocket soldiers, no
+      tanks). Your construction yard, barracks, and war factory are
+      online from turn 1; commit the whole $2550 to the dominant
+      counter — armoured medium tanks (3× 2tnk @ $850 = $2550) walk
+      through small-arms fire. Mass rockets (e3 @ $300) waste cost-
+      per-effect against soft targets and get out-DPSed by the rifle
+      mass on attrition; matching with own rifles (e1 @ $100) is a
+      1:1 trade with no advantage. Win when 8 enemy units are killed
+      AND ≥1 of your units are alive AND your fact still stands,
+      before tick 5400.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: weap, owner: agent, position: [14, 22]}
+        - {type: jeep, owner: agent, position: [12, 20]}
+        # 12× e1 entrenched cluster — deeper centre mass.
+        - {type: e1, owner: enemy, position: [70, 17], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 23], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [74, 20], stance: 3}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 8}
+        - {own_units_gte: 1}
+        - {has_building: fact}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: 2 agent spawn_point groups (NORTH base y=12 / SOUTH base
+  # y=28), seed-driven round-robin. The centre infantry cluster has
+  # NO spawn_point (per CLAUDE.md, enemy actors don't honour it) and
+  # places on every seed at (70, 20) — equidistant from both bases,
+  # so the composition decision is the same but the lane the agent
+  # must commit to (NE→SE or SE→NE) flips per seed. Per CLAUDE.md,
+  # ANY agent actor with spawn_point filters out every agent actor
+  # WITHOUT — so the entire base (fact + tent + weap + jeep) is
+  # duplicated under BOTH spawn_point groups.
+  hard:
+    description: >
+      Cash $2550. The enemy holds a centre garrison (~12 rifle
+      infantry) entrenched on the central lane (y=20); their
+      composition is fogged — scout with the starter jeep to verify
+      they are anti-armour-WEAK (no e3, no tanks). Your base spawns
+      either at the NORTH (y=12) or SOUTH (y=28) corner (chosen by
+      seed). Commit the whole $2550 to the dominant counter — 3×
+      medium tanks (2tnk) walk through small-arms fire; mass rockets
+      (e3) waste cost-per-effect against soft targets and get out-
+      DPSed on attrition; matching with own rifles is a 1:1 trade
+      with no advantage. Win when 8 enemy units are killed AND ≥1 of
+      your units are alive AND your fact still stands, before tick
+      5400.
+    overrides:
+      actors:
+        # ── AGENT spawn 0 — NORTH base (y=12) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: tent, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: weap, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [12, 12], spawn_point: 0}
+        # ── AGENT spawn 1 — SOUTH base (y=28) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: weap, owner: agent, position: [14, 30], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [12, 28], spawn_point: 1}
+        # ── CENTRE ENEMY CLUSTER — pure infantry (always places) ──
+        # 12× e1 entrenched on the central lane. Per CLAUDE.md, enemy
+        # actors do not honour spawn_point — this cluster lands on
+        # every seed regardless of the agent's spawn corner.
+        - {type: e1, owner: enemy, position: [70, 17], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 23], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [74, 20], stance: 3}
+        # Far persistent enemy marker — prevents engine auto-done
+        # when the centre cluster falls.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 8}
+        - {own_units_gte: 1}
+        - {has_building: fact}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+    max_turns: 60
