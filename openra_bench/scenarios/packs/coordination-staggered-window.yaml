@@ -1,0 +1,233 @@
+# Validate: python -m openra_bench.scenarios.validate packs/coordination-staggered-window.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# COORDINATION focus — parallel scheduling under non-aligned per-region
+# arrival deadlines. The split is obvious; the test is whether the
+# controller can DISPATCH IN PARALLEL so that EVERY dock is staffed
+# *at the same instant* before a shared deadline. A single column
+# touring A→B leaves A empty by the time it reaches B (the joint
+# AND-clause never co-fires); a stall blows the deadline; a brute
+# one-region rush only ever satisfies one of the n region clauses;
+# only true split control wins.
+#
+# Real-world anchor: multi-robot warehouse fulfilment where order A
+# ships by 10:15 and B by 10:30 — one packing line per dock and the
+# SLAs do not align, so a single packer cannot serve both docks: the
+# long-haul team has to be dispatched FIRST so it lands at its dock
+# at the same instant the closer teams hold station on theirs.
+#
+# Engine-footgun note (kept for future authors):
+# (a) A win clause that uses `after_ticks` to force a HOLD phase is
+#     structurally incompatible with the map-level
+#     ConquestVictoryConditions trait — the engine auto-ends the
+#     episode the second the last enemy MustBeDestroyed building falls,
+#     and a held-on-dock agent unavoidably levels the landmark via
+#     move-tool opportunistic fire well before the after_ticks window
+#     opens, collapsing the run to a DRAW. The staggered-window
+#     semantic is therefore captured here by per-region landmark
+#     distance + a single shared `within_ticks` instead of an
+#     after_ticks/within_ticks band.
+# (b) The dock landmark MUST be a MustBeDestroyed building (barr /
+#     proc / powr / fact). `silo` is NOT MustBeDestroyed, so a brute
+#     rush of dock A that kills `tent` while `silo` at dock B
+#     survives in fog still triggers engine auto-done (silo doesn't
+#     count) and a brute would draw instead of losing on the deadline.
+#     Every landmark here is a Soviet MustBeDestroyed building so
+#     that the *unvisited* docks keep the episode alive.
+
+meta:
+  id: coordination-staggered-window
+  title: 'Staggered Windows — Two Docks, Two Deadlines, One Fleet'
+  capability: action
+  real_world_meaning: >
+    Warehouse fulfilment with non-aligned per-order SLAs and one packing
+    line per dock: every dock must be staffed during its own shipping
+    window. A single packer touring one dock then the other (the
+    single-column tour) cannot honour both SLAs — the first dock empties
+    while the packer relocates. The advertised capability is parallel
+    multi-fleet dispatch with hold-on-station, not route-planning.
+  robotics_analogue: >
+    Multi-robot dispatch where each robot team has a job-specific
+    deadline that does not align with the others': teams must launch
+    staggered (the long-haul team first) so that every team is on its
+    own objective during a bounded common arrival window. Serialising
+    one team behind the other blows the global SLA.
+  benchmark_anchor:
+    - "Watch-And-Help concurrent multi-agent"
+    - "SMAC asymmetric squad timing"
+    - "MARLÖ multi-objective deadlines"
+    - "multi-robot dispatch with non-aligned SLAs"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  easy:
+    # SAME-window baseline: two docks at very different distances from
+    # spawn. The closer (SW) squad arrives early and just camps; the
+    # long-haul (NE) squad arrives later. The joint AND-clause first
+    # fires when the long-haul team lands. A single column touring A
+    # then B (or B then A) physically can't be in both regions at the
+    # same instant, so the joint clause never co-fires before the
+    # deadline.
+    description: >
+      Two docks, one shared shipping deadline. Dock A (Barracks, type
+      'barr') is in the NE (~115,6); dock B (Refinery, type 'proc')
+      is in the SW (~20,36). Put >=3 of your units at EACH dock
+      before tick 2700: the joint AND-clause only fires when BOTH
+      docks are staffed AT THE SAME INSTANT. Split your force and
+      dispatch BOTH squads at once — a single column touring A then
+      B leaves A empty when it reaches B and never satisfies the
+      joint win. Lose if the deadline passes or the force is wiped.
+    overrides:
+      actors:
+        # Two squads in the spawn corner (x < 25). Pre-split so the
+        # task is unambiguously "drive each squad to ITS dock".
+        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
+        - {type: 1tnk, owner: agent, position: [7, 9],  count: 3}
+        - {type: jeep, owner: agent, position: [5, 12], count: 2}
+        # Visible landmark buildings at each dock. Both are
+        # MustBeDestroyed (Soviet barracks + refinery) so the
+        # unvisited dock's landmark KEEPS THE EPISODE ALIVE when a
+        # brute single-region rush levels the visited dock — without
+        # this, the engine auto-ends and a brute draws instead of
+        # losing on the deadline.
+        - {type: barr, owner: enemy, position: [115, 6]}    # NE dock A
+        - {type: proc, owner: enemy, position: [20, 36]}    # SW dock B
+        # Far-from-any-path persistent MustBeDestroyed building.
+        # Even an over-split policy that arrives at every dock and
+        # levels EVERY landmark still leaves this one alive in fog,
+        # so the deadline can fire as a LOSS (no DRAW-by-engine-
+        # auto-done degeneracy). Distance >12 from every squad
+        # route keeps it out of tank sight range.
+        - {type: powr, owner: enemy, position: [60, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 115, y: 6,  radius: 8, n: 3}}
+        - {units_in_region_gte: {x: 20,  y: 36, radius: 8, n: 3}}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {not: {own_units_gte: 1}}
+        - {after_ticks: 2701}
+    max_turns: 32
+
+  medium:
+    # STAGGERED-window: the deadline is tightened to ~tick 2200 so
+    # only true parallel dispatch can land both squads in time. The
+    # SW dock is much closer than the NE dock — the long-haul (NE)
+    # squad MUST be launched FIRST (the "stagger") or it cannot land
+    # before the deadline. A pure single-column tour (visit one then
+    # the other) cannot make it: travel A→B then back to A blows the
+    # clock, and at the instant the column is at B, A is empty so
+    # the joint AND-clause never co-fires.
+    description: >
+      Two docks, ONE tight shared shipping deadline. Dock A (Barracks
+      'barr') is far in the NE (~115,6); dock B (Refinery 'proc') is
+      in the SW (~20,36). Put >=3 of your units at EACH dock before
+      tick 2200: the joint AND-clause only fires when BOTH docks are
+      staffed AT THE SAME INSTANT. The NE dock is much farther than
+      the SW dock, so the NE squad must be launched FIRST (the
+      stagger) and the SW squad must follow promptly. A single
+      column touring A then B leaves A empty when it reaches B and
+      cannot finish in time. Lose if the deadline passes or the
+      force is wiped.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
+        - {type: 1tnk, owner: agent, position: [7, 9],  count: 3}
+        - {type: jeep, owner: agent, position: [5, 12], count: 2}
+        - {type: barr, owner: enemy, position: [115, 6]}    # NE dock A
+        - {type: proc, owner: enemy, position: [20, 36]}    # SW dock B
+        # Persistent center survivor (see easy).
+        - {type: powr, owner: enemy, position: [60, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 115, y: 6,  radius: 8, n: 3}}
+        - {units_in_region_gte: {x: 20,  y: 36, radius: 8, n: 3}}
+        - {within_ticks: 2200}
+    fail_condition:
+      any_of:
+        - {not: {own_units_gte: 1}}
+        - {after_ticks: 2201}
+    max_turns: 26
+
+  hard:
+    # THREE docks, three staggered deadlines (different distances),
+    # RELATIVE coords, ≥2 seed-driven spawn groups. The agent is not
+    # told (x,y); it is told the compass label + the landmark
+    # building type for each dock and must localise on the minimap.
+    # The three docks lie in three different directions (NE / SW /
+    # SE), so a single column cannot reach them all; this is genuine
+    # three-way parallel dispatch under a tight shared deadline.
+    # Spawn round-robin (seeds 1..4) flips the staging corner so a
+    # single memorised opening cannot generalise — the dock that is
+    # "long haul" from spawn 0 may be the closest from spawn 1.
+    objective_coords: relative
+    description: >
+      Three docks, one tight shared shipping deadline. You are NOT
+      given coordinates. Each dock is marked by a specific enemy
+      building: a Barracks (barr) in the NORTH-EAST, an Ore Refinery
+      (proc) in the SOUTH-WEST (bottom-left), and a Power Plant
+      (powr) in the SOUTH-EAST. Put >=3 of your units at EACH dock
+      before tick 2700: the joint AND-clause only fires when ALL
+      THREE docks are staffed AT THE SAME INSTANT. The three docks
+      lie in three DIFFERENT directions — a single column cannot
+      cover all three — so you need true three-way parallel
+      dispatch. Lose if the deadline passes or the force is wiped.
+    overrides:
+      interrupts:
+        # Re-prompt the moment a unit sights a marker building — the
+        # corrective feedback loop that makes coordinate-blind
+        # grounding solvable under a tight window.
+        enemy_building_spotted: true
+      actors:
+        # spawn_point 0 — fleet staged in the NW corner. 12 units so
+        # a clean 3-way split puts 4 at each dock and tolerates
+        # incidental loss without dropping below the n=3 region
+        # threshold.
+        - {type: 2tnk, owner: agent, position: [5, 6],  count: 4, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [7, 9],  count: 4, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 12], count: 4, spawn_point: 0}
+        # spawn_point 1 — fleet staged in the SW corner (mirrored).
+        # Now the long-haul leg is to the NE rather than the SE;
+        # the routing decision flips per-seed, so a single memorised
+        # opening cannot generalise.
+        - {type: 2tnk, owner: agent, position: [5, 33], count: 4, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [7, 30], count: 4, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5, 27], count: 4, spawn_point: 1}
+        # Static landmark buildings at each dock. The agent sees
+        # the building TYPE in the brief (relative coords) and must
+        # scout to find (x,y). All MustBeDestroyed Soviet buildings
+        # so the unvisited landmarks keep the episode alive when an
+        # incomplete attempt destroys the visited ones.
+        - {type: barr, owner: enemy, position: [115, 6]}    # NE dock
+        - {type: proc, owner: enemy, position: [20, 36]}    # SW dock
+        - {type: powr, owner: enemy, position: [115, 34]}   # SE dock
+        # Persistent far-from-any-path survivor — keeps the
+        # episode alive past partial / under-split attempts so a
+        # missed deadline emits a LOSS, not a DRAW (see easy/medium
+        # notes). Center cell is >12 from every squad route.
+        - {type: barr, owner: enemy, position: [60, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 115, y: 6,  radius: 8, n: 3,
+            label: "the enemy Barracks (barr) in the NORTH-EAST"}}
+        - {units_in_region_gte: {x: 20,  y: 36, radius: 8, n: 3,
+            label: "the enemy Ore Refinery (proc) in the SOUTH-WEST (bottom-left)"}}
+        - {units_in_region_gte: {x: 115, y: 34, radius: 8, n: 3,
+            label: "the enemy Power Plant (powr) in the SOUTH-EAST"}}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {not: {own_units_gte: 1}}
+        - {after_ticks: 2701}
+    max_turns: 32

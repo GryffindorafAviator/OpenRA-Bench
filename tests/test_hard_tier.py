@@ -32,6 +32,7 @@ UPGRADED = [
     "artofwar-lure-the-tiger",
     "artofwar-sequenced-citadel",
     "action-sequenced-execution",
+    "coordination-staggered-window",
     "strict-sequence",
     "perception-frontier-reading",
     "perception-target-vs-fog",
