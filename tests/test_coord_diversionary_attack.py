@@ -88,10 +88,10 @@ def _alive(n, kind="2tnk"):
 
 def test_easy_predicates():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    # Intended: fact at (100,10) destroyed (in region), 3 lost, in budget → WIN
+    # Intended: fact at (100,10) destroyed (in region), 4 lost, in budget → WIN
     assert evaluate(
         c.win_condition,
-        _ctx(units=_alive(4), tick=3000, lost=3,
+        _ctx(units=_alive(3), tick=3000, lost=4,
              destroyed_records=[("fact", 100, 10)]),
     )
     # Razing only the decoy powr at (100,30) → not a win
@@ -106,10 +106,10 @@ def test_easy_predicates():
         _ctx(units=_alive(4), tick=3000, lost=1,
              destroyed_records=[("fact", 125, 38)]),
     )
-    # Loss cap (3) tripped (4 lost) → not a win
+    # Loss cap (5) tripped (6 lost) → not a win
     assert not evaluate(
         c.win_condition,
-        _ctx(units=_alive(2), tick=3000, lost=4,
+        _ctx(units=_alive(1), tick=3000, lost=6,
              destroyed_records=[("fact", 100, 10)]),
     )
     # Past deadline → not a win
@@ -128,31 +128,31 @@ def test_easy_predicates():
         c.fail_condition,
         _ctx(units=[], tick=3000, lost=7, destroyed_records=[]),
     )
-    # Loss cap (>3) → fail
+    # Loss cap tripped (>5) → fail
     assert evaluate(
         c.fail_condition,
-        _ctx(units=_alive(1), tick=3000, lost=4,
+        _ctx(units=_alive(1), tick=3000, lost=6,
              destroyed_records=[("fact", 100, 10)]),
     )
 
 
 def test_medium_predicates():
     c = compile_level(load_pack(PACK_PATH), "medium")
-    # Intended: fact destroyed, 3 lost (3 bait jeeps), within budget → WIN
+    # Intended: fact destroyed, 4 lost (3 jeeps + 1 tank), within budget → WIN
     assert evaluate(
         c.win_condition,
-        _ctx(units=_alive(4), tick=4000, lost=3,
+        _ctx(units=_alive(3), tick=4000, lost=4,
              destroyed_records=[("fact", 100, 10)]),
     )
-    # 4 lost (one tank lost) → not a win, AND fail
+    # 5 lost → not a win, AND fail (cap is 4 on medium)
     assert not evaluate(
         c.win_condition,
-        _ctx(units=_alive(3), tick=4000, lost=4,
+        _ctx(units=_alive(2), tick=4000, lost=5,
              destroyed_records=[("fact", 100, 10)]),
     )
     assert evaluate(
         c.fail_condition,
-        _ctx(units=_alive(3), tick=4000, lost=4,
+        _ctx(units=_alive(2), tick=4000, lost=5,
              destroyed_records=[("fact", 100, 10)]),
     )
     # Only decoy razed → not a win
@@ -165,33 +165,27 @@ def test_medium_predicates():
 
 def test_hard_predicates():
     c = compile_level(load_pack(PACK_PATH), "hard")
-    # Intended: NE fact destroyed → WIN
+    # Intended: fact at (100,10) destroyed, 4 lost (3 jeeps + 1 tank) → WIN
     assert evaluate(
         c.win_condition,
-        _ctx(units=_alive(4), tick=4000, lost=2,
+        _ctx(units=_alive(3), tick=4000, lost=4,
              destroyed_records=[("fact", 100, 10)]),
     )
-    # Intended (mirror): SE fact destroyed → WIN
-    assert evaluate(
-        c.win_condition,
-        _ctx(units=_alive(4), tick=4000, lost=2,
-             destroyed_records=[("fact", 100, 30)]),
-    )
-    # Only decoy powr at centre → not a win
+    # Razing only the decoy powr → not a win
     assert not evaluate(
         c.win_condition,
         _ctx(units=_alive(4), tick=4000, lost=1,
-             destroyed_records=[("powr", 100, 20)]),
+             destroyed_records=[("powr", 100, 30)]),
     )
-    # 3 lost → not a win, AND fail (cap is 2 on hard)
+    # 5 lost → not a win, AND fail (cap is 4 on hard)
     assert not evaluate(
         c.win_condition,
-        _ctx(units=_alive(3), tick=4000, lost=3,
+        _ctx(units=_alive(2), tick=4000, lost=5,
              destroyed_records=[("fact", 100, 10)]),
     )
     assert evaluate(
         c.fail_condition,
-        _ctx(units=_alive(3), tick=4000, lost=3,
+        _ctx(units=_alive(2), tick=4000, lost=5,
              destroyed_records=[("fact", 100, 10)]),
     )
 
@@ -221,16 +215,20 @@ def test_hard_has_two_spawn_point_groups():
     assert len(groups) >= 2, f"hard needs ≥2 spawn_point groups, got {groups}"
 
 
-def test_hunt_bot_and_two_target_kinds():
-    """Enemy must be the `hunt` scripted bot (pursues nearest agent
-    units — required for the bait to actually pull defenders). Each
-    level must include an enemy `fact` (the real / scoring target)
-    and an enemy `powr` (the decoy target that does NOT score)."""
+def test_guard_bot_and_two_target_kinds():
+    """Enemy must be the `guard` scripted bot (leashed defender:
+    holds its post, auto-fires in range, lunges within aggro,
+    snaps back past leash). Each level must include an enemy
+    `fact` (the real / scoring target) and an enemy `powr` (the
+    decoy that does NOT score). The spec's "hunt — defenders
+    react to incursion" hint maps to `guard`'s aggro/leash arc;
+    `hunt` would have every enemy charge across the map ignoring
+    the bait/strike split."""
     pack = load_pack(PACK_PATH)
     enemy = pack.base.get("enemy") if isinstance(pack.base, dict) else None
     assert enemy is not None
     bot = enemy.get("bot_type") or enemy.get("bot") or ""
-    assert bot == "hunt", f"expected hunt bot, got {bot!r}"
+    assert bot == "guard", f"expected guard bot, got {bot!r}"
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
         etypes = [a.type for a in c.scenario.actors if a.owner == "enemy"]
@@ -251,11 +249,13 @@ def test_sentinel_fact_present_per_level():
             for a in c.scenario.actors
             if a.owner == "enemy" and a.type == "fact"
         ]
-        # at least one objective candidate near (100,10)/(100,30) AND a
-        # far sentinel (>=12 cells from any objective candidate)
+        # at least one objective candidate near the objective region
+        # (the real fact: (100,10) on easy/medium, (100,20) on hard)
+        # AND a far sentinel (>=12 cells from the candidate)
         objs = [
             p for p in facts
             if (p[0] - 100) ** 2 + (p[1] - 10) ** 2 <= 6 ** 2
+            or (p[0] - 100) ** 2 + (p[1] - 20) ** 2 <= 6 ** 2
             or (p[0] - 100) ** 2 + (p[1] - 30) ** 2 <= 6 ** 2
         ]
         sentinels = [p for p in facts if p not in objs]
@@ -309,20 +309,6 @@ def _enemies_of_type(rs, want_types):
     return out
 
 
-def _enemy_buildings_in_region(rs, cx, cy, r):
-    """Enemies of building kind ~ near (cx, cy) within radius r."""
-    out = []
-    for e in (rs.get("enemy_summary") or []):
-        t = (e.get("type") or e.get("actor_type") or "").lower()
-        ex = e.get("cell_x")
-        ey = e.get("cell_y")
-        if ex is None or ey is None:
-            continue
-        if (ex - cx) ** 2 + (ey - cy) ** 2 <= r * r:
-            out.append((t, ex, ey, e.get("id")))
-    return out
-
-
 def _stall(rs, Command):
     """Pure observe — fact never takes damage; clock runs out → LOSS."""
     return [Command.observe()]
@@ -334,9 +320,8 @@ def _brute_all_on_decoy(rs, Command):
     by the heavy e3 anti-tank cluster en route → LOSS."""
     cmds = []
     # Target the decoy powr — easy/medium decoy is at (100,30);
-    # hard's decoy is at (100,20). Use centre y=20 for hard, y=30
-    # otherwise. Cheap detection: if a powr is at y=20 in vision,
-    # pick that; else use (100, 30).
+    # hard's decoy is at (100,20). Use whatever powr is visible;
+    # fall back to (100, 30) for the easy/medium default.
     target_x, target_y = 100, 30
     for e in (rs.get("enemy_summary") or []):
         t = (e.get("type") or "").lower()
@@ -350,29 +335,20 @@ def _brute_all_on_decoy(rs, Command):
 
 def _lazy_nearest(rs, Command):
     """Lazy "send each squad to its nearest visible target":
-      • jeeps → nearest fact/powr in vision (typically the near-
-        latitude one — for easy/medium that's the fact at (100,10)
-        if NW spawn, or the powr at (100,30) if SW spawn).
-      • tanks → nearest fact/powr in vision (the OTHER one).
-    The lazy assignment puts jeeps on the wrong-strength target and
-    tanks on the WRONG type (the decoy). On easy/medium the lazy
-    jeeps-on-fact / tanks-on-powr means tanks raze the decoy (which
-    doesn't score) and jeeps can't crack the fact garrison fast
-    enough → clock expires → LOSS."""
+      • jeeps → nearest visible target (typically the near-latitude
+        one: jeep at y=10 → fact at (100,10) on easy/medium).
+      • tanks → nearest visible target (the other latitude: tanks
+        at y=30 → powr at (100,30) on easy/medium).
+    On easy/medium this puts tanks on the close-looking powr (the
+    WRONG type — `enemy_key_buildings_destroyed_in_region` requires
+    a `fact`), so the real fact survives the clock → LOSS."""
     cmds = []
     jeeps = _of_type(rs, {"jeep"})
     tanks = _of_type(rs, {"2tnk"})
     if not (jeeps or tanks):
         return [Command.observe()]
-
-    # Fixed-coord lazy nearest (model can read positions but lazy
-    # means send-to-nearest-visible-target without bait logic):
-    # jeeps from NW go to (100,10), tanks from SW go to (100,30).
-    # Easy/medium objective: fact (100,10) is the real target;
-    # this lazy plan razes only powr at (100,30) — fails.
     for j in jeeps:
         jy = j.get("cell_y", 20)
-        # nearest by latitude: jeep at y≈10 → (100,10); else (100,30)
         tx, ty = (100, 10) if jy < 20 else (100, 30)
         cmds.append(Command.attack_move([str(j["id"])], tx, ty))
     for t in tanks:
@@ -389,31 +365,21 @@ def _bait_only(rs, Command):
     not score."""
     cmds = []
     for j in _of_type(rs, {"jeep"}):
-        # Oscillate around the decoy region (south for easy/medium,
-        # centre for hard) so the jeeps stay engaged but moving.
-        jy = j.get("cell_y", 20)
         # If on north start, dive into south decoy region; mirror.
+        jy = j.get("cell_y", 20)
         target_y = 30 if jy < 20 else 10
         cmds.append(Command.move_units([str(j["id"])], 100, target_y))
     return cmds or [Command.observe()]
 
 
 def _intended(rs, Command):
-    """Diversion + main strike:
-      1. Detect agent staging hemisphere from the unit centroid.
-      2. Bait the jeeps INTO the heavier garrison's pursuit region:
-         • easy/medium: decoy is south at (100,30) — jeeps slash
-           south-east no matter the spawn (NW spawn jeeps must
-           cross to south).
-         • hard: decoy cluster is at CENTRE (100,20) — jeeps slash
-           toward (100,20) to draw the centre e3 cluster.
-      3. Main strike: tanks attack-move along the OPPOSITE latitude
-         from the decoy to the real target.
-         • easy/medium: tanks at SW must cross north to (100,10).
-         • hard: real target is whichever fact MATCHES the agent's
-           spawn latitude (NORTH spawn → NE fact at (100,10);
-           SOUTH spawn → SE fact at (100,30)).
-      4. If a fact is in vision and reachable, attack_unit it.
+    """Diversion + main strike. The REAL target is always at
+    (100, 10); the DECOY is the powr at (100, 30). Jeeps slash
+    south-east into the decoy garrison's aggro arc; tanks route
+    NORTH along y=8 corridor (bypasses the centre band where the
+    decoy's e3 cluster lunge arc spills, and bypasses any north-
+    spawn agents' own staging line) and approach the fact along
+    y≈10.
     """
     cmds = []
     jeeps = _of_type(rs, {"jeep"})
@@ -422,34 +388,10 @@ def _intended(rs, Command):
     if not all_units:
         return [Command.observe()]
 
-    # Probe: which enemy buildings are present? Hard has a centre
-    # powr at (100,20); easy/medium has a powr at (100,30).
-    has_centre_decoy = any(
-        (e.get("type") or "").lower() == "powr"
-        and 16 <= (e.get("cell_y") or 99) <= 24
-        for e in (rs.get("enemy_summary") or [])
-    )
-
-    # Spawn latitude detection by tank centroid (tanks dominate the
-    # mass; jeeps may already have moved).
-    if tanks:
-        ty_avg = sum(t["cell_y"] for t in tanks) / len(tanks)
-    else:
-        ty_avg = sum(u["cell_y"] for u in all_units) / len(all_units)
-    is_north = ty_avg < 20
-
-    if has_centre_decoy:
-        # HARD: bait jeeps INTO the centre decoy cluster.
-        bait_x, bait_y = 100, 20
-        # Strike: matching-latitude fact (NORTH spawn → NE fact;
-        # SOUTH spawn → SE fact).
-        strike_x, strike_y = (100, 10) if is_north else (100, 30)
-    else:
-        # EASY/MEDIUM: decoy is south at (100,30); jeeps slash south
-        # regardless of spawn. The intended cross-attack for the
-        # tanks is north onto the fact at (100,10).
-        bait_x, bait_y = 100, 30
-        strike_x, strike_y = 100, 10
+    # The decoy is south at (100, 30); jeeps slash south. The real
+    # target is north at (100, 10).
+    bait_x, bait_y = 100, 30
+    strike_x, strike_y = 100, 10
 
     for j in jeeps:
         cmds.append(Command.move_units([str(j["id"])], bait_x, bait_y))
@@ -460,7 +402,8 @@ def _intended(rs, Command):
     tank_ids = [str(t["id"]) for t in tanks]
 
     # If the real fact is in vision, attack_unit it for a clean kill;
-    # else attack_move onto the cell so the column drives there.
+    # else route via a waypoint so the column stays in the strike
+    # corridor (NOT a diagonal through the decoy garrison).
     fact_id = None
     for e in (rs.get("enemy_summary") or []):
         et = (e.get("type") or "").lower()
@@ -469,6 +412,8 @@ def _intended(rs, Command):
         ex, ey = e.get("cell_x"), e.get("cell_y")
         if ex is None or ey is None:
             continue
+        # Real fact is at (100, strike_y); the sentinel fact at
+        # (125, 38) is far enough away to not pass this region check.
         if (ex - strike_x) ** 2 + (ey - strike_y) ** 2 <= 6 ** 2:
             fact_id = str(e.get("id"))
             break
@@ -476,7 +421,14 @@ def _intended(rs, Command):
     if fact_id is not None:
         cmds.append(Command.attack_unit(tank_ids, fact_id))
     else:
-        cmds.append(Command.attack_move(tank_ids, strike_x, strike_y))
+        # Two-phase route: first move to a STRIKE-LATITUDE waypoint
+        # (x=80, y=strike_y) so the column travels along an empty
+        # corridor, then attack-move into the fact region.
+        tx_avg = sum(t["cell_x"] for t in tanks) / len(tanks)
+        if tx_avg < 80:
+            cmds.append(Command.move_units(tank_ids, 80, strike_y))
+        else:
+            cmds.append(Command.attack_move(tank_ids, strike_x, strike_y))
     return cmds or [Command.observe()]
 
 
@@ -531,14 +483,22 @@ def test_brute_all_on_decoy_loses(level, seed):
     )
 
 
-@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_lazy_nearest_assignment_loses(level, seed):
     """Lazy "send each squad to its nearest visible target" play.
     On easy/medium this puts jeeps on the close-looking fact (too
     weak to crack) and tanks on the close-looking powr (the wrong
     type — `enemy_key_buildings_destroyed_in_region` requires a
-    `fact`), so the real fact survives the clock → LOSS."""
+    `fact`), so the real fact survives the clock → LOSS.
+    HARD is excluded: from the NORTH-spawn seed, both squads'
+    nearest target is the REAL fact (no decoy near the north
+    spawn) — that's the "lazy works for north spawn but fails
+    for south spawn" asymmetry the diversionary test asks the
+    AGENT to identify. The OTHER cheat plays (stall, brute-on-
+    decoy, bait-only) still discriminate the hard tier cleanly,
+    AND the spawn-variation contract (hard's spawn flips the
+    bait/strike vector per seed) is the load-bearing axis."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 

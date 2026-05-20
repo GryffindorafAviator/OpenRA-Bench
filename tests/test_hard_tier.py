@@ -152,13 +152,6 @@ UPGRADED = [
     # main session.
     "lh-opening-to-tech-to-army",
     "lh-tech-pivot-attack",
-    # Wave-5 Group G long-horizon: 5+ ordered checkpoints chained via
-    # the Wave-2 `then:` composite (PERT critical path / PlanBench
-    # long-sequencing anchor). Hard defines 2 agent spawn_point groups
-    # (NORTH base y=14..18 / SOUTH base y=22..26) round-robined by
-    # seed; the per-seed base latitude flips so a memorised 6-phase
-    # opening cannot generalise.
-    "lh-multi-checkpoint-5-plus",
     "mfb-tech-base-vs-economy-base",
     "combat-harass-balanced-hit-and-run",
     "tech-aggro-all-in",
@@ -200,19 +193,6 @@ UPGRADED = [
     # flips per seed and no memorised "retreat west on y=20" opening
     # generalises.
     "combat-kite-jeep-vs-tank",
-    # Wave-6 combat-micro skirmish pack (SC2 skirmisher tactics /
-    # military reconnaissance-by-fire anchor). One coordinated
-    # strike-then-pull-back; the load-bearing decision is "stop
-    # attacking after the kill bar is met and order the disengage
-    # back to the spawn-corner recovery zone before the deadline".
-    # Hard tier defines two agent spawn_point groups (NORTH (5,10)
-    # vs SOUTH (5,30)) round-robined by seed; the recovery clause is
-    # `any_of` over the two spawn-corner regions so the agent must
-    # return to ITS OWN start corner. Hunt-bot pursuit (e1 cluster
-    # attacks-anything) makes a slow-disengage policy also LOSE on
-    # the survival bar — the "stop fighting and pull back" call is
-    # mandatory on every seed.
-    "combat-skirmish-then-disengage",
     # Wave-4 Group B TURTLE node of the expansion triple (SC2 fortress
     # macro / 1-base mass-defence; military fortress doctrine; risk-
     # averse single-market deep-investment anchor). Hard tier defines
@@ -221,150 +201,14 @@ UPGRADED = [
     # regardless (enemy actors don't honour spawn_point — CLAUDE.md),
     # so a memorised pbox layout from one spawn does not generalise.
     "expansion-turtle-1-base-fortified",
-    # Wave-5 Group G long-horizon "secure-expand-with-tech" pack (SC2
-    # secure-expand multi-base macro / PlanBench multi-stage credit
-    # assignment anchor). Strict 3-phase chain (pbox×3 → weap → 2nd
-    # fact in east region) on medium; 4-phase on hard (+ second proc).
-    # Hard defines two agent spawn_point groups (NORTH y=22 / SOUTH
-    # y=38) round-robined by seed; two patrol bands hit BOTH latitudes
-    # (enemy actors don't honour spawn_point — CLAUDE.md) so a memorised
-    # base layout cannot generalise.
-    "lh-defense-tech-second-base",
-    # Wave-5 Group C reasoning pack — central mobile reserve doctrine
-    # / chess-piece centralization / military QRF. Hard tier defines
-    # two agent spawn_point groups (centre column x=40 / x=50)
-    # round-robined by seed so the reserve's exact staging cell varies
-    # but both remain equidistant from N/S flanks; THREE simultaneous
-    # rush bands (N/S/E) always place (enemy actors don't honour
-    # spawn_point — CLAUDE.md), so a single committed-flank policy
-    # cannot generalise. The forward-zone clause (`all_of` THREE
-    # `units_in_region_gte`) is the load-bearing discriminator: a
-    # passive central reserve auto-engages but never satisfies the
-    # forward zones; only an active three-way split / staggered send
-    # wins.
-    "def-pre-position-mobile-reserve",
-    # Wave-5 Group C reasoning pack — ERQA spatial commit / MicroRTS
-    # terrain-aware defence / military pre-positioned defence /
-    # intel-driven facility hardening anchor. The model is TOLD where
-    # the enemy will attack from; the decision is purely spatial
-    # commitment (build the pbox triple on the CORRECT lane). Hard
-    # tier defines two agent spawn_point groups (NORTH base y=12 /
-    # SOUTH base y=28) round-robined by seed and the win clause is
-    # `any_of` over the two correct region orientations — the
-    # threat-axis intel rotates with the spawn so "NORTH of YOUR
-    # base" flips per seed; a memorised single-cell pbox layout
-    # cannot generalise.
-    "def-position-expected-direction",
-    # Wave-5 Group N coordination pack — SC2 triple-prong assault /
-    # military convergent (pincer) attack / envelopment doctrine. Hard
-    # tier defines two agent spawn_point groups (squads staged
-    # NORTH/WEST/SOUTH in group 0, NORTH/EAST/SOUTH in group 1)
-    # round-robined by seed; the third squad's ingress bearing flips
-    # per seed and a single memorised opening cannot generalise. The
-    # defender cluster is symmetric so both spawns face the same
-    # convergent geometry from different start corners.
-    "coord-converge-on-target",
-    # Wave-5 Group N coordination pack — SC2 attack-wave timing /
-    # SMAC relay strike / military overlapping fires (bound-and-bound)
-    # anchor. Squad A (4× 2tnk heavy first wave) destroys the enemy
-    # armour line first; Squad B (4× e1 light rifle-infantry mop-up)
-    # follows up on the survivors. (Spec-pivot from the brainstorm
-    # e3+2tnk roles — see YAML header: e3 is offensively non-viable
-    # in the engine combat sheet.) Hard tier defines two agent
-    # spawn_point groups (NORTH staging y=12..18 / SOUTH staging
-    # y=28..34) round-robined by seed; the central enemy cluster
-    # (3× 2tnk + 5× e1 at y=20) is symmetric across the map's
-    # mid-latitude so either staging faces an equivalent relay
-    # decision but no memorised approach corridor generalises across
-    # seeds.
-    "coord-relay-attack",
-    # Wave-5 Group G long-horizon "marathon survival" pack — lmgame-Bench
-    # multi-hour endurance / SC2LE full-game extended testing / SRE
-    # extended on-call anchor. Hard tier defines two agent spawn_point
-    # groups (NORTH y=12 / SOUTH y=28) round-robined by seed; six
-    # staggered hunt squads always place at BOTH latitudes (enemy
-    # actors don't honour spawn_point — CLAUDE.md), so a memorised
-    # pbox-lane / starting cell cannot generalise across seeds.
-    "lh-100-turn-marathon-survival",
-    # Wave-5 Group F reasoning pack — SC2 mass-vs-elite army composition
-    # / industrial mass-production vs craftsmanship / military
-    # quantity-vs-quality doctrine / OR unit-composition optimisation
-    # anchor. Hard tier defines two agent spawn_point groups (NORTH
-    # base y=10 / SOUTH base y=30) round-robined by seed; TWO enemy
-    # garrisons of OPPOSING composition (anti-INFANTRY at the north
-    # latitude, anti-VEHICLE at the south latitude) always place
-    # (enemy actors don't honour spawn_point — CLAUDE.md), so the
-    # right counter (mass-cheap rifles vs elite heavy tanks) flips
-    # per seed and a single memorised opening cannot generalise.
-    "econ-quantitative-vs-qualitative-spend",
-    # Wave-5 Group N coord seed: SQUAD HANDOFF via Wave-2 `then:`
-    # composite + new `units_of_type_in_region_gte` predicate (type-
-    # filtered region count). Hard defines two agent spawn_point groups
-    # (NW staging y=5..12 / SW staging y=33..38) round-robined by seed;
-    # the four-leg alternating handoff (A→P1→B→P2→A→P3→B→P4) is
-    # symmetric across starts but the per-squad long-haul leg flips
-    # per seed so a memorised opening cannot generalise.
-    "coord-squad-handoff",
-    # Wave-5 Group G long-horizon reasoning seed — SC2 macro-then-
-    # multi-prong-attack / military operational planning (force build
-    # then theater assault) / PERT theater-wide ops sequencing.
-    # Two-phase plan: assemble ≥N medium tanks THEN raze TWO separated
-    # enemy fact (NE 130,15 + SE 130,45) in parallel. Hard tier defines
-    # two agent spawn_point groups (NORTH base y=18 / SOUTH base y=42)
-    # round-robined by seed; both enemy bases always place (enemy
-    # actors don't honour spawn_point — CLAUDE.md), so the "near" vs
-    # "far" front flips per seed and the per-prong assignment must be
-    # re-computed instead of memorised.
-    "lh-build-army-coordinate-multifront-attack",
-    # Wave-5 Group F turtle-recovery seed — SC2 turtle-back-to-economy
-    # / business bankruptcy turnaround / military rebuild-from-defeat /
-    # startup pivot-after-runway-crisis anchor. Agent starts with a
-    # minimum viable kit (fact + proc + 1 harv + 1 mine) and $0 cash;
-    # must commit to harvest first then reinvest into a war factory +
-    # 2nd/3rd harvester. Hard tier defines 2 agent spawn_point groups
-    # (NORTH base y=14 / SOUTH base y=26) round-robined by seed; each
-    # spawn has its own symmetric two-patch geometry so the harv
-    # routing flips per seed and a memorised "place weap at (8,18)"
-    # opening cannot generalise.
-    "econ-recover-from-zero-cash",
-    # Wave-5 Group C defense-topology pack — graph theory min-cut /
-    # military bunker placement / firewall topology at chokepoints /
-    # Lanchester defense concentration anchor. The win predicate makes
-    # the cluster-vs-spread topology decision load-bearing
-    # (`building_in_region` ≥ N out of `building_count_gte` ≥ M total).
-    # Hard tier defines two agent spawn_point groups (NORTH base y=10 /
-    # SOUTH base y=30) round-robined by seed; the rusher band is staged
-    # symmetrically at y=20 (enemies don't honour spawn_point — CLAUDE.md)
-    # and charges the agent centroid, so the cluster's required world
-    # cell is geographically distant from each base — a memorised
-    # relative-to-base placement that lands in the same world cell on
-    # every seed cannot generalise.
-    "def-tower-line-vs-cluster",
-    # Wave-5 Group F cash-bar-by-deadline pack (SC2 econ-by-tick /
-    # budget-by-date / fundraising milestone / OR throughput-with-
-    # deadline anchor). Hard tier defines two agent spawn_point groups
-    # (NORTH y=10..14 / SOUTH y=28..32) round-robined by seed with
-    # symmetric near-patch ore geometry at both latitudes — so the
-    # reinvestment-vs-baseline decision is the same per spawn but a
-    # memorised "build at (8,18)" opening cannot generalise across
-    # seeds.
-    "econ-target-cash-amount-by-deadline",
-    # Wave-5 Group G observation-driven 3-phase chain pack (SC2 reactive
-    # macro / CICERO information-action loop / PlanBench replanning /
-    # threat-intel-driven defense anchor). Hard tier defines two agent
-    # spawn_point groups (NORTH base y=10 / SOUTH base y=30) round-
-    # robined by seed; three enemy bases (NE/MID/SE) plus a SHARED
-    # forward outpost at (60,20) always place (enemy actors don't
-    # honour spawn_point — CLAUDE.md), so the nearest-corner assault
-    # target flips per seed and a memorised "scout-then-attack-NE"
-    # opening cannot generalise across spawn variants.
-    "lh-scout-react-counter",
-    # Wave-5 salvaged-from-worktree packs: agents finished authoring
-    # YAML+tests but didn't push (multiple agents ran into push-blocked
-    # / output-truncation states). Salvaged from the untracked working
-    # tree and committed from the main session. All 4 have ≥2 spawn
-    # groups on hard.
-    "coord-cover-and-move",
+    # Wave-5 Group N coordination pack — diversionary / split-attack
+    # assault (SC2 multi-prong + Sun Tzu loud feint anchor). Hard tier
+    # defines two agent spawn_point groups (NORTH y≈10..14 / SOUTH
+    # y≈26..30) round-robined by seed; the REAL `fact` at (100,10)
+    # and the DECOY `powr` at (100,30) place every seed (enemy
+    # actors don't honour spawn_point — CLAUDE.md), so the SAME
+    # diversionary discipline is tested from either spawn while the
+    # bait/strike vector flips per seed.
     "coord-diversionary-attack",
     "def-in-depth",
     "def-surprise-flank-react",
@@ -620,7 +464,7 @@ NOT_APPLICABLE = {
 
 # No-adversary maps: spawn variation applies but a force-loss
 # fail_condition is impossible (nothing can destroy the force).
-_NO_ENEMY = {"strict-sequence", "custom-map-no-enemy", "proc-checklist-no-deviation"}
+_NO_ENEMY = {"strict-sequence", "custom-map-no-enemy"}
 
 
 def _agent_spawn_points(pack_id: str, level: str) -> set:

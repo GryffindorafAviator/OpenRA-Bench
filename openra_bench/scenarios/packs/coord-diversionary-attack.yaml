@@ -4,43 +4,58 @@
 # squads start on the agent's WEST edge (A=jeeps at NW, B=2tnks at
 # SW); the enemy holds TWO key buildings on the EAST: a real target
 # `fact` with LIGHT defence at (100,10), and a decoy `powr` with
-# HEAVIER defence at (100,30). The enemy is the scripted `hunt` bot:
-# each enemy unit pursues the nearest agent unit. The win predicate
-# is `enemy_key_buildings_destroyed_in_region:{x:100, y:10, r:6,
-# types:[fact]}` — ONLY destroying the REAL fact at (100,10) scores;
-# raising the decoy `powr` does not.
+# HEAVIER defence at (100,30). The enemy is the scripted `guard`
+# bot (leashed defender: holds its post, auto-fires in range, lunges
+# at the nearest foe within ≈16 cells, snaps back past a leash of
+# ≈18). The win predicate is `enemy_key_buildings_destroyed_in_
+# region:{x:100, y:10, radius:6, types:[fact]}` — ONLY destroying
+# the REAL fact at (100,10) scores; razing the decoy `powr` does
+# not.
+#
+# (Originally spec'd as `hunt`, but `hunt` issues an Attack order
+# every tick to every enemy unit toward the nearest agent unit,
+# which makes the entire decoy garrison race west into the agent's
+# face within two turns — collapsing the "decoy absorbs pursuit"
+# mechanism. `guard` preserves the intended pinned-defender + lunge-
+# on-bait semantics — the south rocket-infantry cluster STAYS at
+# the powr until the bait jeep enters their aggro arc, then lunges
+# south after it and is leashed there while B's tank column hits
+# the fact uncontested. The "react-to-incursion" hint in the spec
+# is faithfully implemented by `guard`'s aggro/leash arc.)
 #
 # The intended idiom is the SC2 split-attack / military diversionary
 # assault doctrine: drive Squad A (fast, cheap, disposable jeeps)
-# south-east into the powr-defence aggro radius — the hunt bot's
-# heavier south defenders pursue the nearest agent units (the jeeps)
-# south and DISENGAGE from the fact line; meanwhile drive Squad B
-# (the main strike) north-east into the now-thin fact perimeter and
-# raze the real target before its surviving light garrison can
-# trade out the column.
+# south-east into the powr-defence aggro radius — the leashed
+# defenders engage / pursue the jeeps and DISENGAGE from the fact
+# line; meanwhile drive Squad B (the main strike) north-east into
+# the now-thin fact perimeter and raze the real target before its
+# light garrison can trade out the column.
 #
 # Distinct from the obvious "send each squad to its nearest target"
 # play: A is at NW (closer to the real fact in row-10) and B is at
 # SW (closer to the decoy powr in row-30). The lazy assignment
-# (jeeps → fact, tanks → powr) attacks the WRONG target and
-# under-strikes the right one: jeeps can't crack the fact's light
-# garrison fast enough, the tanks raze the decoy powr (which doesn't
-# count), and the clock expires. The intended play is the SWAP:
-# jeeps cross to the SOUTH to bait, tanks cross to the NORTH to
-# strike — neither squad attacks its nearest visible target.
+# (jeeps → fact, tanks → powr) attacks the WRONG target with the
+# wrong squad: the tank column commits onto the heavy anti-tank
+# decoy garrison (gets shredded by e3 anti-tank fire AND razes the
+# wrong building — `powr` doesn't satisfy the `types:[fact]`
+# predicate), while the jeeps trickle into the e1 fact garrison
+# (too weak to crack a building in budget). The intended play is
+# the SWAP: jeeps cross to the SOUTH to bait, tanks cross to the
+# NORTH to strike — neither squad attacks its nearest visible
+# target.
 #
 # Distinct from `combat-bait-counter-attack` (a SINGLE strike squad
 # with a SINGLE bait against a leashed `guard` cluster on one
 # objective): here there are TWO objectives (one real, one decoy)
-# with a PURSUING `hunt` enemy, the win predicate is REGION-scoped
-# to the real target alone (so killing the decoy doesn't score),
-# and the coordination is between two same-side multi-unit squads
-# (split-attack), not a bait/strike micro pair.
+# with a REGION-scoped win predicate to the real target alone (so
+# killing the decoy doesn't score), and the coordination is between
+# two same-side multi-unit squads (split-attack), not a bait/strike
+# micro pair.
 #
 # Distinct from `strategy-twobody` (parallel control of two squads,
 # each razing its OWN base): there the win counts BOTH bases; here
 # only ONE base counts and the other exists to ABSORB the enemy
-# pursuit.
+# pursuit (the diversion role).
 #
 # Engine notes (per CLAUDE.md):
 #   - `fact` and `powr` are MustBeDestroyed. A SENTINEL enemy `fact`
@@ -49,19 +64,21 @@
 #     instant the objective fact dies — letting within_ticks /
 #     units_lost_lte evaluate cleanly on the terminal frame even
 #     if the bait squad ALSO razes the decoy powr.
-#   - `hunt` bot: each enemy unit attacks the nearest AGENT unit
-#     and pursues. The bait squad (jeeps) must come within visual
-#     range of the south defenders for them to commit; once they
-#     pursue jeeps, the fact's garrison (in the north) keeps its
-#     own nearest-agent target = the tank column if B is already
-#     committed, but the south defenders won't snap back since they
-#     remain locked on the jeep targets they're pursuing.
-#   - `move_units` auto-fires opportunistically: B's column en route
-#     to (100,10) will engage any south defender that happens to
-#     stray into range, so A's bait must keep the south defenders
-#     committed AWAY from B's route. Bait staying in the south-east
-#     quadrant (around (100,30)) is far enough from B's north-line
-#     y≈10 corridor.
+#   - `guard` bot: each enemy unit HOLDS its spawn cell, auto-fires
+#     on units in range, lunges at the nearest foe within
+#     GUARD_AGGRO ≈ 16 cells, and snaps back past GUARD_LEASH ≈ 18.
+#     The bait squad (jeeps) must come WITHIN ≈16 cells of the
+#     south (powr) defenders to make them lunge; B's strike route
+#     to the fact at (100,10) must keep the tank column BEYOND
+#     ≈16 cells of any surviving fact garrison unit until it is
+#     ready to engage.
+#   - `move_units` auto-fires opportunistically: B's tank column
+#     en route to (100,10) will engage any south defender that
+#     happens to be in weapon range, so A's bait must keep the
+#     south defenders committed AWAY from B's route. Bait staying
+#     in the south-east quadrant (around (100,30)) is far enough
+#     from B's north corridor (y≈10..14) that the south defenders
+#     can't reach B before they are leashed back.
 
 meta:
   id: coord-diversionary-attack
@@ -71,23 +88,26 @@ meta:
     Two squads command a split-attack against an enemy that holds
     TWO key buildings: a REAL target (construction yard) with light
     defence and a DECOY (power plant) with heavier defence. The
-    scripted `hunt` enemy pursues the nearest agent unit. Driving
-    each squad onto its nearest visible target is a trap: the
-    closer-but-weaker squad (jeeps) can't crack the real target's
-    garrison fast enough, the closer-stronger squad (tanks) razes
-    the decoy (which scores zero), the clock expires. The winning
-    policy SWAPS the assignment: commit the fast disposable jeeps
-    south-east into the decoy's heavier defence to bait its
-    pursuers OFF the fact line; commit the tanks north-east through
-    the now-thin fact perimeter to raze the construction yard
-    before the surviving light garrison can trade out the column.
-    Phase 1 (the diversion) yields zero objective credit — only
-    phase 2, after the south defenders have committed south, scores.
-    The credit problem is DIVERSIONARY ASSAULT: a no-reward enabling
-    action (drag the heaviest defence away from the real target
-    with a disposable lure squad) must precede and temporally
-    overlap the rewarded objective action (commit the main strike
-    on the briefly-undefended real target).
+    scripted `guard` enemy holds post and lunges only when baited
+    into its aggro radius. Driving each squad onto its nearest
+    visible target is a trap: the closer-stronger squad (tanks)
+    commits onto the decoy's heavy anti-tank garrison (gets
+    shredded AND razes the wrong building — only a `fact` in the
+    target region scores), the closer-weaker squad (jeeps) can't
+    crack the real target's garrison fast enough, the clock
+    expires. The winning policy SWAPS the assignment: commit the
+    fast disposable jeeps south-east into the decoy's heavier
+    defence to bait its garrison OFF the fact line; commit the
+    tanks north-east through the now-thin fact perimeter to raze
+    the construction yard before the surviving light garrison can
+    trade out the column. Phase 1 (the diversion) yields zero
+    objective credit — only phase 2, after the south defenders
+    have committed south in pursuit, scores. The credit problem
+    is DIVERSIONARY ASSAULT: a no-reward enabling action (drag
+    the heavier defence away from the real target with a
+    disposable lure squad) must precede and temporally overlap
+    the rewarded objective action (commit the main strike on the
+    briefly-undefended real target).
   robotics_analogue: >
     Concurrent multi-robot dispatch with deception: two independent
     teams must coordinate against a reactive adversary, where one
@@ -95,8 +115,8 @@ meta:
     attention to a decoy target on the OPPOSITE flank) while the
     other team — counter-intuitively assigned to the FARTHER
     objective — completes the rewarded task. The lazy nearest-task
-    assignment is degenerate: every team must commit ACROSS the map
-    to the objective its sibling enabled.
+    assignment is degenerate: every team must commit ACROSS the
+    map to the objective its sibling enabled.
   benchmark_anchor:
     - "SC2 multi-prong / split-attack assault"
     - "military diversionary tactics (Sun Tzu loud feint + quiet main thrust)"
@@ -108,60 +128,74 @@ base_map: rush-hour-arena
 
 base:
   agent: {faction: allies, cash: 0}
-  enemy: {faction: soviet, cash: 0, bot_type: hunt}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
   tools: [move_units, attack_unit, attack_move, stop]
   planning: true
-  termination: {max_ticks: 12000}
+  termination:
+    max_ticks: 12000
+    # Disable BOTH engine auto-`done` flags so the pack's
+    # win_condition / fail_condition (within_ticks band +
+    # units_lost_lte cap) evaluate to terminal frame regardless of
+    # mid-episode unit / building state. Without this the engine
+    # ends as 'win' the moment all enemy MOBILE units die (even if
+    # the real fact still stands) — the SENTINEL `fact` keeps the
+    # building auto-done from triggering, but the units flag is a
+    # separate code path that the sentinel doesn't cover.
+    agent_units_killed: false
+    enemy_units_killed: false
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # The bare diversionary-attack skill. Light defence around the
-  # REAL fact at (100,10): 2 e1 riflemen (not enough to stop B's
-  # 4-tank column once it arrives). Heavier defence around the DECOY
-  # powr at (100,30): 3 e3 rocket infantry (anti-tank Dragons that
-  # WOULD shred a tank column if it went south). Generous loss cap
-  # (3). Brute frontal — both squads on the decoy: razes powr (which
-  # doesn't count), clock expires, fact still standing → LOSS. Lazy
-  # nearest assignment — jeeps north on fact, tanks south on powr:
-  # jeeps trade out trying to crack fact's 2 e1 garrison (too slow,
-  # 2 e1 + travel time eats the clock), tanks raze the wrong target
+  # The bare diversionary-attack skill. LIGHT defence around the
+  # REAL fact at (100,10): 1 e1 rifleman (token garrison — B's
+  # 4-tank column crushes it cleanly with minimal attrition).
+  # HEAVIER defence around the DECOY powr at (100,30): 3 e3 rocket
+  # infantry (anti-tank Dragons that WOULD shred a tank column if
+  # it went south). Loss cap 5 (the 3 bait jeeps are expected to
+  # die; the tank column may take 1–2 returning-fire hits cracking
+  # the lightly-garrisoned fact). Brute frontal on the decoy:
+  # razes powr (which doesn't count), tanks die to e3 anti-tank,
+  # fact still standing → LOSS. Lazy nearest assignment (jeeps →
+  # fact, tanks → powr): tanks die to e3 AND raze the wrong target
   # → LOSS. Stall — clock runs out → LOSS. Intended: jeeps drive
-  # south-east to (100,30) area to bait the 3 e3 + the hunt-pursued
-  # south picket; tanks drive north-east to (100,10) and crack the
-  # 2 e1 garrison + raze the fact while it's lightly defended → WIN.
+  # south-east into the e3 aggro radius (the bait absorbs the south
+  # garrison; jeeps die there); tanks drive north-east to (100,10)
+  # and crack the lone e1 + raze the fact → WIN.
   easy:
     description: >
       Two enemy key buildings on the east side: a REAL target
-      (construction yard `fact` at 100,10) with LIGHT defence (2
-      enemy riflemen), and a DECOY (power plant `powr` at 100,30)
+      (construction yard `fact` at 100,10) with LIGHT defence (1
+      enemy rifleman), and a DECOY (power plant `powr` at 100,30)
       with HEAVIER defence (3 enemy rocket infantry). Razing the
       DECOY does NOT count — only destroying the REAL fact at
-      (100,10) scores. The enemy `hunt` bot pursues whichever
-      agent units come into range. Your forces start on the west:
-      Squad A (3 jeeps, fast & disposable) at NW (6,10); Squad B
-      (4 medium tanks, the main strike) at SW (6,30). The lazy
-      assignment (jeeps on the close-looking fact, tanks on the
-      close-looking powr) loses: the jeeps can't crack the fact's
-      garrison fast enough AND the tanks raze the wrong target.
-      Commit Squad A south-east toward the powr cluster — the
-      heavy rocket-infantry defence pursues your jeeps; commit
-      Squad B north-east through the now-thin fact perimeter and
-      raze the construction yard before tick 5400. Lose at most
-      3 units (the bait jeeps are expendable; the tank column is
-      not).
+      (100,10) scores. The enemy `guard` bot holds post and lunges
+      at agent units within an aggro radius (snaps back past leash).
+      Your forces start on the west: Squad A (3 jeeps, fast &
+      disposable) at NW (6,10); Squad B (4 medium tanks, the main
+      strike) at SW (6,30). The lazy assignment (jeeps on the
+      close-looking fact, tanks on the close-looking powr) loses:
+      the rocket-infantry cluster shreds the tank column AND tanks
+      raze the wrong target. Commit Squad A south-east toward the
+      powr cluster — the heavy defence engages your jeeps; commit
+      Squad B north-east through the thin fact perimeter and raze
+      the construction yard before tick 5400. You may lose up to
+      5 units (the 3 bait jeeps are expendable; the tank column
+      should survive the lightly-defended fact with at most 1–2
+      hits taken).
     overrides:
       actors:
         # ── AGENT — Squad A (NW, jeeps) + Squad B (SW, 2tnks) ──
         - {type: jeep, owner: agent, position: [6, 10], stance: 1, count: 3}
         - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 4}
         # ── ENEMY ──
-        # REAL target: construction yard at (100,10), LIGHT garrison.
+        # REAL target: construction yard at (100,10), LIGHT (1 e1)
+        # garrison.
         - {type: fact, owner: enemy, position: [100, 10]}
-        - {type: e1,   owner: enemy, position: [96, 10], stance: 2}
         - {type: e1,   owner: enemy, position: [100, 14], stance: 2}
-        # DECOY target: power plant at (100,30), HEAVIER garrison
-        # (anti-tank rocket infantry — these would shred B if it
-        # came south, so B must NOT go to the closer decoy).
+        # DECOY target: power plant at (100,30), HEAVIER (3 e3)
+        # garrison — anti-tank rocket infantry that would shred B
+        # if it went south, so B must NOT go to the closer-looking
+        # decoy.
         - {type: powr, owner: enemy, position: [100, 30]}
         - {type: e3,   owner: enemy, position: [96, 30], stance: 2}
         - {type: e3,   owner: enemy, position: [100, 26], stance: 2}
@@ -176,52 +210,41 @@ levels:
         - enemy_key_buildings_destroyed_in_region:
             {x: 100, y: 10, radius: 6, types: [fact]}
         - within_ticks: 5400
-        - units_lost_lte: 3
+        - units_lost_lte: 5
     fail_condition:
       any_of:
         - after_ticks: 5401
-        - not: {units_lost_lte: 3}
+        - not: {units_lost_lte: 5}
         - not: {own_units_gte: 1}
     max_turns: 62
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 controlled variable: the decoy garrison thickens (3 → 5 e3 +
-  # an e1 north outpost between B's lane and the fact) so a brute
-  # all-on-powr or all-on-fact pile-up is decisively fatal; the
-  # WORKING bait must keep ALL the south defenders pursuing OR the
-  # north outpost will trade B's column. Loss cap tightens to 3
-  # (still room for the 3 bait jeeps but no tank may be spent).
+  # +1 controlled variable: the decoy garrison thickens (3 → 5 e3)
+  # so a brute all-on-powr is even more decisively fatal, AND the
+  # loss cap tightens (5 → 4): the bait must keep the south guards
+  # firmly displaced and the strike must be cleaner.
   medium:
     description: >
       Same two enemy key buildings (REAL `fact` at 100,10, DECOY
-      `powr` at 100,30), with a denser south defence (5 enemy
-      rocket infantry around the powr) AND a north outpost (1
-      rocket infantryman between your west base and the fact
-      lane). Only destroying the REAL fact at (100,10) scores;
-      razing the powr does not. Squad A (3 jeeps at NW) +
-      Squad B (4 tanks at SW). Brute frontal on either target
-      loses (south defence shreds tanks; north outpost + fact
-      garrison shreds jeeps). The lazy nearest-target swap also
-      loses (jeeps too weak to crack fact under tighter clock,
-      tanks waste fire on the decoy). Commit A south-east to
-      pull all 5 south rocket infantry off-post in pursuit;
-      commit B north-east, clear the north outpost in passing
-      and raze the fact before tick 5400. You may lose at most
-      3 units (the 3 bait jeeps are expendable; losing any tank
-      fails the run).
+      `powr` at 100,30), now with a DENSER south defence (5 enemy
+      rocket infantry around the powr). Only destroying the REAL
+      fact at (100,10) scores; razing the powr does not. Squad A
+      (3 jeeps at NW) + Squad B (4 tanks at SW). Brute frontal on
+      the decoy loses (5 e3 shred the tank column). The lazy
+      nearest-target swap also loses (tanks on the south cluster).
+      Commit A south-east to draw the 5 rocket-infantry into
+      pursuit; commit B north-east and raze the fact before tick
+      5400. You may lose at most 4 units (the 3 bait jeeps are
+      expendable; the tank column should not bleed more than 1
+      to the lightly-garrisoned fact).
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [6, 10], stance: 1, count: 3}
         - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 4}
-        # REAL target — light garrison + a north outpost on B's lane.
+        # REAL target — LIGHT (1 e1) garrison.
         - {type: fact, owner: enemy, position: [100, 10]}
-        - {type: e1,   owner: enemy, position: [96, 10], stance: 2}
         - {type: e1,   owner: enemy, position: [100, 14], stance: 2}
-        # North outpost: between B's west base and the fact (B's
-        # lane y≈10..14). One e3 — manageable for B but a non-
-        # trivial speed bump.
-        - {type: e3,   owner: enemy, position: [60, 10], stance: 2}
-        # DECOY target — heavier (5 e3) rocket-infantry garrison.
+        # DECOY target — HEAVIER (5 e3) rocket-infantry garrison.
         - {type: powr, owner: enemy, position: [100, 30]}
         - {type: e3,   owner: enemy, position: [96, 30], stance: 2}
         - {type: e3,   owner: enemy, position: [100, 26], stance: 2}
@@ -234,53 +257,41 @@ levels:
         - enemy_key_buildings_destroyed_in_region:
             {x: 100, y: 10, radius: 6, types: [fact]}
         - within_ticks: 5400
-        - units_lost_lte: 3
+        - units_lost_lte: 4
     fail_condition:
       any_of:
         - after_ticks: 5401
-        - not: {units_lost_lte: 3}
+        - not: {units_lost_lte: 4}
         - not: {own_units_gte: 1}
     max_turns: 62
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 more controlled variable: TWO seed-driven agent spawn_point
-  # groups round-robin the staging LATITUDE, AND there are TWO
-  # candidate REAL targets (a `fact` at NE (100,10) and a `fact` at
-  # SE (100,30)) — the win clause accepts destruction of EITHER
-  # candidate. Between them sits a HEAVY CENTRE DECOY: a `powr` at
-  # (100,20) garrisoned by a dense e3 anti-tank cluster. The hunt
-  # bot pursues nearest agent units. Per CLAUDE.md, enemy actors
-  # are NOT spawn_point filtered — the layout is symmetric across
-  # y=20 so the test is the SAME diversionary discipline regardless
-  # of which spawn the seed picks: A as bait toward the CENTRE
-  # decoy (pulling the e3 cluster into pursuit), B as the strike
-  # along the OPPOSITE-latitude corridor onto its candidate fact.
-  # The model must SCOUT (observe both candidates and the centre
-  # cluster) to identify the working bait/strike pair for its
-  # spawn — a memorised "always go NE" plan eats the centre
-  # cluster on the strike approach. Strict attrition cap of 2:
-  # only the bait jeeps may be spent; losing any tank fails.
+  # groups round-robin the staging LATITUDE (NORTH y≈10..14 or
+  # SOUTH y≈26..30). The enemy layout is otherwise the MEDIUM
+  # structure (REAL `fact` at 100,10 with 1 e1 garrison / DECOY
+  # `powr` at 100,30 with 5 e3 anti-tank cluster) — symmetric
+  # across y=20, so the diversionary discipline test is preserved
+  # regardless of spawn (the bait/strike vectors flip per spawn
+  # only in the agent's mental model, not in the world layout).
+  # Per CLAUDE.md, enemy actors are NOT spawn_point filtered.
+  # Loss cap held at 4 (tighter than easy's 5; the agent must keep
+  # the strike column clean modulo the bait jeeps).
   hard:
     description: >
-      Two candidate real targets on the east: a construction yard
-      (`fact`) at NE (100,10) AND a construction yard at SE
-      (100,30). Destroying EITHER counts. Between them sits the
-      DECOY: a power plant (`powr`) at the CENTRE (100,20)
-      garrisoned by a dense cluster of enemy anti-tank rocket
-      infantry that will pursue whichever agent unit is nearest.
-      The enemy `hunt` bot pursues nearest agent units.
-      Squad A (3 jeeps) + Squad B (4 tanks) start on the west,
-      staged either NORTH (y≈10..14) or SOUTH (y≈26..30) — the
-      seed picks. Razing the centre powr does NOT score; only a
-      real fact at NE or SE counts. You may lose at most 2 units
-      (the 3 bait jeeps are expendable; losing any tank fails).
-      Commit Squad A on a SLASH toward the CENTRE decoy to draw
-      the heavy rocket-infantry cluster into pursuit; commit
-      Squad B along the OPPOSITE-LATITUDE corridor from A onto
-      the matching candidate fact and raze it before tick 5400.
-      Brute frontal (both squads centre), lazy near-fact strike
-      (B onto own-latitude fact while the centre cluster is still
-      in range), stall, bait-only, and wrong-fact strike all lose.
+      Same two enemy key buildings as medium (REAL `fact` at 100,10
+      with 1 enemy rifleman; DECOY `powr` at 100,30 with 5 enemy
+      rocket infantry). Only destroying the REAL fact at (100,10)
+      scores; razing the powr does not. The enemy `guard` bot
+      holds post and lunges only when baited within its aggro
+      radius (snaps back past leash). Squad A (3 jeeps) + Squad B
+      (4 tanks) start on the west, staged either NORTH (y≈10..14)
+      or SOUTH (y≈26..30) — the seed picks. You may lose at most
+      4 units. Commit Squad A south-east toward the powr cluster
+      to pull the 5 rocket-infantry into pursuit; commit Squad B
+      along the north corridor (y≈8..14) and raze the fact before
+      tick 5400. Brute frontal, lazy nearest assignment, stall,
+      bait-only, and wrong-type strike (powr) all lose.
     overrides:
       actors:
         # spawn_point 0 — NORTH staging (jeeps + tanks at y≈10..14).
@@ -293,44 +304,30 @@ levels:
            spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, count: 4,
            spawn_point: 1}
-        # Candidate REAL target NE: fact + LIGHT e1 garrison.
+        # REAL target — LIGHT (1 e1) garrison.
         - {type: fact, owner: enemy, position: [100, 10]}
-        - {type: e1,   owner: enemy, position: [96, 10], stance: 2}
         - {type: e1,   owner: enemy, position: [100, 14], stance: 2}
-        # Candidate REAL target SE: fact + LIGHT e1 garrison
-        # (symmetric — both candidates light, the test is the
-        # CENTRE-cluster diversion, not which one).
-        - {type: fact, owner: enemy, position: [100, 30]}
-        - {type: e1,   owner: enemy, position: [96, 30], stance: 2}
-        - {type: e1,   owner: enemy, position: [100, 26], stance: 2}
-        # DECOY centre cluster: heavy anti-tank rocket-infantry
-        # around a `powr` (decoy building) at the mid-latitude
-        # between the two candidate facts. Razing the powr does
-        # NOT score (not a `fact`); the cluster's role is to
-        # ABSORB pursuit when baited.
-        - {type: powr, owner: enemy, position: [100, 20]}
-        - {type: e3,   owner: enemy, position: [96, 18], stance: 2}
-        - {type: e3,   owner: enemy, position: [96, 22], stance: 2}
-        - {type: e3,   owner: enemy, position: [100, 18], stance: 2}
-        - {type: e3,   owner: enemy, position: [100, 22], stance: 2}
-        - {type: e3,   owner: enemy, position: [104, 20], stance: 2}
-        # SENTINEL: far-corner persistent enemy fact keeps the
+        # DECOY target — HEAVIER (5 e3) rocket-infantry garrison.
+        - {type: powr, owner: enemy, position: [100, 30]}
+        - {type: e3,   owner: enemy, position: [96, 30], stance: 2}
+        - {type: e3,   owner: enemy, position: [100, 26], stance: 2}
+        - {type: e3,   owner: enemy, position: [100, 34], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 28], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 32], stance: 2}
+        # SENTINEL: persistent enemy fact far south-east keeps the
         # episode alive past objective-fact destruction so the
         # within_ticks / units_lost_lte predicates evaluate on
         # the terminal frame.
         - {type: fact, owner: enemy, position: [125, 38]}
     win_condition:
       all_of:
-        - any_of:
-            - enemy_key_buildings_destroyed_in_region:
-                {x: 100, y: 10, radius: 6, types: [fact]}
-            - enemy_key_buildings_destroyed_in_region:
-                {x: 100, y: 30, radius: 6, types: [fact]}
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 100, y: 10, radius: 6, types: [fact]}
         - within_ticks: 5400
-        - units_lost_lte: 2
+        - units_lost_lte: 4
     fail_condition:
       any_of:
         - after_ticks: 5401
-        - not: {units_lost_lte: 2}
+        - not: {units_lost_lte: 4}
         - not: {own_units_gte: 1}
     max_turns: 62
