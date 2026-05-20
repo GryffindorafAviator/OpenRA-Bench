@@ -241,6 +241,19 @@ UPGRADED = [
     # bait/strike vector flips per seed.
     "coord-diversionary-attack",
     "def-in-depth",
+    # Wave-8 REASONING fog-ambush pack — SC2 hidden defense / military
+    # ambush doctrine / fog warfare anchor. Defenders pre-placed in
+    # concealment OFF the direct enemy axis must HOLD their hidden
+    # positions and let the rusher band advance into the L-ambush
+    # crossfire; centralising to the fact/choke abandons the flanking
+    # fire envelope and loses. Hard tier defines two agent spawn_point
+    # groups (NORTH base y=8 / SOUTH base y=32) round-robined by seed;
+    # the matching ambush coordinates flip with the base latitude so
+    # a memorised "(40,15)/(40,25)" plan cannot generalise. Enemy
+    # bands ALWAYS place at BOTH latitudes (enemy actors don't honour
+    # spawn_point — CLAUDE.md), so each spawn faces the SAME HOLD-vs-
+    # CENTRALISE decision from a flipped base latitude.
+    "def-with-ambush",
     # Wave-8 REASONING pack — concurrent defence + construction under
     # active attack (SRE simultaneous incident-response + capacity-add /
     # military business continuity / ops triage during incident anchor).
