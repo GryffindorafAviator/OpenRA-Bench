@@ -69,6 +69,11 @@ UPGRADED = [
     # either candidate region (NE or SE) so the model must pick the
     # NEAREST one — cross-map diagonal blows the tick budget.
     "mcv-deploy-second-base",
+    # Group A seed (this commit): hard tier seed-varies the FRESH
+    # MCV's start column (40,20 vs 60,20) with the matching safe
+    # shoulders, so a single memorised relocation cell cannot
+    # generalise across seeds.
+    "mcv-deploy-relocate-under-pressure",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

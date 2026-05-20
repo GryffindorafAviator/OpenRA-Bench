@@ -1,0 +1,281 @@
+meta:
+  id: mcv-deploy-relocate-under-pressure
+  title: 'Relocate Under Fire — Deploy a Fresh MCV at a Safe Site'
+  capability: reasoning
+  real_world_meaning: >
+    Spin up a relocated site under attack: the active site (the
+    pre-placed western Construction Yard) is taking damage from a
+    committed rusher coming down the central lane, and the agent has
+    a single FRESH MCV parked mid-map. The decision: where to deploy
+    the new Construction Yard so operations continue if the original
+    falls. Deploying the MCV in-place (still in the rusher's lane)
+    just gives the attacker a second fact to raze; deploying at a
+    SAFE relocation region (NE or SE corner, off the attack lane)
+    keeps a Construction Yard alive past the original's loss. The
+    original may or may not survive — that is accepted; the goal is
+    to keep operating from SOME Construction Yard at episode end.
+  robotics_analogue: >
+    Deploy a backup base when the primary is compromised: the active
+    waypoint is being overrun and a mobile carrier must redeploy at
+    a safe location BEFORE (or just after) the primary is lost,
+    so the operator keeps a live anchor to act from. Choosing a
+    redeployment site still inside the attacker's footprint is a
+    naive solution — the right move puts the new anchor outside the
+    blast radius.
+  benchmark_anchor:
+    - 'PlanBench replanning under exogenous loss'
+    - 'ScienceWorld error recovery'
+    - 'MicroRTS rebuild-after-loss'
+    - 'business continuity / disaster recovery relocation'
+  author: openra-bench
+
+# rush-hour-arena (128×40, playable ≈ (2..126)×(2..38)).
+# Geometry (medium):
+#   - Original agent base WEST on the y=20 lane:
+#       fact (10,20)  tent (14,18)  powr (14,22)
+#   - Fresh MCV parked dead-center on the y=20 lane: (60,20)
+#       → in the rusher's path: deploying in-place loses the fresh
+#         fact too. Must move to a safe region BEFORE deploying.
+#   - Rusher band spawns FAR EAST on the same lane (x≈110, y=20)
+#       and charges the agent's centroid (which is dominated by the
+#       western base) — drives straight west down y=20, killing
+#       anything in the lane.
+#   - Safe relocation regions, far from the y=20 lane:
+#       NE — centred (60,8),  radius 8  ← reachable by moving N
+#       SE — centred (60,32), radius 8  ← reachable by moving S
+#   The agent's intended play: `move_units` the MCV ~12 cells N or
+#   S out of the lane, then `deploy` to spawn a new agent fact in a
+#   safe region. The whole sequence is ≤ ~80 ticks of travel + the
+#   DeployTransform; the rusher takes ~10× longer to reach the
+#   western fact (≈100 cells of travel), so even a half-attentive
+#   relocate completes well before the original falls.
+base_map: rush-hour-arena
+# 0 cash — the agent cannot afford new buildings or units; the only
+# play is to relocate the EXISTING fresh MCV. No way to side-step the
+# decision by spending into a parallel base. (`fact` cost 0 also can't
+# be built from the production queue — see CLAUDE.md footgun — so the
+# only path to a NEW fact is via `deploy(mcv)`.)
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+  # Rusher: relentless concentrated charge at the agent centroid every
+  # ~8 ticks. With the western base dominating the centroid, the band
+  # ploughs straight west along the y=20 lane. The fresh MCV parked at
+  # (60,20) is squarely in the path.
+  enemy:
+    faction: soviet
+    bot_type: rusher
+  # Minimal toolset: observe to read state, move_units to relocate the
+  # MCV out of the rusher lane, deploy to transform the MCV into a fact
+  # at the chosen site. No build / place_building — there is no cash
+  # and the design is exactly "deploy the fresh MCV, don't construct
+  # around it".
+  tools:
+    - observe
+    - move_units
+    - deploy
+  planning: true
+  # Re-decide the instant the rusher is spotted (so the agent doesn't
+  # waste turns observing a fixed picture while the band closes) or a
+  # unit is destroyed (the loss of the original fact is the canonical
+  # 'plan changed, switch to relocate-after-loss' trigger).
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+
+levels:
+  # ── EASY ──────────────────────────────────────────────────────────
+  # Rusher is light (3× e1, no e3) — the rush is slow enough that the
+  # original western fact often survives, but the win still REQUIRES
+  # the agent to relocate the fresh MCV to a safe shoulder. (A stall
+  # policy with the original surviving would otherwise satisfy the
+  # win at turn 1 — degenerate.) The easy axis is the relocation
+  # window: light rush ⇒ generous time + light attrition risk.
+  # max_turns 60 → reachable tick ≥ 5400 in interrupt mode (one step
+  # ≤ 90 ticks; some shorter due to events). within_ticks: 5400 paired
+  # with after_ticks: 5401 in fail ⇒ a non-finisher is a real reachable
+  # timeout LOSS, never a draw.
+  easy:
+    description: >
+      Your original Construction Yard (fact) at the west of the map
+      is under attack by a small rusher band (3 rifle infantry)
+      coming down the central lane from the east. You start with a
+      single MCV parked at the centre of the map (cell 60,20). You
+      have NO cash, so the only way to get a new Construction Yard
+      is to deploy the MCV. Win by relocating the MCV out of the
+      central lane and deploying it to a safe shoulder — the north
+      (cells around 60,8) or the south (cells around 60,32) — AND
+      keep at least one own unit alive AND before tick 5400.
+      Stalling, or deploying the MCV in-place at (60,20), puts the
+      new fact in the rusher lane and loses.
+    overrides:
+      actors:
+        # ── original agent base (west) ──
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        # ── fresh MCV parked mid-map, in the rusher lane ──
+        - {type: mcv,  owner: agent, position: [60, 20]}
+        # ── pre-placed garrison rifle infantry at BOTH safe shoulders
+        #    (stance: 0 hold-fire, off the rusher lane). They satisfy
+        #    the own_units_gte:1 SLA after deploy consumes the MCV —
+        #    AND they double as a visible landmark of the safe regions.
+        #    Far from the y=20 lane so the rusher does NOT pass through
+        #    them on the way to the original fact.
+        - {type: e1, owner: agent, position: [60, 8],  stance: 0}
+        - {type: e1, owner: agent, position: [60, 32], stance: 0}
+        # ── rusher band (light: 4× e1 + 1× e3) ──
+        # Light enough that the agent has a generous relocate window
+        # (no e3 swarm), but the lone rocket soldier guarantees the
+        # original western fact eventually falls if defended only by
+        # the pre-placed base — so stalling/in-place deploy cannot
+        # squat on the original surviving as a 'pseudo-win'.
+        - {type: e1, owner: enemy, position: [110, 20], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [112, 20], stance: 3, count: 1}
+        # ── unarmed high-HP enemy anchor far east (anti-DRAW: keeps
+        #    the episode alive past rusher death so the win/fail check
+        #    fires; engine auto-`done`s on enemy-elimination otherwise).
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            # relocated NE
+            - building_in_region: {type: fact, x: 60, y: 8,  radius: 8, count: 1}
+            # relocated SE
+            - building_in_region: {type: fact, x: 60, y: 32, radius: 8, count: 1}
+        - own_units_gte: 1
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        # Both original AND any relocation are gone.
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ────────────────────────────────────────────────────────
+  # +1 controlled variable: the rusher band is the canonical full
+  # band (6× e1 + 2× e3) — the original western fact is no longer
+  # defensible inside the episode budget, so the agent MUST relocate.
+  # Sit-and-defend ⇒ original falls + no fresh fact ⇒ both lost ⇒ LOSS.
+  # The win predicate excludes the western original site from the
+  # safe-region list: ONLY a fresh fact at the NE or SE shoulder wins.
+  medium:
+    description: >
+      Your original Construction Yard at the west is being charged by
+      the full rusher band (6 rifle infantry + 2 rocket soldiers)
+      coming down the central lane from the east. You start with a
+      single MCV parked at (60,20) and NO cash. Win by having at
+      least one Construction Yard alive at episode end at a SAFE
+      relocation region — either the north shoulder (cells around
+      60,8) or the south shoulder (cells around 60,32) — AND at
+      least one own unit alive AND before tick 5400. Defending the
+      original alone, deploying the MCV in-place at (60,20), or
+      stalling all lose: the rusher band is too fast for the
+      original to survive, and a fresh fact in the central lane
+      is razed the moment it stands up.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: mcv,  owner: agent, position: [60, 20]}
+        # Garrison at the safe shoulders (anti-zero-units SLA, see easy).
+        - {type: e1, owner: agent, position: [60, 8],  stance: 0}
+        - {type: e1, owner: agent, position: [60, 32], stance: 0}
+        # Full rusher band: 6× e1 + 2× e3. Spawned at x=110 so the
+        # band needs ≈100 cells of travel west to reach the original
+        # fact — gives the agent ample time to move+deploy the MCV
+        # but NOT enough time to also defend the original.
+        - {type: e1, owner: enemy, position: [110, 20], stance: 3, count: 6}
+        - {type: e3, owner: enemy, position: [112, 20], stance: 3, count: 2}
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            - building_in_region: {type: fact, x: 60, y: 8,  radius: 8, count: 1}
+            - building_in_region: {type: fact, x: 60, y: 32, radius: 8, count: 1}
+        - own_units_gte: 1
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ──────────────────────────────────────────────────────────
+  # +1 controlled variable: the FRESH MCV's start position is itself
+  # seed-varied via two spawn_point groups (the safe regions also
+  # shift to remain reachable from each start) AND the rusher band
+  # is more aggressive (8× e1 + 2× e3, spawned closer at x=100) AND
+  # an attrition cap (units_lost_lte: 2) bites — losing more than
+  # the MCV (which is consumed by deploy, count 0) plus 2 units in
+  # transit is a fail. A single memorised relocation plan cannot
+  # generalise: the MCV starts at (60,20) on seed 0/2 and at (40,20)
+  # on seed 1/3, and the only "safe" cells for each starting position
+  # differ.
+  hard:
+    description: >
+      The rusher band (8 rifle infantry + 2 rocket soldiers) is heavy
+      and starts close to your western base. The fresh MCV starts at
+      a SEED-CHOSEN location (either 60,20 or 40,20) and the safe
+      relocation regions for each starting position differ. Win by
+      having at least one Construction Yard alive at episode end at
+      a safe relocation region (the north or south shoulder of the
+      MCV's starting column) AND at least one own unit alive AND
+      lose ≤2 of your own units AND before tick 5400. The original
+      western fact cannot be defended in the budget. Deploying the
+      MCV in-place, stalling, or relocating to the wrong shoulder
+      (still in the rusher lane) all lose.
+    overrides:
+      actors:
+        # spawn_point 0 — MCV parked mid-map (60,20).
+        # Safe regions for this start: (60,8) and (60,32).
+        - {type: mcv,  owner: agent, position: [60, 20], spawn_point: 0}
+        # spawn_point 1 — MCV parked further west (40,20).
+        # Safe regions for this start: (40,8) and (40,32).
+        - {type: mcv,  owner: agent, position: [40, 20], spawn_point: 1}
+        # Original western base duplicated across BOTH spawn_point
+        # groups so it appears identically regardless of seed (the
+        # spawn_point filter excludes any AGENT actor without a
+        # spawn_point label whenever ANY agent actor declares one —
+        # see CLAUDE.md footgun).
+        - {type: fact, owner: agent, position: [10, 20], spawn_point: 0}
+        - {type: tent, owner: agent, position: [14, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 22], spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 20], spawn_point: 1}
+        - {type: tent, owner: agent, position: [14, 18], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 22], spawn_point: 1}
+        # Garrison at the safe shoulders for BOTH MCV-start columns
+        # (duplicated per spawn_point: see above). They satisfy the
+        # own_units_gte:1 SLA after deploy consumes the MCV.
+        - {type: e1, owner: agent, position: [60, 8],  stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [60, 32], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [40, 8],  stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [40, 32], stance: 0, spawn_point: 1}
+        # Heavier rusher band, spawned CLOSER (x=100) so the original
+        # falls faster and the relocate window is tighter.
+        - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 8}
+        - {type: e3, owner: enemy, position: [102, 20], stance: 3, count: 2}
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            # Safe regions for MCV-start (60,20).
+            - building_in_region: {type: fact, x: 60, y: 8,  radius: 8, count: 1}
+            - building_in_region: {type: fact, x: 60, y: 32, radius: 8, count: 1}
+            # Safe regions for MCV-start (40,20).
+            - building_in_region: {type: fact, x: 40, y: 8,  radius: 8, count: 1}
+            - building_in_region: {type: fact, x: 40, y: 32, radius: 8, count: 1}
+        - own_units_gte: 1
+        - units_lost_lte: 2
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {units_lost_lte: 2}
+    max_turns: 60
