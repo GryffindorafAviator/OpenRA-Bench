@@ -1,0 +1,350 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/mid-concede-vs-hold.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# CONCEDE-vs-HOLD reasoning. The operations-triage call: under a
+# partial outage you cannot save every shard at once, so you must
+# CHOOSE which datacentre to drain and which to defend, accept the
+# loss of the conceded one cleanly, and save the defended one cleanly.
+# The benchmark anchor is PlanBench under a partial-observability
+# constraint relaxation ("which goal to drop?") and CICERO/Diplomacy's
+# tactical-retreat call ("concede a province to save the front").
+#
+# Concretely: the agent owns TWO bases (fact+proc each) at WEST (24,20)
+# and EAST (78,20), each with a small tank garrison; a 5-unit flex
+# squad parks at the centre (51,20). A scripted `hunt` enemy pushes
+# BOTH bases simultaneously, asymmetrically — one push is light, one
+# is heavy. The HEAVY push is large enough to roll the east base's
+# garrison plus any half-flex; the LIGHT push is small enough that
+# garrison + FULL flex defeats it before it cracks the west fact.
+# The win is keeping fact+proc alive at AT LEAST ONE base in the
+# [after_ticks, within_ticks] band; the loss is the timeout (5401)
+# OR no fact buildings remaining (both bases razed).
+#
+#   * Stall ⇒ west garrison alone falls to the light push (engine
+#     defensive AI is weak on stationary tanks vs ranged infantry,
+#     verified empirically — see SCENARIO_QUALITY footgun); east
+#     garrison falls to the heavy push ⇒ both razed ⇒ LOSS.
+#   * Split-defend (half flex to each side) ⇒ each base gets too few
+#     reinforcements; both fall ⇒ LOSS.
+#   * Reinforce-both-back-and-forth ⇒ flex never lands long enough
+#     anywhere to make the trade; both fall ⇒ LOSS.
+#   * Consolidate flex on the WEST (light) side ⇒ west holds, east
+#     base falls (conceded by design) ⇒ ONE base saved ⇒ WIN.
+#
+# Map: arena 160x60, cordon 4 (generated on demand via mapgen). The
+# rush-hour-arena top-level base_map is only the support-flag sentinel
+# (a known-supported string the loader can resolve before per-level
+# overrides replace it with the actual generator spec).
+
+meta:
+  id: mid-concede-vs-hold
+  title: 'Concede One, Save the Other — Partial-Outage Triage Under a Clock'
+  capability: reasoning
+  real_world_meaning: >
+    Operations triage during a partial outage: the on-call engineer
+    cannot save every shard, so they pick which datacentre to drain
+    (concede) and which to defend, accept the loss of the conceded
+    one, and save the defended one cleanly. Trying to save both
+    simultaneously fails both.
+  robotics_analogue: >
+    Multi-site facility ops under acute load — when two sites are
+    failing in parallel and the defender pool can only cover one,
+    consolidating on a single site beats spreading thin across both.
+  benchmark_anchor:
+    - 'PlanBench partial-observability constraint relaxation'
+    - 'CICERO/Diplomacy tactical retreat'
+    - 'operations triage during partial outage'
+    - 'datacentre drain decision under failover'
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    # `hunt` per spec: every enemy unit attacks the nearest agent
+    # unit/building. With a small push starting far west and a heavy
+    # push starting far east, the attack mass is asymmetric out of
+    # the gate; the AI's only job is to march on the nearest agent.
+    bot_type: hunt
+  tools:
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop_units
+  planning: true
+  termination:
+    max_ticks: 12000
+    agent_units_killed: true
+    enemy_units_killed: true
+
+levels:
+
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Asymmetric push visible from start (both pushes pre-placed in the
+  # open within agent vision early). Heavier push EAST, light push
+  # WEST. Concede east, hold west. Lenient clock (within 5400, max
+  # turns 65 → tick reach 5853); a staller times out at 5401 and
+  # LOSES, but well before that the unprotected fact buildings are
+  # destroyed and the `not building_count_gte:fact` clause LOSES.
+  easy:
+    description: >
+      Two-Base Triage (easy). You own TWO bases at WEST (24,20) and
+      EAST (78,20), each a fact + proc with a small tank garrison; a
+      5-unit flex squad parks at the centre (51,20). A scripted
+      hunting enemy is attacking BOTH simultaneously — but the EAST
+      push is much heavier than the WEST push. You CANNOT save both:
+      any split or back-and-forth defence loses both bases to the
+      clock. Pick the lighter (WEST) side, consolidate your flex
+      squad onto it, let the heavier side fall, and keep fact+proc
+      alive at the saved base in the late survival band. WIN = both
+      fact AND proc still standing at EITHER the west base OR the
+      east base, between tick 3000 and 5400. LOSE = timeout (both
+      bases inevitably razed) or losing BOTH bases (no fact
+      buildings remaining).
+    overrides:
+      base_map:
+        generator: arena
+        name: mid-concede-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # ── WEST agent base ──
+        # fact/proc/powr at stance:2 so they don't trigger any
+        # spurious movement; the agent's mobile garrison nearby is
+        # stance:3 to auto-engage anything in range.
+        - {type: fact, owner: agent, position: [24, 20], stance: 2, health: 100}
+        - {type: proc, owner: agent, position: [24, 23], stance: 2, health: 100}
+        - {type: powr, owner: agent, position: [22, 20], stance: 2, health: 100}
+        - {type: 2tnk, owner: agent, position: [27, 19], stance: 3, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [27, 21], stance: 3, count: 2, health: 100}
+        - {type: e3,   owner: agent, position: [26, 20], stance: 3, count: 2, health: 100}
+        # ── EAST agent base — symmetric layout ──
+        - {type: fact, owner: agent, position: [78, 20], stance: 2, health: 100}
+        - {type: proc, owner: agent, position: [78, 23], stance: 2, health: 100}
+        - {type: powr, owner: agent, position: [80, 20], stance: 2, health: 100}
+        - {type: 2tnk, owner: agent, position: [75, 19], stance: 3, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [75, 21], stance: 3, count: 2, health: 100}
+        - {type: e3,   owner: agent, position: [76, 20], stance: 3, count: 2, health: 100}
+        # ── Flex squad — parked centre, must be committed to ONE side
+        - {type: 2tnk, owner: agent, position: [51, 20], stance: 3, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [51, 22], stance: 3, count: 2, health: 100}
+        - {type: jeep, owner: agent, position: [51, 18], stance: 3, health: 100}
+        # ── WEST enemy push (LIGHT) — far west edge so a stalling
+        # garrison can't keep west fact alive past the late checkpoint
+        # without the flex squad's help.
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 4, health: 100}
+        # ── EAST enemy push (HEAVY, easy size) — strong but tractable;
+        # easy's heavy push is smaller than medium/hard's, so the
+        # asymmetry is more obvious and the saved side is more
+        # forgiving.
+        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 8, health: 100}
+    # Survival band [after_ticks 3000, within_ticks 5400]: the saved
+    # base must still have fact+proc inside this window, so a turn-1
+    # snapshot of "both still alive" cannot win. Reachable within
+    # max_turns 65 (tick reach 5853 ≥ 5401).
+    win_condition:
+      any_of:
+        - all_of:
+          - building_in_region: {x: 24, y: 20, radius: 8, type: fact, count: 1}
+          - building_in_region: {x: 24, y: 20, radius: 8, type: proc, count: 1}
+          - after_ticks: 3000
+          - within_ticks: 5400
+        - all_of:
+          - building_in_region: {x: 78, y: 20, radius: 8, type: fact, count: 1}
+          - building_in_region: {x: 78, y: 20, radius: 8, type: proc, count: 1}
+          - after_ticks: 3000
+          - within_ticks: 5400
+    # Timeout is a real reachable LOSS: max_turns 65 → tick reach 5853
+    # ≥ 5401 (after_ticks fail). Losing both `fact` (both bases razed
+    # before timeout) LOSES immediately.
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 65
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Same asymmetric design as easy, but the HEAVY push is larger
+  # (12 e1 vs easy's 8) so the trade window is tighter and the
+  # heavy-side trade is even more clearly unwinnable. Survival band
+  # identical. Tighter max_turns budget keeps the staller honest.
+  medium:
+    description: >
+      Two-Base Triage (medium). Same two-base layout. The east push
+      is heavier than easy — split or reinforce-both loses both bases
+      to the tighter trade. Commit the flex squad to the LIGHT
+      (west) side, let the heavy side fall, and keep fact+proc alive
+      at the saved base in the late survival band.
+    overrides:
+      base_map:
+        generator: arena
+        name: mid-concede-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # ── WEST agent base ──
+        - {type: fact, owner: agent, position: [24, 20], stance: 2, health: 100}
+        - {type: proc, owner: agent, position: [24, 23], stance: 2, health: 100}
+        - {type: powr, owner: agent, position: [22, 20], stance: 2, health: 100}
+        - {type: 2tnk, owner: agent, position: [27, 19], stance: 3, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [27, 21], stance: 3, count: 2, health: 100}
+        - {type: e3,   owner: agent, position: [26, 20], stance: 3, count: 2, health: 100}
+        # ── EAST agent base ──
+        - {type: fact, owner: agent, position: [78, 20], stance: 2, health: 100}
+        - {type: proc, owner: agent, position: [78, 23], stance: 2, health: 100}
+        - {type: powr, owner: agent, position: [80, 20], stance: 2, health: 100}
+        - {type: 2tnk, owner: agent, position: [75, 19], stance: 3, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [75, 21], stance: 3, count: 2, health: 100}
+        - {type: e3,   owner: agent, position: [76, 20], stance: 3, count: 2, health: 100}
+        # ── Flex squad ──
+        - {type: 2tnk, owner: agent, position: [51, 20], stance: 3, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [51, 22], stance: 3, count: 2, health: 100}
+        - {type: jeep, owner: agent, position: [51, 18], stance: 3, health: 100}
+        # ── WEST enemy push (LIGHT) ──
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 4, health: 100}
+        # ── EAST enemy push (HEAVY) — bigger than easy ──
+        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 12, health: 100}
+    # Same survival band as easy; max_turns 60 → tick reach 5403 ≥ 5401.
+    win_condition:
+      any_of:
+        - all_of:
+          - building_in_region: {x: 24, y: 20, radius: 8, type: fact, count: 1}
+          - building_in_region: {x: 24, y: 20, radius: 8, type: proc, count: 1}
+          - after_ticks: 3000
+          - within_ticks: 5400
+        - all_of:
+          - building_in_region: {x: 78, y: 20, radius: 8, type: fact, count: 1}
+          - building_in_region: {x: 78, y: 20, radius: 8, type: proc, count: 1}
+          - after_ticks: 3000
+          - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Seed-varied flex-squad start. Two agent spawn_point groups: in
+  # each one, the agent's flex squad starts pre-positioned closer to
+  # ONE side, signalling-but-not-determining the intended commit. The
+  # actual asymmetry is read from the enemy mass which the agent
+  # still has to scout (the relative-coord objective disclosure means
+  # the model cannot blindly memorise a coordinate). Plus a strict
+  # attrition cap (units_lost_lte:8) so a Pyrrhic "save the base but
+  # bleed the garrison dry" outcome LOSES.
+  #
+  # NOTE on spawn_point semantics in the Rust engine
+  # (openra-data/src/oramap.rs::expand_scenario_actors): when ANY
+  # agent actor declares a spawn_point, ALL agent actors WITHOUT a
+  # spawn_point are filtered OUT (a `None != Some(selected)` skip,
+  # different from the Python rollout's `None` passthrough). So we
+  # must tag every agent actor with a spawn_point — base/garrison
+  # actors get BOTH (duplicated entries with spawn_point 0 and 1) so
+  # the bases and garrisons are present under either seed, and only
+  # the flex squad's start position rotates.
+  #
+  # The enemy push composition stays identical between spawn groups
+  # (enemy actors don't accept spawn_point in the Rust engine — see
+  # openra-data/src/oramap.rs), so the weak side stays WEST. The
+  # seed-varied piece is whether the agent's flex spawns NEAR the
+  # weak side (spawn_point 0, west-flex) or FAR from it (spawn_point
+  # 1, east-flex): the wrong-side start punishes a memorised
+  # "always commit where I spawn" heuristic — on spawn_point 1 the
+  # model must travel across the map to reach the saveable base.
+  hard:
+    description: >
+      Two-Base Triage (hard). Two bases, two simultaneous pushes;
+      your flex squad's start position varies by seed. Scout BOTH
+      pushes (heavy vs light), commit the flex squad to the LIGHT
+      side, let the HEAVY side fall, and SAVE fact+proc at the
+      defended base under the deadline — without bleeding the
+      garrison dry (a strict attrition cap rules out a Pyrrhic
+      save). Splitting, oscillating, or stalling all lose both
+      bases.
+    objective_coords: relative
+    overrides:
+      base_map:
+        generator: arena
+        name: mid-concede-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # ── WEST agent base — spawn_point 0 copy ──
+        - {type: fact, owner: agent, position: [24, 20], stance: 2, health: 100, spawn_point: 0}
+        - {type: proc, owner: agent, position: [24, 23], stance: 2, health: 100, spawn_point: 0}
+        - {type: powr, owner: agent, position: [22, 20], stance: 2, health: 100, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [27, 19], stance: 3, count: 2, health: 100, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [27, 21], stance: 3, count: 2, health: 100, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [26, 20], stance: 3, count: 2, health: 100, spawn_point: 0}
+        # ── WEST agent base — spawn_point 1 copy ──
+        - {type: fact, owner: agent, position: [24, 20], stance: 2, health: 100, spawn_point: 1}
+        - {type: proc, owner: agent, position: [24, 23], stance: 2, health: 100, spawn_point: 1}
+        - {type: powr, owner: agent, position: [22, 20], stance: 2, health: 100, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [27, 19], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [27, 21], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [26, 20], stance: 3, count: 2, health: 100, spawn_point: 1}
+        # ── EAST agent base — spawn_point 0 copy ──
+        - {type: fact, owner: agent, position: [78, 20], stance: 2, health: 100, spawn_point: 0}
+        - {type: proc, owner: agent, position: [78, 23], stance: 2, health: 100, spawn_point: 0}
+        - {type: powr, owner: agent, position: [80, 20], stance: 2, health: 100, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [75, 19], stance: 3, count: 2, health: 100, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [75, 21], stance: 3, count: 2, health: 100, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [76, 20], stance: 3, count: 2, health: 100, spawn_point: 0}
+        # ── EAST agent base — spawn_point 1 copy ──
+        - {type: fact, owner: agent, position: [78, 20], stance: 2, health: 100, spawn_point: 1}
+        - {type: proc, owner: agent, position: [78, 23], stance: 2, health: 100, spawn_point: 1}
+        - {type: powr, owner: agent, position: [80, 20], stance: 2, health: 100, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [75, 19], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [75, 21], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [76, 20], stance: 3, count: 2, health: 100, spawn_point: 1}
+        # ── Flex squad, spawn_point 0 — pre-positioned WEST of centre
+        # (closer to the weak-side base). The model still has to scout
+        # and decide; the start nudges the right policy.
+        - {type: 2tnk, owner: agent, position: [48, 20], stance: 3, count: 2, health: 100, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [48, 22], stance: 3, count: 2, health: 100, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [48, 18], stance: 3, health: 100, spawn_point: 0}
+        # ── Flex squad, spawn_point 1 — pre-positioned EAST of centre,
+        # FURTHER from the weak-side base: a real "wrong-side" start
+        # that punishes a memorised "always commit to wherever I
+        # spawn" heuristic. Forces the model to read the enemy mass.
+        - {type: 2tnk, owner: agent, position: [60, 20], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [60, 22], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [60, 18], stance: 3, health: 100, spawn_point: 1}
+        # ── WEST enemy push (LIGHT) — far west ──
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 4, health: 100}
+        # ── EAST enemy push (HEAVY) — far east, same as medium ──
+        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 12, health: 100}
+    # Same survival band PLUS a strict attrition cap
+    # (units_lost_lte:8): the saved base must still have fact+proc at
+    # the late checkpoint AND the consolidate cannot have bled the
+    # garrison dry. A Pyrrhic save that loses more than 8 units
+    # (over half the force) is a LOSS.
+    win_condition:
+      any_of:
+        - all_of:
+          - building_in_region: {x: 24, y: 20, radius: 8, type: fact, count: 1}
+          - building_in_region: {x: 24, y: 20, radius: 8, type: proc, count: 1}
+          - after_ticks: 3000
+          - within_ticks: 5400
+          - units_lost_lte: 8
+        - all_of:
+          - building_in_region: {x: 78, y: 20, radius: 8, type: fact, count: 1}
+          - building_in_region: {x: 78, y: 20, radius: 8, type: proc, count: 1}
+          - after_ticks: 3000
+          - within_ticks: 5400
+          - units_lost_lte: 8
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {units_lost_lte: 8}
+    max_turns: 60

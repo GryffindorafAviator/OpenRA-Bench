@@ -50,6 +50,7 @@ UPGRADED = [
     # DEEP throughput is equal on each spawn (no opening can be
     # memorised across seeds).
     "economy-harvest-investment",
+    "mid-concede-vs-hold",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
