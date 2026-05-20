@@ -128,6 +128,40 @@ A scenario is defective if any of the following hold:
   does. For perception packs, use `e3` for hidden clusters and
   verify cluster cells on a smoke run before authoring against them.
 
+## Engine blockers: fix the engine, do not compromise the pack
+
+When authoring a pack you may discover that the intended capability
+cannot be expressed in the current engine — e.g. `power_down` is a
+no-op, `stance:1` doesn't act as ReturnFire, enemy actors don't
+honour `spawn_point`, there is no mid-episode scripted-event hook,
+or some specific order/predicate isn't surfaced. **The correct move
+is to fix the engine, not to retire the pack, weaken the bar, or
+substitute a different mechanic that masks the gap.** Concretely:
+
+1. Reproduce the gap with a focused Rust or Python test.
+2. Add the test as a failing test in `OpenRA-Rust/openra-sim/tests/`
+   (or `openra-data/tests/`, or `tests/test_<feature>.py` on the
+   bench side) and make it pass with the minimum change.
+3. Rebuild the wheel:
+   `cd OpenRA-Rust && PATH=$HOME/.cargo/bin:/opt/anaconda3/bin:$PATH
+   maturin develop --release` (verify the `Installed openra_train`
+   line printed — maturin can exit 0 while cargo failed).
+4. If the change needs a new predicate or signal, also add the
+   `_PHRASES` translation in `openra_bench/game_knowledge.py`
+   (the suite test `test_all_predicate_keys_have_a_translation`
+   enforces this).
+5. Ship the engine change + the pack in **separate commits** on
+   the same push so reviewers can see "this engine gap was closed
+   to unblock this pack".
+6. Update this CLAUDE.md to remove the footgun note (or restate it
+   as a now-fixed historical pitfall).
+
+Only retire a pack if the engine fix is genuinely out of scope —
+e.g. requires a multi-week refactor or contradicts an explicit
+design constraint. In that case open a task with the gap, the
+attempted fix, and what would be needed, rather than silently
+retiring.
+
 ## How to validate (deterministic, no model / no network)
 
 For each level + each hard seed (1–4) run scripted policies via
