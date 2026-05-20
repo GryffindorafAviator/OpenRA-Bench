@@ -1,0 +1,315 @@
+# build-defensive-tower-cluster — Concentrate Defenses on the High-Value Building
+#
+# REASONING focus: CONCENTRATED-DEFENSE topology. A single high-value
+# building (the agent fact) is the protected asset. A heavy rush band
+# charges the agent's centroid — which IS the fact. The right doctrine
+# is a TIGHT CLUSTER of pillboxes WRAPPING the fact (overlapping fields
+# of fire on the single chokepoint that matters: the cell the fact sits
+# on), NOT a thin line spread across the map.
+#
+# The win predicate makes the topology decision load-bearing — total
+# pbox count alone is not enough; ≥3 of the pillboxes must sit INSIDE
+# a radius-4 disc around the fact. A pbox-LINE policy (the obvious
+# sibling: pboxes strung along the east-west attack lane) satisfies the
+# count but FAILS the region bar AND lets the concentrated rifle/rocket
+# band overwhelm the thin frontage at the fact — line LOSES, intended
+# cluster WINS.
+#
+# Sibling to a hypothetical `build-defensive-tower-line` (which would
+# reward a long-frontage line across a wide threat-axis); on THIS pack
+# the threat is FOCUSED on the fact, so the doctrine inverts.
+#
+# Real-world anchor:
+#   • ERQA spatial-commit primitive — place a small, finite resource set
+#     onto a *single point* of the environment under a region predicate;
+#   • military strongpoint doctrine — defense-in-depth around a single
+#     critical asset (the fortress keep, the SAM hub, the data-centre
+#     hardened core), not a perimeter cordon thin everywhere;
+#   • asset protection / critical infrastructure protection — concentrate
+#     overlapping inspection / fires AT the protected asset, not a thin
+#     uniform spread across all approaches.
+#
+# Discrimination (four-script bar — scripted, no model needed):
+#   • stall (observe-only): spends nothing, the rush razes the fact —
+#     fact-alive fail clause fires → LOSS (no draw degeneracy because
+#     `after_ticks` also fires as a backstop).
+#   • pbox-line (the "build-defensive-tower-line" solution — pboxes
+#     strung along the attack lane far from the fact): meets the count
+#     clause but FAILS the region clause (at most 0-1 line-pbox lands
+#     inside the radius-4 disc around the fact) AND the line lets the
+#     rusher band slip through any gap to reach the fact → LOSS.
+#   • pure-army (only e1, no pbox): FAILS the count clause AND the
+#     region clause; the rifle wall alone cannot stop the heavier
+#     medium/hard waves either → LOSS.
+#   • intended CLUSTER (3-4 pboxes wrapping the fact within radius 4):
+#     overlapping pbox fire shreds the focused rush; count + region +
+#     kill + fact-alive clauses all satisfied → WIN.
+#
+# Why the spec works (engine combat sheet, per CLAUDE.md):
+#   • pbox = pillbox (anti-infantry base defence; cost 600cr; dps very
+#     high vs rifle infantry; 1×1 footprint, easy to cluster). The
+#     defense queue is SEPARATE from infantry so parallel queues are
+#     allowed (CLAUDE.md).
+#   • A radius-4 disc around the fact at (10,20) contains ~50 cells;
+#     plenty of room for ≥3 pboxes after the fact's 2×2 footprint plus
+#     the pre-placed tent/powr are subtracted.
+#   • `building_count_gte:{fact,1}` (PRESENT-TENSE) is the fact-alive
+#     check — `has_building` is a one-shot ever-seen set that stays true
+#     after the fact is razed (documented CLAUDE.md footgun).
+#   • `after_ticks: BUDGET+1` fail clause is reachable within max_turns
+#     (no interrupts ⇒ exactly 90 ticks/step ⇒ max tick = 93+90·(N-1));
+#     stallers hit it and LOSE rather than draw.
+#   • A persistent unarmed enemy `fact` at (120,20) keeps the episode
+#     alive past full rusher elimination so the win/fail evaluator sees
+#     the terminal frame (no DRAW collapse on enemy-wipe auto-done).
+#   • The `rusher` bot relentlessly charges the agent's centroid (the
+#     agent fact) — that's WHY a cluster at the fact wins and a line
+#     away from it doesn't: the rush focal point is the fact itself.
+#   • Cash is intentionally tight (exactly N×600cr for N pboxes, with a
+#     small slack on hard for one extra defender unit). A model that
+#     wastes cash on extra units cannot complete the pbox count.
+
+meta:
+  id: build-defensive-tower-cluster
+  title: 'Defense Topology — Cluster Pillboxes Around the High-Value Building'
+  capability: reasoning
+  real_world_meaning: >
+    A single high-value building (the fact — your construction yard) is
+    the protected asset, and a concentrated enemy band charges directly
+    at it. Right doctrine: a TIGHT CLUSTER of pillboxes WRAPPING the
+    fact, overlapping fields of fire on the single point that matters.
+    Wrong doctrine: a thin LINE of pillboxes strung along the attack
+    lane far from the fact — the line satisfies a naive "we built N
+    defences" count but cannot stop a focused rush from reaching the
+    fact, because the firepower is too dispersed to mass on the threat.
+    The win predicate makes the topology decision load-bearing: total
+    pbox count alone is not enough; ≥3 of the pillboxes must sit INSIDE
+    the radius-4 disc around the fact, AND the fact must survive.
+  robotics_analogue: >
+    Critical-asset protection / defense-in-depth: when ONE node is the
+    irreplaceable principal (the fortress keep, the SAM hub, the data-
+    centre hardened core, the ambassador's residence), the right
+    architecture is dense overlapping enforcement AT that asset, not a
+    thin uniform perimeter that is everywhere but never massed where
+    the threat actually comes. The same logic that gives you a single
+    hardened crypto module behind layered firewalls — concentrate
+    coverage AT the asset, not a uniform spread.
+  benchmark_anchor:
+    - "ERQA"
+    - "military strongpoint"
+    - "asset protection"
+    - "defense-in-depth around critical infrastructure"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: rusher}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # No interrupts — defense topology is a STATIC up-front decision; the
+  # threat axis is known a priori (the rusher always charges the agent
+  # fact). Disabling interrupts also makes the tick budget deterministic
+  # (exactly 90 ticks/step ⇒ max_turns is a hard tick budget that the
+  # `after_ticks` fail clause reliably bites in).
+  interrupts: {}
+  termination:
+    max_ticks: 12000
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ── bare CONCENTRATED-DEFENSE skill: budget covers exactly
+  # 4 pbox (2400cr). Win requires ≥3 of the 4 INSIDE the radius-4 disc
+  # around the fact at (10,20). A line layout (pbox strung at x=20..35
+  # along the attack lane) lands ≤1 pbox inside the disc → region clause
+  # fails. Stall loses (clock OR fact razed); pure-army loses (count).
+  # max_turns 60 ⇒ reachable tick 93+90·59 = 5403; deadline 5400.
+  easy:
+    description: >
+      A rusher band of rifle infantry charges your construction yard
+      (fact, at (10,20)). Build 4 pillboxes (pbox — 600cr each, budget
+      exactly 2400) AND place at least 3 of them INSIDE the radius-4
+      disc around the fact, so their overlapping fields of fire shred
+      the rush at the doorstep of the protected asset. A thin pillbox
+      LINE strung along the attack lane (pboxes at x=20..35) fails the
+      region clause (none land inside the radius-4 disc around the
+      fact) and also lets the rifle band slip through. Stall, pure-
+      army, and pbox-line all LOSE. The fact must survive; ≥3 enemy
+      units must die before tick 5400.
+    starting_cash: 2400
+    overrides:
+      actors:
+        # Pre-placed agent base. Fact at (10,20); tent and powr WEST
+        # of the fact (behind it) so they aren't in the rush line of
+        # fire and they leave plenty of cells inside the radius-4
+        # disc free for cluster pboxes.
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [6,  18]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        # 3 pre-placed e1 defenders flanking the fact (the cluster's
+        # job is the wall; these are the supporting fire so the LINE
+        # / pure-army counterfactuals can still be discriminated). All
+        # at stance:2 (return fire) so they don't wander.
+        - {type: e1,   owner: agent, position: [12, 19], stance: 2}
+        - {type: e1,   owner: agent, position: [12, 20], stance: 2}
+        - {type: e1,   owner: agent, position: [12, 21], stance: 2}
+        # Rusher band at mid-east — forced through the y=20 lane on
+        # the way to the agent centroid (the fact). 5× e1 is enough
+        # to overwhelm a thin line / no-pbox defence but a cluster of
+        # ≥3 pbox (dps very high vs infantry, overlapping fields of
+        # fire) shreds it. Off the (50,20) silently-failing column.
+        - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 5}
+        # Unarmed high-HP marker (anti-DRAW): keeps the episode alive
+        # past full rusher elimination so the win/fail check fires.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: pbox, n: 4}}
+        - {building_in_region: {type: pbox, x: 10, y: 20, radius: 4, count: 3}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {units_killed_gte: 3}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 axis: heavier rush (canonical 6×e1 + 2×e3 band)
+  # AND tighter cash (2400cr — still exactly 4 pbox, NO slack for
+  # extra units). The region bar stays at 3-of-4 at the fact. A
+  # line layout (1 at fact, 3 along the lane) still meets the count
+  # but FAILS the region (1 of 4 inside the disc, not the required 3)
+  # AND the line cannot mass enough firepower to stop the heavier
+  # band. The intended cluster (3 pbox INSIDE the disc + 1 spare
+  # nearby, OR all 4 inside the disc) survives. Kill bar raised to
+  # 5 to require the cluster to actually fight, not just absorb.
+  # max_turns 60 ⇒ reachable tick 5403; deadline 5400.
+  medium:
+    description: >
+      The full rush band — 6 rifle infantry + 2 rocket soldiers —
+      charges your construction yard (fact, at (10,20)). Build 4
+      pillboxes (budget exactly 2400cr = 4 pbox at 600 each) AND
+      place at least 3 of them INSIDE the radius-4 disc around the
+      fact. A pillbox LINE (1 at the fact, 3 along the lane) meets
+      the count but FAILS the region bar (1 of 4 inside the disc, not
+      the required 3) AND cannot mass enough firepower to blunt the
+      heavier band. Stall, pure-army, and pbox-line all LOSE. The
+      fact must survive; ≥5 enemy units must die before tick 5400.
+    starting_cash: 2400
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [6,  18]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        # 4 pre-placed e1 defenders (one more than easy) — the supporting
+        # fire layer; the cluster pboxes are still the load-bearing wall.
+        - {type: e1,   owner: agent, position: [12, 19], stance: 2}
+        - {type: e1,   owner: agent, position: [12, 20], stance: 2}
+        - {type: e1,   owner: agent, position: [12, 21], stance: 2}
+        - {type: e1,   owner: agent, position: [8,  20], stance: 2}
+        # Canonical heavy rush: 6× e1 + 2× e3 at x=60 (mid-east), all
+        # at y=20 so the band converges through the protected lane on
+        # the way to the agent fact at (10,20). Off the (50,20)
+        # silently-failing column. Heavier band ⇒ a line / pure-army
+        # defence is overrun in ~6-8 turns; the cluster (overlapping
+        # pbox dps) holds.
+        - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 6}
+        - {type: e3, owner: enemy, position: [62, 20], stance: 3, count: 2}
+        # Anti-DRAW marker.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: pbox, n: 4}}
+        - {building_in_region: {type: pbox, x: 10, y: 20, radius: 4, count: 3}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {units_killed_gte: 5}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── HARD ── +1 axis: TWO seed-driven agent spawn_point groups so the
+  # fact (and therefore the cluster centre) FLIPS between NORTH y=14
+  # and SOUTH y=26 per seed. The win predicate's `any_of` accepts a
+  # cluster around EITHER candidate fact location — but a single
+  # memorised "build pboxes at (10,20) area" plan does NOT work
+  # because the fact never sits at y=20 on hard. The model has to
+  # READ the fact's latitude from observation and place the cluster
+  # relative to it. Enemies don't honour spawn_point (engine:
+  # oramap.rs::expand_scenario_actors per CLAUDE.md), so the rusher
+  # band is staged symmetrically at the matching latitude on BOTH
+  # candidate routes; the rusher charges agent centroid so it
+  # converges on whichever fact is present this seed. Total pbox
+  # grows to 4 (still 2400cr, exact). Kill bar 6.
+  # max_turns 60 ⇒ reachable tick 5403; deadline 5400.
+  hard:
+    description: >
+      The agent construction yard (fact) flips between NORTH (y=14)
+      and SOUTH (y=26) by seed; the cluster centre must follow.
+      Build 4 pillboxes (budget 2400cr = 4 pbox at 600 each) AND
+      place at least 3 of them INSIDE the radius-4 disc around the
+      CURRENT fact (either (10,14) or (10,26) — read it from the
+      observation). A line layout, a cluster around (10,20) (the
+      old centre that no longer holds the fact), or any plan that
+      doesn't follow the fact's latitude FAILS the region bar AND
+      lets the rush reach the fact. Stall, pure-army, pbox-line
+      all LOSE. The fact must survive; ≥6 enemy units must die
+      before tick 5400.
+    starting_cash: 2400
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base. Fact at (10,14); tent/powr WEST
+        # of fact; pre-placed defenders flanking the fact.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [6,  12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  16], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 13], stance: 2, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 14], stance: 2, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 15], stance: 2, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [8,  14], stance: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH base (mirror across y=20).
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [6,  24], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  28], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 25], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 26], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 27], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [8,  26], stance: 2, spawn_point: 1}
+        # Enemies don't honour spawn_point (CLAUDE.md). Stage the rush
+        # band at BOTH candidate latitudes (y=14 AND y=26); the rusher
+        # charges agent centroid so the band whose latitude matches the
+        # active fact converges on it. (Both bands always place; the
+        # off-latitude band wanders harmlessly toward the unused
+        # latitude — but the on-latitude band is heavy enough on its
+        # own to overwhelm a thin / mis-placed defence.)
+        - {type: e1, owner: enemy, position: [60, 14], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [62, 14], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [60, 26], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [62, 26], stance: 3, count: 1}
+        # Anti-DRAW marker on the symmetry axis.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: pbox, n: 4}}
+        - any_of:
+            - {building_in_region: {type: pbox, x: 10, y: 14, radius: 4, count: 3}}
+            - {building_in_region: {type: pbox, x: 10, y: 26, radius: 4, count: 3}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {units_killed_gte: 6}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
