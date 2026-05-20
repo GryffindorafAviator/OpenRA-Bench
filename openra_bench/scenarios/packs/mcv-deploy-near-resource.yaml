@@ -1,0 +1,203 @@
+meta:
+  id: mcv-deploy-near-resource
+  title: 'MCV Site Choice — Deploy Near the Ore Patch (Econ-First Siting)'
+  capability: reasoning
+  real_world_meaning: >
+    Econ-first facility siting: a Construction Yard is most valuable
+    when co-located with its raw-resource source. The starter MCV +
+    harvester are the "movable" assets that pin the new base; the
+    decision is WHERE to deploy. Deploying on top of (or adjacent to)
+    the productive ore patch minimises harvester cycle distance and the
+    deadline-bound revenue ramp clears the bar. Deploying anywhere else
+    — at a distant decoy patch, mid-map, or sitting on the start cell
+    without considering the patch geography — either misses the
+    deploy-location predicate or starves the harvester's throughput so
+    the revenue gate fails before the clock runs out.
+  robotics_analogue: >
+    Autonomous mining-base placement: the depot/processor must be
+    placed near the ore body, not at an arbitrary staging point, or
+    the collector's per-trip cost dominates throughput. Same idea in
+    warehouse-near-rail, fab-near-silicon-source, distribution-center-
+    near-port siting (Weber facility-location problem).
+  author: groupA-mcv-seed
+  benchmark_anchor:
+    - SC2LE econ optimization (worker travel minimization)
+    - MicroRTS resource-co-location
+    - Weber facility-location problem
+    - distribution-center / fab siting near supply source
+
+# ENGINE NOTE (verified 2026-05-19 against the installed openra_train
+# wheel on rush-hour-arena, post-S0/S1 harvest income — Task #14, and
+# post-MCV-deploy fix — tests/test_mcv_deploy.py):
+# 1. MCV deploy works: `Command.deploy([mcv_id])` removes the MCV and
+#    creates a `fact` ConYard. The fact's cell sits within ~2 cells of
+#    the MCV's pre-deploy position (e.g. MCV at (12,18) → fact at
+#    (11,17), distance ≈ 1.4) — within a radius:5 disc centred on the
+#    MCV's start cell.
+# 2. Harvest income is strongly distance-dependent: with proc at
+#    (10,18) and a pre-placed harv, harvesting from a patch at (16,18)
+#    yields ~200 cr/turn (3000 ev by tick ~2400). Patch at (50,18)
+#    yields ~33 cr/turn; patch at (100,18) yields zero ev in 1500
+#    ticks (round-trip > sim window).
+# 3. Stall (only Command.observe) yields 0 cr/turn — starting_cash:0
+#    keeps EV pinned at 0, so the income gate is the load-bearing
+#    constraint and stall LOSES.
+# 4. building_in_region uses Euclidean distance squared (radius field,
+#    NOT 'r'); see openra_bench/scenarios/win_conditions.py. The
+#    predicate `{x: X, y: Y, radius: R, type: fact, count: 1}`
+#    requires ≥1 agent fact within R cells of (X,Y).
+# 5. Tick alignment: engine advances ~90 ticks per decision turn, so
+#    within_ticks ≤ 93 + 90·(max_turns − 1) is required for the clock
+#    to bite (CLAUDE.md). fail_condition uses the same boundary so a
+#    non-finisher LOSES (never draws).
+# 6. The inert enemy `e1` (stance:0, far from the agent) keeps the
+#    engine from auto-`done`-ing on enemy-elimination before the win
+#    is evaluated (CLAUDE.md engine footgun).
+# 7. NO pre-placed proc anywhere but the agent's starting base — the
+#    proc location is fixed at (10,18) (or (10,28) for spawn 1 on
+#    hard). Distance from THIS proc to the chosen patch is what
+#    governs harvest throughput; the deploy-location predicate is
+#    what governs the siting choice. Pre-placing a second proc would
+#    decouple income from deploy site and dilute the econ-siting
+#    signal.
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    - deploy
+    - harvest
+    - move_units
+    - build
+    - place_building
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    # Default base: MCV + pre-placed harvester + pre-placed proc, ready
+    # to deploy in place. The proc sits adjacent to the spawn so the
+    # harvester's cycle to the NEAR patch (16,18) is short → income is
+    # high. Pre-placed because building proc from a fresh deploy fact
+    # costs 1400 cr and starting_cash is 0 (econ-first siting test —
+    # not a build-order test).
+    - {type: mcv,  owner: agent,   position: [12, 18]}
+    - {type: harv, owner: agent,   position: [14, 18]}
+    - {type: proc, owner: agent,   position: [10, 18]}
+    # NEAR patch — adjacent to the proc; the intended deploy region.
+    # Distance from proc ≈ 6 cells → ~200 cr/turn harvested.
+    - {type: mine, owner: neutral, position: [16, 18]}
+    # Inert enemy marker keeps the engine from auto-`done`-ing on
+    # enemy-elimination before win/fail is evaluated (CLAUDE.md
+    # engine footgun). Stance 0, well outside any reachable path.
+    - {type: e1,   owner: enemy,   position: [120, 36], stance: 0}
+
+levels:
+  easy:
+    description: >
+      The starter MCV, harvester, and refinery are co-placed with ONE
+      ore patch directly adjacent to the refinery. Deploy the MCV in
+      place (the fact lands inside the near-patch region) and harvest;
+      EV crosses the 3000 bar by tick ≈ 2400, well inside the 5400
+      tick budget. Stall earns 0 (starting_cash:0) and loses the
+      income gate; failing to deploy at all loses the fact predicate.
+    starting_cash: 0
+    win_condition:
+      all_of:
+        - building_in_region: {x: 12, y: 18, radius: 5, type: fact, count: 1}
+        - economy_value_gte: 3000
+        - within_ticks: 5400
+    # after_ticks = within_ticks; both reachable inside max_turns=62
+    # (ceiling = 93 + 90·61 = 5583). Non-finisher LOSES (not draws).
+    # The deploy-location requirement lives ONLY in win_condition; a
+    # turn-1 `not fact` fail would insta-LOSS stall before the clock
+    # bites, hiding the timeout-discrimination signal. The clock is
+    # the discriminator: stall → 0 income → never wins → after_ticks
+    # → LOSS.
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+    max_turns: 62
+  medium:
+    description: >
+      Two patches: the NEAR patch adjacent to the spawn refinery
+      (16,18) and a FAR decoy at (50,18). The far patch is a tempting
+      "more ore" target but its round-trip cycle to the fixed refinery
+      yields ~33 cr/turn — far below the throughput needed. The
+      intended play is to deploy in place AND keep the harvester on
+      the near patch; EV reaches the 4500 bar by tick ≈ 3700. Moving
+      to the far patch (whether by reassigning the harvester or by
+      walking the MCV to deploy there) misses the income gate AND/OR
+      the fact predicate. Clock is tighter (4500 ticks).
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: mcv,  owner: agent,   position: [12, 18]}
+        - {type: harv, owner: agent,   position: [14, 18]}
+        - {type: proc, owner: agent,   position: [10, 18]}
+        - {type: mine, owner: neutral, position: [16, 18]}
+        - {type: mine, owner: neutral, position: [50, 18]}
+        - {type: e1,   owner: enemy,   position: [120, 36], stance: 0}
+    win_condition:
+      all_of:
+        - building_in_region: {x: 12, y: 18, radius: 5, type: fact, count: 1}
+        - economy_value_gte: 4500
+        - within_ticks: 4500
+    # max_turns=52 → ceiling 93 + 90·51 = 4683 ≥ 4500.
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+    max_turns: 52
+  hard:
+    description: >
+      Two spawn groups (round-robin by seed) and three ore patches.
+      Each spawn has its OWN near-patch geometry: spawn 0 starts in the
+      north (proc at (10,18), near patch at (16,18)); spawn 1 starts
+      in the south (proc at (10,28), near patch at (16,28)). A shared
+      FAR decoy patch at (100,20) is far from both spawns and yields
+      zero income inside the budget. The agent must deploy at its
+      LOCAL near patch (the fact predicate is `any_of` over both
+      spawn-local near regions). A memorised deploy-at-(12,18) opening
+      generalises to seed 0 but fails on seed 1 — the model must read
+      its actual start position. EV reaches the 5500 bar by tick ≈
+      4200 with a clean deploy-in-place + near-patch harvest; the
+      clock is 5400 ticks.
+    starting_cash: 0
+    overrides:
+      actors:
+        # spawn_point 0 — north base; ore patch to the east at (16,18)
+        - {type: mcv,  owner: agent,   position: [12, 18], spawn_point: 0}
+        - {type: harv, owner: agent,   position: [14, 18], spawn_point: 0}
+        - {type: proc, owner: agent,   position: [10, 18], spawn_point: 0}
+        # spawn_point 1 — south base; ore patch to the east at (16,28)
+        - {type: mcv,  owner: agent,   position: [12, 28], spawn_point: 1}
+        - {type: harv, owner: agent,   position: [14, 28], spawn_point: 1}
+        - {type: proc, owner: agent,   position: [10, 28], spawn_point: 1}
+        # Spawn-local near patches (neutral actors place regardless of
+        # spawn_point filter — CLAUDE.md engine footgun; we want BOTH
+        # patches present so each spawn has its own near-patch geometry,
+        # and the unused near patch from the other spawn is too far to
+        # matter for income).
+        - {type: mine, owner: neutral, position: [16, 18]}
+        - {type: mine, owner: neutral, position: [16, 28]}
+        # Shared FAR decoy patch — far from both spawns, income-inert.
+        - {type: mine, owner: neutral, position: [100, 20]}
+        - {type: e1,   owner: enemy,   position: [120, 36], stance: 0}
+    win_condition:
+      all_of:
+        - any_of:
+            - building_in_region: {x: 12, y: 18, radius: 5, type: fact, count: 1}
+            - building_in_region: {x: 12, y: 28, radius: 5, type: fact, count: 1}
+        - economy_value_gte: 5500
+        - within_ticks: 5400
+    # max_turns=62 → ceiling 93 + 90·61 = 5583 ≥ 5400.
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+    max_turns: 62

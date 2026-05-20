@@ -74,6 +74,10 @@ UPGRADED = [
     # shoulders, so a single memorised relocation cell cannot
     # generalise across seeds.
     "mcv-deploy-relocate-under-pressure",
+    # Group A econ-first siting seed (Wave 2 MCV deploy fix + post-S0/S1
+    # harvest income); hard tier defines 2 symmetric spawn_point groups
+    # (north/south base) so each seed gets its own near-patch geometry.
+    "mcv-deploy-near-resource",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
