@@ -476,6 +476,16 @@ UPGRADED = [
     # footprint is symmetric per spawn but a memorised "defenders at
     # (14,20)" cluster cannot generalise across seeds.
     "proc-only-defend-no-attack",
+    # Wave-6 perception coverage pack (SC2 map-control / vision objectives
+    # / ERQA coverage / military area dominance / drone-coverage anchor).
+    # Win is explored_pct_gte X% within a tick budget with units_lost_lte:0.
+    # Hard tier defines two agent spawn_point groups (SW column y=20..36
+    # vs NW column y=4..20) of 5 jeeps each, round-robined by seed; the
+    # five frontier corners (4 distant corners + a centre diagonal) are
+    # symmetric to both spawn columns so the per-jeep nearest-quadrant
+    # assignment flips per seed and a memorised "which jeep to which
+    # corner" plan cannot generalise.
+    "scout-map-reveal-percent-target",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

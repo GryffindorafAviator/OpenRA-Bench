@@ -1,0 +1,204 @@
+# scout-map-reveal-percent-target.yaml
+#
+# PERCEPTION capability — efficient coverage path-planning. The cell
+# tests whether the agent COMMITS a small scout force to a coverage
+# strategy that REVEALS a target fraction of the map within a tick
+# budget. Distinct from the perception-frontier-reading family
+# (which uses `buildings_discovered_gte` to test reading the fog
+# frontier for hidden landmarks), this pack uses `explored_pct_gte`
+# directly to score broad map coverage — the agent must DISTRIBUTE
+# scouts across the map (not bunch them onto one swath, not strand
+# a single jeep with the rest idle) to hit the percentage in time.
+#
+# Real-world anchor: SC2 map-control / vision objectives (the player
+# spreads workers and units to maintain map vision); ERQA coverage
+# benchmarks (reveal-by-coverage scoring); military area dominance /
+# coverage objectives; drone-search coverage planning (lawn-mower or
+# Voronoi-partitioned multi-agent sweeps).
+#
+# Win idiom: `explored_pct_gte:X AND within_ticks:K AND units_lost_lte:0`.
+# There is no enemy, so units_lost is structurally zero — it makes the
+# preservation contract explicit (and the predicate appears in plain
+# language in the brief). The discrimination is in the (X, K) pair:
+#   * stall                              → never moves, ≤4% revealed ⇒ LOSS
+#   * single-jeep-only (others idle)     → ~38% asymptote, never reaches
+#                                          medium/hard target ⇒ LOSS
+#   * bunched (all jeeps one target)     → all jeeps reveal the same
+#                                          swath together, capped near
+#                                          the single-path asymptote
+#                                          (50-69% depending on tier);
+#                                          fails the target or the clock
+#                                          on every tier ⇒ LOSS
+#   * intended split-and-distribute      → jeeps fan to disjoint regions
+#                                          (corners / multi-stage routes),
+#                                          revealing the target % in time
+#                                          on every tier ⇒ WIN
+#
+# Solvency calibration (probe runs on rush-hour-arena, seed 1):
+#   * easy   4j  intended_4corner T5=33.8% (tick 453), bunched T5=28.8%
+#            → target 30% with within_ticks=453 (max_turns=8 so the
+#              after_ticks=454 fail actually fires by T6)
+#   * medium 4j  intended_4corner T9=56.1% (tick 813), bunched T10=50.4%
+#            → target 50% with within_ticks=825 (bunched needs T10
+#              tick 903 > 825 to pass, fails the clock)
+#   * hard   5j  intended_2stage  T9=77.2% (tick 813), bunched T11=68.6%
+#            → target 70% with within_ticks=1350 (bunched asymptote
+#              is 68.6% — strictly under 70% on the entire budget)
+#
+# Validate (deterministic, no model):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/scout-map-reveal-percent-target.yaml
+
+meta:
+  id: scout-map-reveal-percent-target
+  title: 'Scout Coverage — Reveal X% of the Map in Budget'
+  capability: perception
+  real_world_meaning: >
+    Broad-area reconnaissance with a coverage objective. The task is
+    not to find one hidden landmark but to DOMINATE the map's
+    visibility — distribute a small scout force so the union of their
+    sensor footprints sweeps a target fraction of the playable area
+    within a deadline. Bunching the force onto one swath, stranding a
+    single scout with the rest idle, or stalling all fail the
+    coverage bar; only a deliberate spread covers the map in time.
+  robotics_analogue: >
+    Multi-robot lawn-mower / Voronoi-partitioned area-coverage
+    planning under a time budget — pick disjoint regions for each
+    scout so the union sweeps the workspace before the clock.
+  benchmark_anchor:
+    - "SC2 map-control / vision objectives"
+    - "ERQA coverage"
+    - "military area dominance / coverage objective"
+    - "drone search coverage planning"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  # Pure-scout toolset: NO attack. There is no enemy in this pack —
+  # the only meaningful tools are routing the scouts and noop-observe.
+  # `stop` lets a route be cancelled if a strategy changes mid-episode.
+  tools: [move_units, observe, stop]
+  planning: true
+  termination: {max_ticks: 10000}
+  actors:
+    # Default base actors (per-level overrides supply the real roster
+    # with spawn_point groups on hard).
+    - {type: jeep, owner: agent, position: [5, 33]}
+    - {type: jeep, owner: agent, position: [5, 30]}
+    - {type: jeep, owner: agent, position: [5, 27]}
+    - {type: jeep, owner: agent, position: [5, 36]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # 4 jeeps at the SW edge; reveal ≥30% of the map by tick 453
+  # (~5 decision turns). A 4-corner fan-out hits the target inside
+  # the budget; bunching all jeeps onto one swath caps near the
+  # single-path asymptote (~28-34%) — even when it crosses 30% it
+  # does so at tick 543 (T6), past the deadline, so the after_ticks
+  # fail fires. Stalling stays at ~4% and loses on the clock.
+  easy:
+    description: >
+      4 jeep scouts at the SW edge. Reveal ≥30% of the map by tick
+      453 (~5 decision turns). Bunching the jeeps onto one
+      destination caps the coverage on a single swath and misses the
+      30% bar by tick 453 (a bunched line reaches 30% only one turn
+      later, past the deadline). Stalling stays at ≈4%. The only
+      winning play is to fan the 4 jeeps to the 4 far edges (SE / NE
+      / SW-far / NW-far) so the union of sight cones crosses 30% in
+      time. No enemies — units_lost is structurally zero.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [5, 33]}
+        - {type: jeep, owner: agent, position: [5, 30]}
+        - {type: jeep, owner: agent, position: [5, 27]}
+        - {type: jeep, owner: agent, position: [5, 36]}
+    win_condition:
+      all_of:
+        - {explored_pct_gte: 30}
+        - {within_ticks: 453}
+        - {units_lost_lte: 0}
+    fail_condition:
+      any_of:
+        - {after_ticks: 454}
+        - {not: {own_units_gte: 1}}
+    max_turns: 8
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: TIGHTER coverage bar at the same
+  # 4-jeep budget. 50% requires a deliberate 4-corner fan; a bunched
+  # one-swath play caps at 50.4% but only reaches that at tick 903
+  # (T10), past the deadline (within_ticks=825). A single jeep alone
+  # caps at 38%. Stalling 4%.
+  medium:
+    description: >
+      4 jeep scouts at the SW edge. Reveal ≥50% of the map by tick
+      825 (~9 decision turns). A bunched one-swath push caps at
+      ≈50% but only reaches it at tick 903 — past the deadline.
+      Stranding a single jeep while the others idle caps at ≈38%.
+      Only a 4-way fan-out (to the SE / NE / SW-far / NW-far edges)
+      revealing ≈56% by tick 813 clears the bar in time. No enemies.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [5, 33]}
+        - {type: jeep, owner: agent, position: [5, 30]}
+        - {type: jeep, owner: agent, position: [5, 27]}
+        - {type: jeep, owner: agent, position: [5, 36]}
+    win_condition:
+      all_of:
+        - {explored_pct_gte: 50}
+        - {within_ticks: 825}
+        - {units_lost_lte: 0}
+    fail_condition:
+      any_of:
+        - {after_ticks: 826}
+        - {not: {own_units_gte: 1}}
+    max_turns: 12
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 more controlled variable: 2 SEED-DRIVEN SPAWN GROUPS and the
+  # bar lifted to 70%. Each spawn group is a 5-jeep column at one
+  # west edge (SW y=20..36 vs NW y=4..20); a memorised "where to
+  # send each jeep" plan from one corner cannot generalise to the
+  # other. Bunching caps at ≈68.6% — strictly UNDER 70% across the
+  # entire budget. A single jeep alone caps at ≈40%. Only a real
+  # 5-way fan with second-stage redirects (4 corners + a centre
+  # diagonal, then redirect to the opposite quadrant) clears 70%.
+  hard:
+    description: >
+      5 jeep scouts at the SW edge (spawn_point 0) OR the NW edge
+      (spawn_point 1), round-robined by seed. Reveal ≥70% of the map
+      by tick 1350 (~14 decision turns). A bunched one-swath push
+      asymptotes at ≈69% — never crosses 70%. A single jeep caps at
+      ≈40%. Only a 5-way fan with second-stage redirects (4 corners
+      plus a centre diagonal, then redirect each jeep to the
+      opposite quadrant once its first edge is reached) reveals 70%
+      in time. No enemies. The seed-varied spawn corner means the
+      "which jeep to which corner" assignment flips per seed — a
+      memorised plan from one start cannot generalise.
+    overrides:
+      actors:
+        # spawn_point 0 — SW column (y=20..36).
+        - {type: jeep, owner: agent, position: [5, 33], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 30], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 27], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 36], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 20], spawn_point: 0}
+        # spawn_point 1 — NW column (y=4..20).
+        - {type: jeep, owner: agent, position: [5,  4], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5,  7], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5, 10], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5, 13], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5, 16], spawn_point: 1}
+    win_condition:
+      all_of:
+        - {explored_pct_gte: 70}
+        - {within_ticks: 1350}
+        - {units_lost_lte: 0}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1351}
+        - {not: {own_units_gte: 1}}
+    max_turns: 15
