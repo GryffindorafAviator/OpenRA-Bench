@@ -397,6 +397,14 @@ UPGRADED = [
     # is symmetric across y=20 so both spawns face the same pincer
     # decision.
     "combat-pincer-coordination",
+    # Wave-6 Group D combat-micro pack: SC2 flank micro / military
+    # flank-maneuver doctrine / force-multiplier-through-angle-of-
+    # attack anchor. Hard tier defines two agent spawn_point groups
+    # (NORTH staging y=14..17 / SOUTH staging y=23..26) round-robined
+    # by seed; the two-column e3 wall at x=60..62 is symmetric across
+    # y=20 so either spawn faces the same flank-vs-frontal decision
+    # from a flipped bearing, and no memorised opening generalises.
+    "combat-flanking-attack",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

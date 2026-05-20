@@ -1,0 +1,305 @@
+# combat-flanking-attack — Flank a frontal enemy line instead of head-on.
+#
+# Wave-6 Group D combat-micro seed (capability: action).
+#
+# Real-world / benchmark anchors:
+#   - SC2 flanking unit micro (army splits to attack from multiple
+#     bearings so the defender's army can't focus-fire on one front).
+#   - Military flank-maneuver doctrine (refuse the frontal trade; hit
+#     the enemy's vulnerable side where fewer of his weapons can bear
+#     simultaneously on the lead unit).
+#   - "Force-multiplier through angle of attack" — same forces, same
+#     enemy, but the bearing of contact controls how many enemy
+#     barrels can fire on the lead tank at once.
+#
+# Mechanism (engine-load-bearing physics, verified by smoke):
+#   - The enemy is a TWO-COLUMN wall of anti-tank rocket soldiers
+#     (e3, Dragon launcher, ~range 5): front rank at x=60 (5 on
+#     medium spanning y=18..22, 6 on hard spanning y=17..22), back
+#     rank at x=62 (2 on medium, 4 on hard) — total 7 (medium) / 10
+#     (hard) rocket soldiers facing west. All defenders are stance:2
+#     (Defend = auto-fire in range, no lunge for INFANTRY), so the
+#     entire wall fires on any tank in range — not just the tank
+#     that opened fire. (Vehicles like 3tnk DO lunge under stance:2;
+#     this is why the defender line is INFANTRY-ONLY — chasers
+#     would collapse the flank vs frontal geometry.)
+#   - Frontal (head-on) push from the west: a tank on the engagement
+#     axis at x≈55..62, y∈[18..22] sits inside Dragon range (Manhattan
+#     ≤5) of EVERY e3 in the front AND back ranks simultaneously; the
+#     column leader takes ~7-10 rockets/turn focused fire and is
+#     destroyed. Tank losses ≥1 → busts the zero-loss survival bar.
+#   - Flank from the north or south: tanks approach from off-axis
+#     (e.g. y=8). The NEAREST e3 (y=18) is in Dragon range first; the
+#     FAR e3 (y=22) is Manhattan-9 away — out of range. Tanks pick
+#     off the near e3 one at a time; only one or two defenders fire
+#     on the leading flanker at any moment. Survival bar holds.
+#
+# Discrimination bar (four script-policy proxies in the test file):
+#   • stall (only observe)             → LOSS. Enemy doesn't approach
+#     (defenders are stance:2, posted in the line); kill bar never
+#     met → after_ticks LOSS.
+#   • brute attack_move east (y=20)    → LOSS. Column marches down
+#     the engagement axis; lead tank sits inside Dragon range of the
+#     whole stack and dies in concentrated rocket fire → busts the
+#     own_units_gte:4 bar (zero loss allowed).
+#   • frontal-charge (move_units east on y=20 + attack_unit nearest e3)
+#                                       → LOSS. Same head-on geometry;
+#     all e3 fire on the lead tank from x≈55..62 before the column
+#     can clear the line.
+#   • intended flank-from-north (move to ~(60, 8) then south, attack
+#     the nearest e3 from outside the far e3's range)
+#                                       → WIN. Engagement is sequenced
+#     1-vs-1 instead of 1-vs-N; all 4 tanks survive, ≥5 e3 killed.
+#
+# Engine guardrails (per CLAUDE.md / SCENARIO_REVIEW_CHECKLIST.md):
+#   - Map: rush-hour-arena (128 × 40, playable x in [2..126],
+#     y in [2..38]). Strike force stages at x=6; enemy line at x=60.
+#   - Persistent far-east enemy `fact` keeps the episode alive past
+#     the moment the line is wiped, so the win/fail evaluator sees
+#     the terminal frame (no DRAW collapse on enemy-unit wipe).
+#   - All deadlines (after_ticks 4501) are reachable within the
+#     declared max_turns ⇒ no draw degeneracy (~90 ticks/turn ⇒
+#     tick ≤ 93 + 90·(max_turns − 1)).
+#   - Defender stance:2 (Defend = auto-fire in range, no chase) is
+#     critical: stance:1 ReturnFire only fires on the unit that
+#     SHOT this defender (so frontal-charge engaging one e3 only
+#     receives fire from that single e3 — and trivially wins);
+#     stance:2 makes every e3 in range fire on every attacker, which
+#     is the "facing west" frontal concentration the doctrine names.
+#     Stance:3 would chase the flanker with the whole line and
+#     collapse the discrimination.
+#   - The fact marker at (120,20) is unarmed and not the objective:
+#     it just absorbs the engine auto-done preempt.
+#   - Per CLAUDE.md, (60,20) is a known "silent-fail" placement cell
+#     for some unit types, so the line uses (60, 18..22) (verified by
+#     smoke). The e1 shield is at (58, 18..22) — also verified.
+
+meta:
+  id: combat-flanking-attack
+  title: 'Combat Micro — Flank a Frontal Anti-Tank Line Instead of Charging Head-On'
+  capability: action
+  real_world_meaning: >
+    Four medium tanks (2tnk) at the west edge face a tight vertical
+    line of anti-tank rocket soldiers (e3) at x=60, fronted by a
+    shield of rifle infantry (e1). The line "faces west" — every
+    defender's weapon envelope covers a tank approaching head-on
+    along the engagement axis (y=20). Charging head-on puts the
+    lead tank inside Dragon range of EVERY rocket soldier in the
+    stack simultaneously and inside small-arms range of the entire
+    shield; concentrated fire destroys the lead before the column
+    clears the line, busting the survival bar. The winning play is
+    the flank: move the strike force off-axis (north or south of
+    the line, well beyond y=22 or y=18), then approach the line
+    END-ON so only one or two defenders are in range at any moment.
+    Same enemy, same forces, but the angle of attack controls how
+    many enemy barrels can bear on the leading tank.
+  robotics_analogue: >
+    Multi-agent strike-package geometry: the bearing of contact
+    against a static defender controls how much of the defender's
+    firepower can engage simultaneously. The decision under test is
+    spatial routing — refuse the high-attrition frontal trade and
+    approach via an axis that sequences the engagement 1-vs-1
+    rather than 1-vs-N.
+  benchmark_anchor:
+    - "SC2 flank micro"
+    - "military flank maneuver doctrine"
+    - "tactical: avoid frontal trade"
+    - "force-multiplier through angle of attack"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant a tank is lost or an enemy is spotted — flank
+  # micro is reactive; without these the model only re-targets on the
+  # next turn boundary and the geometry decisions don't propagate.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Bare flank skill: 3 e3 line with no shield, attrition cap ≥3 of
+  # 4 tanks (lose ≤1). Frontal can squeak by here (only 3 rockets on
+  # the lead, just under one-shot range). Stall LOSES on the clock
+  # (defenders are stance:2 ReturnFire-equivalent, never advance).
+  easy:
+    description: >
+      Four medium tanks (2tnk) stage at the west edge (x=6, y=18..21).
+      A short vertical line of THREE anti-tank rocket soldiers (e3,
+      Dragon launcher, range ~5) stands at x=60, y=19..21, facing
+      west (stance:2 — auto-fire in range, no chase). Charging
+      head-on (east along y=20) puts the lead tank in range of all
+      three rocket soldiers at once. The winning play is the FLANK
+      — move the strike force off-axis (north of y=18 or south of
+      y=22) and approach the line end-on so only 1-2 rocket
+      soldiers are in range at any moment. Win when 3 enemy units
+      are killed AND at least 3 of your tanks remain, before tick
+      4500. Stalling LOSES (kill bar unmet). Brute attack_move east
+      can squeak the survival bar on easy — the bigger tests are
+      on medium and hard.
+    overrides:
+      actors:
+        # STRIKE FORCE — 4 medium tanks stacked at the west edge,
+        # stance:1 ReturnFire so they only engage when ordered.
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        # ENEMY LINE — THREE anti-tank rocket soldiers (e3) stacked
+        # in a tight vertical line at x=60, y=19..21. Stance:2
+        # Defend so they auto-fire on any in-range attacker without
+        # chasing (the line stays POSTED, preserving the
+        # frontal-vs-flank geometry).
+        - {type: e3, owner: enemy, position: [60, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+        # Persistent far-east enemy fact — prevents engine auto-done
+        # on enemy unit wipe collapsing the run to DRAW.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 51
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: the line grows to FIVE e3 stance:2
+  # auto-firing in range AND the survival bar tightens to ZERO loss
+  # (own_units_gte:4). Frontal-charge now decisively LOSES — 5 e3
+  # firing simultaneously on the lead tank score ≥1 tank kill before
+  # the column clears the line. The intended flank cycle preserves
+  # all 4 tanks because only 1-2 e3 are ever in range of the leading
+  # flanker at a time.
+  medium:
+    description: >
+      Four medium tanks (2tnk) stage at the west edge (x=6, y=18..21).
+      A tight vertical line of FIVE anti-tank rocket soldiers (e3,
+      Dragon launcher, range ~5) stands at x=60, y=18..22, facing
+      west (stance:2 — auto-fire in range, no chase). Charging
+      head-on along the engagement axis (y=20) puts the lead tank
+      inside range of ALL FIVE rocket soldiers simultaneously —
+      concentrated fire pressures the column. The winning play is
+      the FLANK — move the strike force off-axis (well NORTH of
+      y=18 or well SOUTH of y=22, e.g. y=8 or y=32) and approach
+      the line END-ON so only one or two rocket soldiers are in
+      Dragon range of the leading flanker at any moment; pick them
+      off in sequence. Win when 4 enemy units are killed AND at
+      least 3 of your tanks remain, before tick 4500. Stall and
+      brute attack_move east both LOSE.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        # FIVE-e3 vertical line at x=60, y=18..22. Stance:2 (auto-
+        # fire in range, no chase — infantry doesn't lunge). Every
+        # e3 within Dragon range (~5) of a tank fires on that tank.
+        # Frontal: lead tank at x=55..60, y=20 sits in range of
+        # every e3 simultaneously ⇒ 5 rockets/turn focused on lead.
+        # Flank from y=8 or y=32 keeps all but the edge e3 out of
+        # range; only 1-2 e3 fire on the leading flanker at a time.
+        - {type: e3, owner: enemy, position: [60, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 22], stance: 2}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 51
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. Denser defender line — SIX e3 (y=17..22) PLUS TWO heavy
+  #      tank (3tnk) meatshields at the front (x=58, y=18 and y=22)
+  #      so a head-on charge meets concentrated rocket fire AND
+  #      heavy-cannon close-range fire.
+  #   2. TWO agent spawn_point groups (NORTH staging y=14..17 OR
+  #      SOUTH staging y=23..26) round-robined by seed so the flank
+  #      vector flips per seed — a memorised "always flank from the
+  #      north" opening cannot generalise. The enemy line is
+  #      symmetric across the map's mid-latitude (y=20) so either
+  #      spawn faces an equivalent flank decision.
+  hard:
+    description: >
+      Four medium tanks (2tnk) stage at ONE of two west-edge
+      corridors (NORTH y=14..17 OR SOUTH y=23..26, chosen by seed,
+      anti-memorisation). A two-column wall of anti-tank rocket
+      soldiers (e3, Dragon launcher, range ~5) — SIX in the front
+      rank at x=60 (y=17..22) and FOUR in a back rank at x=62 —
+      stands facing west (stance:2 — auto-fire in range, no
+      chase). Charging east along any engagement axis between y=14
+      and y=26 puts the lead tank inside Dragon range of MOST of
+      the 10-e3 wall ⇒ concentrated rocket fire destroys ≥1 tank
+      before the column clears the line. The winning play is the
+      FLANK — approach from WELL off-axis (y=8 from the north
+      spawn or y=32 from the south spawn) and engage the line
+      END-ON so only one or two rocket soldiers are in range of
+      the leading flanker at any moment. Win when 4 enemy units
+      are killed AND ALL FOUR of your tanks remain, before tick
+      4500. Stall, brute attack_move east, and any frontal head-on
+      charge all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging corridor (y=14..17). Closer
+        # to the e3 line latitude so a frontal march MUST engage the
+        # line (an off-axis y=14 lane is still within Dragon range
+        # of the e3 column).
+        - {type: 2tnk, owner: agent, position: [6, 14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 15], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 16], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 17], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging corridor (y=23..26)
+        - {type: 2tnk, owner: agent, position: [6, 23], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 24], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 25], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, spawn_point: 1}
+        # SIX-e3 front rank at x=60 (y=17..22, symmetric across
+        # y=20) + FOUR-e3 back rank at x=62, y=18..21. All stance:2
+        # ⇒ every e3 in Dragon range of a tank fires on that tank.
+        # Frontal from either spawn enters the kill envelope of
+        # the entire 10-e3 wall (Manhattan ≤5 to all e3 from a tank
+        # on the engagement axis at x=55..62). Flank from y=8 or
+        # y=32 keeps all but the edge e3 out of range — sequenced
+        # 1-vs-1 engagement preserves the survival bar.
+        - {type: e3, owner: enemy, position: [60, 17], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [62, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [62, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [62, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [62, 22], stance: 2}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 5}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 51
