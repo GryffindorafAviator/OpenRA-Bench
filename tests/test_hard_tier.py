@@ -109,6 +109,13 @@ UPGRADED = [
     # (two 3tnk defenders + four harvs around proc 80,20) varies
     # per seed.
     "combat-harass-aggro-commit",
+    # Group F econ reasoning (Wave-4): Weber multi-source / SC2
+    # mineral-patch allocation. Hard defines two agent spawn_point
+    # groups (NORTH base y=14 / SOUTH base y=28) round-robined by
+    # seed; the four neutral mines stay fixed but the NEAREST patch
+    # flips per seed ((16,14) for NORTH, (16,28) for SOUTH), so a
+    # memorised "always send to (16,14)" cannot generalise.
+    "econ-multi-patch-allocation",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
