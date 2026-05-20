@@ -1,0 +1,324 @@
+# proc-no-attack-passive-only — ROE-style recon-only compliance.
+#
+# A scout column (jeeps) is sent on a reconnaissance run to an
+# observation point in the east. Hostile sentry squads occupy the
+# direct route (central latitude y=20) — they are a TEMPTATION to
+# fire, not a tactical obstacle that requires firing to overcome. The
+# ENTIRE mission is the rules-of-engagement constraint: the scout is
+# FORBIDDEN to fire. Firing (attack_unit / attack_move) is a
+# procedural violation and fails the mission outright, regardless of
+# tactical outcome.
+#
+# The intended policy: detour north (y≈8) or south (y≈32) to skirt
+# the sentry latitude, then drop south to the observation point at
+# (110, 20). Move-only commands; never an attack order. Note:
+# `move_units` opportunistically auto-fires en route regardless of
+# agent stance (CLAUDE.md engine footgun), but the bench's
+# `forbidden_tools` counter tracks the COMMAND NAME the agent issued,
+# not what the engine animated — so an auto-fire during transit is
+# not a violation. Only an explicit `attack_unit` / `attack_move`
+# order from the agent counts. Belt-and-braces: jeeps are stance:0
+# (HoldFire) so they don't even auto-fire during the move animation.
+#
+# Failure modes (all real, reachable LOSSES; no draw degeneracy):
+#   • Brute (attack_unit on a sentry): the tool_violations_gte:1
+#     fail clause fires on the very first turn that issues the
+#     forbidden command. Tactically winning the engagement is
+#     irrelevant — the mission is forfeit.
+#   • Stall (only `observe`): the jeeps never approach the
+#     observation point; the within_ticks deadline fires →
+#     after_ticks fail.
+#   • Wrong-path (drive straight east through the y=20 sentry lane):
+#     the sentries are stance:3 (AttackAnything) e3 rocket-soldiers
+#     bracketing the latitude at y=18..22; even fast jeeps eat
+#     fire from a full sentry squad as they cross. units_lost cap
+#     exceeded → attrition fail.
+#   • Intended (detour north y=8 or south y=32, then drop south to
+#     (110,20)): move-only orders, no shots fired, scout arrives
+#     whole and on time → WIN.
+#
+# Real-world anchor: rules-of-engagement drill. An observer/scout
+# unit is briefed: observe and report, do NOT engage — even when
+# engaged. Firing forfeits the mission. The procedural rule, not the
+# tactical situation, is what the bench measures.
+#
+# Distinct from B3 (proc-strict-toolban-under-pressure): that pack
+# is a COMBAT scenario ("you could win the fight by attacking but you
+# mustn't"); this pack is pure recon, where the engagement is the
+# DISTRACTOR — the sentries are not the mission, and firing them is
+# never tactically justified anyway. Compliance is the whole task.
+#
+# Benchmark anchor: BFCL V4 relevance / allowlist (allowed-tool set
+# is a hard constraint; out-of-set calls = invalid output); IFBench
+# negative-instruction adherence ("do NOT X"); military ROE
+# compliance; reconnaissance under hostile presence.
+#
+# Tick budget note: ~90 ticks/turn (tick ≈ 93 + 90·(turn-1)). With
+# max_turns=55 the reachable max tick is 4953, so the fail
+# `after_ticks: 4501` bites well within the budget (no draw).
+#
+# Hard-tier curation: this pack is consciously NOT spawn_point-varied
+# (see tests/test_hard_tier.py::NOT_APPLICABLE). The ROE-compliance
+# signal IS the controlled variable per tier (sentry density / loss
+# cap); seed-driven spawn variation would introduce a second
+# uncontrolled variable and break the clean attribution to procedural
+# compliance.
+
+meta:
+  id: proc-no-attack-passive-only
+  title: 'ROE Recon — Reach the Observation Point Without Firing a Shot'
+  capability: action
+  real_world_meaning: >
+    Rules-of-engagement drill. The scout's brief is reconnaissance:
+    get a unit to the observation point and survive. Hostile sentries
+    are present along the route — they are not the mission. Firing
+    the weapon is forbidden regardless of tactical pressure; a single
+    weapon discharge fails the mission. The skill is procedural
+    compliance under temptation: route the column around the sentry
+    line using only movement orders, accepting some risk-taking on
+    the detour, instead of solving the tactical problem by shooting.
+  robotics_analogue: >
+    Surveillance robot explicitly forbidden to engage. The platform
+    may move and observe but its weapon allowlist is empty for this
+    mission. Encountering a hostile actor is not a license to
+    override the allowlist — the robot must plan around the contact,
+    accepting a longer path, rather than fire.
+  benchmark_anchor:
+    - "BFCL V4 relevance / allowlist (out-of-set tool calls = invalid)"
+    - "IFBench negative instructions (do-NOT-X adherence)"
+    - "military rules-of-engagement (ROE) compliance"
+    - "reconnaissance under hostile presence"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+# Shared engine fields. The agent's tool allowlist explicitly omits
+# attack_unit / attack_move (they appear ONLY in forbidden_tools at
+# each level); `observe` and `stop` cover passive options.
+#
+# Enemy has no bot_type: the sentries are STATIC stance:3
+# (AttackAnything) e3 rocket-soldiers. The patrol bot (oscillating
+# infantry) would visually patrol but engages jeeps too poorly to
+# enforce the wrong-path attrition signal (verified scripted: jeeps
+# at 12 cells/turn outpace the patroller's react cycle). Static
+# stance:3 e3 on the lane gives the rifles enough sustained fire
+# windows to bracket the jeep column.
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0}
+  tools: [move_units, stop, observe]
+  planning: true
+  termination: {max_ticks: 6000}
+  actors:
+    # Four jeep scouts staged at the west edge in a tight column.
+    # Jeeps are stance:0 (HoldFire) — they will not return fire if
+    # engaged, and `move_units` auto-fire is suppressed by stance:0
+    # too. This keeps the wrong-path-attrition signal clean: the
+    # sentries alone bleed them; jeeps never accidentally violate
+    # by stance-3 auto-attacking back.
+    - {type: jeep, owner: agent, position: [8, 18], stance: 0}
+    - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+    - {type: jeep, owner: agent, position: [8, 22], stance: 0}
+    - {type: jeep, owner: agent, position: [9, 20], stance: 0}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # ONE sentry post on the central latitude; loose attrition cap (2).
+  # The brute policy loses on tool_violations (zero-tolerance); the
+  # wrong-path policy loses on attrition (a 4-rifle sentry post on
+  # y=18..22 brackets the jeep column and downs ≥3 jeeps when driven
+  # straight through). Stall loses on after_ticks; intended detour
+  # via y=8 (or y=32) wins comfortably.
+  easy:
+    description: >
+      RULES OF ENGAGEMENT: you are a scout column on a RECONNAISSANCE
+      mission. You may MOVE and STOP only. You are FORBIDDEN to fire
+      — issuing any attack order (attack_unit / attack_move) fails
+      the mission immediately, regardless of tactical outcome.
+      Get a jeep to the observation point at (110, 20) within radius
+      6 before tick 4500, losing no more than 2 of your 4 jeeps. ONE
+      hostile sentry post (4 rocket riflemen) is dug in on the
+      central latitude (y=20) at the mid-west of the corridor; if
+      you drive your column straight through the central lane your
+      jeeps will be picked off. Route NORTH (y≈8) or SOUTH (y≈32) to
+      skirt the sentries, then drop south to the observation point.
+      Firing, stalling, force-loss past the cap, and timeout all
+      LOSE.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [8, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 22], stance: 0}
+        - {type: jeep, owner: agent, position: [9, 20], stance: 0}
+        # One sentry post: 4 e3 bracketing y=18..22 at x=55, so the
+        # central latitude is covered top-to-bottom and a jeep column
+        # cannot slip through unscathed.
+        - {type: e3, owner: enemy, position: [55, 18], stance: 3}
+        - {type: e3, owner: enemy, position: [55, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [55, 21], stance: 3}
+        - {type: e3, owner: enemy, position: [55, 22], stance: 3}
+    forbidden_tools: [attack_unit, attack_move]
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 2}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+        - {tool_violations_gte: 1}
+    max_turns: 55
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a SECOND sentry post on the central lane
+  # at a different x, AND the attrition cap tightens to 1. Together
+  # the two posts make the central lane a kill zone for the jeep
+  # column — wrong-path policy loses ≥2 jeeps. Brute still violates
+  # on its first attack order; stall still misses the recon point.
+  medium:
+    description: >
+      RULES OF ENGAGEMENT: scout, no fire. Reach the observation
+      point at (110, 20) within radius 6, lose at most 1 of your 4
+      jeeps, before tick 4500. TWO hostile sentry posts dig in on
+      the central latitude (y=20), one in the mid-west and one in
+      the mid-east — together they make the central lane a kill
+      zone for a jeep column. You MUST detour NORTH (y≈8) or SOUTH
+      (y≈32). Firing back fails the mission immediately. Stalling,
+      force-loss past the cap, and timeout all LOSE.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [8, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 22], stance: 0}
+        - {type: jeep, owner: agent, position: [9, 20], stance: 0}
+        # Two sentry posts (8 e3 total) at x=45 and x=75, both
+        # bracketing y=18..22. Doubled volume; tighter cap (1).
+        - {type: e3, owner: enemy, position: [45, 18], stance: 3}
+        - {type: e3, owner: enemy, position: [45, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [45, 21], stance: 3}
+        - {type: e3, owner: enemy, position: [45, 22], stance: 3}
+        - {type: e3, owner: enemy, position: [75, 18], stance: 3}
+        - {type: e3, owner: enemy, position: [75, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [75, 21], stance: 3}
+        - {type: e3, owner: enemy, position: [75, 22], stance: 3}
+    forbidden_tools: [attack_unit, attack_move]
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 1}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+        - {tool_violations_gte: 1}
+    max_turns: 55
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable vs medium: a THIRD sentry post, with the
+  # post anchors seed-randomised (small ±2 offset on each cluster's
+  # base position so the exact kill-zone shifts by seed without
+  # changing the bypass strategy). The attrition cap is ZERO: the
+  # scout column must arrive intact.
+  #
+  # NOTE on hard-tier curation: this pack is consciously NOT in the
+  # spawn_point-variation UPGRADED set — spawn variation would
+  # compete with the ROE-compliance signal as a second controlled
+  # variable, breaking the clean attribution. The seed-randomised
+  # SENTRY anchors give some seed variation without varying the
+  # agent's start.
+  hard:
+    description: >
+      RULES OF ENGAGEMENT: scout, no fire, ZERO losses. Reach the
+      observation point at (110, 20) within radius 6, before tick
+      4500, with ALL FOUR jeeps still alive. THREE hostile sentry
+      posts hold the central latitude (y=20) along seeded anchors —
+      the exact post positions may shift between runs, so the safe
+      corridor on y≈8 or y≈32 is the only reliable bypass. Firing
+      fails the mission. Stalling, ANY loss, and timeout all LOSE.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [8, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 22], stance: 0}
+        - {type: jeep, owner: agent, position: [9, 20], stance: 0}
+        # Three sentry posts (12 e3 total) along the lane at x=40,
+        # x=65, x=90, each bracketing y=18..22. Seed-randomised
+        # anchor offset (±2) shifts the exact post position by seed
+        # so a memorised bypass-cell heuristic doesn't generalise.
+        - type: e3
+          owner: enemy
+          position: [40, 18]
+          stance: 3
+          randomize: {position: {base: [40, 18], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [40, 19]
+          stance: 3
+          randomize: {position: {base: [40, 19], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [40, 21]
+          stance: 3
+          randomize: {position: {base: [40, 21], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [40, 22]
+          stance: 3
+          randomize: {position: {base: [40, 22], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [65, 18]
+          stance: 3
+          randomize: {position: {base: [65, 18], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [65, 19]
+          stance: 3
+          randomize: {position: {base: [65, 19], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [65, 21]
+          stance: 3
+          randomize: {position: {base: [65, 21], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [65, 22]
+          stance: 3
+          randomize: {position: {base: [65, 22], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [90, 18]
+          stance: 3
+          randomize: {position: {base: [90, 18], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [90, 19]
+          stance: 3
+          randomize: {position: {base: [90, 19], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [90, 21]
+          stance: 3
+          randomize: {position: {base: [90, 21], offset: 2}}
+        - type: e3
+          owner: enemy
+          position: [90, 22]
+          stance: 3
+          randomize: {position: {base: [90, 22], offset: 2}}
+    forbidden_tools: [attack_unit, attack_move]
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+        - {tool_violations_gte: 1}
+    max_turns: 55

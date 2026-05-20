@@ -122,6 +122,12 @@ NOT_APPLICABLE = {
     "corridor-vs-detour route-choice signal.",
     "proc-ordered-action-strict": "non-spatial ordered build task; "
     "spawn variation would compete with the order-enforcement signal",
+    "proc-no-attack-passive-only": "spawn variation would compete with "
+    "the ROE-compliance signal — the controlled variable across tiers "
+    "is the sentry density / loss cap (the ROE compliance pressure), "
+    "and adding a seed-varied agent start would dilute that "
+    "attribution. Seed-randomised sentry anchors give within-hard "
+    "variation without varying the agent's start.",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss
