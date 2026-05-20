@@ -1,0 +1,394 @@
+# mfb-mirror-base-east-west — Geographic Mirror Redundancy
+#
+# REASONING capability — distributed-systems geographic mirror /
+# raft-style replicas / multi-region cloud. The agent owns a fully
+# built WEST base (fact + proc + powr + HoldFire tank defenders) and
+# a HALF-built EAST base (just the construction yard `fact`). The
+# agent must MIRROR the west base at the east — build powr + proc
+# at the east to bring it to functional parity with the west —
+# WHILE a COORDINATED ATTACK pressures BOTH bases simultaneously
+# (defenders are HoldFire on each base so the agent must dispatch
+# them onto the right band).
+#
+# WIN (every level):
+#   building_count_gte:{fact, n:2}                  ← BOTH facts alive
+#   AND building_in_region:{x:15,  y:20, r:8, proc, count:1}  ← west proc still up
+#   AND building_in_region:{x:85,  y:20, r:8, proc, count:1}  ← east proc now built
+#   AND within_ticks: T
+#
+# FAIL (every level):
+#   after_ticks: T+1
+#   OR not building_count_gte:{fact, n:2}           ← either replica fell
+#
+# Why the predicate IS the capability (no defect):
+#   • STALL (observe-only): defenders stay HoldFire; both rush bands
+#     raze both facts → `not building_count_gte:fact:2` fires → LOSS.
+#   • DEFEND-WEST-ONLY (engage west band, never command east band /
+#     never build east proc): east band razes the east `fact` (no
+#     east defender ever dispatched) AND the east region never sees
+#     a `proc` → `not building_count_gte:fact:2` fires → LOSS.
+#   • DEFEND-EAST-ONLY: symmetric — west fact falls → LOSS.
+#   • BUILD-ONLY-NO-DEFEND: both rushes converge unopposed → both
+#     facts fall in ~6-8 turns before the east proc can come online
+#     → `not building_count_gte:fact:2` fires → LOSS.
+#   • INTENDED MIRROR-BOTH: dispatch each base's defenders onto the
+#     ON-LATITUDE attack band AND queue powr→proc at the east in
+#     parallel. Both replicas survive; the east proc lands inside
+#     its region before the deadline → WIN.
+#
+# Real-world anchor:
+#   • Distributed-systems mirror — keep N geographic replicas in
+#     functional parity; tolerate the loss of any one replica WITHOUT
+#     losing the other (no single-region failure).
+#   • Raft / Paxos consensus — quorum requires a majority of replicas
+#     alive; a partition that takes out either replica breaks the
+#     cluster (here: both facts must survive the coordinated probe).
+#   • Multi-region cloud — DR / failover requires the standby region
+#     to come online to parity WHILE the primary continues serving
+#     under load. Pausing the standby buildout to fight the primary's
+#     incident loses the SLA on the standby. Pausing primary defence
+#     to focus on standby buildout loses the primary.
+#
+# Engine footguns applied here (CLAUDE.md):
+#   • Map is the generator-spec `{generator: arena, width:160,
+#     height:60, cordon:4}` so playable cells are x∈[4,156), y∈[4,56).
+#     Every actor and region centre sits well inside.
+#   • Defenders are stance:0 (HoldFire) on BOTH bases — explicit
+#     `attack_unit`/`attack_move` is required to engage. This is what
+#     makes the "command BOTH defender groups" half of the test
+#     load-bearing: an agent that only attends to one base sees the
+#     other's defenders sit idle while that base's rush completes.
+#   • `proc` (cost 1400) requires `powr` as a tech prereq (engine
+#     gamerules). The WEST base already has powr (preplaced); the
+#     EAST base does NOT — so the agent must build powr FIRST at
+#     the east before the proc item becomes buildable. The order
+#     matters; queueing `proc` before `powr` is built means it sits
+#     in the queue blocked.
+#   • Starting cash is sized so the agent can JUST afford the east
+#     mirror parts (powr 300 + proc 1400 = 1700) with zero slack —
+#     no money for a third pbox / e1 detour.
+#   • `place_building` does NOT enforce build-adjacency (CLAUDE.md);
+#     the agent can place the east powr/proc at the east coords
+#     directly from the shared player queue.
+#   • `building_count_gte:{type:fact,n:2}` is the PRESENT-TENSE pair-
+#     alive check (NOT `has_building:fact`, which is a one-shot
+#     ever-seen set that stays true after a fact is razed — the
+#     documented CLAUDE.md footgun).
+#   • A persistent UNARMED enemy `fact` marker is parked in the far
+#     SE corner so the engine does not auto-`done` when the rush is
+#     eliminated — guarantees LOSS-not-DRAW on a deadline timeout
+#     (CLAUDE.md auto-done footgun).
+#   • Tick/turn alignment (~90 ticks/turn): every level's
+#     `after_ticks` fail is reachable inside its `max_turns`:
+#       easy   : after_ticks 4501 ≤ 93 + 90·54 = 4953 ✓ (max_turns 55)
+#       medium : after_ticks 3001 ≤ 93 + 90·36 = 3333 ✓ (max_turns 37)
+#       hard   : after_ticks 3001 ≤ 93 + 90·36 = 3333 ✓ (max_turns 37)
+#   • Hard tier: two agent `spawn_point` groups round-robin the
+#     BASE LATITUDE (NORTH layout y=12 vs SOUTH layout y=28). Per
+#     CLAUDE.md spawn-filter rule, EVERY agent actor declares an
+#     explicit spawn_point — base buildings AND defenders are
+#     duplicated across both groups at their respective coords;
+#     otherwise the filter drops every un-tagged actor. The two
+#     target regions move with the bases (NORTH band y=12 r=8 vs
+#     SOUTH band y=28 r=8). Enemy actors don't honour spawn_point
+#     (CLAUDE.md) so the rush bands are staged at the SYMMETRY
+#     axis (y=20) — the rusher bot concentrates on the active
+#     agent centroid (the on-latitude facts) regardless of seed.
+
+meta:
+  id: mfb-mirror-base-east-west
+  title: 'Mirror Base — East/West Geographic Redundancy Under Coordinated Attack'
+  capability: reasoning
+  real_world_meaning: >
+    Geographic mirror redundancy under simultaneous pressure. You hold
+    a fully built primary base in the WEST (fact + proc + powr + tank
+    defenders on HOLD-FIRE) and a HALF-built standby in the EAST
+    (just the construction yard). A coordinated probe pressures BOTH
+    bases simultaneously. You must (a) defend the WEST primary —
+    your HoldFire tanks will NOT engage on their own; only an
+    explicit attack order makes them fight, (b) defend the EAST
+    standby — same constraint with its own tank group, and (c) MIRROR
+    the standby to functional parity with the primary by building a
+    Power Plant (powr) AND a Refinery (proc) at the east. Defending
+    only one base loses the other replica; pausing the standby
+    buildout to fight loses the SLA window on the mirror; ignoring
+    defence to focus on the buildout loses both facts to the rush.
+    Only a play that streams BOTH defence operations AND the east
+    buildout from turn 1 keeps both replicas alive before the
+    deadline.
+  robotics_analogue: >
+    Distributed-systems mirror / raft replicas / multi-region cloud
+    failover under simultaneous incident pressure. Two geographic
+    replicas must remain in functional parity; an incident that takes
+    out EITHER replica breaks quorum. Standing up the standby region
+    to parity (capacity-add) WHILE both regions are under attack
+    requires parallel work streams — the on-call cannot serialize
+    (handle the primary incident, then the secondary, then provision
+    the standby capacity) without busting the cross-region SLA window.
+  benchmark_anchor:
+    - "distributed-systems mirror"
+    - "raft-style replicas"
+    - "multi-region cloud"
+  author: "openra-bench"
+
+# Pack-level base_map is the sentinel `rush-hour-arena` so the loader
+# can map-resolve before per-level overrides materialise the actual
+# generator-spec arena .oramap (same pattern as the other mfb-* packs
+# and mcv-deploy-third-base).
+base_map: rush-hour-arena
+
+# Sized to JUST cover east mirror (powr 300 + proc 1400 = 1700) with
+# zero slack — no room for distractor builds.
+starting_cash: 1700
+
+base:
+  agent: {faction: allies}
+  # `rusher` bot commits enemy units at the agent's nearest mass so
+  # the home-side raids walk straight onto whichever base the model
+  # ignores. Coordinated pressure on BOTH bases is what makes the
+  # defend-EITHER-only failure modes lose.
+  enemy: {faction: soviet, cash: 0, bot_type: rusher}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  # Engine default auto-spawns an MCV at mpspawn cells; off so the
+  # inventory is exactly what each level declares (no spare MCV that
+  # could deploy into a third fact and accidentally satisfy clauses).
+  spawn_mcvs: false
+  planning: true
+  # No interrupts — the mirror-both decision is a STATIC up-front
+  # commitment (queue east powr+proc + command BOTH defender groups
+  # every turn). The threat axis is known a priori (rusher bot
+  # always charges the agent centroid on each base). Disabling
+  # interrupts also keeps the tick budget deterministic (exactly 90
+  # ticks/step ⇒ max_turns is a hard tick budget the `after_ticks`
+  # fail clause reliably bites in).
+  interrupts: {}
+  termination: {max_ticks: 6000}  # > all per-level after_ticks
+  # Every level supplies its own actor list via overrides so the
+  # per-tier rush density + spawn variation is audit-explicit.
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare CONCURRENT-MIRROR skill: a LIGHT 2-grenadier raid on EACH
+  # base + a generous clock (within_ticks 4500). The intended play
+  # (dispatch west defenders + dispatch east defenders + queue
+  # east powr → place → queue east proc → place) wins. Stall, defend-
+  # east-only, defend-west-only all LOSE on the fact-pair clause.
+  # max_turns 55 → reachable tick 93 + 90·54 = 4953 > 4500 ✓.
+  easy:
+    description: >
+      You hold a fully built WEST base — Construction Yard `fact` at
+      (15,20), Refinery `proc` at (18,20), Power Plant `powr` at
+      (12,20), and 2 medium tanks (2tnk) on HOLD-FIRE at (16,17) and
+      (16,23). You also hold a HALF-built EAST standby — just a fact
+      at (85,20) and 2 HoldFire tanks at (84,17) and (84,23). A
+      coordinated 2-grenadier probe hits EACH base (one band on the
+      west, one band on the east). MIRROR the east standby to
+      functional parity: build a Power Plant (`powr`, 300cr) AND a
+      Refinery (`proc`, 1400cr) within the east region (centred at
+      (85,20), radius 8). Starting cash 1700 is EXACTLY enough.
+      Your tanks will NOT engage on their own — you MUST issue
+      attack orders on EACH side. WIN when you still own BOTH facts,
+      a `proc` sits in the WEST region (15,20,r8), and a `proc` sits
+      in the EAST region (85,20,r8), before tick 4500. Stalling
+      lets both rushes raze both facts; defending only ONE base
+      loses the other replica; ignoring defence to build the mirror
+      loses both facts to the rush.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-mirror-base-east-west-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # WEST primary base (fully built): fact + proc + powr + 2
+        # HoldFire defenders.
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: proc, owner: agent, position: [18, 20]}
+        - {type: powr, owner: agent, position: [12, 20]}
+        - {type: 2tnk, owner: agent, position: [16, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 23], stance: 0}
+        # EAST standby base (HALF built — just the fact + defenders).
+        # No powr/proc — that's what the agent must build to mirror.
+        - {type: fact, owner: agent, position: [85, 20]}
+        - {type: 2tnk, owner: agent, position: [84, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [84, 23], stance: 0}
+        # COORDINATED ATTACK: 2 grenadier raiders on the WEST band,
+        # 2 grenadier raiders on the EAST band. The `rusher` bot
+        # commits the raiders at the agent's nearest mass — west
+        # band walks into the west fact, east band walks into the
+        # east fact. stance:3 = AttackAnything.
+        - {type: e3, owner: enemy, position: [28, 20], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [72, 20], stance: 3, count: 2}
+        # Persistent unarmed enemy `fact` marker at the far SE,
+        # outside every win region. Keeps the engine from auto-done
+        # on all-enemies-eliminated, so a non-winner emits a real
+        # reachable LOSS on the deadline.
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - building_in_region: {x: 15, y: 20, radius: 8, type: proc, count: 1}
+        - building_in_region: {x: 85, y: 20, radius: 8, type: proc, count: 1}
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 55
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVIER coordinated attack (3× e1 + 1× e3
+  # per side, so 8 hostiles in two bands) AND a tighter clock
+  # (within_ticks 3000). The intended mirror-both still wins but
+  # with NO slack for indirection. Defend-only-one-side loses
+  # faster (the unattended fact razes in <5 turns under the heavier
+  # band); pause-defence-to-build loses both facts.
+  # max_turns 37 → reachable tick 93 + 90·36 = 3333 > 3000 ✓.
+  medium:
+    description: >
+      Same WEST primary (fact + proc + powr + 2 HoldFire tanks) and
+      EAST standby (fact + 2 HoldFire tanks) at (15,20) / (85,20),
+      but the coordinated probe is HEAVIER: 3 rifle infantry + 1
+      rocket soldier on EACH side. Starting cash 1700 — exactly
+      enough for the east mirror (powr 300 + proc 1400). Build a
+      `powr` and a `proc` within radius 8 of the EAST fact (85,20)
+      while commanding BOTH tank groups onto their on-side band.
+      WIN when both facts still stand, a `proc` sits in each region
+      (WEST 15,20,r8 + EAST 85,20,r8), before tick 3000. Stall,
+      defend-west-only, defend-east-only, build-only-no-defend all
+      LOSE.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-mirror-base-east-west-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: proc, owner: agent, position: [18, 20]}
+        - {type: powr, owner: agent, position: [12, 20]}
+        - {type: 2tnk, owner: agent, position: [16, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 23], stance: 0}
+        - {type: fact, owner: agent, position: [85, 20]}
+        - {type: 2tnk, owner: agent, position: [84, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [84, 23], stance: 0}
+        # Heavier coordinated attack — 3× e1 + 1× e3 each side.
+        - {type: e1, owner: enemy, position: [28, 20], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [30, 20], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [72, 20], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [70, 20], stance: 3, count: 1}
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - building_in_region: {x: 15, y: 20, radius: 8, type: proc, count: 1}
+        - building_in_region: {x: 85, y: 20, radius: 8, type: proc, count: 1}
+        - within_ticks: 3000
+    fail_condition:
+      any_of:
+        - after_ticks: 3001
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 37
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: TWO seed-driven agent spawn_point groups
+  # round-robin the BASE LATITUDE — NORTH layout (y=12) vs SOUTH
+  # layout (y=28). Both west AND east bases flip together, so the
+  # two target regions also flip together. The win clause is an
+  # `any_of` over the two latitudes so EITHER set of regions
+  # counts — but the agent must place each east proc within radius
+  # 8 of WHICHEVER latitude its facts actually spawned at (a
+  # memorised "always (85,20)" placement misses by ≥8 cells on
+  # both seed groups). The same heavy coordinated attack and same
+  # tight clock as medium — concurrency is still the discriminator.
+  #
+  # CLAUDE.md spawn-filter rule: once any agent actor declares
+  # spawn_point, every agent actor WITHOUT spawn_point is filtered
+  # OUT — so every base building AND tank defender is duplicated
+  # across BOTH spawn groups at the appropriate latitude.
+  # Enemy actors don't honour spawn_point (enemy actors place
+  # regardless), so the rush bands sit at the SYMMETRY axis y=20;
+  # the rusher bot concentrates on the active agent centroid, so
+  # whichever latitude the agent spawned at, the bands converge
+  # on those facts.
+  # max_turns 37 → reachable tick 93 + 90·36 = 3333 > 3000 ✓.
+  hard:
+    description: >
+      Same mirror-base + coordinated attack pattern under a tight
+      clock, but the BASE LATITUDE varies per seed. Both your WEST
+      primary AND your EAST standby spawn at EITHER the NORTH band
+      (y=12) OR the SOUTH band (y=28); the two candidate target
+      regions move with them. Read your starting fact positions and
+      place each east mirror part within radius 8 of the matching
+      latitude. WIN when both facts still stand, a `proc` sits in
+      the WEST region AND a `proc` sits in the EAST region (BOTH at
+      WHICHEVER latitude your bases spawned at), before tick 3000.
+      Stall, defend-only-one-base, and build-only-no-defend all LOSE.
+    objective_coords: relative
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-mirror-base-east-west-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # spawn_point 0 — NORTH layout (bases at y=12). Per the
+        # CLAUDE.md spawn-filter rule, every agent actor is tagged
+        # for its group; otherwise the un-tagged actors would be
+        # filtered out and the agent would start bare.
+        - {type: fact, owner: agent, position: [15, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [18, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [16, 10], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [16, 14], stance: 0, spawn_point: 0}
+        - {type: fact, owner: agent, position: [85, 12], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [84, 10], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [84, 14], stance: 0, spawn_point: 0}
+        # spawn_point 1 — SOUTH layout (bases at y=28).
+        - {type: fact, owner: agent, position: [15, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [18, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [16, 26], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [16, 30], stance: 0, spawn_point: 1}
+        - {type: fact, owner: agent, position: [85, 28], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [84, 26], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [84, 30], stance: 0, spawn_point: 1}
+        # Enemy bands at SYMMETRY axis y=20. rusher bot concentrates
+        # on the active agent centroid — bands turn toward whichever
+        # latitude the agent spawned at. Same heavy composition as
+        # medium (3× e1 + 1× e3 per side).
+        - {type: e1, owner: enemy, position: [28, 20], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [30, 20], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [72, 20], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [70, 20], stance: 3, count: 1}
+        # Persistent unarmed enemy marker (anti auto-done).
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - any_of:
+            # NORTH match: both procs at y=12 band.
+            - all_of:
+                - building_in_region: {x: 15, y: 12, radius: 8, type: proc, count: 1}
+                - building_in_region: {x: 85, y: 12, radius: 8, type: proc, count: 1}
+            # SOUTH match: both procs at y=28 band.
+            - all_of:
+                - building_in_region: {x: 15, y: 28, radius: 8, type: proc, count: 1}
+                - building_in_region: {x: 85, y: 28, radius: 8, type: proc, count: 1}
+        - within_ticks: 3000
+    fail_condition:
+      any_of:
+        - after_ticks: 3001
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 37

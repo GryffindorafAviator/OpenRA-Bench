@@ -201,6 +201,23 @@ UPGRADED = [
     # start MARKER so units_summary reveals which spawn fired (no
     # role in the win predicate, which is buildings-only).
     "mfb-two-base-simultaneous",
+    # Wave-9 Group B reasoning pack — geographic mirror redundancy
+    # under coordinated attack (distributed-systems mirror / raft-
+    # style replicas / multi-region cloud anchor). The agent owns
+    # a fully built WEST primary (fact + proc + powr + HoldFire 2tnks)
+    # and a HALF-built EAST standby (just a fact + HoldFire 2tnks); a
+    # coordinated rusher-bot probe pressures BOTH bases. Agent must
+    # MIRROR the east (build powr + proc) while keeping BOTH facts
+    # alive (the win predicate requires building_count_gte:fact:2 AND
+    # a proc in EACH region). Hard tier defines two agent spawn_point
+    # groups (NORTH base latitude y=12 / SOUTH base latitude y=28)
+    # round-robined by seed; both candidate target regions move with
+    # the bases (NORTH (15,12)+(85,12) vs SOUTH (15,28)+(85,28)), so
+    # a memorised "always (85,20)" placement misses on both seed
+    # groups. Enemy bands sit on the symmetry axis y=20 (enemies
+    # don't honour spawn_point — CLAUDE.md) and the rusher bot
+    # concentrates on the active agent centroid regardless.
+    "mfb-mirror-base-east-west",
     # Wave-4 TURTLE node of the tech triple (SC2 turtle macro /
     # military fortify-before-research doctrine anchor). Hard defines
     # two agent spawn_point groups (NORTH base / SOUTH base) so the
