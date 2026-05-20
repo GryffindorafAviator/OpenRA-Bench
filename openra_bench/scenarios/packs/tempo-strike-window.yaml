@@ -1,0 +1,144 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/tempo-strike-window.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# TEMPO focus, FORCED-LULL strike window. The agent must NOT engage
+# before tick t0 (a "lull" / staging window) and then deliver the
+# kill quota within a tight follow-up band before tick t1. Engaging
+# early uses up the units against unfavourable spacing; waiting
+# until t0 then committing is the dominant strategy.
+#
+# This is the cat-c11 canonical tempo design (after_ticks + kill bar
+# + within_ticks), the one the audit said the suite still needs.
+# Same axis across easy/medium/hard — only the lull length and the
+# follow-up window tighten.
+#
+# Honestly NOT a true double-window (P2-3 happened-before predicate
+# would be required to express "kill N1 in band 1 AND kill N2 in
+# band 2 with a forced gap"). What this CAN express with current
+# predicates: a single strike window after a forced wait, with
+# attrition pressure.
+
+meta:
+  id: tempo-strike-window
+  title: 'Strike Window — Wait for the Lull, Then Hit the Quota'
+  capability: reasoning
+  real_world_meaning: >
+    Timing discipline in a single strike window: do not engage
+    before the lull elapses, then deliver a kill quota inside the
+    follow-up band while staying under the attrition cap. Premature
+    engagement squanders the force; late engagement misses the
+    deadline.
+  robotics_analogue: >
+    Pulsed-mission timing: a UAV/team must hold station through a
+    no-action interval (e.g. avoiding detection / waiting for a
+    handoff window) before committing to its sortie, then complete
+    the engagement inside a hard window.
+  benchmark_anchor:
+    - "TextStarCraft II tempo / timed strike"
+    - "OSWorld scheduled-task chains"
+    - "PlanBench temporally-extended goals with hold-then-act"
+    - "pulsed-mission timing (UAV / fire-mission window)"
+  author: yiyu-tian
+  # Companion to `tempo-double-window` (Wave 1 A6). A6 is double-band
+  # (strike → lull-with-tsla → second strike). This pack is single-
+  # band with a forced pre-lull (no kills allowed before the gate)
+  # and a tight follow-up window — the cat-c11 canonical tempo design.
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    bot_type: ''
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 12000}
+  actors:
+    - {type: 2tnk, owner: agent, position: [6, 18], stance: 3, count: 3}
+    - {type: 1tnk, owner: agent, position: [6, 22], stance: 3, count: 3}
+    - {type: jeep, owner: agent, position: [6, 14], stance: 3, count: 2}
+    # Enemy cluster positioned so the dominant strike is one
+    # coordinated push after the lull.
+    - {type: e1, owner: enemy, position: [40, 20], stance: 3, count: 4}
+    - {type: e3, owner: enemy, position: [42, 20], stance: 3, count: 2}
+
+levels:
+  # Tick budgets aligned to 93 + 90·(max_turns - 1) so the timeout
+  # fail fires within the run loop (eval_core.run_level iterates
+  # max_turns, not termination.max_ticks).
+  easy:
+    description: >
+      Hold station, then strike. Do not have >=2 kills before tick
+      2000 (early-engagement fail). After tick 2000, deliver >=4
+      kills before tick 4200, losing <=3. The lull is long enough
+      that pre-positioning is rewarded; the follow-up band is loose.
+    win_condition:
+      all_of:
+        - after_ticks: 2000
+        - units_killed_gte: 4
+        - within_ticks: 4200
+        - units_lost_lte: 3
+    fail_condition:
+      any_of:
+        - after_ticks: 4201
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 3}
+        # premature engagement: more than 1 kill before tick 2000
+        # is taken as "did not wait for the lull"
+        - all_of:
+            - units_killed_gte: 2
+            - within_ticks: 1999
+    max_turns: 48   # ceiling 93 + 90·47 = 4323 > 4201 ✓
+
+  medium:
+    description: >
+      Tighter pacing: no kills before tick 1800, then >=5 kills
+      before tick 3600, losing <=2. The lull is shorter and the
+      follow-up window narrower — pre-positioning during the lull
+      is required, not optional.
+    win_condition:
+      all_of:
+        - after_ticks: 1800
+        - units_killed_gte: 5
+        - within_ticks: 3600
+        - units_lost_lte: 2
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 2}
+        - all_of:
+            - units_killed_gte: 1
+            - within_ticks: 1799
+    max_turns: 52
+
+  hard:
+    description: >
+      Aggressive lull-then-burst: no engagement at all before tick
+      1500 (any kill = premature-fail), then >=6 kills before tick
+      3000, losing <=1. The post-lull band is only 1500 ticks wide;
+      only an agent that has used the lull to assemble its force
+      at a launch point can hit the kill bar inside the window.
+    win_condition:
+      all_of:
+        - after_ticks: 1500
+        - units_killed_gte: 6
+        - within_ticks: 3000
+        - units_lost_lte: 1
+    fail_condition:
+      any_of:
+        - after_ticks: 3001
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 1}
+        - all_of:
+            - units_killed_gte: 1
+            - within_ticks: 1499
+    max_turns: 56

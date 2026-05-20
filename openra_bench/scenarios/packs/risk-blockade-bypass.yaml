@@ -1,0 +1,151 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/risk-blockade-bypass.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# REASONING / RISK focus. The objective region is reachable via two
+# axes: (a) the SHORT central corridor, blocked by a heavy enemy
+# garrison that out-trades the agent's force; (b) a LONGER but
+# lightly-defended detour. With a units_lost_lte cap and a clock
+# that is tight but not too tight, the dominant strategy is the
+# detour. Brute-forcing the corridor reduces the force below the
+# attrition cap before reaching the objective.
+#
+# Difficulty escalates the cost of the wrong call: easy allows a
+# slim head-on (loss <=4); medium tightens the cap; hard introduces
+# a smaller forward force AND a tempo gate (the objective only
+# scores after tick t0, so committing too early through the corridor
+# and arriving wounded fails the after_ticks-then-attrition combo).
+
+meta:
+  id: risk-blockade-bypass
+  title: 'Blockade Bypass — Reach the Objective by the Survivable Detour'
+  capability: reasoning
+  real_world_meaning: >
+    Route-risk assessment with a visibly hard direct path and a
+    longer survivable alternative under a binding attrition cap.
+    The cap punishes brute force; the clock punishes infinite
+    detour. The decision is committing the force to the route that
+    actually makes the deadline alive.
+  robotics_analogue: >
+    Field-robot mission routing rejecting a hazardous shortest path
+    for a survivable longer one within a time window — but the
+    longer path is not free, so the model must weigh attrition vs
+    deadline rather than always preferring the safe option.
+  benchmark_anchor:
+    - "MicroRTS route-risk / hazardous-corridor sub-tasks"
+    - "PlanBench cost-vs-survival route planning"
+    - "field-robotics: contested vs detour route under SLA"
+    - "convoy routing with attrition budget"
+  author: yiyu-tian
+  # Distinct from `reasoning-risk-route` (single-path hazard vs
+  # detour). This pack adds the explicit corridor-vs-detour
+  # bifurcation with an attrition cap binding tight enough that
+  # head-on brute-force fails the cap before reaching the goal.
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    bot_type: ''
+  interrupts:
+    enemy_unit_spotted: true
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 14000}
+  actors:
+    # Agent force, mid-west.
+    - {type: 2tnk, owner: agent, position: [8, 20],  stance: 3, count: 3}
+    - {type: 1tnk, owner: agent, position: [8, 22],  stance: 3, count: 3}
+    - {type: jeep, owner: agent, position: [6, 18],  stance: 3, count: 2}
+    # Heavy CORRIDOR garrison (the wrong way): trades well, expensive
+    # to clear. Combination of e3 (rockets) + defensive gun.
+    - {type: e3,  owner: enemy, position: [55, 20], stance: 2, count: 4}
+    - {type: gun, owner: enemy, position: [57, 22], stance: 3, count: 1}
+    - {type: e1,  owner: enemy, position: [55, 22], stance: 2, count: 3}
+    # Light DETOUR garrison (the right way, top-N): one infantry
+    # picket; clears at low cost.
+    - {type: e1,  owner: enemy, position: [55, 5],  stance: 2, count: 2}
+    # Objective region marker: a static enemy building in the east.
+    - {type: fact, owner: enemy, position: [110, 20]}
+
+# Tick budgets aligned to 93 + 90·(max_turns - 1) so the timeout fail
+# fires within the run loop (eval_core.run_level iterates max_turns,
+# not termination.max_ticks). The capability axis is route-risk under
+# attrition cap; difficulty ladders on (clock, cap, force size) only —
+# no orthogonal mechanic (e.g. tempo gate) introduced on hard, per
+# CLAUDE.md "one new controlled variable per tier".
+levels:
+  easy:
+    description: >
+      Reach the objective region near (110, 20) within 3500 ticks
+      losing <=4 units. The central corridor garrison (heavy at
+      (55, 20–22)) out-trades you 1-for-1; pushing through is
+      possible but spends the whole loss budget and may run the
+      clock. The northern detour (light picket at (55, 5)) costs
+      ~600 extra ticks but only ~1 unit. Decision is route choice.
+    overrides: {}
+    win_condition:
+      all_of:
+        - reach_region: {x: 110, y: 20, radius: 6}
+        - within_ticks: 3500
+        - units_lost_lte: 4
+    fail_condition:
+      any_of:
+        - after_ticks: 3501
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 4}
+    max_turns: 40   # ceiling 93 + 90·39 = 3603 > 3501 ✓
+
+  medium:
+    description: >
+      Same map, tighter cap (<=2 lost), 2800-tick deadline. The
+      corridor route is now infeasible — losses against the heavy
+      garrison exceed the cap deterministically. The detour is the
+      only path with positive margin, but it must be committed
+      promptly; dithering near the corridor before bouncing burns
+      ticks.
+    overrides: {}
+    win_condition:
+      all_of:
+        - reach_region: {x: 110, y: 20, radius: 6}
+        - within_ticks: 2800
+        - units_lost_lte: 2
+    fail_condition:
+      any_of:
+        - after_ticks: 2801
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 2}
+    max_turns: 32   # ceiling 2883 > 2801 ✓
+
+  hard:
+    description: >
+      Smaller agent force, attrition cap <=1, deadline 2400 ticks.
+      Pushing the corridor with the reduced force fails the cap
+      deterministically; the detour is the only path with positive
+      margin and it must be executed cleanly inside the budget.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [8, 20],  stance: 3, count: 2}
+        - {type: 1tnk, owner: agent, position: [8, 22],  stance: 3, count: 2}
+        - {type: jeep, owner: agent, position: [6, 18],  stance: 3, count: 2}
+        - {type: e3,  owner: enemy, position: [55, 20], stance: 2, count: 4}
+        - {type: gun, owner: enemy, position: [57, 22], stance: 3, count: 1}
+        - {type: e1,  owner: enemy, position: [55, 22], stance: 2, count: 3}
+        - {type: e1,  owner: enemy, position: [55, 5],  stance: 2, count: 2}
+        - {type: fact, owner: enemy, position: [110, 20]}
+    win_condition:
+      all_of:
+        - reach_region: {x: 110, y: 20, radius: 6}
+        - within_ticks: 2400
+        - units_lost_lte: 1
+    fail_condition:
+      any_of:
+        - after_ticks: 2401
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 1}
+    max_turns: 28   # ceiling 2523 > 2401 ✓

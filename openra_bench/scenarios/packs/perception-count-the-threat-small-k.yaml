@@ -1,0 +1,137 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/perception-count-the-threat.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# PERCEPTION focus, EXACT-COUNT variant: the win is set to the actual
+# hidden enemy count K. The model must scout enough to see all K — no
+# more, no less — within a tight clock. Under-scouting fails the
+# enemies_discovered_gte bar; over-scouting (sweeping the whole map)
+# blows the clock or the units_lost_lte cap because reaching the
+# trailing decoys costs ticks/casualties. The model has to REASON
+# about WHERE the K-th enemy could be hiding from the partial scout
+# so far, not just expand fog area-greedily.
+
+meta:
+  id: perception-count-the-threat-small-k
+  title: 'Count the Threat (small-K) — Discover Exactly K Hidden Enemy Squads'
+  capability: perception
+  real_world_meaning: >
+    State-estimation under partial observability with a precise count
+    target: identify the exact number of hidden entities by inferring
+    where the remaining ones must be, given what has already been
+    cleared, before the clock runs out and without burning the force
+    on irrelevant ground.
+  robotics_analogue: >
+    Sensor-budgeted search for a known target count: locate all K
+    survivors / contraband / contacts in a bounded area, where missing
+    one fails the mission and over-searching exhausts the energy
+    budget on already-cleared zones.
+  benchmark_anchor:
+    - "ERQA state-estimation under partial observability"
+    - "POMDP exact-count sub-tasks"
+    - "ScienceWorld inventory before-commit"
+    - "ICU triage exact census"
+  author: yiyu-tian
+  # Companion to `perception-count-the-threat` (Wave 1 A7): both test
+  # the same cell (exact-K perception) but along different stress axes.
+  # A7 uses K=5 fixed medium / K seed-varied 4..7 hard with 2 spawn
+  # groups (count discrimination + spawn robustness). This pack uses
+  # K=2/3/4 with psychologically non-obvious hidden positions (the
+  # "where could the K-th be hiding?" inference axis).
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 12000}
+  actors:
+    - {type: jeep, owner: agent, position: [6, 5], count: 3}
+    - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+
+levels:
+  # Tick budgets aligned to 93 + 90·(max_turns - 1) so the timeout
+  # fail actually fires within the run loop (eval_core.run_level
+  # iterates max_turns, not termination.max_ticks — without this
+  # alignment the after_ticks clause is unreachable and unmet wins
+  # exit as draw, not loss; see CLAUDE.md).
+  easy:
+    description: >
+      Exactly 2 enemy squads hidden in fog (one near-east, one
+      far-east). Find both within 2200 ticks losing <=1 unit. Both
+      are roughly on the same lane — a straight east sweep finds
+      them. Missing one or losing too many = loss.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 5], count: 3}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+        # Two distinct enemy squads, deliberately count K=2.
+        - {type: e1, owner: enemy, position: [55, 15], stance: 2, count: 2}
+        - {type: e3, owner: enemy, position: [105, 18], stance: 2, count: 2}
+    win_condition:
+      all_of:
+        - enemies_discovered_gte: 2
+        - within_ticks: 2200
+        - units_lost_lte: 1
+    fail_condition:
+      any_of:
+        - after_ticks: 2201
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 1}
+    max_turns: 26   # ceiling 93 + 90·25 = 2343 > 2201 ✓
+
+  medium:
+    description: >
+      Exactly 3 enemy squads scattered in three different directions
+      (north-east, south-east, and a non-obvious mid-north pocket).
+      Find all 3 within 2800 ticks losing <=2. A naive east-only
+      sweep finds 2 of 3 and runs out the clock searching the wrong
+      half of the map; the model must read where the remaining
+      unexplored mass is after each contact and commit there.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 5], count: 3}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+        - {type: e1, owner: enemy, position: [105, 8], stance: 2, count: 2}    # NE
+        - {type: e3, owner: enemy, position: [105, 32], stance: 2, count: 2}   # SE
+        - {type: dog, owner: enemy, position: [55, 4], stance: 2, count: 2}    # mid-N
+    win_condition:
+      all_of:
+        - enemies_discovered_gte: 3
+        - within_ticks: 2800
+        - units_lost_lte: 2
+    fail_condition:
+      any_of:
+        - after_ticks: 2801
+        - not: {own_units_gte: 1}
+    max_turns: 32   # ceiling 2883 > 2801 ✓
+
+  hard:
+    description: >
+      Exactly 4 enemy squads. Two are "obvious" (along the natural
+      east-bound axes the spawn pushes toward), one is in the far-NW
+      strip behind the spawn, and one is in a tight south-of-mid
+      pocket. Loss cap is 2, clock is 3500. A best-effort sweep
+      finds 2–3; only inferring from which fog masses remain after
+      each contact identifies all 4 in time. Over-scouting (visiting
+      every remaining fog cell) blows the clock.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 5], count: 3}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+        - {type: e1, owner: enemy, position: [105, 8], stance: 2, count: 2}
+        - {type: e3, owner: enemy, position: [105, 32], stance: 2, count: 2}
+        - {type: dog, owner: enemy, position: [115, 4], stance: 2, count: 2}    # far-NW relative to push
+        - {type: e2, owner: enemy, position: [60, 28], stance: 2, count: 2}     # south-of-mid pocket
+    win_condition:
+      all_of:
+        - enemies_discovered_gte: 4
+        - within_ticks: 3500
+        - units_lost_lte: 2
+    fail_condition:
+      any_of:
+        - after_ticks: 3501
+        - not: {own_units_gte: 1}
+    max_turns: 40   # ceiling 3603 > 3501 ✓

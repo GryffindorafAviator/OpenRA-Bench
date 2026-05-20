@@ -82,6 +82,22 @@ NOT_APPLICABLE = {
     "instead of handed coordinates). Adding seed-driven spawn variation "
     "would introduce a second uncontrolled variable and break the clean "
     "medium→hard attribution.",
+    # PR #8 from yiyu-tian: 4 packs that tighten one decision axis per
+    # tier rather than per-spawn variation. UPGRADED would force a
+    # second variable per tier and break the clean attribution model.
+    "perception-count-the-threat-small-k": "hard tightens K (2→3→4) "
+    "and the positional non-obviousness of each squad — adding spawn "
+    "variation would dilute the count-and-infer signal. Companion to "
+    "perception-count-the-threat (UPGRADED above), which IS spawn-varied.",
+    "coordination-ordered-rendezvous": "hard tightens the waypoint "
+    "count (2→3→4) and the overall deadline; spawn variation would "
+    "compete with the order-enforcement axis for attribution.",
+    "tempo-strike-window": "hard tightens the lull length, follow-up "
+    "window, and attrition cap (cat-c11 canonical tempo design). "
+    "Spawn variation would dilute the tempo-discipline signal.",
+    "risk-blockade-bypass": "hard adds a tempo gate (after_ticks) and "
+    "shrinks the attrition cap; spawn variation would muddy the "
+    "corridor-vs-detour route-choice signal.",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss

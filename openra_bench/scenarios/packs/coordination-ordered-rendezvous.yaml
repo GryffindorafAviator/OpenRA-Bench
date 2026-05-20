@@ -1,0 +1,152 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/coordination-staggered-window.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ACTION focus, ORDERED parallel rendezvous. Two/three squads must
+# deliver >=2 units to a sequence of regions IN ORDER (W1 before W2
+# before W3), within a tight overall deadline. Order is enforced by
+# `waypoint_sequence` (stateful latch: W2 only counts after W1 was
+# satisfied at some prior tick). The deadline is tight enough that
+# a single column cannot tour all waypoints in time — parallel
+# columns are required AND the deposit at W1 must come first.
+#
+# Differs from action-multiunit-coordination (simultaneous delivery
+# to N regions at one deadline) on the ORDER axis: this scenario
+# fails if W2 is reached before W1, even if both end up satisfied.
+# Same axis across easy/medium/hard — only the number of waypoints
+# and the deadline tighten.
+
+meta:
+  id: coordination-ordered-rendezvous
+  title: 'Ordered Rendezvous — Deliver Squads to Waypoints In Sequence'
+  capability: action
+  real_world_meaning: >
+    Parallel multi-team delivery under an ordering constraint:
+    waypoint A must be reached before waypoint B before waypoint C,
+    each requiring two or more units present, all within one tight
+    overall window. Skipping or out-of-order delivery does not
+    count. Single-column tours blow the deadline; only concurrent
+    dispatch with leg-by-leg ordering succeeds.
+  robotics_analogue: >
+    Sequenced multi-depot fleet dispatch with a precedence
+    constraint: team A must arrive at depot 1 before team B may be
+    credited for arriving at depot 2 (e.g. handoff / supply chain),
+    and the overall window does not permit a single team to do all
+    legs in series.
+  benchmark_anchor:
+    - "Watch-And-Help concurrent multi-agent with sequenced sub-tasks"
+    - "SMAC asymmetric squad sequencing"
+    - "PERT/CPM precedence-constrained dispatch"
+    - "supply-chain ordered handoff: depot A before depot B"
+  author: yiyu-tian
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop_units]
+  planning: true
+  termination: {max_ticks: 6000}
+  actors:
+    - {type: 2tnk, owner: agent, position: [5, 8],  count: 3}
+    - {type: 1tnk, owner: agent, position: [7, 32], count: 3}
+
+levels:
+  easy:
+    description: >
+      Two waypoints in sequence: W1 NE (110, 8) before W2 SE
+      (110, 32), each requiring >=2 units, all within 2200 ticks.
+      A single column tour from spawn through both legs exceeds
+      2200 ticks; parallel columns with W1 finishing first
+      (squad A delivers, squad B holds short of W2 until W1 latches)
+      makes it. Out-of-order (B arrives at W2 first) never satisfies
+      waypoint_sequence's W1→W2 latch.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 8],  count: 3}
+        - {type: 1tnk, owner: agent, position: [7, 32], count: 3}
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: coord-easy
+            n: 2
+            radius: 7
+            points:
+              - {x: 110, y: 8,  label: "W1 north-east rendezvous"}
+              - {x: 110, y: 32, label: "W2 south-east rendezvous"}
+        - within_ticks: 2200
+    fail_condition:
+      any_of:
+        - after_ticks: 2201
+        - not: {own_units_gte: 1}
+    max_turns: 40
+
+  medium:
+    description: >
+      Three waypoints in sequence: W1 NE, W2 bottom-left
+      (south-west detour), W3 SE — each n>=2, all within 3000
+      ticks. The detour leg through the south-west adds tour cost a
+      single column cannot absorb. Enemy pickets contest the two
+      eastern lanes. Loss cap 2.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
+        - {type: 1tnk, owner: agent, position: [7, 10], count: 3}
+        - {type: jeep, owner: agent, position: [5, 14], count: 2}
+        - {type: e1, owner: enemy, position: [55, 8],  stance: 2, count: 2}
+        - {type: e1, owner: enemy, position: [55, 32], stance: 2, count: 2}
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: coord-medium
+            n: 2
+            radius: 7
+            points:
+              - {x: 115, y: 6,  label: "W1 north-east"}
+              - {x: 20,  y: 36, label: "W2 south-west detour"}
+              - {x: 115, y: 34, label: "W3 south-east"}
+        - within_ticks: 3000
+        - units_lost_lte: 2
+    fail_condition:
+      any_of:
+        - after_ticks: 3001
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 2}
+    max_turns: 48
+
+  hard:
+    description: >
+      Four waypoints in sequence with a strict ordering, 3200-tick
+      deadline, loss cap 1. Even with three squads, no single
+      column can absorb a full tour; the ordering forces W1 to
+      finish before W2 can be credited, etc., so squads must
+      stagger their arrivals naturally. Failure isolates *ordered*
+      parallel coordination — both simultaneous-only and serial
+      strategies miss.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3}
+        - {type: 1tnk, owner: agent, position: [7, 10], count: 3}
+        - {type: jeep, owner: agent, position: [5, 14], count: 3}
+        - {type: e1, owner: enemy, position: [55, 8],  stance: 2, count: 2}
+        - {type: e3, owner: enemy, position: [55, 32], stance: 2, count: 2}
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: coord-hard
+            n: 2
+            radius: 6
+            points:
+              - {x: 115, y: 6,  label: "W1 north-east"}
+              - {x: 20,  y: 36, label: "W2 south-west"}
+              - {x: 115, y: 34, label: "W3 south-east"}
+              - {x: 60,  y: 20, label: "W4 mid-east handoff"}
+        - within_ticks: 3200
+        - units_lost_lte: 1
+    fail_condition:
+      any_of:
+        - after_ticks: 3201
+        - not: {own_units_gte: 1}
+        - not: {units_lost_lte: 1}
+    max_turns: 52
