@@ -78,6 +78,49 @@ A scenario is defective if any of the following hold:
   in range, lunges at the nearest foe within `GUARD_AGGRO ≈ 16`,
   snaps back past `GUARD_LEASH ≈ 18` — the bait-able-defender idiom
   proven in #4 / #6 / #7 / #15 / #18.
+- **`spawn_point` filter applies ONLY to AGENT actors** — enemy
+  actors with no `spawn_point` ALWAYS place, regardless of the chosen
+  group (`openra-data/src/oramap.rs::expand_scenario_actors`). You
+  cannot vary enemy count/composition by seed via `spawn_point`;
+  vary the agent's spawn instead and design symmetric enemy
+  placement. If ANY agent actor declares `spawn_point`, every agent
+  actor WITHOUT `spawn_point` is filtered OUT — so duplicate
+  base/garrison actors across BOTH spawn groups at identical coords.
+- **`silo` is NOT MustBeDestroyed** — using it as an objective
+  landmark allows premature engine auto-`done` when the *other*
+  MustBeDestroyed buildings fall. Use `barr` / `proc` / `powr` /
+  `fact` for landmark anchors. (Wall-as-obstacle role is fine.)
+- **`after_ticks` in a WIN clause is structurally incompatible with
+  ConquestVictoryConditions** — the engine auto-`done`s the second
+  the last enemy `MustBeDestroyed` building falls, before the
+  `after_ticks` window opens, collapsing the run to DRAW. `after_ticks`
+  belongs in `fail_condition`. Encode timed-arrival semantics via
+  distance/landmark positioning instead.
+- **`move_units` auto-fires opportunistically en route** regardless
+  of agent stance (even `stance:0` HoldFire). For perception packs
+  with hidden enemies that must be discovered without combat, set
+  the HIDDEN actors to `stance:0` themselves (defender side, not
+  scout side).
+- **`pbox` costs 600** (not the 400 some old specs assumed);
+  defense and infantry are SEPARATE production queues so an
+  efficient policy queues `build('pbox')` and `build('e1')` in
+  parallel from turn 1.
+- **`place_building` does NOT enforce build-adjacency** — orders
+  work at arbitrary in-bounds coords. Forward-base / far-region
+  building is solvable with a single `build + place_building`.
+- **`fact` has cost 0** → not buildable via `StartProduction`
+  (engine gates on `cost > 0`). Use `proc` as the "second base seed"
+  in expand-arm objectives.
+- **`not own_units_gte:1`** mis-fires on turn 1 when the agent
+  starts unit-less (documented footgun from `economy-force-buildup`).
+  Use `after_ticks` + `not has_building:fact` for the unit-less
+  start fail clause instead.
+- **Certain mid-map cells silently fail to place enemy clusters**
+  (e.g. `(50,20)`, `(60,28)`, `(90,30)` observed by A7); nearby
+  cells (`(60,10)`, `(100,30)`, `(50,19)/(50,21)`) work. Likewise
+  `e1` at some cells doesn't surface in `enemy_positions` — `e3`
+  does. For perception packs, use `e3` for hidden clusters and
+  verify cluster cells on a smoke run before authoring against them.
 
 ## How to validate (deterministic, no model / no network)
 
