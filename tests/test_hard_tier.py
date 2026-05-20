@@ -365,6 +365,19 @@ UPGRADED = [
     # opening generalisation without diluting the selective-action
     # signal.
     "proc-instruction-following-edge-case",
+    # Wave-5 Group F reasoning seed — common-pool contested mining
+    # (SC2 contested expansion / Hardin tragedy of commons / TAM
+    # contention). Hard defines two agent spawn_point groups (NORTH
+    # base y=14 / SOUTH base y=26) round-robined by seed with a
+    # shared harv-lane + defender ring at y=18..22 — base orientation
+    # flips per seed (rear-guard 3tnk at y=14 vs y=26 marks the
+    # spawn group). The enemy raider strike force + dense contested
+    # flavor (3 rival harvs + proc) ALWAYS place (enemy actors
+    # don't honour spawn_point — CLAUDE.md), so each seed faces the
+    # SAME committed-balance test from a different base orientation
+    # and a memorised "always defend at y=N" opening cannot
+    # generalise.
+    "econ-contention-with-enemy",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

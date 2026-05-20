@@ -1,0 +1,324 @@
+# econ-contention-with-enemy — contested central ore patch with enemy
+#
+# REASONING capability — shared resource contention. The agent and the
+# enemy both lay claim to a mid-map ore patch. The bench-binding
+# decision is the COMMON-POOL TRADEOFF: pure mining (no defense) lets
+# the enemy `raider` bot pick off the agent's harvesters at the
+# contested patch; pure defending (no harvest orders) abandons the
+# revenue stream; stalling commits to neither and the economy bar
+# never bites. The intended COMMITTED-BALANCE play keeps the
+# pre-ringed defenders on station (auto-engaging the inbound raider)
+# AND keeps every harvester in `harvest` mode each turn so the
+# contested patch yields throughput THROUGH the contestation.
+#
+# Real-world anchors:
+#   • SC2 contested expansion / split-mining (third-base dispute) —
+#     committing to both mine AND defend instead of one-sided commit.
+#   • Common-pool resource (Hardin "tragedy of the commons") — the
+#     pasture / fishery is finite, both parties draw from it, and a
+#     pure-extract policy that ignores the contender loses access.
+#   • Competitive market entry / TAM contention — you and the
+#     incumbent both pull from the same total addressable market;
+#     pure-extraction without defending the channel loses share.
+#   • Fishing common-resource dynamics — a contested patch yields
+#     less per boat with more boats present; abandoning the patch
+#     means the rival fully captures it.
+#
+# ENGINE NOTES (verified 2026-05-20 with scripted run_level probes
+# at HEAD; smoke runs at /tmp/probe_v4.py + /tmp/probe_pack.py):
+# 1. Pre-placed `harv` actors are inserted with `activity: None`
+#    (env.rs::build_scenario_actor) — they do NOT auto-harvest at
+#    placement, so every harvester needs an explicit
+#    `Command.harvest(...)` order each turn. Stall (only observe)
+#    therefore keeps EV at the starting_cash floor (500) regardless
+#    of how the raider fight resolves.
+# 2. Pre-placed ENEMY `harv` actors are ALSO inserted with
+#    `activity: None` and no scripted bot orders harvesters, so the
+#    enemy harvs at the east of the patch are FLAVOR / observable
+#    rivals (the agent sees them as "enemy units at the contested
+#    patch" in `enemy_positions`) but do NOT actually pull ore. The
+#    "common-pool" mechanic is encoded via the raider's worker-
+#    priority attack: keeping harvs at the patch under raider
+#    pressure IS the contestation cost. (Engine doesn't yet model
+#    multi-side simultaneous mining of the same patch; the raider-
+#    on-harv attack is the bench-binding contestation.)
+# 3. The `raider` ScriptedBehavior (openra-sim/src/scripted_bot.rs)
+#    targets the nearest agent `harv` each turn; falls back to
+#    nearest combat actor only when no harv is alive. The agent's
+#    pre-ringed defenders (2× 3tnk at x=26 on easy, 3× 3tnk on
+#    medium, 4× 3tnk on hard) auto-engage the inbound raider on
+#    default `Defend` stance — the intended policy is to LEAVE the
+#    defenders ringed (they do their job automatically) and only
+#    spend orders on harvest commands.
+# 4. The enemy proc + harvs are placed at x=76-80 (far east), well
+#    outside the agent's default sight range at start, so they do
+#    NOT auto-aggro the agent's defender ring before the raider
+#    arrives. Required for the discriminator: a wandering agent
+#    sweep east (the "pure-mine-no-defense + chase enemy proc"
+#    failure mode) is what loses, not a passive ringed defender.
+# 5. Bar tuning (probe_pack.py seed-1..4, scripted policies):
+#      - stall:                   ev=500   lost=0..2 (no harvest)
+#      - pure-mine-no-defense:    ev=500..1500  lost=2..4 (raider unopposed)
+#      - pure-defend:             ev=500   lost=2..4 (no harvest)
+#      - intended-balance:        ev=2500..12500  lost=0..1
+#    Easy bar 2000, medium bar 3500, hard bar 3500. Every non-intended
+#    play falls below the bar (or loses harvs below the required
+#    count); intended clears it by a comfortable margin.
+# 6. Tick alignment (CLAUDE.md): max_turns=61 ⇒ ceiling tick
+#    93 + 90·60 = 5493. within_ticks=5400 and after_ticks=5401 both
+#    fit; non-finishers LOSE (not draw).
+# 7. Persistent enemy `fact` at (128,20) prevents the engine from
+#    auto-`done`-ing when the raider squad is wiped (would collapse
+#    a clean run to DRAW before the economy bar is satisfied).
+# 8. Hard tier: seed-varied AGENT spawn_point groups (NORTH y=14 /
+#    SOUTH y=26) with symmetric defender rings + shared harv-lane
+#    geometry. A rear-guard 3tnk at the base y-row (y=14 vs y=26)
+#    marks the spawn so test_hard_tier's units_summary check sees
+#    distinct starts. Raider strike force + enemy flavor cluster
+#    ALWAYS place (enemy actors don't honour spawn_point —
+#    CLAUDE.md), so each seed faces the SAME contestation problem
+#    from a different base orientation.
+
+meta:
+  id: econ-contention-with-enemy
+  title: 'Contested Central Ore Patch — Common-Pool Resource vs Enemy Raider'
+  capability: reasoning
+  real_world_meaning: >
+    Common-pool resource contention with an active rival. A shared
+    ore patch sits in the middle of the map; the enemy fields its
+    own harvesters AND a worker-priority raider bot that drives
+    specifically at your harvesters. Pure extraction (mine only,
+    don't defend) lets the raider pick off your harvs at the
+    contested patch; pure defense (engage the raider, but stop
+    mining) abandons the revenue stream; stalling commits to neither
+    and the economy clock bites. The intended committed-balance play
+    keeps the pre-ringed defenders on station (auto-engaging the
+    inbound raider) AND keeps every harvester in `harvest` mode each
+    turn — extracting THROUGH the contestation, not after it.
+  robotics_analogue: >
+    Multi-agent extraction from a shared resource zone with an
+    actively-hostile rival fleet. The harvesters keep visiting the
+    contested deposit; the defender fleet must intercept the
+    rival's worker-priority raiders BEFORE they reach the
+    collectors, without leaving the patch unmanned. Abandoning
+    either function — extraction or interception — loses the day
+    to a one-sided commit.
+  benchmark_anchor:
+    - "SC2 contested mining / split-base play"
+    - "game theory common-pool resource (Hardin tragedy of commons)"
+    - "competitive market entry / TAM contention"
+    - "fishing common-resource dynamics"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 500
+
+base:
+  agent: {faction: allies, cash: 500}
+  enemy: {faction: soviet, cash: 0, bot_type: raider}
+  tools: [observe, build, place_building, harvest, move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 7000}
+  actors:
+    # Base seed — fact + proc for refining + 2 harvs on the patch lane.
+    - {type: fact, owner: agent, position: [8, 18]}
+    - {type: proc, owner: agent, position: [12, 18]}
+    - {type: harv, owner: agent, position: [14, 18]}
+    - {type: harv, owner: agent, position: [14, 20]}
+    # Two 3tnk defenders ringed east of the contested patch — auto-
+    # engage the raider on default Defend stance; the intended policy
+    # leaves them ringed and only spends orders on `harvest`.
+    - {type: '3tnk', owner: agent, position: [26, 18]}
+    - {type: '3tnk', owner: agent, position: [26, 20]}
+    # Shared central ore patch — the contention target.
+    - {type: mine, owner: neutral, position: [22, 20]}
+    - {type: mine, owner: neutral, position: [22, 22]}
+    # Enemy CONTESTED FLAVOR — own proc + 2 harvs at the east edge
+    # of the patch zone (visible in enemy_positions as "rival
+    # harvesters at the contested patch"). Placed at x=76-80 (out
+    # of agent sight range at start) so they do NOT auto-aggro the
+    # defender ring before the raider arrives.
+    - {type: proc, owner: enemy, position: [80, 20]}
+    - {type: harv, owner: enemy, position: [76, 18]}
+    - {type: harv, owner: enemy, position: [76, 22]}
+    # ONE raider tank (easy) — see overrides for medium/hard.
+    - {type: '1tnk', owner: enemy, position: [60, 20]}
+    # Persistent enemy marker far east — prevents engine auto-`done`
+    # on raider squad wipe before the economy bar is satisfied.
+    - {type: fact, owner: enemy, position: [128, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare skill: ONE weak raider (1tnk), loose bar (2000 EV), 2
+  # 3tnk defenders pre-ringed. Stall LOSES (no income); pure-mine-
+  # no-defense LOSES (defenders moved off-vector → raider picks off
+  # harvs); pure-defend LOSES (no harvest orders → no income); the
+  # intended committed-balance play (harvest + leave defenders
+  # ringed) WINS comfortably (probed EV ≈ 12500 by tick 5400 on
+  # seeds 1..4).
+  easy:
+    description: >
+      Your refinery (`proc` at 12,18) sits west of a shared ore patch
+      at (22,20). Two harvesters are pre-placed at (14,18) and
+      (14,20); two heavy tanks ring the patch at (26,*). ONE enemy
+      raider tank is staged east at (60,20) — it specifically targets
+      your harvesters (worker-priority `raider` bot). The enemy also
+      fields a refinery and two harvesters at the east side of the
+      patch zone (visible as rival harvesters contesting the same
+      patch). Win when your economy value (cash + stored resources)
+      reaches 2000 AND at least 2 harvesters are still alive, before
+      tick 5400. Stalling leaves EV at the 500 starting floor;
+      chasing the raider east with your defenders abandons the patch
+      and the raider's successor / lone path picks off your harvs;
+      pulling harvesters home and only defending stops the income.
+      The intended play is to keep both harvesters in `harvest` mode
+      AND leave your ringed defenders in place — they auto-engage
+      the raider on contact, and throughput climbs unimpeded.
+    overrides: {}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 2000}
+        - {unit_type_count_gte: {type: harv, n: 2}}
+        - {within_ticks: 5400}
+    # after_ticks 5401 ≤ 93+90·60 = 5493 ⇒ deadline bites inside
+    # max_turns. Loss is reachable: EV/harv bar unmet at the deadline
+    # OR harv count drops to 0 first.
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+    max_turns: 61
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: FULL raider strike (TWO raider 1tnks
+  # staggered on the y-line), tighter bar (3500 EV), and ONE extra
+  # defender (3× 3tnk) to keep the intended play winnable. Same
+  # patch + agent base geometry as easy.
+  medium:
+    description: >
+      Same patch layout — `proc` at (12,18), mines at (22,20) and
+      (22,22), two harvesters at (14,18) and (14,20). The defender
+      ring is THREE heavy tanks now (26,18 / 26,20 / 26,22). TWO
+      enemy raider tanks now stagger down the y-line at x=60 (one at
+      y=18, one at y=22) — both target your harvesters. The enemy
+      refinery and two harvesters remain at the east side of the
+      contested zone. Win when economy value reaches 3500 AND at
+      least 2 harvesters are still alive, before tick 5400. Stalling
+      leaves EV at 500; chasing raiders east abandons the harvs to
+      whichever raider is in transit; pulling harvs home stops the
+      income. The intended play is the same committed balance —
+      both harvesters in `harvest` mode AND the ringed defenders on
+      station — and throughput clears 3500 with margin.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        # MEDIUM: 3 defenders (one more than easy).
+        - {type: '3tnk', owner: agent, position: [26, 18]}
+        - {type: '3tnk', owner: agent, position: [26, 20]}
+        - {type: '3tnk', owner: agent, position: [26, 22]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        - {type: proc, owner: enemy, position: [80, 20]}
+        - {type: harv, owner: enemy, position: [76, 18]}
+        - {type: harv, owner: enemy, position: [76, 22]}
+        # MEDIUM: TWO raider 1tnks staggered on the y-line.
+        - {type: '1tnk', owner: enemy, position: [60, 18]}
+        - {type: '1tnk', owner: enemy, position: [60, 22]}
+        - {type: fact, owner: enemy, position: [128, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 3500}
+        - {unit_type_count_gte: {type: harv, n: 2}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+    max_turns: 61
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. THREE enemy harvs flavor (a denser contested zone) + TWO
+  #      raider tanks attacking from TWO distinct y-vectors (north
+  #      y=18 and south y=22), so a single-y defender ring would
+  #      leak one vector. The 4-tank defender ring (y=18..22) handles
+  #      both vectors.
+  #   2. TWO seed-driven AGENT spawn_point groups: NORTH-flank base
+  #      (fact/proc + rear-guard 3tnk at y=14) vs SOUTH-flank base
+  #      (y=26). The harv lane + central defender ring are SHARED
+  #      across spawns (y=18..22) so the committed-balance task is
+  #      symmetric per spawn; only the base orientation flips. The
+  #      rear-guard 3tnk at y=14 vs y=26 is the spawn-distinguishing
+  #      unit (test_hard_tier checks units_summary not buildings).
+  #      Enemy raiders / proc / harvs ALWAYS place (enemy actors
+  #      don't honour spawn_point — CLAUDE.md), so each seed faces
+  #      the same contestation problem from a different base
+  #      orientation. A memorised "always defend at y=N" opening
+  #      cannot generalise across the seed flip.
+  hard:
+    description: >
+      A contested mining run against TWO raider tanks attacking from
+      two distinct y-vectors (north y=18 and south y=22), with a
+      denser enemy contested zone (a refinery and three rival
+      harvesters at the east edge). Your base orientation varies by
+      seed (north-flank or south-flank) — both halves cover the same
+      contested patch column at (22,*). Win when economy value
+      reaches 3500 AND at least 2 harvesters are still alive, before
+      tick 5400. Stalling, chasing the raiders east, and pulling
+      harvesters home all LOSE. The intended play is the same
+      committed-balance: both harvesters in `harvest` mode AND the
+      ringed defenders on station (covering both y-vectors with the
+      4-tank ring), and throughput clears 3500 with margin.
+    overrides:
+      actors:
+        # Spawn 0 — NORTH base (fact/proc at y=14, rear-guard tank
+        # at y=14 marks the spawn group so unit positions differ
+        # across seeds — test_hard_tier checks units_summary, not
+        # buildings).
+        - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 18], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 22], spawn_point: 0}
+        # 4-tank ring covers y=18..22 — both raider y-vectors.
+        - {type: '3tnk', owner: agent, position: [26, 18], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [26, 20], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [26, 22], spawn_point: 0}
+        # Rear-guard tank at NORTH y=14 (the spawn-distinguishing unit).
+        - {type: '3tnk', owner: agent, position: [13, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 20], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 22], spawn_point: 0}
+        # Spawn 1 — SOUTH base (fact/proc at y=26).
+        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 18], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 22], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 18], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 20], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 22], spawn_point: 1}
+        # Rear-guard tank at SOUTH y=26.
+        - {type: '3tnk', owner: agent, position: [13, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 20], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 22], spawn_point: 1}
+        # Enemy contested zone — DENSER (3 rival harvs + proc).
+        # Always placed (no spawn_point on enemy actors per CLAUDE.md).
+        - {type: proc, owner: enemy, position: [80, 20]}
+        - {type: harv, owner: enemy, position: [76, 16]}
+        - {type: harv, owner: enemy, position: [76, 20]}
+        - {type: harv, owner: enemy, position: [76, 24]}
+        # TWO raiders on TWO y-vectors (north + south).
+        - {type: '1tnk', owner: enemy, position: [60, 18]}
+        - {type: '1tnk', owner: enemy, position: [60, 22]}
+        - {type: fact, owner: enemy, position: [128, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 3500}
+        - {unit_type_count_gte: {type: harv, n: 2}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+    max_turns: 61
