@@ -1,84 +1,149 @@
 meta:
   id: economy-harvest-timebox
-  title: Harvest Economy — Time-Boxed
+  title: 'Harvest Economy — Time-Boxed Greenfield Revenue Ramp'
   capability: reasoning
-  real_world_meaning: 'Within a fixed time budget, earn as much economic value as possible by running
-    and growing a harvesting operation, then keep the harvesters productive — the decision is committing
-    to harvest promptly and expanding capacity rather than idling.
+  real_world_meaning: >
+    Time-boxed greenfield revenue ramp from a bootstrapped pipeline: a
+    pre-placed harvester + refinery + ore patch is the starter
+    operation, and the model must commit to running it (and at higher
+    tiers, expanding it: build extra harvesters and feed multiple
+    patches) so the cumulative economy value clears a target before a
+    hard tick deadline. Idling, spending the budget on non-harvesters,
+    or running a single harvester at the higher tiers all miss the bar.
+  robotics_analogue: >
+    Autonomous warehouse / mining pipeline that must hit a throughput
+    target by deadline: route collectors to known sources, return loads
+    to the depot, and scale the collector fleet when one collector
+    can't meet the rate. The decision is committing to the harvest loop
+    and scaling collectors — not building unrelated capability.
+  author: autonomous-loop
+  benchmark_anchor:
+    - SC2LE CollectMineralsAndGas
+    - MineRL Diamond resource collection
+    - lmgame-Bench resource-streaming
+    - greenfield revenue-ramp under deadline
 
-    '
-  robotics_analogue: 'Autonomous resource-collection under a mission clock: maximize yield by dispatching
-    and scaling collectors instead of dithering.
-
-    '
-  author: catalog-c13
-  status: quarantine
-  quarantine_reason: blocked on engine S0/S1 ore-income prerequisite (non-discriminating until then)
+# ENGINE NOTE (verified 2026-05-19, scripted run_level seeds 1-4):
+# task #14 wired harvest income end-to-end (a placed `mine` actor seeds
+# ore patches around it, harvesters refine into `proc`, and economy_
+# value = cash + resources surfaces in signals). Budgets here are tuned
+# against the measured income rate (~1.05 ore/tick per active
+# harvester/patch pair, harv build cost 1100cr, weap-required) so the
+# starting_cash + 1 active pre-placed harvester cannot satisfy the
+# medium/hard bars: a 2nd (medium) / 3rd (hard) harvester must be
+# built. Stall, "build units instead", and "1 pre-placed harvester
+# only" all LOSE on every level and every hard seed.
 base_map: rush-hour-arena
-starting_cash: 200
+starting_cash: 300
+
 base:
   agent:
     faction: allies
   enemy:
     faction: soviet
   tools:
-  - harvest
-  - move_units
-  - build
-  - stop
+    - harvest
+    - move_units
+    - build
+    - place_building
+    - stop
   planning: true
   termination:
     max_ticks: 40000
   actors:
-  - type: proc
-    owner: agent
-    position:
-    - 12
-    - 18
-  - type: harv
-    owner: agent
-    position:
-    - 14
-    - 18
-  - type: mine
-    owner: neutral
-    position:
-    - 22
-    - 18
-  - type: jeep
-    owner: agent
-    position:
-    - 8
-    - 16
+    - {type: proc, owner: agent, position: [12, 18]}
+    - {type: harv, owner: agent, position: [14, 18]}
+    - {type: mine, owner: neutral, position: [22, 18]}
+    - {type: mine, owner: neutral, position: [22, 22]}
+
 levels:
   easy:
-    description: 'Loose clock — just start harvesting promptly; idling fails the economy-value target.
-
-      '
+    description: >
+      Loose clock. A refinery and one harvester are already placed next
+      to two ore patches; just commit to harvesting promptly. The
+      starting cash (300) is well below the bar (1500), so idling
+      cannot satisfy it — only the harvest income closes the gap. The
+      intended scripted harvester wins by ~tick 1350.
+    starting_cash: 300
     win_condition:
       all_of:
-      - economy_value_gte: 1000
-      - within_ticks: 7000
-    max_turns: 60
+        - economy_value_gte: 1500
+        - within_ticks: 1800
+    # after_ticks == within_ticks; both reachable inside
+    # max_turns=22 (≤ 93+90·21 = 1983): a non-finisher LOSES.
+    fail_condition:
+      any_of:
+        - after_ticks: 1801
+        - not: {own_units_gte: 1}
+    max_turns: 22
   medium:
-    description: 'Tighter clock and a higher target — the harvester must stay productive (not lost / not
-      idle).
-
-      '
+    description: >
+      Tighter clock and a higher bar (5500 economy value by tick 3000).
+      Starting cash (1500) is well below the bar, and a single
+      harvester at this map only produces ~3150 ore over 3000 ticks
+      (total ~4650) — that misses the bar. A war factory and a
+      construction yard are pre-placed: the intended play is to build
+      one extra harvester (cost 1100) while the first keeps harvesting,
+      then run both. Spending the budget on infantry / other units
+      starves the income channel and loses; stalling loses.
+    starting_cash: 1500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [8, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: weap, owner: agent, position: [12, 22]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
     win_condition:
       all_of:
-      - economy_value_gte: 2500
-      - harvesters_gte: 1
-      - within_ticks: 6000
-    max_turns: 60
+        - economy_value_gte: 5500
+        - within_ticks: 3000
+    # after_ticks ≤ 93+90·34 = 3153 ⇒ deadline bites inside max_turns.
+    fail_condition:
+      any_of:
+        - after_ticks: 3001
+        - not: {own_units_gte: 1}
+    max_turns: 35
   hard:
-    description: 'High target, short clock — a single harvester cannot reach it; must expand harvesting
-      capacity.
-
-      '
+    description: >
+      High bar (7500) and a short clock (3600 ticks). Starting cash
+      (1200) is well below the bar; a single pre-placed harvester only
+      reaches ~3200-5200 ore over 3600 ticks — that misses. The
+      intended play is to build TWO extra harvesters (3 total) and feed
+      all three ore patches in parallel. The starting position varies
+      by seed (two spawn_point groups: NW or SW base) so a memorised
+      single fixed plan can't generalise — the model must locate the
+      pre-placed patches relative to its base each episode.
+    starting_cash: 1200
+    overrides:
+      actors:
+        # spawn_point 0 — north base; ore patches to the east
+        - {type: fact, owner: agent, position: [8, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: weap, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [26, 12], spawn_point: 0}
+        # spawn_point 1 — south base; ore patches to the east
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 32], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: weap, owner: agent, position: [12, 32], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 28], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 32], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [26, 30], spawn_point: 1}
     win_condition:
       all_of:
-      - economy_value_gte: 3500
-      - harvesters_gte: 2
-      - within_ticks: 5000
-    max_turns: 70
+        - economy_value_gte: 7500
+        - within_ticks: 3600
+    # after_ticks ≤ 93+90·41 = 3783 ⇒ deadline bites inside max_turns.
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+        - not: {own_units_gte: 1}
+    max_turns: 42

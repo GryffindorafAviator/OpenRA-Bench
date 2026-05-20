@@ -49,10 +49,13 @@ def test_curated_set_is_small_handauthored_and_meaningful():
 
 
 def test_harvest_quarantined_with_engine_reason():
-    for h in ("economy-harvest-investment", "economy-harvest-timebox"):
-        m = load_pack(PACKS / f"{h}.yaml").meta
-        assert m.status == "quarantine"
-        assert "S0/S1" in m.quarantine_reason
+    # economy-harvest-timebox was un-quarantined after task #14 wired
+    # real harvest income / silo storage end-to-end; the investment
+    # pack still rides the S0/S1 quarantine until storage-capacity work
+    # lands.
+    m = load_pack(PACKS / "economy-harvest-investment.yaml").meta
+    assert m.status == "quarantine"
+    assert "S0/S1" in m.quarantine_reason
 
 
 def test_default_evaluate_excludes_quarantine_keeps_active(monkeypatch):
@@ -75,12 +78,17 @@ def test_default_evaluate_excludes_quarantine_keeps_active(monkeypatch):
     out = run_eval.evaluate(packs=packs, levels=["easy"], seeds=[1])
     sk = " ".join(out["skipped"])
     assert "quarantine:" in sk
-    assert any("economy-harvest-timebox" in s for s in out["skipped"])
-    assert "economy-harvest-timebox" not in captured.get("compiled", [])
+    # economy-harvest-investment is the remaining harvest-family
+    # quarantined pack (timebox was un-quarantined post-#14).
+    assert any("economy-harvest-investment" in s for s in out["skipped"])
+    assert "economy-harvest-investment" not in captured.get("compiled", [])
     # a curated active pack reached the (faked) compile step
     assert "rush-hour" in captured.get("compiled", [])
 
 
 def test_quarantined_pack_still_loads_when_named_explicitly():
-    p = load_pack(PACKS / "economy-harvest-timebox.yaml")
-    assert p.meta.status == "quarantine" and p.meta.id == "economy-harvest-timebox"
+    p = load_pack(PACKS / "economy-harvest-investment.yaml")
+    assert (
+        p.meta.status == "quarantine"
+        and p.meta.id == "economy-harvest-investment"
+    )
