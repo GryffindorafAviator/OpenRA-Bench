@@ -250,14 +250,17 @@ UPGRADED = [
     "coord-converge-on-target",
     # Wave-5 Group N coordination pack — SC2 attack-wave timing /
     # SMAC relay strike / military overlapping fires (bound-and-bound)
-    # anchor. Squad A (3× e3 rockets) softens the enemy 2tnk cluster
-    # FIRST; Squad B (3× 2tnk) follows up to mop up the e1 survivors.
-    # Hard tier defines two agent spawn_point groups (NORTH staging
-    # y=12..18 / SOUTH staging y=28..34) round-robined by seed; the
-    # central enemy cluster (6× 2tnk + 6× e1 at y=20) is symmetric
-    # across the map's mid-latitude so either staging faces an
-    # equivalent relay decision but no memorised approach corridor
-    # generalises across seeds.
+    # anchor. Squad A (4× 2tnk heavy first wave) destroys the enemy
+    # armour line first; Squad B (4× e1 light rifle-infantry mop-up)
+    # follows up on the survivors. (Spec-pivot from the brainstorm
+    # e3+2tnk roles — see YAML header: e3 is offensively non-viable
+    # in the engine combat sheet.) Hard tier defines two agent
+    # spawn_point groups (NORTH staging y=12..18 / SOUTH staging
+    # y=28..34) round-robined by seed; the central enemy cluster
+    # (3× 2tnk + 5× e1 at y=20) is symmetric across the map's
+    # mid-latitude so either staging faces an equivalent relay
+    # decision but no memorised approach corridor generalises across
+    # seeds.
     "coord-relay-attack",
     # Wave-5 Group G long-horizon "marathon survival" pack — lmgame-Bench
     # multi-hour endurance / SC2LE full-game extended testing / SRE

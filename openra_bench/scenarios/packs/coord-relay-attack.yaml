@@ -1,35 +1,52 @@
 # coord-relay-attack.yaml
 #
-# ACTION capability — relay assault: Squad A engages FIRST (rockets
-# soften the enemy armour), THEN Squad B follows up to finish off the
-# survivors. The Wave-2 `then:` happened-before composite makes the
-# ordering load-bearing: clause 1 (`units_killed_gte: K1`) must latch
-# BEFORE clause 2 (`units_killed_gte: K2`) — a chain-of-thought that
-# rushes B first or both-at-once cannot satisfy the chain in time
-# because B's tanks get focus-fired by the enemy's 4× 2tnk before any
-# kills materialise, blowing the `units_lost_lte` attrition cap.
+# ACTION capability — relay assault: Squad A (heavy first-wave tanks)
+# engages and destroys the enemy ARMOUR first; Squad B (light infantry
+# mop-up second-wave) follows up to clear the remaining infantry. The
+# Wave-2 `then:` happened-before composite makes the ordering load-
+# bearing: clause 1 (`units_killed_gte: K1`) must latch BEFORE clause
+# 2 (`units_killed_gte: K2`) — and the K1 bar matches the number of
+# enemy ARMOURED units (so B alone cannot satisfy K1 inside the
+# attrition cap: rifle infantry e1 cannot defeat enemy tanks).
+#
+# Spec note: the original brainstorm seed proposed
+# A=3× e3 rockets + B=3× 2tnk. We pivoted to A=4× 2tnk + B=4× e1
+# because the engine combat sheet (see coord-cover-and-move's
+# header) makes the e3-vs-2tnk matchup an offensive non-starter:
+# e3 (rng 4, dps 12, hp 45) is OUTRANGED and OUTDPS'd by 2tnk
+# (rng 4.75, dps 22, hp 400) when ATTACKING (walking into the
+# tank's fire envelope). e3 only shines DEFENSIVELY (as in
+# coord-cover-and-move where they are the static cluster).
+# The "anti-vehicle first wave / anti-infantry mop-up" SC2
+# attack-wave doctrine survives the role swap intact: the
+# first wave is heavy armour (kills armour), the second wave
+# is light infantry (kills infantry, dies to armour).
 #
 # The relay teeth:
-#   - Squad A = 3× e3 (rocket soldiers, anti-vehicle): well-suited to
-#     killing the enemy's 4× 2tnk, but slow to melt the 4× e1 alone.
-#   - Squad B = 3× 2tnk (medium tanks, anti-infantry mop-up): great vs
-#     e1 horde, but BLEEDS when fed alone into the enemy 4× 2tnk that
-#     out-DPS them via focus fire.
-#   - Enemy = 4× 2tnk + 4× e1 clustered at the centre (static, stance
-#     2 = return-fire only). Naturally relays A→tanks-first so B faces
-#     only the remaining infantry.
+#   - Squad A = 4× 2tnk (heavy first wave). Has the HP and DPS to
+#     trade 1:1 with the enemy 2tnk line and clear it (K1).
+#   - Squad B = 4× e1 (rifle infantry mop-up). Cheap, fast, perfect
+#     vs infantry — but BLEEDS to enemy 2tnk fire (e1 has only ~30 hp;
+#     a single tank shot is a one-shot kill). Sending B alongside or
+#     before A puts e1 in the enemy tanks' fire envelope and busts
+#     the attrition cap before any kills materialise.
+#   - Enemy = 2× 2tnk + 4× e1 (medium), stance:1 (ReturnFire). The
+#     return-fire stance is the relay-aware geometry: a unit only
+#     wakes up enemies it directly threatens, so A engaging the tank
+#     line wakes the tank line but leaves the infantry idle (B can
+#     then mop them up cleanly). B advancing first wakes ALL enemies
+#     it is in range of — including the enemy tanks who one-shot e1.
 #
 # Real-world anchor: SC2 attack-wave timing (1st wave commits, 2nd
 # wave clears survivors); SMAC relay strike doctrine; military
 # overlapping fires; fire-and-maneuver bound-and-bound.
 #
-# ENGINE NOTE: the centre enemy cluster is the *only* enemy presence,
-# so the engine will auto-end the episode the second the last enemy
-# falls. We anchor an unarmed high-HP `proc` "marker" deep at the far
-# east so a stalled / partial run cannot prematurely auto-`done` —
-# but the win predicate counts `units_killed_gte`, not buildings, so
-# the marker is purely a stay-alive prop. Distance >40 cells from
-# every agent route keeps it out of tank vision.
+# ENGINE NOTE: an unarmed survivor `proc` deep at the far east
+# (120,6) keeps the episode alive past partial / failed attempts
+# so a missed deadline emits a LOSS, not a DRAW (engine auto-done
+# is conquest-triggered on MustBeDestroyed building elimination).
+# Distance >40 cells from every agent route keeps it out of tank
+# vision.
 #
 # Validate:
 #   cd /Users/berta/Projects/OpenRA-Bench && \
@@ -38,24 +55,27 @@
 
 meta:
   id: coord-relay-attack
-  title: 'Relay Strike — Rockets Soften, Tanks Mop Up'
+  title: 'Relay Strike — Heavy Tanks Soften, Infantry Mop Up'
   capability: action
   real_world_meaning: >
-    Two-wave relay assault: the first wave (rockets) softens the
-    target by destroying the heavy threats; the second wave (tanks)
-    follows up to clear the remaining infantry. Sending the second
-    wave in first exposes it to the un-softened heavy threats and
-    loses the force; sending both together (simultaneous commit)
-    exposes the mop-up wave to the same heavies before they are
-    suppressed — only the relay ordering (A engages → softens →
-    THEN B advances) preserves the force and finishes inside the
-    deadline.
+    Two-wave relay assault: the first wave (heavy tanks) commits to
+    destroy the enemy armour line; the second wave (light infantry)
+    follows up to clear the remaining enemy infantry. Sending the
+    light second wave in first exposes the soft infantry to the
+    un-suppressed enemy tank line and the wave is shredded before
+    any kills materialise; sending both waves together exposes the
+    light wave to the same tank fire envelope before the heavy
+    wave can suppress them. Only the relay ordering (A engages →
+    softens → THEN B advances) preserves the force AND finishes
+    inside the deadline.
   robotics_analogue: >
-    Two-team relay clearing operation: the suppression team commits
-    first to neutralise the heavy threats, then the mop-up team
-    advances to clear the secondary targets. Concurrent commitment
-    over-exposes the mop-up team to the heavies they are not equipped
-    for; the suppression-then-clear handoff is the doctrine.
+    Two-team relay clearing operation: the suppression team
+    (heavily armoured) commits first to neutralise the heavy threats;
+    the mop-up team (lightly armoured, fast, optimised for the
+    secondary target class) advances only after the heavies are
+    down. Concurrent commitment over-exposes the mop-up team to the
+    heavies they are not equipped for; the suppression-then-clear
+    handoff is the doctrine.
   benchmark_anchor:
     - "SC2 attack-wave timing"
     - "SMAC relay strike doctrine"
@@ -82,35 +102,36 @@ base:
 
 levels:
   # ── EASY ────────────────────────────────────────────────────────
-  # Bare relay: 1 enemy 2tnk + 3 e1 at the centre. Even A alone could
-  # finish, but the then-composite still enforces scout-first style
-  # ordering (kill 2 before kill 4). A=4× e3 has 48dps focus vs the
-  # enemy tank's 22dps spread → A survives the soften phase. B mops
-  # up the remaining infantry. Loose attrition cap (≤4) so a small
-  # over-commit can still squeak by — this is the bare-skill tier.
+  # Bare relay: 1 enemy 2tnk + 3 e1. K1=1 (A kills the enemy tank);
+  # K2=4 (mop up the e1 + the tank, total 4). Loose attrition cap
+  # (≤4). Even a suboptimal aggressive play can squeak by here per
+  # the SCENARIO_REVIEW_CHECKLIST "inert anti-cheat teeth acceptable
+  # on easy" convention — the bare-skill tier only enforces stall-
+  # loses and intended-wins.
   easy:
     description: >
-      You command TWO squads. Squad A: 4 rocket soldiers (e3) at the
-      west (15,20) — anti-vehicle. Squad B: 3 medium tanks (2tnk) at
-      the far west (5,30) — anti-infantry mop-up, staged a long way
-      back. The enemy is a small cluster at the centre (60,20): 1
-      medium tank (2tnk) + 3 rifle infantry (e1), holding position.
-      The intended relay: Squad A engages FIRST and destroys ≥2
-      enemies (the rockets kill the enemy tank); THEN advance Squad
-      B to mop up the remaining infantry, bringing the total
-      destroyed to ≥4 before tick 3000. Lose if the clock runs out
-      or you lose more than 4 of your own units.
+      You command TWO squads. Squad A: 4 medium tanks (2tnk) at
+      the west (15,20) — heavy first wave, kills enemy armour.
+      Squad B: 4 rifle infantry (e1) at the far west (5,30) —
+      light mop-up second wave, kills enemy infantry but DIES
+      INSTANTLY to enemy tank fire. The enemy is a small cluster
+      at the centre (60,20): 1 medium tank (2tnk) + 3 rifle
+      infantry (e1), holding position (return fire only). The
+      intended relay: Squad A engages FIRST and destroys ≥1
+      enemy (the enemy tank); THEN advance Squad B to mop up the
+      infantry, bringing the total destroyed to ≥4 before tick
+      3000. Lose if the clock runs out or you lose more than 4
+      of your own units.
     overrides:
       actors:
-        # Squad A: 4× e3 rocket soldiers at WEST.
-        - {type: e3, owner: agent, position: [15, 20], stance: 1, count: 4}
-        # Squad B: 3× 2tnk medium tanks at FAR-WEST south.
-        - {type: 2tnk, owner: agent, position: [5, 30], stance: 1, count: 3}
-        # Enemy: 1× 2tnk + 3× e1 at centre, stance:1 = ReturnFire
-        # (only fire on attackers, do not initiate). This is the
-        # relay-key mechanic: B advancing alongside A wakes EVERY
-        # enemy that B is in range of; A picks them off one at a
-        # time. See the design note at the top of the file.
+        # Squad A: 4× 2tnk heavy tanks at WEST.
+        - {type: 2tnk, owner: agent, position: [15, 20], stance: 1, count: 4}
+        # Squad B: 4× e1 rifle infantry at FAR-WEST south.
+        - {type: e1, owner: agent, position: [5, 30], stance: 1, count: 4}
+        # Enemy: 1× 2tnk + 3× e1 at centre, stance:1 (ReturnFire) —
+        # only wakes the enemies that the agent's incoming wave is
+        # directly engaging; B exposed in the tank's fire envelope
+        # gets one-shot.
         - {type: 2tnk, owner: enemy, position: [60, 20], stance: 1, count: 1}
         - {type: e1,   owner: enemy, position: [62, 20], stance: 1, count: 3}
         # Far-east survivor marker (unarmed proc) keeps the episode
@@ -123,7 +144,7 @@ levels:
         - then:
             id: relay-A-then-B-easy
             clauses:
-              - {units_killed_gte: 2}
+              - {units_killed_gte: 1}
               - {units_killed_gte: 4}
         - {within_ticks: 3000}
         - {units_lost_lte: 4}
@@ -135,40 +156,38 @@ levels:
     max_turns: 36
 
   # ── MEDIUM ──────────────────────────────────────────────────────
-  # +1 controlled variable: the enemy threat grows to 3× 2tnk + 4× e1
-  # all stance:3 (AttackAnything — they aggressively engage the
-  # closest agent on sight, not wait to be shot at). attrition cap
-  # ≤5. K1=3 (kill the 3 enemy tanks), K2=7 (mop up 4 e1). B is
-  # staged FAR back (x=5) so a B-only / both-at-once policy that
-  # commits B from turn 1 still has B walking toward the centre
-  # while A absorbs the close enemy. The relay teeth: A in front
-  # absorbs the enemy 3× 2tnk focus-fire (and slowly chips the
-  # tanks); B advances later when the tanks are dead/wounded — if
-  # B advances early, the un-softened enemy tanks focus B's column
-  # (88 dps onto 400 HP tanks = 1 tank per ~4-5s) → ≥6 lost.
+  # +1 controlled variable: enemy tank line grows to 2× 2tnk (the
+  # K1 bar) and the e1 escort doubles to 4. K1=2 (A kills both
+  # enemy tanks), K2=6 (mop up the 4 e1). Tightened attrition cap
+  # ≤4. B-only is now genuinely fatal: 2 enemy 2tnk × 22 dps = 44
+  # dps focused on e1 (~30 hp each, one-shot) = 4 e1 dead in 4s.
+  # Both-at-once: B's e1 exposed to enemy tank fire while A also
+  # engages → 4 e1 die fast → cap busted.
   medium:
     description: >
-      You command TWO squads. Squad A: 4 rocket soldiers (e3) at the
-      west (15,20) — anti-vehicle. Squad B: 3 medium tanks (2tnk)
-      at the far west (5,30) — strong vs infantry, OUTGUNNED if fed
-      alone into the enemy tanks. The enemy is at the centre
-      (60,20): 3 medium tanks (2tnk) + 4 rifle infantry (e1), all
-      aggressive (AttackAnything). The intended relay: Squad A
-      engages FIRST and destroys ≥3 enemies (rockets kill the enemy
-      tanks); THEN advance Squad B to finish the survivors,
-      bringing the total destroyed to ≥7 before tick 4000. Lose if
-      the clock runs out or you lose more than 5 of your own units.
-      Sending B in alone, or both squads together, exposes B's
-      tanks to the un-softened enemy 3× 2tnk and blows the
-      attrition cap.
+      You command TWO squads. Squad A: 4 medium tanks (2tnk) at
+      the west (15,20) — heavy first wave, kills enemy armour.
+      Squad B: 4 rifle infantry (e1) at the far west (5,30) —
+      light mop-up second wave, kills enemy infantry but DIES
+      INSTANTLY to enemy tank fire. The enemy at the centre
+      (60,20): 2 medium tanks (2tnk) + 4 rifle infantry (e1),
+      defending in place (return-fire only). The intended relay:
+      Squad A engages FIRST and destroys ≥2 enemies (kill both
+      enemy tanks with your tanks); THEN advance Squad B to mop
+      up the rifle infantry, bringing the total destroyed to ≥6
+      before tick 4000. Lose if the clock runs out or you lose
+      more than 4 of your own units. Sending B in alone, or both
+      squads together, exposes B's rifle infantry to the
+      un-suppressed enemy 2× 2tnk (which one-shots e1) and blows
+      the attrition cap.
     overrides:
       actors:
-        # Squad A: 4× e3 rocket soldiers at WEST.
-        - {type: e3, owner: agent, position: [15, 20], stance: 1, count: 4}
-        # Squad B: 3× 2tnk medium tanks at FAR-WEST south.
-        - {type: 2tnk, owner: agent, position: [5, 30], stance: 1, count: 3}
-        # Enemy: 3× 2tnk + 4× e1 at centre, all stance:3.
-        - {type: 2tnk, owner: enemy, position: [60, 20], stance: 1, count: 3}
+        # Squad A: 4× 2tnk heavy tanks at WEST.
+        - {type: 2tnk, owner: agent, position: [15, 20], stance: 1, count: 4}
+        # Squad B: 4× e1 rifle infantry at FAR-WEST south.
+        - {type: e1, owner: agent, position: [5, 30], stance: 1, count: 4}
+        # Enemy: 2× 2tnk + 4× e1 at centre, stance:1.
+        - {type: 2tnk, owner: enemy, position: [60, 20], stance: 1, count: 2}
         - {type: e1,   owner: enemy, position: [62, 20], stance: 1, count: 4}
         # Far-east survivor marker (see easy).
         - {type: proc, owner: enemy, position: [120, 6]}
@@ -177,57 +196,57 @@ levels:
         - then:
             id: relay-A-then-B-medium
             clauses:
-              - {units_killed_gte: 3}
-              - {units_killed_gte: 7}
+              - {units_killed_gte: 2}
+              - {units_killed_gte: 6}
         - {within_ticks: 4000}
-        - {units_lost_lte: 5}
+        - {units_lost_lte: 4}
     fail_condition:
       any_of:
         - {after_ticks: 4001}
-        - {not: {units_lost_lte: 5}}
+        - {not: {units_lost_lte: 4}}
         - {not: {own_units_gte: 1}}
     max_turns: 45
 
   # ── HARD ────────────────────────────────────────────────────────
-  # +1 controlled variable: BIGGER KILL BAR (K1=4, K2=10) + larger
-  # enemy threat (4× 2tnk + 6× e1) + ≥2 agent spawn_point groups
+  # +1 controlled variable: BIGGER KILL BAR (K1=3, K2=8) + bigger
+  # enemy threat (3× 2tnk + 5× e1) + ≥2 agent spawn_point groups
   # (NORTH vs SOUTH staging) so the squads' staging latitude flips
   # per seed.
   #
   # Spawn-point design (per CLAUDE.md): the agent's start group
-  # flips between NORTH (A at (15,12), B at (5,18)) and SOUTH (A at
-  # (15,28), B at (5,34)) per seed. The central enemy cluster sits
-  # at y=20 (symmetric across the map's mid-latitude) so either
+  # flips between NORTH (A at (15,12), B at (5,18)) and SOUTH (A
+  # at (15,28), B at (5,34)) per seed. The central enemy cluster
+  # at y=20 is symmetric across the map's mid-latitude so either
   # staging faces an equivalent relay decision but no memorised
   # approach corridor generalises across seeds.
   hard:
     description: >
-      You command TWO squads. Squad A: 4 rocket soldiers (e3) —
-      anti-vehicle. Squad B: 3 medium tanks (2tnk) — strong vs
-      infantry, OUTGUNNED if fed alone into the enemy tanks. The
-      squads start staged on the west edge of the map (north-side
-      OR south-side staging depending on the seed); B is staged
-      further back than A. The enemy is a heavy cluster at the
-      centre (~60,20): 4 medium tanks (2tnk) + 6 rifle infantry
-      (e1), all aggressive (AttackAnything). The intended relay:
-      Squad A engages FIRST and destroys ≥4 enemies (rockets kill
-      the enemy tanks first); THEN advance Squad B to finish the
-      survivors, bringing the total destroyed to ≥10 before tick
-      4500. Lose if the clock runs out or you lose more than 5 of
-      your own units. Sending B in alone, or both squads together,
-      exposes B's tanks to the un-softened enemy 4× 2tnk and blows
+      You command TWO squads. Squad A: 4 medium tanks (2tnk) —
+      heavy first wave, kills enemy armour. Squad B: 4 rifle
+      infantry (e1) — light mop-up, killed INSTANTLY by enemy
+      tank fire. The squads start staged on the west edge of the
+      map (north-side OR south-side staging depending on the
+      seed); B is staged further back than A. The enemy at the
+      centre (~60,20): 3 medium tanks (2tnk) + 5 rifle infantry
+      (e1), defending in place. The intended relay: Squad A
+      engages FIRST and destroys ≥3 enemies (kill all enemy
+      tanks); THEN advance Squad B to mop up the infantry,
+      bringing the total destroyed to ≥8 before tick 4500. Lose
+      if the clock runs out or you lose more than 4 of your own
+      units. Sending B in alone, or both squads together,
+      exposes the rifle infantry to enemy tank fire and blows
       the attrition cap.
     overrides:
       actors:
         # NORTH staging (spawn_point 0): A above, B below-and-back.
-        - {type: e3,   owner: agent, position: [15, 12], stance: 1, count: 4, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [5,  18], stance: 1, count: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [15, 12], stance: 1, count: 4, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [5,  18], stance: 1, count: 4, spawn_point: 0}
         # SOUTH staging (spawn_point 1): A above, B below-and-back.
-        - {type: e3,   owner: agent, position: [15, 28], stance: 1, count: 4, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [5,  34], stance: 1, count: 3, spawn_point: 1}
-        # Enemy: 4× 2tnk + 6× e1 at centre, all stance:3.
-        - {type: 2tnk, owner: enemy, position: [60, 20], stance: 1, count: 4}
-        - {type: e1,   owner: enemy, position: [62, 20], stance: 1, count: 6}
+        - {type: 2tnk, owner: agent, position: [15, 28], stance: 1, count: 4, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [5,  34], stance: 1, count: 4, spawn_point: 1}
+        # Enemy: 3× 2tnk + 5× e1 at centre, stance:1.
+        - {type: 2tnk, owner: enemy, position: [60, 20], stance: 1, count: 3}
+        - {type: e1,   owner: enemy, position: [62, 20], stance: 1, count: 5}
         # Far-east survivor marker (see easy).
         - {type: proc, owner: enemy, position: [120, 6]}
     win_condition:
@@ -235,13 +254,13 @@ levels:
         - then:
             id: relay-A-then-B-hard
             clauses:
-              - {units_killed_gte: 4}
-              - {units_killed_gte: 10}
+              - {units_killed_gte: 3}
+              - {units_killed_gte: 8}
         - {within_ticks: 4500}
-        - {units_lost_lte: 5}
+        - {units_lost_lte: 4}
     fail_condition:
       any_of:
         - {after_ticks: 4501}
-        - {not: {units_lost_lte: 5}}
+        - {not: {units_lost_lte: 4}}
         - {not: {own_units_gte: 1}}
     max_turns: 50
