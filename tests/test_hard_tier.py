@@ -177,6 +177,14 @@ UPGRADED = [
     # always place and hit whichever latitude the agent occupies, so
     # a memorised pbox-lane placement cannot generalise across seeds.
     "tech-turtle-defensive-tech",
+    # Wave-4 Group D reasoning pack — SC2 bait-micro / military feint-
+    # and-flank doctrine. Hard tier defines two agent spawn_point groups
+    # (NORTH staging y=10 / SOUTH staging y=30) round-robined by seed;
+    # 6 enemy guards are split into NW + SW half-clusters around the
+    # objective `fact` so the working bait-direction + counter-attack-
+    # target pair flips per seed and a single memorised bait line
+    # cannot generalise across seeds.
+    "combat-bait-counter-attack",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
