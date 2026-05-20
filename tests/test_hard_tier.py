@@ -33,6 +33,7 @@ UPGRADED = [
     "artofwar-sequenced-citadel",
     "action-sequenced-execution",
     "coordination-staggered-window",
+    "harass-response-preserve",
     "strict-sequence",
     "perception-frontier-reading",
     "perception-target-vs-fog",

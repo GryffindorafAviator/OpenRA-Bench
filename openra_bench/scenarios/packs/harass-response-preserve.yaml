@@ -1,0 +1,242 @@
+# harass-response-preserve — perimeter alert inside live infrastructure
+#
+# A probing patrol oscillates inside your perimeter and chips your
+# refinery (`proc`). The intended fire-support-on-home-turf policy
+# WINS: keep the rifle squad ON the proc, order them to engage the
+# patroller as it swings into range; let the bot's own oscillation
+# bring it back to die. Every non-intended policy LOSES:
+#   • Stall (only observe): defenders are stance:0 HoldFire so they
+#     never auto-engage; the patroller chips the proc unopposed →
+#     proc razed → `not has_building:proc`.
+#   • Brute counter-harass (chase the patrol off-map east): defenders
+#     leave proc; even when they catch the bouncing patroller they
+#     overextend into the next alt-vector swing (hard tier: a 2nd
+#     spawn_point's patrol on a different y), eating ≥1 unit → the
+#     attrition cap bites; meanwhile proc is undefended → razed.
+#   • Yield (pull defenders back to map edge): proc undefended →
+#     razed → fail by `has_building:proc`.
+#
+# Real-world anchor: SOC Tier-2 triage — an alert appears inside the
+# perimeter and you must pick contain / monitor / hunt without
+# bleeding capacity to the distractor. The distractor (the patroller)
+# is small; the cost of overreacting (taking your fire team away from
+# live infrastructure) is the real failure mode. The bench mirrors
+# τ²-bench's distractor-handling under attrition and MineRL/MineDojo's
+# react-vs-pursue wildlife encounters.
+
+meta:
+  id: harass-response-preserve
+  title: 'Harass Response — Engage the Probe, Don''t Bleed the Defence'
+  capability: action
+  real_world_meaning: >
+    A perimeter alert appears inside live infrastructure (a small
+    probing patrol oscillates onto your refinery). You must pick
+    contain / monitor / hunt without bleeding capacity to the
+    distractor. The intended policy keeps the fire team ON the asset
+    and ORDERS them to engage as the probe swings into range — fire
+    support on home turf. Doing nothing (monitor) lets the probe chip
+    the asset to death; chasing the probe off-map (hunt) overextends
+    the team into the next alt-vector swing and abandons the asset;
+    pulling back (yield / retreat) also abandons the asset. The
+    discrimination is between "respond proportionally on home turf"
+    and three failure modes that all bleed something (the asset, the
+    team, or both).
+  robotics_analogue: >
+    Security robot reacting to a probe without leaving the patrol zone
+    unmanned: engage the intruder within the asset's defended footprint;
+    do not pursue past the leash or the parallel sector goes uncovered.
+  benchmark_anchor:
+    - "τ²-bench distractor handling"
+    - "MineRL react vs pursue wildlife"
+    - "SOC Tier-2 triage: contain vs monitor vs hunt"
+    - "perimeter alert response under preservation constraint"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+# Enemy is a scripted `patrol` (engine bot): each unit oscillates ±8
+# cells along x from its spawn cell, with Defend stance auto-firing
+# on enemies in weapon range. The patrol anchor [22,20] makes the
+# probe bounce between [14,20] (right on top of proc[16,20]) and
+# [30,20] (well inside agent territory) — every swing west puts the
+# probe in range to chip proc unless engaged.
+#
+# Defenders are stance:0 (HoldFire) — they DO NOT auto-engage. The
+# intended policy must explicitly order them onto the probe; the
+# stall policy that issues no orders leaves the probe unopposed.
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: patrol}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 6000}
+  actors:
+    # Refinery (the harass target) — a building on the perimeter,
+    # within the probe's oscillation arc. has_building:proc enforces
+    # its survival as a hard win predicate.
+    - {type: proc, owner: agent, position: [16, 20]}
+    # 5 defender riflemen clustered AT the proc, HoldFire (stance:0)
+    # so they only engage on explicit orders — stalling cannot win
+    # by accident.
+    - {type: e1, owner: agent, position: [14, 18], stance: 0}
+    - {type: e1, owner: agent, position: [14, 20], stance: 0}
+    - {type: e1, owner: agent, position: [14, 22], stance: 0}
+    - {type: e1, owner: agent, position: [13, 19], stance: 0}
+    - {type: e1, owner: agent, position: [13, 21], stance: 0}
+    # Enemy probe — 1 e1 on the patrol bot, oscillating [14,20]<->[30,20]
+    # (PATROL_RADIUS = 8 in scripted_bot.rs).
+    - {type: e1, owner: enemy, position: [22, 20], stance: 2}
+    # Persistent enemy marker (far east, off the patrol arc): keeps
+    # the episode alive past the moment the probe(s) die, so the
+    # win/fail evaluator sees the terminal `has_building:proc` and
+    # `within_ticks` state instead of engine auto-done on enemy wipe.
+    - {type: fact, owner: enemy, position: [120, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare skill: one probe, loose attrition cap. Stall still LOSES
+  # (proc gets razed because defenders are HoldFire); brute chase
+  # LOSES (proc razed while team is east); yield LOSES (proc razed);
+  # intended fire-support WINS comfortably.
+  easy:
+    description: >
+      A single enemy rifleman is patrolling INSIDE your perimeter,
+      bouncing between (14,20) and (30,20). Every western swing it
+      chips your refinery (`proc` at 16,20). Your 5 riflemen are on
+      HOLD-FIRE — they will not engage unless you order it. Keep them
+      ON the refinery and order them to attack the probe as it
+      swings in; let your own walls bring it to you. Win when the
+      probe is dead, the refinery still stands, and you have not
+      lost more than 2 of your own — before tick 4500. Sitting idle
+      (the probe destroys the refinery) and chasing the probe off
+      east (refinery undefended) both LOSE.
+    overrides: {}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {own_units_gte: 4}
+        - {units_lost_lte: 2}
+        - {has_building: proc}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {has_building: proc}}
+    max_turns: 55
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a SECOND probe stacked at the same anchor
+  # (chip damage doubles), tighter attrition cap (1), and the strict
+  # `own_units_gte:5` rider — the team must arrive whole.
+  medium:
+    description: >
+      Two enemy riflemen patrol the same arc inside your perimeter,
+      bouncing between (14,20) and (30,20). Hold the line ON your
+      refinery (`proc` at 16,20), order BOTH probes engaged as they
+      swing west; do not chase them east. Win when ≥2 enemies are
+      down, the refinery still stands, ≥5 of your team are alive
+      and you have not lost more than 1 — before tick 4500. Sitting
+      idle (refinery dies under double chip), chasing the probes
+      east (refinery undefended OR team caught out), or pulling back
+      (refinery dies) all LOSE.
+    overrides:
+      actors:
+        - {type: proc, owner: agent, position: [16, 20]}
+        - {type: e1, owner: agent, position: [14, 18], stance: 0}
+        - {type: e1, owner: agent, position: [14, 20], stance: 0}
+        - {type: e1, owner: agent, position: [14, 22], stance: 0}
+        - {type: e1, owner: agent, position: [13, 19], stance: 0}
+        - {type: e1, owner: agent, position: [13, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [22, 20], stance: 2, count: 2}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 2}
+        - {own_units_gte: 5}
+        - {units_lost_lte: 1}
+        - {has_building: proc}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 1}}
+        - {not: {has_building: proc}}
+    max_turns: 55
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 controlled variables versus medium:
+  #   1. THREE probes on TWO seed-driven spawn vectors — the
+  #      defenders' staging latitude (north y=18 vs south y=22)
+  #      round-robins by seed (spawn_point groups). A second asset
+  #      (`tent`) sits adjacent to proc so the assets share one
+  #      defended footprint that all 5 defenders can cover from
+  #      either staging slot; the seed varies which approach lane
+  #      faces the brunt of the chip-volley.
+  #   2. Strict attrition: lose ZERO. Both `proc` AND `tent` must
+  #      still stand.
+  # The intended fire-support-on-home-turf policy wins (HoldFire
+  # defenders + explicit attack_unit on each probe in turn — they
+  # arrive serially as the patrol script bounces them in). Stall:
+  # the triple chip-volley razes the assets unopposed. Chase: the
+  # bouncing probes outpace pursuit (PATROL_RADIUS=8 in two beats),
+  # defenders overextend into [22..30,20] while the next swing
+  # arrives — assets die undefended. Yield: same — assets fall.
+  hard:
+    description: >
+      THREE enemy riflemen probe your perimeter on the central
+      latitude (anchor 22,20 → bouncing 14..30,20). Your refinery
+      (`proc` at 16,20) AND your adjacent barracks (`tent` at 18,20)
+      must BOTH still stand. Your 5 riflemen stage on a seed-varied
+      latitude (north y=18 or south y=22) — both slots cover BOTH
+      assets. They are on HOLD-FIRE; order them to engage each probe
+      as it swings west into your assets' footprint. Win when ≥3
+      probes are dead, both buildings still stand, ≥5 of you are
+      alive and you have NOT lost a single defender — before tick
+      4500. Idling, chasing east, or pulling back all LOSE.
+    overrides:
+      actors:
+        # Both assets, duplicated across BOTH spawn_point groups —
+        # `expand_scenario_actors` (openra-data/src/oramap.rs) drops
+        # agent actors lacking a matching spawn_point when ANY
+        # agent actor uses spawn_point.
+        - {type: proc, owner: agent, position: [16, 20], spawn_point: 0}
+        - {type: tent, owner: agent, position: [18, 20], spawn_point: 0}
+        - {type: proc, owner: agent, position: [16, 20], spawn_point: 1}
+        - {type: tent, owner: agent, position: [18, 20], spawn_point: 1}
+        # spawn_point 0 — defenders staged NORTH of the asset row
+        # (y=17..19); both proc (16,20) and tent (18,20) are within
+        # rifle range from this line.
+        - {type: e1, owner: agent, position: [14, 17], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [14, 18], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [14, 19], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [13, 17], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [13, 19], stance: 0, spawn_point: 0}
+        # spawn_point 1 — defenders staged SOUTH of the asset row
+        # (y=21..23); same two assets, attacked from the same arc.
+        - {type: e1, owner: agent, position: [14, 21], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [14, 22], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [14, 23], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [13, 21], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [13, 23], stance: 0, spawn_point: 1}
+        # Three probes stacked at the central anchor — they bounce
+        # together but engage serially as defenders kill them one
+        # by one. The triple chip-volley is the controlled-variable
+        # vs medium's two; the stall/chase/yield losses scale with it.
+        - {type: e1, owner: enemy, position: [22, 20], stance: 2, count: 3}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {own_units_gte: 5}
+        - {units_lost_lte: 0}
+        - {has_building: proc}
+        - {has_building: tent}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {has_building: proc}}
+        - {not: {has_building: tent}}
+    max_turns: 55
