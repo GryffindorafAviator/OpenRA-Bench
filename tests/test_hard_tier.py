@@ -754,6 +754,26 @@ UPGRADED = [
     # discipline generalises across spawns but a memorised "scout at
     # y=20" opening cannot.
     "scout-count-defenders",
+    # Wave-8 REASONING pack — PlanBench replanning under exogenous loss /
+    # disaster recovery / SC2 rebuild-after-trade anchor. The agent
+    # inherits a complete production base (fact + proc + powr + weap +
+    # harv); a pre-placed low-HP `powr` is destroyed in the opening
+    # turn by an adjacent stance:3 `4tnk` strike (1× on easy, 2× on
+    # medium/hard); the agent must `build('powr')` + `place_building`
+    # adjacent to the surviving `fact` with the indivisible reserve.
+    # The win clause uses `then:[not building_count_gte powr, then
+    # building_count_gte powr]` so destruction-then-rebuild is enforced
+    # by the happened-before latch (CLAUDE.md: `has_building` cannot be
+    # used here because its accumulating set never toggles back to
+    # false after destruction). Hard tier defines two agent spawn_point
+    # groups (NORTH base y=14..22 / SOUTH base y=22..30) round-robined
+    # by seed; the full base (fact + proc + powr + weap + harv +
+    # defender 3tnk) is duplicated across both groups per CLAUDE.md
+    # spawn_point filter rules, and the 2× 4tnk strikers are duplicated
+    # at BOTH latitudes (enemy actors don't honour spawn_point) to keep
+    # per-spawn strike geometry symmetric — a memorised "(10,18) rebuild
+    # cell" cannot generalise across seeds.
+    "build-engineer-rebuild-after-loss",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

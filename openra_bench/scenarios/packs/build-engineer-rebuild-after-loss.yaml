@@ -1,0 +1,393 @@
+# Validate: python -m openra_bench.scenarios.validate packs/build-engineer-rebuild-after-loss.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# BUILD-ENGINEER-REBUILD-AFTER-LOSS (Wave-8 REASONING: replanning under
+# exogenous LOSS of a power-grid building mid-episode).
+#
+# Real-world anchor: PlanBench replanning under exogenous loss /
+# disaster recovery after a critical-infrastructure loss / SC2 rebuild-
+# after-trade / military force-regen / industrial process restart
+# after an unplanned shutdown.
+#
+# Pack frame: the agent inherits a complete production base
+# (`fact` + `proc` + `powr` + `weap` + harv + ore patch); but the
+# pre-placed Power Plant (`powr`) starts at LOW HEALTH and a pre-placed
+# enemy strike force (1-2× 4tnk, stance:3) sits adjacent and lands its
+# opening salvo on tick 0 — the `powr` is destroyed within the first
+# 1-2 turns. The agent must:
+#   1. notice the `powr` died (the `building_count_gte:powr:1` clause
+#      drops to false on live `own_buildings`),
+#   2. `build('powr')` from the surviving `fact` with the reserve
+#      cash (powr cost = 300),
+#   3. place it adjacent to the `fact` so production continues
+#      (`proc` and `weap` both have `powr` as a prerequisite —
+#      gamerules.rs:340-343 — but here both pre-placed structures
+#      remain intact, so income / production never stops; the
+#      reasoning task is the BUILD-ENGINEER replan AFTER the loss),
+#   AND the win predicate's `then:[not powr, then powr]` happened-before
+#   latch CLOSES only when both a destruction event AND a rebuild event
+#   have been observed in that order; if `powr` is never destroyed (the
+#   strike misses) or never rebuilt (stall / wrong-spend), the win
+#   never fires and the reachable timeout LOSS bites.
+#
+# Difficulty axis (one new controlled variable per tier):
+#   • easy   — LIGHT enemy strike (1× 4tnk staged adjacent to the
+#              low-HP `powr`). One striker dies after its kill; the
+#              rebuild reserve covers exactly one `powr` (300 cr)
+#              plus modest slack. Bare skill: detect-loss + rebuild.
+#   • medium — HEAVY strike (2× 4tnk staged adjacent to powr; the
+#              second tank guarantees the kill on tick 1 even if the
+#              first is intercepted, and they engage the new powr if
+#              it lands too close). Same reserve, tighter clock. The
+#              agent must also pick a SAFE placement cell so the
+#              fresh powr survives the lingering strikers.
+#   • hard   — HEAVY strike (2× 4tnk) + 2 seed-driven AGENT
+#              `spawn_point` groups (NORTH base y=14 / SOUTH base
+#              y=26). Per CLAUDE.md `spawn_point` filter rules: ANY
+#              agent actor with a spawn_point causes agent actors
+#              WITHOUT a spawn_point to be FILTERED OUT — so the full
+#              base (fact + proc + powr + weap + harv) is DUPLICATED
+#              across both spawn groups at the spawn-matched cells.
+#              The enemy strike `4tnk`s carry NO spawn_point so they
+#              always place; we duplicate them at BOTH y-latitudes to
+#              keep the strike geometry symmetric per spawn. A
+#              memorised "place powr at (10,18)" rebuild cannot
+#              generalise across the seed-flip.
+#
+# Why this pack is different from `rob-cash-depletion-recovery`:
+#   • `rob-cash-depletion-recovery` destroys the REFINERY (proc) and
+#     tests ECONOMIC recovery (income channel restart); the harv
+#     loop must be re-issued post-rebuild. Win = economy_value bar.
+#   • `build-engineer-rebuild-after-loss` destroys the POWER PLANT
+#     (powr) and tests BUILD-ENGINEER replan (rebuild the power
+#     prerequisite for the production chain). Win = then-latch over
+#     destruction-then-rebuild + live-count of proc/powr; no
+#     economy bar, no harvest re-issue. The reasoning chain is
+#     "notice + rebuild + place safely", not "notice + rebuild +
+#     re-issue harvest".
+#
+# Why this pack is different from `rob-unit-loss-recovery`:
+#   • `rob-unit-loss-recovery` kills a UNIT (3tnk) and tests force-
+#     regen via `build('3tnk')`. Win = unit_type_count_gte + kills.
+#   • `build-engineer-rebuild-after-loss` kills a BUILDING (powr) and
+#     tests structure-regen via `build('powr') + place_building`. The
+#     recovery is one chain step deeper (build + place + adjacency).
+#
+# Why this pack is different from `build-power-online-first`:
+#   • `build-power-online-first` tests the SOP-OPENING sequence
+#     (powr THEN proc from a bare fact, no enemy). Pure ordering
+#     puzzle. No destruction event.
+#   • `build-engineer-rebuild-after-loss` tests the MID-EPISODE
+#     REPLAN after an exogenous DESTRUCTION event. The starting
+#     state ALREADY has a complete chain; the test is reactive
+#     rebuild discipline under an exogenous loss.
+#
+# ENGINE FACTS verified (CLAUDE.md + cousin packs 2026-05-20):
+#  1. `powr` cost = 300 (build-power-online-first.yaml line 33). One
+#     rebuild fits in any reasonable reserve.
+#  2. `health: N` actor field is an HP PERCENTAGE (1-100) per
+#     openra_rl_training.scenario.ActorPlacement (line 196). Setting
+#     a pre-placed `powr` to `health: 15` puts it at ~15% HP — a
+#     single 4tnk adjacent at stance:3 (auto-fire on contact, ~40
+#     dps) destroys it inside the first decision turn (~tick 90).
+#  3. `building_count_gte` reads the LIVE `own_buildings` list per
+#     frame (win_conditions.py lines 190-191), so `not
+#     building_count_gte:{powr,1}` fires the instant the live powr
+#     count drops to 0 — unlike `has_building` which uses the
+#     accumulating `own_building_types` set (CLAUDE.md footgun) and
+#     would NEVER toggle false after a destruction.
+#  4. `then:[A,B]` is the Wave-2 stateful happened-before latch
+#     (win_conditions.py lines 220-262): clause 1 must observe-true
+#     AT LEAST ONCE before clause 2 can latch. So `then:[not powr,
+#     then powr]` requires BOTH a "powr currently destroyed" frame
+#     AND (subsequently) a "powr currently alive" frame to latch.
+#     A stall (never destroyed, never rebuilt) ⇒ clause 1 never
+#     latches ⇒ never closes ⇒ LOSS.
+#  5. Enemy `4tnk` at stance:3 (AttackAnything) fires on contact at
+#     tick 0; pre-placed adjacent to the low-HP `powr` it lands the
+#     kill before the agent's first decision turn (~tick 90).
+#  6. The persistent unarmed enemy `fact` marker far east at
+#     (120,20) keeps the engine's all-enemies-eliminated auto-`done`
+#     path gated, so non-winners reach the deadline as LOSS (not
+#     DRAW). After the strike force dies to the agent's defenders,
+#     the marker keeps the episode running.
+#  7. Tick alignment (CLAUDE.md): max_turns 30 → ceiling 93 + 90·29
+#     = 2703 > 2700 ✓. within_ticks 2700; fail after_ticks 2701
+#     (non-finisher LOSES on the next tick after the window).
+#  8. `place_building` does NOT enforce build-adjacency (CLAUDE.md);
+#     a `build('powr') + place_building` chain works at arbitrary
+#     in-bounds coords. The intended idiom is "place adjacent to
+#     the surviving fact" so the new powr provides power and is
+#     out of the strike-force kill radius.
+#  9. Hard tier `spawn_point` rule (CLAUDE.md oramap.rs footgun):
+#     ANY agent actor with spawn_point causes agent actors WITHOUT
+#     spawn_point to be FILTERED OUT — so the FULL base must be
+#     DUPLICATED across both spawn groups at spawn-matched cells.
+#     Enemy actors do NOT honour spawn_point (they always place
+#     regardless of the chosen group), so the strike `4tnk`s are
+#     declared with no spawn_point and we duplicate them at BOTH
+#     y-latitudes to keep per-spawn strike geometry symmetric.
+
+meta:
+  id: build-engineer-rebuild-after-loss
+  title: 'Build-Engineer: Rebuild Power Plant After Mid-Episode Loss'
+  capability: reasoning
+  real_world_meaning: >
+    Reactive replan after exogenous loss of a critical-infrastructure
+    building (the Power Plant) mid-episode. An ongoing operation has
+    its power-grid building unexpectedly destroyed by an enemy strike
+    in the opening; the agent inherits a complete production chain
+    (Construction Yard + Refinery + Power Plant + War Factory + Ore
+    Truck + ore patch) and a reserve cash budget; the deadline is
+    real. The model must notice the destruction (the live building
+    count for the Power Plant drops to zero), commit the reserve to
+    rebuilding the Power Plant (not to army units, not to a different
+    structure, not to nothing) AND place it adjacent to the surviving
+    Construction Yard so production stays online — fast enough that
+    the rebuild closes the happened-before latch before the deadline
+    bites.
+  robotics_analogue: >
+    Disaster recovery after a critical-infrastructure node is
+    destroyed by an external event mid-mission. The autonomous
+    operator inherits a working processing site, a reserve allowance
+    sufficient for exactly one replacement substation, and a strict
+    operational deadline. Recovery requires identifying the lost
+    asset, committing the reserve to rebuilding the same kind of
+    asset (not to defenders, not to expansion, not to nothing), and
+    siting it safely — close enough to the surviving site that the
+    powered loads stay online, far enough from the lingering threat
+    that the new asset survives.
+  benchmark_anchor:
+    - "PlanBench replanning under exogenous loss"
+    - "disaster recovery"
+    - "exogenous loss"
+    - "SC2 rebuild-after-trade"
+  author: openra-bench-wave-8
+
+base_map: rush-hour-arena
+# Rebuild reserve: 500 cr funds one `powr` (300 cr) with $200 slack.
+# A model that spends the reserve on an extra build (e.g. `e1` at
+# 100 cr four times) starves the powr rebuild → LOSS.
+starting_cash: 500
+
+base:
+  agent: {faction: allies}
+  # No bot — the strike force is a small pre-placed `4tnk` squad at
+  # stance:3 (AttackAnything). Their job is one-shot: destroy the
+  # low-HP `powr` on tick 0..90, then die to the agent defenders /
+  # become a non-issue for the rebuild. A scripted bot (hunt) would
+  # over-pressure the rebuild (it would target the new powr too) and
+  # make the rebuild test geometrically infeasible inside the budget.
+  enemy: {faction: soviet, cash: 0}
+  # Build-engineer toolset: build + place_building drive the rebuild;
+  # move_units + attack_unit let the agent defend if needed; harvest
+  # keeps the ore income credible (the harv is present in actors).
+  tools: [observe, build, place_building, harvest, move_units, attack_unit, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 4000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare skill: ONE 4tnk striker adjacent to a low-HP powr. The
+  # striker kills powr inside the first decision turn (~tick 90),
+  # then engages the agent's lone defender 3tnk and dies (3tnk vs
+  # 4tnk: light vs heavy, 4tnk wins ~60% but the kill timeline is
+  # ~tick 200-300 and the proc/fact are out of the striker's
+  # follow-on path). Reserve 500 cr funds the powr rebuild with
+  # $200 slack. max_turns 30 → ceiling 2703 > 2700 ✓.
+  easy:
+    description: >
+      You inherit a working production base — a Construction Yard
+      ('fact'), an Ore Refinery ('proc'), a Power Plant ('powr'),
+      a War Factory ('weap'), and one Ore Truck ('harv') with an
+      ore patch — and $500 cash. The Power Plant is at LOW HEALTH
+      and a single enemy heavy tank ('4tnk') is staged adjacent to
+      it; the Power Plant will be DESTROYED in the opening turn.
+      To recover: queue another Power Plant ('build' "powr",
+      cost 300) and place it adjacent to the Construction Yard so
+      production stays online. Win = the Power Plant must be
+      DESTROYED and then REBUILT, AND you must still own a
+      Refinery, before tick 2700. Stalling, ignoring the rebuild,
+      or spending the reserve on army units all miss the bar.
+    starting_cash: 500
+    overrides:
+      actors:
+        # Base layout: fact at the west, powr to the east (in the
+        # strike lane), proc + weap on the inside (safe), harv + mine
+        # on the far east of the base.
+        - {type: fact, owner: agent, position: [8, 18]}
+        # LOW-HP powr placed in the strike lane (x=14) so the
+        # adjacent 4tnk has a clean shot. health:15 = 15% HP.
+        - {type: powr, owner: agent, position: [14, 18], health: 15}
+        - {type: proc, owner: agent, position: [10, 18]}
+        - {type: weap, owner: agent, position: [12, 18]}
+        # Harvester + ore patches (income credible, not load-bearing
+        # for the win predicate).
+        - {type: harv, owner: agent, position: [10, 20]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        # ONE 3tnk defender south of the strike lane — engages the
+        # 4tnk AFTER it lands the powr kill, so the strike force
+        # eventually dies and the rebuild can complete unmolested.
+        - {type: '3tnk', owner: agent, position: [16, 22]}
+        # LIGHT strike: one enemy 4tnk staged adjacent to the
+        # low-HP powr at (15,18). At stance:3 it auto-fires on
+        # contact at tick 0 and destroys the powr inside the first
+        # decision turn.
+        - {type: '4tnk', owner: enemy, position: [15, 18], stance: 3}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee
+        # (keeps the engine from auto-`done` when the strike force
+        # falls before the deadline is evaluated).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: build-engineer-rebuild-after-loss-E
+            clauses:
+              # Clause A: powr currently DESTROYED (live count < 1).
+              # `not building_count_gte` reads the LIVE buildings
+              # list per frame, so this latches the destruction
+              # event (unlike `has_building` which uses the
+              # accumulating set and never toggles back to false).
+              - not: {building_count_gte: {type: powr, n: 1}}
+              # Clause B: powr currently ALIVE again (live count
+              # ≥1) — i.e. the rebuild has landed.
+              - building_count_gte: {type: powr, n: 1}
+        - building_count_gte: {type: proc, n: 1}
+        - within_ticks: 2700
+    fail_condition:
+      any_of:
+        - after_ticks: 2701
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVIER strike (2× 4tnk vs easy's 1).
+  # The second tank guarantees the kill on tick 1 even if the first
+  # is intercepted; both tanks will linger and engage the new powr
+  # if the agent places it too close. The agent must pick a SAFE
+  # placement cell (e.g. adjacent to the fact on the OPPOSITE side
+  # from the strike lane). Reserve still 500 cr, deadline tightened.
+  medium:
+    description: >
+      Same base as easy (fact, proc, low-HP powr, weap, harv, mine,
+      one 3tnk defender, $500 reserve) but the enemy strike is now
+      TWO heavy tanks adjacent to the Power Plant. The second tank
+      guarantees the kill on the opening turn AND will engage a
+      fresh Power Plant that you place too close to the strike
+      lane. To recover: queue another Power Plant and place it
+      ADJACENT TO THE CONSTRUCTION YARD on the far side from the
+      strike lane (e.g. west of the fact). Win = the Power Plant
+      must be DESTROYED and then REBUILT, AND you must still own a
+      Refinery, before tick 2700. Stalling, ignoring the rebuild,
+      placing the new powr in the strike lane (where the lingering
+      4tnks will destroy it again), or spending the reserve on
+      army units all miss the bar.
+    starting_cash: 500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [14, 18], health: 15}
+        - {type: proc, owner: agent, position: [10, 18]}
+        - {type: weap, owner: agent, position: [12, 18]}
+        - {type: harv, owner: agent, position: [10, 20]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: '3tnk', owner: agent, position: [16, 22]}
+        # HEAVIER strike: TWO 4tnks adjacent to the powr.
+        - {type: '4tnk', owner: enemy, position: [15, 17], stance: 3}
+        - {type: '4tnk', owner: enemy, position: [15, 19], stance: 3}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: build-engineer-rebuild-after-loss-M
+            clauses:
+              - not: {building_count_gte: {type: powr, n: 1}}
+              - building_count_gte: {type: powr, n: 1}
+        - building_count_gte: {type: proc, n: 1}
+        - within_ticks: 2700
+    fail_condition:
+      any_of:
+        - after_ticks: 2701
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 30
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven AGENT
+  # spawn_point groups (NORTH base y=14 / SOUTH base y=26) round-
+  # robined by seed. Per CLAUDE.md `spawn_point` rules:
+  #   * ANY agent actor with spawn_point ⇒ agent actors WITHOUT
+  #     spawn_point are filtered out, so the FULL base (fact + proc
+  #     + powr + weap + harv + defender 3tnk) is DUPLICATED across
+  #     both spawn groups at spawn-matched cells.
+  #   * Enemy actors do NOT honour spawn_point (they always place);
+  #     so we DUPLICATE the 2× 4tnk strike at BOTH y-latitudes
+  #     (NORTH y=14 and SOUTH y=26) to keep per-spawn strike
+  #     geometry symmetric. The foreign-latitude strikers (e.g. the
+  #     y=26 strikers when the agent spawns NORTH) sit dormant at
+  #     the dormant powr location (the dormant base buildings are
+  #     filtered out by the spawn round-robin) and never engage
+  #     active agent assets. The active-latitude strikers do their
+  #     one-shot powr kill identically to medium.
+  hard:
+    description: >
+      Same exogenous-loss-and-rebuild task as medium (2× 4tnk
+      strike, low-HP Power Plant, $500 reserve, tick 2700 deadline)
+      but your base may begin in the NORTH band (y≈14..22) OR the
+      SOUTH band (y≈22..30) of the map depending on the seed. Read
+      the Construction Yard's actual position from the observation
+      and place the replacement Power Plant adjacent to it on the
+      far side from the strike lane. A memorised "(10,18)" rebuild
+      cell will mis-place out of build radius on one of the two
+      spawns. Win = the Power Plant must be DESTROYED and then
+      REBUILT, AND you must still own a Refinery, before tick
+      2700. The same lazy / wrong-spend plays lose as on medium.
+    starting_cash: 500
+    overrides:
+      actors:
+        # ── SPAWN 0 (NORTH base, y=14..22) ────────────────────────
+        - {type: fact, owner: agent, position: [8, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 18], health: 15, spawn_point: 0}
+        - {type: proc, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: weap, owner: agent, position: [12, 18], spawn_point: 0}
+        - {type: harv, owner: agent, position: [10, 20], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [16, 22], spawn_point: 0}
+        # ── SPAWN 1 (SOUTH base, y=22..30) ────────────────────────
+        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 26], health: 15, spawn_point: 1}
+        - {type: proc, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: weap, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [16, 30], spawn_point: 1}
+        # Neutral mine shared across both spawns (mines have no
+        # spawn_point — neutral actors always place per the same
+        # oramap.rs rule that lets enemy actors always place).
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 26]}
+        # ── Enemy strike (duplicated at both latitudes; enemy
+        # actors do NOT honour spawn_point — CLAUDE.md). The
+        # active-latitude strikers do the powr kill; the
+        # foreign-latitude strikers sit at the dormant-spawn powr
+        # location which is filtered out by the spawn round-robin,
+        # so they never engage active agent assets.
+        - {type: '4tnk', owner: enemy, position: [15, 17], stance: 3}
+        - {type: '4tnk', owner: enemy, position: [15, 19], stance: 3}
+        - {type: '4tnk', owner: enemy, position: [15, 25], stance: 3}
+        - {type: '4tnk', owner: enemy, position: [15, 27], stance: 3}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: build-engineer-rebuild-after-loss-H
+            clauses:
+              - not: {building_count_gte: {type: powr, n: 1}}
+              - building_count_gte: {type: powr, n: 1}
+        - building_count_gte: {type: proc, n: 1}
+        - within_ticks: 2700
+    fail_condition:
+      any_of:
+        - after_ticks: 2701
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 30
