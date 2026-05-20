@@ -136,6 +136,15 @@ UPGRADED = [
     # leaning (drives to SE candidate) so the per-seed nearest-
     # target assignment flips.
     "expansion-balanced-2-base-defended",
+    # Group F replan-after-loss seed (Wave-4): PlanBench replanning
+    # / SC2 replace-killed-workers idiom. The agent starts with 3
+    # harvs + indivisible reserve; a raider 4tnk kills 1 harv early
+    # (medium) or 2 staggered on hard; agent must build('harv') and
+    # re-issue `harvest`. Hard defines 2 agent spawn_point groups
+    # (NORTH base y=14 / SOUTH base y=26) with a SHARED central patch
+    # geometry, so the replanning task is symmetric per spawn but a
+    # memorised base opening cannot generalise.
+    "econ-replace-dead-harvester",
     # Wave-4 salvaged-from-worktree packs: agents finished authoring
     # and validating but ran out of usage budget mid-push; rescued
     # YAML+tests from their worktree branches and committed from the
