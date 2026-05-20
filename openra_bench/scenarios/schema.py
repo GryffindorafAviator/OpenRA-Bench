@@ -62,6 +62,19 @@ class ScenarioMeta(BaseModel):
         ..., min_length=10, description="Concrete robotics/agentic parallel"
     )
     author: str = "unknown"
+    # Real-world / benchmark anchors — every pack must name at least one
+    # external referent (a named benchmark or a real-world capability)
+    # so the scenario carries transfer signal, not just RTS novelty.
+    # Multi-anchor packs are common (e.g. tool-fidelity → BFCL V4 +
+    # τ²-bench + IFBench), so this is a list. The list-non-empty rule
+    # is suite-enforced by tests/test_benchmark_anchor_required.py.
+    benchmark_anchor: list[str] = Field(
+        default_factory=list,
+        description="Named benchmarks and/or real-world capabilities this "
+        "scenario transfers to (e.g. ['MicroRTS rush-defense', "
+        "'SC2LE defend-the-cheese tempo', 'incident-response: defend "
+        "production infra under live attack']).",
+    )
     # Hygiene (audit): "quarantine" keeps the file on disk and runnable
     # by explicit --packs, but excludes it from the default eval set so
     # it doesn't dilute scores / the leaderboard. Used for the
