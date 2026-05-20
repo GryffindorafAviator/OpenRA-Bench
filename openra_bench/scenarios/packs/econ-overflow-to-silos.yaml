@@ -1,0 +1,360 @@
+# Validate: python -m openra_bench.scenarios.validate packs/econ-overflow-to-silos.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ECON-OVERFLOW-TO-SILOS (Wave-8 — high-throughput economy hits the
+# refinery storage cap fast; the agent MUST build silos to absorb the
+# overflow or harvested income above the cap is silently wasted on
+# deposit and the EV bar is unreachable inside the clock).
+#
+# Real-world anchor: capacity planning / distributed-systems back-
+# pressure / FIFO perishable inventory cap. A producer fleet (the
+# harvesters) generates income at a sustained rate that exceeds the
+# consumer (refinery storage). When the buffer (proc's 2000-ore cap)
+# saturates, every new unit deposited beyond the cap is LOST — the
+# classical back-pressure footgun. The fix is to add buffer capacity
+# (silos, cap +3000 each) so the producer's throughput is absorbed,
+# the working capital is preserved, and the EV bar lands inside the
+# tick budget.
+#
+# Pack frame: the agent owns a minimum revenue kit (fact + proc +
+# powr + many harvs on a dense adjacent ore patch column) and a low
+# starting cash buffer. Income flows IN HIGH (7 harvs unload in
+# parallel on the medium tier). The storage cap on harvested ore is
+# 2000 from the proc; once saturated, the engine deposits become
+# `(stored + value).min(cap)` (see comments in econ-silo-vs-spend.yaml;
+# the cap+overflow mechanic is the same).
+#
+# The model's decision: recognise the throughput-vs-cap gap and BUILD
+# SILOS to absorb the overflow. Each silo costs 150 and adds +3000 cap
+# (gamerules/world.rs), so 1-3 silos pull the cap above the 7-harv
+# deposit rate. A play that:
+#   * stalls (only observe) — no income, EV bar never met ⇒ LOSS.
+#   * harvest-only (no silo) — income flows but the proc cap binds,
+#     deposits above the drain rate are lost on overflow, the EV bar
+#     is unreachable inside the within_ticks budget ⇒ LOSS.
+# The intended capability:
+#   * recognise the overflow → build 1-3 silos (cost 150 each, prereq
+#     proc — already pre-placed) → cap grows → harvested ore accrues
+#     into BOTH stored resources AND drained cash → EV bar lands
+#     INSIDE the within_ticks budget (silos buy ~1 turn of speed-up
+#     and ~3000 EV of extra cap headroom — the load-bearing
+#     differentiation against no-silo).
+#
+# The capability under test (REASONING): capacity planning /
+# distributed-systems back-pressure. Producer throughput must be
+# matched by consumer buffer; under-buffered systems silently drop
+# load.
+#
+# WHY THIS DIFFERS FROM `econ-silo-vs-spend` (Wave-7 sibling):
+#   * econ-silo-vs-spend offers THREE legitimate paths (silo OR kills
+#     OR pbox) and tests the reasoning "do SOMETHING with the
+#     capital" — three valid answers. M (EV bar) is sized so cash on
+#     its own can satisfy it; the any_of clause is the load-bearing
+#     teeth.
+#   * econ-overflow-to-silos forces SILOS specifically — there is no
+#     any_of escape. The EV bar M is sized HIGH ENOUGH that the
+#     no-silo (overflow-bound) run CANNOT reach M inside the
+#     within_ticks budget, so silos are structurally required. This
+#     is the throughput / buffer-sizing test, not the capital-
+#     allocation decision test.
+#
+# ENGINE FACTS verified (CLAUDE.md + econ-silo-vs-spend.yaml notes +
+# empirical seed-1..4 calibration with scripted policies):
+#  1. `silo` cost 150, prereq `proc` (pre-placed). Buildable via
+#     Command.build("silo") + Command.place_building("silo", x, y).
+#  2. Storage cap (harvested ore beyond cap is LOST on deposit —
+#     world.rs `(r + value).min(cap)`):
+#        proc = +2000
+#        silo = +3000
+#     Pre-placed proc → cap 2000. Adding 1-3 silos → cap 5000-11000.
+#  3. Drain: 10 stored-ore units → cash per tick. Harvester deposit
+#     ~25 ore/tick under unload, but harvs alternate trips so the
+#     instantaneous deposit rate is bursty; the cap-binding effect
+#     emerges with MANY harvs on dense adjacent patches (so deposit
+#     bursts overlap and stored ore stays near the cap a meaningful
+#     fraction of the time, exposing the overflow loss).
+#  4. Empirical calibration (scripted seed-1..4, max_turns 21,
+#     ~1893 ticks, validated by tests/test_econ_overflow_to_silos.py):
+#        - HARVEST-ONLY (7 harvs, no silo): EV ~17840 at turn 20
+#          (tick 1803) → MISS the 18000 bar; reaches EV ≥18000 only
+#          by turn 21 (tick 1893) — past the 1803 within_ticks
+#          deadline ⇒ LOSS on the after_ticks fail clause.
+#        - SILO POLICY (7 harvs + 1 silo, $150): EV ~18400 at turn
+#          20 (tick 1803) → CLEAR the bar inside the deadline ⇒ WIN.
+#          The silo's resource buffer (~1760 stored vs ~200 for no-
+#          silo) is the load-bearing ~600-EV uplift that lands the
+#          bar one turn earlier (the one-turn speed-up is the binding
+#          differentiation against no-silo). Building MORE than one
+#          silo (2-3) costs additional turn cycles to queue/place
+#          and actually SLOWS the EV climb on hard, so the minimal-
+#          effort intended-capability policy is exactly one silo.
+#     The within_ticks deadline (1803) is the tick at the end of
+#     max_turns-1 (turn 20 = tick 1803 by the 93+90·(N−1) rule); a
+#     no-silo run pays for the overflow-bound slow accrual by missing
+#     the deadline (rolling onto turn 21 / tick 1893 > 1803).
+#  5. `economy_value_gte = cash + resources` (win_conditions.py
+#     L178). The silo enlarges the RESOURCES side and (by avoiding
+#     overflow) slightly accelerates the CASH side too.
+#  6. Far inert enemy `fact` marker prevents engine auto-`done` via
+#     the "all enemies eliminated" path (CLAUDE.md auto-done footgun)
+#     so a non-finisher LOSES on the deadline (never DRAWS).
+#  7. `has_building:silo` is safe as a WIN clause (we do NOT key it
+#     as a destruction objective — CLAUDE.md "silo is NOT
+#     MustBeDestroyed" footgun is about using silo as an enemy
+#     landmark, not as an own-building check).
+#  8. Tick alignment: engine advances ~90 ticks per decision turn so
+#     within_ticks ≤ 93 + 90·(max_turns − 1) (CLAUDE.md). For medium
+#     /hard: max_turns 21 → ceiling 1893; within_ticks 1803 (= turn
+#     20 tick, the load-bearing edge) and after_ticks 1804 (so a
+#     non-finisher at turn 21 LOSES on the after_ticks clause, NOT
+#     a max-turn draw).
+#  9. spawn_point filter on agent actors only (CLAUDE.md) — neutral
+#     `mine` actors and the inert enemy `fact` always place; the
+#     hard tier duplicates the dense patch column at each spawn row
+#     band.
+# 10. Fail clause includes `not has_building:proc` (per spec) —
+#     losing the refinery collapses both income AND the cap; a play
+#     that somehow loses proc fails regardless of cash on hand.
+
+meta:
+  id: econ-overflow-to-silos
+  title: 'Overflow To Silos — Build Storage Or Income Spoils At The Cap'
+  capability: reasoning
+  real_world_meaning: >
+    Capacity planning under high producer throughput. The agent owns
+    a minimum revenue kit (fact + proc + powr + many harvs on a
+    dense ore patch column) whose harvesters deposit ore at a
+    sustained rate exceeding the refinery's 2000-ore storage cap.
+    Once the cap saturates, every new deposit is LOST — the
+    back-pressure footgun. The decision is to recognise the
+    throughput-vs-buffer gap and BUILD SILOS (cost 150, +3000 cap
+    each) so the working capital is absorbed and the economy_value
+    bar lands INSIDE the within_ticks budget. A run with no silo
+    cannot reach the bar in time (overflow-bound accrual is too slow
+    against the tight deadline); intended capacity-planning runs
+    (build 1-3 silos) WIN.
+  robotics_analogue: >
+    Distributed-systems back-pressure / FIFO perishable inventory
+    cap. A producer pipeline (sensor capture, log shipping, the data
+    plane) generates events at a sustained rate; the consumer's
+    buffer (the queue, the warehouse, the refinery store) has a
+    fixed cap; when the buffer fills, new events are silently
+    dropped on deposit. The operator must size the buffer (add
+    silos / scale the queue / add warehouse storage) to match
+    producer throughput, or the income channel runs at the buffer's
+    drain rate forever. This pack tests the capacity-planning
+    reflex — measure throughput, measure cap, size the buffer above
+    throughput.
+  author: wave8-econ-overflow-seed
+  benchmark_anchor:
+    - capacity planning
+    - distributed-systems backpressure
+    - FIFO inventory
+
+base_map: rush-hour-arena
+starting_cash: 500
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Spec-required toolset for the build-silo decision: observe (read
+  # cash + resources + own_buildings), build + place_building (queue
+  # silo), harvest + move_units (sustain income on the patches), stop.
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - stop
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # M LOW so the no-silo (single-harv, cap-NOT-binding) run can still
+  # reach it from passive accumulation. The "easy" floor is the bare
+  # skill: the agent must keep harvesting (own a fact, stay above the
+  # EV bar) within the clock. A silo is NOT required at this tier;
+  # this is the baseline that establishes income-flow / clock-
+  # alignment is solvable from the kit. max_turns 20 → ceiling
+  # 93 + 90·19 = 1803.
+  easy:
+    description: >
+      You own a Construction Yard ('fact'), an Ore Refinery ('proc'),
+      a Power Plant ('powr'), and ONE Ore Truck ('harv') on an ore
+      patch. Starting cash is $1000. Your storage cap for harvested
+      ore is 2000 (the proc alone). Win = (economy_value ≥ 1500) AND
+      (you still own a 'fact') AND (current tick ≤ 1800). A single
+      harvester sustains income well under the proc cap — a simple
+      `harvest` + observe loop clears the EV bar (no silo needed at
+      the easy floor; silos start mattering on medium where high-
+      throughput income saturates the cap quickly). Stalling (no
+      harvest) or losing the fact / proc loses.
+    starting_cash: 1000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [10, 20]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [14, 18]}
+        # Persistent far inert enemy fact prevents engine auto-`done`
+        # via the all-enemies-eliminated path (CLAUDE.md footgun).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - economy_value_gte: 1500
+        - has_building: fact
+        - within_ticks: 1800
+    fail_condition:
+      any_of:
+        - after_ticks: 1801
+        - not: {has_building: fact}
+        - not: {has_building: proc}
+    max_turns: 20
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HIGH income (7 harvs on a dense adjacent
+  # patch column) AND the EV bar (18000) sized so the within_ticks
+  # deadline (1803, the end of turn 20) BITES on a no-silo run.
+  # Empirically (see ENGINE FACTS #4):
+  #   - no-silo:  17840 EV at tick 1803 → MISS bar; reaches 18340 at
+  #               tick 1893 → past within_ticks → LOSS.
+  #   - silo (1): 18400 EV at tick 1803 → CLEAR bar → WIN at turn 20.
+  # The silo's load-bearing benefit is the resource-buffer uplift
+  # (~1760 stored vs ~200 for the no-silo case) which lands the
+  # 18000 bar one turn earlier — that one-turn speed-up is the
+  # binding differentiation against no-silo.
+  # max_turns 21 → ceiling 93 + 90·20 = 1893 (≥ within_ticks 1803 +
+  # 1 turn of safety margin so the after_ticks fail-clause fires).
+  medium:
+    description: >
+      Same kit (fact + proc + powr) but with SEVEN harvesters on a
+      dense adjacent ore patch column (x=14, y=14..22) — high
+      throughput. The storage cap is 2000 (proc only); under sustained
+      7-harv income the stored-ore pool saturates the cap, at which
+      point new harvested ore is LOST on deposit (the back-pressure
+      footgun). Decision: build SILOS (cost 150, prereq proc, +3000
+      cap each) so the throughput is absorbed and the income keeps
+      banking inside the clock. Win = (economy_value ≥ 18000) AND
+      (you still own a 'fact') AND (tick ≤ 1803, the end of turn 20).
+      A no-silo run plateaus around 17840 EV at the deadline; you
+      MUST build at least one silo to clear the 18000 bar in time.
+      Stalling / harvest-only without silos LOSES on the clock.
+    starting_cash: 500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [10, 20]}
+        - {type: harv, owner: agent, position: [14, 14]}
+        - {type: harv, owner: agent, position: [14, 15]}
+        - {type: harv, owner: agent, position: [14, 16]}
+        - {type: harv, owner: agent, position: [14, 17]}
+        - {type: harv, owner: agent, position: [14, 19]}
+        - {type: harv, owner: agent, position: [14, 21]}
+        - {type: harv, owner: agent, position: [14, 22]}
+        - {type: mine, owner: neutral, position: [14, 14]}
+        - {type: mine, owner: neutral, position: [14, 15]}
+        - {type: mine, owner: neutral, position: [14, 16]}
+        - {type: mine, owner: neutral, position: [14, 17]}
+        - {type: mine, owner: neutral, position: [14, 19]}
+        - {type: mine, owner: neutral, position: [14, 21]}
+        - {type: mine, owner: neutral, position: [14, 22]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - economy_value_gte: 18000
+        - has_building: fact
+        - within_ticks: 1803
+    fail_condition:
+      any_of:
+        - after_ticks: 1804
+        - not: {has_building: fact}
+        - not: {has_building: proc}
+    max_turns: 21
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO agent spawn_point
+  # groups (WEST base x=8 / EAST-MIRROR base x=30) round-robined by
+  # seed, BOTH at y=18 so the y-axis throughput geometry is identical
+  # per spawn (the only differential is the WHERE — the silo must be
+  # placed near the *actual* fact, not at a memorised cell from the
+  # other spawn). High income preserved (7 harvs on a dense column
+  # per spawn); EV bar held at 18000; the silo requirement is the
+  # same. Neutral mines duplicated at both spawn columns because
+  # neutral / enemy actors don't honour spawn_point filter
+  # (CLAUDE.md engine footgun). max_turns 21 → ceiling 1893 ✓.
+  hard:
+    description: >
+      Same decision (build silos to absorb high-throughput income)
+      and the same EV bar (18000), but your base orientation varies
+      by seed: WEST base (fact at x=8) or EAST-MIRROR base (fact at
+      x=30). Each spawn has its own dense near-patch column on its
+      x-axis band. The silo must be placed near your *actual* fact
+      (a memorised cell from the other spawn misses on the wrong
+      seed). No-silo runs LOSE on the clock; intended build-silo
+      runs WIN.
+    starting_cash: 500
+    overrides:
+      actors:
+        # ── spawn_point 0: WEST base (fact x=8, patches x=14) ─────
+        - {type: fact, owner: agent, position: [8, 18], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 20], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 15], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 17], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 19], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 21], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 22], spawn_point: 0}
+        # ── spawn_point 1: EAST-MIRROR base (fact x=80, patches x=86) ─
+        # Placed FAR (x=80) from the WEST spawn (x=8..14) so the two
+        # mine clusters do NOT mutually leak — a WEST harv that
+        # exhausts its own (14,y) cell does not have (86,y) as a
+        # nearby fallback (the auto-path distance dominates and the
+        # harv idles back to its own column). This keeps the
+        # per-spawn throughput symmetric and matches the medium tier
+        # ceiling.
+        - {type: fact, owner: agent, position: [80, 18], spawn_point: 1}
+        - {type: proc, owner: agent, position: [84, 18], spawn_point: 1}
+        - {type: powr, owner: agent, position: [82, 20], spawn_point: 1}
+        - {type: harv, owner: agent, position: [86, 14], spawn_point: 1}
+        - {type: harv, owner: agent, position: [86, 15], spawn_point: 1}
+        - {type: harv, owner: agent, position: [86, 16], spawn_point: 1}
+        - {type: harv, owner: agent, position: [86, 17], spawn_point: 1}
+        - {type: harv, owner: agent, position: [86, 19], spawn_point: 1}
+        - {type: harv, owner: agent, position: [86, 21], spawn_point: 1}
+        - {type: harv, owner: agent, position: [86, 22], spawn_point: 1}
+        # Neutral mines always place regardless of spawn_point filter
+        # (CLAUDE.md). Duplicate the patch column at each spawn band.
+        - {type: mine, owner: neutral, position: [14, 14]}
+        - {type: mine, owner: neutral, position: [14, 15]}
+        - {type: mine, owner: neutral, position: [14, 16]}
+        - {type: mine, owner: neutral, position: [14, 17]}
+        - {type: mine, owner: neutral, position: [14, 19]}
+        - {type: mine, owner: neutral, position: [14, 21]}
+        - {type: mine, owner: neutral, position: [14, 22]}
+        - {type: mine, owner: neutral, position: [86, 14]}
+        - {type: mine, owner: neutral, position: [86, 15]}
+        - {type: mine, owner: neutral, position: [86, 16]}
+        - {type: mine, owner: neutral, position: [86, 17]}
+        - {type: mine, owner: neutral, position: [86, 19]}
+        - {type: mine, owner: neutral, position: [86, 21]}
+        - {type: mine, owner: neutral, position: [86, 22]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - economy_value_gte: 18500
+        - has_building: fact
+        - within_ticks: 1803
+    fail_condition:
+      any_of:
+        - after_ticks: 1804
+        - not: {has_building: fact}
+        - not: {has_building: proc}
+    max_turns: 21
