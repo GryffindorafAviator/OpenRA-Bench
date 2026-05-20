@@ -1,0 +1,385 @@
+# def-retreat-and-rebuild — strategic withdrawal + rebuild at depth
+#
+# Wave-8 REASONING pack. The agent operates a FORWARD base that is
+# being overrun by a heavy attack from the east; the FORWARD base
+# (fact + proc + tent + 2 defenders at x≈40, y=20) WILL FALL under
+# the inbound rush — it cannot be held inside the tick budget. The
+# agent also has a parked MCV and a powr at a deeper SAFE zone in
+# the WEST (x≈10..14, y=20), well outside the rusher's effective
+# travel. The capability under test is to RECOGNISE the losing
+# position, RETREAT (let the forward base fall — don't stake
+# anything on it), DEPLOY the safe-zone MCV (creates a new fact in
+# the safe region), and BUILD a `proc` next to it so the production
+# economy stands up at depth. Win = a fact AND a proc are alive
+# INSIDE the safe region before the deadline.
+#
+# Real-world anchors:
+#   - CICERO retreat doctrine / military strategic withdrawal:
+#     intentionally giving up indefensible forward ground to
+#     preserve force and re-establish a defensible posture at
+#     greater depth ("trading space for time").
+#   - PlanBench replanning: the original plan ("hold the forward
+#     base") becomes infeasible; the agent must re-plan toward a
+#     reachable goal at depth.
+#   - Business continuity / disaster recovery failover: the
+#     primary production site is being lost; standing up the
+#     replacement site at the cold-standby location IS the
+#     business-continuity goal, not heroic defence of the primary.
+#
+# DISCRIMINATION (the four-policy bar, every level + hard seed):
+#
+#   • STALL (only observe): the rusher band razes the forward base
+#     ~turn 18-22; the MCV at the safe zone is never deployed and
+#     no proc is built; the safe-region win clauses are never
+#     satisfied; total fact count drops to 0 by the deadline →
+#     LOSS via `not building_count_gte:{type:fact,n:1}` (fact-loss
+#     fail clause) AND `after_ticks`.
+#
+#   • HOLD-FORWARD-BASE (try to defend the forward base; e.g.
+#     attack_unit the rushers with the 2 defenders, build pbox at
+#     the forward perimeter, never touch the safe MCV): the rush
+#     is too heavy; the forward base is razed regardless; the
+#     defenders die in the trade; the safe MCV stays parked → no
+#     safe-region fact, no safe-region proc → LOSS.
+#
+#   • DEPLOY-MCV-ONLY (deploy the safe-zone MCV, but never build
+#     proc): the safe-region fact clause IS satisfied (the deploy
+#     creates a fact at the MCV cell) but the safe-region proc
+#     clause is NEVER satisfied — proc requires `build('proc')` +
+#     `place_building('proc', ...)` inside the safe radius →
+#     LOSS via after_ticks (win unsatisfied) AND/OR
+#     `not building_count_gte:{type:proc,n:1}` once the forward
+#     proc is razed.
+#
+#   • INTENDED RETREAT-AND-REBUILD: deploy the safe-zone MCV early
+#     (creates a fact at the safe radius), then `build('proc')` +
+#     `place_building('proc')` inside the safe region. WINS once
+#     both safe-region predicates fire (typically tick ~1000-1100
+#     for the deploy + proc cycle), well inside the deadline.
+#
+# WHY both safe-region clauses load-bear (no laziest-play
+# inversion):
+#   - The win is `all_of`: fact-in-safe AND proc-in-safe AND
+#     within_ticks. Either clause alone is reachable by a half-task
+#     play; both together require BOTH the deploy AND the build.
+#   - The fail clause includes `not building_count_gte:{type:fact,n:1}`
+#     (canonical fact-loss check) so total fact extinction also
+#     triggers a real LOSS (no draw degeneracy).
+#   - The forward base falling is REQUIRED by design: the rush
+#     band is overwhelming, and the agent has no tools / no cash
+#     to mount a defence sufficient to keep the forward fact +
+#     forward proc alive. Trying to hold the forward base bleeds
+#     the only assets (the 2 defenders) that count toward
+#     own_units_gte. The agent must accept the loss.
+#
+# ENGINE FACTS APPLIED (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - Map: rush-hour-arena (128 × 40, playable x in [2..126],
+#     y in [2..38]). Every actor coord inside.
+#   - `deploy` works for scenario-declared MCVs (Wave-2 fix in
+#     `openra-sim/src/gamerules.rs` + env.rs `kind_for_unit_type`).
+#     `Command.deploy([mcv_id])` removes the MCV and creates an
+#     agent `fact` at offset (mcv_x-1, mcv_y-1), re-enabling
+#     Building/Defense queues.
+#   - `place_building` does NOT enforce build-adjacency — `proc`
+#     can be placed at any safe-zone cell once the post-deploy
+#     fact is alive and the Building queue has the item.
+#   - `proc` costs 1400; `starting_cash: 1600` funds exactly one
+#     proc + ~200cr of slack. NO budget for an alternate "spam
+#     pbox to save the forward base" play.
+#   - `rusher` bot: concentrates the band on the agent CENTROID
+#     every ~8 ticks (scripted_bot.rs::Rusher); the centroid is
+#     dominated by the forward base (3 buildings + 2 defenders at
+#     x≈40), so the band drives west down y=20 straight into the
+#     forward base. The deep safe zone (x≈10) is far behind the
+#     centroid; even after the forward base falls, the rusher
+#     band continues toward the safe-zone units (but the MCV
+#     deploys + proc completes before the band can travel another
+#     ~30 cells west).
+#   - Persistent unarmed enemy `fact` marker far east keeps the
+#     episode alive past the last rusher death so the win/fail
+#     evaluator fires (anti auto-done on enemy-elimination).
+#   - `enemy_unit_spotted` + `own_unit_destroyed` interrupts so
+#     the agent re-decides as the rush closes AND when the
+#     forward fact / forward proc falls — the canonical
+#     "plan-changed, replan" trigger for CICERO retreat doctrine.
+#   - Tick budget: max_turns 60 → reachable tick ≈ 5400 in
+#     interrupt mode. `within_ticks: 4500` paired with
+#     `after_ticks: 4501` ⇒ a non-finisher is a real reachable
+#     timeout LOSS (no draw degeneracy).
+#   - Hard tier: TWO seed-driven agent spawn_point groups
+#     (NORTH safe zone at y=14 vs SOUTH safe zone at y=26). The
+#     safe-zone candidate that satisfies the win clause is an
+#     `any_of` so EITHER spawn satisfies the safe geometry —
+#     but the MCV + powr (and the matching forward base) move
+#     to the spawn latitude per seed, so a memorised "always
+#     deploy at (10,20)" cannot generalise.
+
+meta:
+  id: def-retreat-and-rebuild
+  title: 'Strategic Withdrawal — Retreat from the Forward Base and Rebuild at Depth'
+  capability: reasoning
+  real_world_meaning: >
+    The forward base is being overrun by a heavy attack that cannot
+    be repulsed inside the tick / cash budget; the right move is to
+    ACCEPT THE LOSS of the forward position, fall back to a deeper
+    safe zone (pre-staged with an MCV and a power plant), DEPLOY
+    the MCV to spawn a new Construction Yard there, and BUILD a
+    refinery so production stands up at depth. Trying to hold the
+    forward base bleeds the defenders and the deadline expires
+    with neither base alive. Stalling, hold-forward, or deploy-
+    only-no-rebuild all lose: only the recognise-and-withdraw
+    policy reconstitutes a live fact + proc post-retreat.
+  robotics_analogue: >
+    Business-continuity failover and military strategic withdrawal:
+    the primary production site is being lost and heroic defence
+    is infeasible; standing up the cold-standby site (DR site,
+    backup datacentre, fall-back command post) BEFORE the primary
+    fully falls is the goal, not preserving the primary. The
+    policy must read the situation as "lost cause, withdraw" and
+    redirect resources to the standby instead of doubling down.
+  benchmark_anchor:
+    - "strategic withdrawal / CICERO retreat doctrine"
+    - "PlanBench replanning under exogenous loss"
+    - "business continuity / disaster recovery failover"
+    - "military trade-space-for-time fall-back"
+  author: openra-bench
+
+base_map: rush-hour-arena
+# 1600 cash funds exactly ONE proc (1400) + ~200 slack — enough to
+# stand up the safe-zone economy, nowhere near enough to mount a
+# meaningful forward-base defence (a pbox costs 600, 2 pbox = 1200
+# still leaves the rush undamaged on the heavy band; the forward
+# base WILL fall regardless of how the cash is spent there).
+starting_cash: 1600
+
+base:
+  agent: {faction: allies}
+  # `rusher` bot concentrates the band on the agent centroid every
+  # ~8 ticks (scripted_bot.rs::Rusher) — the band drives straight
+  # at the forward base mass and razes it.
+  enemy: {faction: soviet, bot_type: rusher}
+  # Minimal toolset for the capability: observe + move + deploy
+  # (the retreat / MCV-deploy primitive) + build/place_building
+  # (the rebuild-production primitive) + attack/stop so a
+  # hold-forward play is even attemptable (and demonstrably loses).
+  tools:
+    - observe
+    - build
+    - place_building
+    - deploy
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare retreat-and-rebuild skill: light rush band (4× e1 + 1× e3),
+  # generous clock (4500 ticks). The forward base still falls (the
+  # e3 rocket soldier ensures the fact dies in the budget) so the
+  # agent CANNOT avoid the retreat. Easy axis: forgiving clock + 1
+  # lone rocket so brute hold-forward also loses but slowly.
+  # max_turns 60 → reachable tick ≈ 5400 in interrupt mode ≥ 4501 ✓.
+  easy:
+    description: >
+      A rusher band (4 rifle infantry + 1 rocket soldier) is bearing
+      down on your FORWARD base (Construction Yard + refinery + 2
+      defenders at cells around x=40, y=20) from the east. The
+      forward base CANNOT be held inside the deadline — the rocket
+      soldier alone razes the fact, and your defenders are too few.
+      You also have a parked MCV at the deeper SAFE zone in the
+      west (cell 10, 20) plus a pre-placed power plant nearby. Win
+      by RETREATING — let the forward base fall — and standing up
+      the new base at depth: DEPLOY the MCV (creates a Construction
+      Yard at the safe zone) AND BUILD a refinery (`proc`) inside
+      the safe radius around (10,20). Win when a fact AND a proc
+      are alive inside the safe region (radius 8) AND you have
+      ≥1 own unit alive AND before tick 4500. Stalling, trying to
+      hold the forward base, and deploying the MCV but not building
+      the refinery all LOSE.
+    overrides:
+      actors:
+        # ── FORWARD base (mid-map, will fall) — fact + proc + tent
+        # + 2 defenders. The forward proc is the canonical second
+        # high-value building that bleeds the agent if defended.
+        - {type: fact, owner: agent, position: [40, 20]}
+        - {type: proc, owner: agent, position: [44, 20]}
+        - {type: tent, owner: agent, position: [40, 23]}
+        - {type: e1,   owner: agent, position: [42, 19], stance: 2}
+        - {type: e1,   owner: agent, position: [42, 21], stance: 2}
+        # ── SAFE zone (deep west) — pre-placed MCV + powr +
+        # 1 garrison rifleman (satisfies own_units_gte:1 after the
+        # forward defenders die in the rush). The powr is required
+        # because proc has positive power draw and the post-deploy
+        # fact starts at 0/0 net; without a pre-placed powr a build
+        # of proc stalls on power.
+        - {type: mcv,  owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [6,  20]}
+        - {type: e1,   owner: agent, position: [4,  20], stance: 0}
+        # ── rusher band: 4× e1 + 1× e3, starting at x=100 (≈60
+        # cells of travel to reach the forward fact at x=40 — fast
+        # enough that hold-forward cannot survive but slow enough
+        # that the retreat-and-rebuild policy has comfortable time).
+        - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [102, 20], stance: 3, count: 1}
+        # ── persistent unarmed enemy marker far east (anti DRAW —
+        # without this the engine auto-`done`s on enemy-elimination
+        # if the agent ever clears the rush, collapsing the run).
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        # Safe-region fact (post-deploy MCV lands a fact ~(9,19)).
+        - building_in_region: {type: fact, x: 10, y: 20, radius: 8, count: 1}
+        # Safe-region proc (the rebuild — the load-bearing clause).
+        - building_in_region: {type: proc, x: 10, y: 20, radius: 8, count: 1}
+        - own_units_gte: 1
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        # Total fact extinction (both forward AND safe).
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVIER rush band (6× e1 + 2× e3) so the
+  # forward base falls FASTER and the hold-forward attrition cap
+  # bites harder. Same clock (4500), same retreat-and-rebuild
+  # geometry. The intended play still wins comfortably (the deploy
+  # + proc-build cycle is ~30 turns wall-clock); brute hold-forward
+  # loses faster and more visibly.
+  medium:
+    description: >
+      A heavy rusher band (6 rifle infantry + 2 rocket soldiers) is
+      bearing down on your FORWARD base (fact + proc + 2 defenders
+      at x=40, y=20). The forward base CANNOT be held — the
+      rockets shred the fact in ~15 turns of fire. You have a
+      parked MCV at the deeper SAFE zone (cell 10, 20) and a
+      pre-placed power plant. Win by RETREATING (let the forward
+      base fall) and standing up the deeper base: DEPLOY the MCV
+      AND BUILD a refinery (`proc`) inside the safe radius around
+      (10,20). Win when a fact AND a proc are alive inside the
+      safe region (radius 8) AND you have ≥1 own unit alive AND
+      before tick 4500. Hold-forward, deploy-only-no-rebuild, and
+      stall all LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [40, 20]}
+        - {type: proc, owner: agent, position: [44, 20]}
+        - {type: tent, owner: agent, position: [40, 23]}
+        - {type: e1,   owner: agent, position: [42, 19], stance: 2}
+        - {type: e1,   owner: agent, position: [42, 21], stance: 2}
+        - {type: mcv,  owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [6,  20]}
+        - {type: e1,   owner: agent, position: [4,  20], stance: 0}
+        # Heavier band: 6× e1 + 2× e3 from x=100 — same arrival
+        # window as easy but doubles the anti-building dps.
+        - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 6}
+        - {type: e3, owner: enemy, position: [102, 20], stance: 3, count: 2}
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        - building_in_region: {type: fact, x: 10, y: 20, radius: 8, count: 1}
+        - building_in_region: {type: proc, x: 10, y: 20, radius: 8, count: 1}
+        - own_units_gte: 1
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: TWO seed-driven agent spawn_point groups
+  # (NORTH layout y=14 vs SOUTH layout y=26). Both the FORWARD base
+  # AND the SAFE zone MCV move to the spawn latitude per seed; the
+  # win clause is `any_of` over the two candidate safe regions so
+  # EITHER landing satisfies, but the agent must DEPLOY+BUILD at
+  # the latitude that MATCHES its own spawn (the rusher commits to
+  # the active latitude's centroid, and the rebuilt base must be
+  # at that latitude to count toward the safe-region predicates).
+  # A memorised "always rebuild at y=20" play satisfies NEITHER
+  # safe region (the safe regions are at y=14 and y=26, NOT y=20).
+  # Per CLAUDE.md spawn_point contract: ALL agent actors carry an
+  # explicit spawn_point (else they'd be filtered out); enemy
+  # actors are unchanged and always place.
+  # Per-band rush intensity HALVED vs medium (3× e1 + 1× e3 per
+  # latitude) — both bands always place (enemy actors don't honour
+  # spawn_point — CLAUDE.md) and the rusher bot commits both to
+  # the active centroid; doubling per-band on top of the always-
+  # both-place doubling would crater the rebuild window before
+  # proc completes. The controlled axis vs medium is the spawn
+  # variation, NOT additional pressure.
+  # max_turns 60 → reachable tick ≈ 5400 ≥ 4501 ✓.
+  hard:
+    description: >
+      Your FORWARD base (fact + refinery + 2 defenders) and your
+      deeper SAFE-zone MCV are both at a SEED-CHOSEN latitude
+      (NORTH y=14 or SOUTH y=26). Rusher bands at BOTH latitudes
+      converge on your forward base centroid; the forward base
+      CANNOT be held inside the deadline. Win by retreating,
+      deploying the safe-zone MCV AND building a refinery — both
+      inside the safe radius around YOUR matched safe zone
+      (NORTH (10,14) OR SOUTH (10,26), radius 8). Win when a
+      fact AND a proc are alive inside EITHER safe region AND
+      you have ≥1 own unit alive AND before tick 4500. Rebuilding
+      at the off-latitude safe zone, hold-forward, deploy-only-
+      no-rebuild, and stall all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH (y=14) forward base + safe zone.
+        - {type: fact, owner: agent, position: [40, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [44, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [40, 17], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [42, 13], stance: 2, spawn_point: 0}
+        - {type: e1,   owner: agent, position: [42, 15], stance: 2, spawn_point: 0}
+        - {type: mcv,  owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  14], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [4,  14], stance: 0, spawn_point: 0}
+        # spawn_point 1 — SOUTH (y=26) forward base + safe zone.
+        - {type: fact, owner: agent, position: [40, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [44, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [40, 29], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [42, 25], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [42, 27], stance: 2, spawn_point: 1}
+        - {type: mcv,  owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  26], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [4,  26], stance: 0, spawn_point: 1}
+        # Two seed-symmetric rush bands (one per candidate latitude).
+        # Enemy actors don't honour spawn_point so BOTH bands always
+        # place; the rusher bot commits each band to the agent
+        # centroid. Each band is HALF the medium intensity (3× e1 +
+        # 1× e3) so the TOTAL on-map enemy firepower roughly matches
+        # medium (6 e1 + 2 e3) — the controlled axis vs medium is
+        # the spawn variation, NOT additional pressure (which would
+        # crater the rebuild window before the proc completes).
+        - {type: e1, owner: enemy, position: [100, 14], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [102, 14], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [100, 26], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [102, 26], stance: 3, count: 1}
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            # NORTH safe zone (matches spawn_point 0).
+            - all_of:
+                - building_in_region: {type: fact, x: 10, y: 14, radius: 8, count: 1}
+                - building_in_region: {type: proc, x: 10, y: 14, radius: 8, count: 1}
+            # SOUTH safe zone (matches spawn_point 1).
+            - all_of:
+                - building_in_region: {type: fact, x: 10, y: 26, radius: 8, count: 1}
+                - building_in_region: {type: proc, x: 10, y: 26, radius: 8, count: 1}
+        - own_units_gte: 1
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60

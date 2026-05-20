@@ -253,6 +253,26 @@ UPGRADED = [
     # dispatch) must run concurrently from t=0 at the spawn-matched
     # latitude.
     "def-while-building",
+    # Wave-8 REASONING pack — strategic withdrawal + rebuild at depth
+    # (CICERO retreat / PlanBench replanning / business-continuity
+    # failover anchor). The agent's forward base (fact + proc + tent +
+    # 2 defenders) is being overrun by a heavy rusher band and cannot
+    # be held in the budget; the intended play is to RETREAT (let the
+    # forward base fall), DEPLOY the safe-zone MCV (creates a fact at
+    # depth), and BUILD a proc inside the safe radius. Hard tier
+    # defines two agent spawn_point groups (NORTH base latitude y=14 /
+    # SOUTH base latitude y=26) round-robined by seed; both forward
+    # base AND safe zone move with the spawn so the agent must
+    # rebuild at the latitude that matches its OWN spawn (a memorised
+    # "always rebuild at y=20" satisfies NEITHER safe region). Per-
+    # band rush intensity is HALVED vs medium (3× e1 + 1× e3 per
+    # latitude) since both rush bands always place (enemy actors
+    # don't honour spawn_point — CLAUDE.md) and the rusher bot
+    # commits both to the active agent centroid; the controlled axis
+    # vs medium is the spawn variation, not additional pressure
+    # (which would crater the rebuild window before the safe-zone
+    # proc completes).
+    "def-retreat-and-rebuild",
     # Wave-7 reasoning pack — distributed defence across three
     # concurrent attack lanes (graph min-cut / military multi-front /
     # distributed-systems load-balancing anchor). Hard tier defines
