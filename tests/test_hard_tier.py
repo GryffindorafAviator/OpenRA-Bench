@@ -88,13 +88,20 @@ UPGRADED = [
     # robined by seed — the "near" enemy composition flips so a
     # memorised pre-pick from one spawn cannot generalise.
     "mid-tech-switch-on-scout",
-    # Wave-4 perception pack (observation-then-plan / tech-read):
-    # discover ≥3 distinct enemy buildings (fact + weap + tech) under
-    # a tight clock and attrition cap. Hard defines two spawn_point
-    # groups (NW / SW) and TWO tech buildings (north tsla / south sam)
-    # so the natural third discovery flips by seed — a memorised
-    # tech-tile pre-plan misses the seed-appropriate read.
-    "scout-detect-enemy-tech",
+    # Wave-4 Group B AGGRO triple expansion (SC2 greedy 3-base macro /
+    # startup blitzscale anchor). Three MCVs at a NW staging zone must
+    # commit to three DISTINCT eastern target regions; the AGGRO play
+    # is to deploy ALL THREE immediately and skip defence. Hard tier
+    # rotates the MCV cluster between NW and SW spawns so the
+    # per-MCV nearest-region assignment flips per seed.
+    "expansion-aggro-3-base-greedy",
+    # Wave-4 perception pack: scout reveals the eastern fact AND
+    # returns alive to the start region. Hard defines two agent
+    # spawn_point groups (NORTH (10,8) / SOUTH (10,32)) round-
+    # robined by seed; the win clause is `any_of` over the two
+    # matching corner-return regions so a scout must return to
+    # its OWN spawn corner.
+    "scout-and-survive",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
