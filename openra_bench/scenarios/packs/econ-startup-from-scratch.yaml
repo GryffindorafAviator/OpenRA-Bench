@@ -1,0 +1,250 @@
+# Validate: python -m openra_bench.scenarios.validate packs/econ-startup-from-scratch.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ECON-STARTUP-FROM-SCRATCH (Group F — opening greenfield ramp from zero).
+#
+# Real-world anchor: SC2 first-base econ ramp (every macro game starts
+# here); greenfield revenue setup; startup MVP-to-revenue pivot. The
+# decision is the OPENING: from a single mobile asset (the MCV) and a
+# pile of cash but NO buildings or harvesters, stand up the income
+# pipeline (deploy MCV → fact, build powr (prereq for proc), build
+# proc — proc auto-spawns one free `harv`) and then COMMIT to harvest
+# so revenue actually accumulates past the bar.
+#
+# Why this pack is different from the rebuilt `economy-harvest-timebox`:
+# that pack starts WITH proc + harv pre-placed and tests the run-it
+# decision under deadline. This pack starts with NEITHER — it tests
+# the cold-start opening: a model that "just builds units" or "stalls"
+# or "deploys but doesn't build the refinery" all LOSE because income
+# never flows.
+#
+# Engine facts used (verified against the installed openra_train wheel,
+# Wave-2 MCV deploy fix bdedc55, post-S0/S1 harvest income — Task #14):
+#
+# 1. `Command.deploy([mcv_id])` removes the MCV and creates an
+#    agent-owned `fact` at a small offset from the MCV's cell (≈ (-1,-1)).
+#    The new `fact` re-enables the Building/Defense production queues.
+#    See tests/test_mcv_deploy.py.
+# 2. Build costs (openra-rl/openra_env/game_data.py, mirrored in
+#    OpenRA-Rust/openra-sim/src/gamerules.rs):
+#       powr = 300  (no prereq, +100 power)
+#       proc = 1400 (prereq powr, −30 power)
+#       harv = 1400 (prereq weap — BUT proc construction auto-spawns
+#                    one free `harv` via world.rs:1388 "Refinery
+#                    auto-spawns a harvester (like OpenRA)").
+#    Intended chain spend: 300 + 1400 = $1700. starting_cash = $1900
+#    leaves $200 of slack — only enough for the chain itself; the
+#    economy_value_gte bar then REQUIRES real harvest income to clear
+#    (cash alone after the chain cannot satisfy the bar on any tier).
+# 2b. CRITICAL: the spawned-from-proc `harv` does NOT auto-path to a
+#    distant ore patch from a bare `Command.harvest(ids, x, y)` order
+#    — it sits at the proc indefinitely. The intended chain must
+#    `Command.move_units(harv_ids, x, y)` FIRST to nudge the harv
+#    onto the patch, after which `Command.harvest(harv_ids, x, y)`
+#    sustains the auto-cycle (verified by trace 2026-05-19; the same
+#    quirk is noted in economy-harvest-investment ENGINE NOTE #3).
+# 3. Harvest income is strongly distance-dependent (verified by Wave-1
+#    economy-harvest-timebox rebuild). A proc near (≈ adjacent to) a
+#    `mine` actor sustains ~150-200 cr/turn with one harvester; placed
+#    far from the patch, throughput collapses. The intended siting
+#    is: deploy MCV near the patch (so the resulting fact is near the
+#    patch), then place powr+proc immediately adjacent to the fact —
+#    the free harv spawns there and cycles to the nearby patch.
+# 4. `mine` actors are owner=neutral and ALWAYS place regardless of
+#    spawn_point filter (CLAUDE.md engine footgun); the agent MCV is
+#    the only spawn_point-varied actor on hard.
+# 5. Tick alignment: engine advances ~90 ticks per decision turn, so
+#    within_ticks ≤ 93 + 90·(max_turns − 1) is required (CLAUDE.md).
+#    fail_condition uses an `after_ticks` one tick past the win
+#    deadline so a non-finisher LOSES (never draws).
+# 6. The persistent unarmed enemy `fact` MARKER far away prevents
+#    engine auto-`done` via the all-enemies-eliminated path (CLAUDE.md
+#    engine-auto-done footgun) — so a non-winner LOSES on the
+#    deadline (never DRAWS). It is a MustBeDestroyed building so the
+#    "all enemies eliminated" engine path stays gated.
+# 7. We avoid the `not has_building:fact` "MCV-died-pre-deploy" fail
+#    clause guard because in a clean spawn the MCV is at no risk
+#    (there is no aggressive enemy); the `after_ticks` deadline is
+#    the only fail vector, which is exactly what the cold-start
+#    opening test needs.
+
+meta:
+  id: econ-startup-from-scratch
+  title: 'Econ Startup From Scratch — Greenfield First Base From Zero'
+  capability: reasoning
+  real_world_meaning: >
+    Greenfield first-base economy ramp from zero infrastructure: the
+    agent begins with one mobile asset (the MCV) and a cash budget but
+    NO buildings, NO harvesters, and NO income. The opening decision
+    is the entire test — deploy the MCV (irreversibly converting it to
+    a Construction Yard), then stand up the first power plant
+    (prerequisite) and the first ore refinery (which auto-spawns a
+    free harvester), and finally commit to harvesting so the income
+    pipeline actually closes the revenue gap before the clock. A
+    model that stalls, that spends the budget on infantry / military
+    buildings, or that deploys and then idles, all miss the revenue
+    bar and the clock runs out as a real loss.
+  robotics_analogue: >
+    Cold-start a revenue pipeline: an autonomous operator arrives at
+    a greenfield site with capital and a single mobile depot. It must
+    anchor the depot, energise it, stand up the first processing
+    facility, dispatch the first collector to a known resource node,
+    and have throughput clear a revenue bar before a hard deadline.
+    Sub-tasks that look productive (training a security team,
+    surveying for additional sites) but don't close the
+    production-to-revenue loop all miss the bar.
+  author: groupF-econ-seed
+  benchmark_anchor:
+    - "SC2LE CollectMineralsAndGas (canonical first-base ramp)"
+    - "MineRL Diamond initial-resources"
+    - "greenfield revenue ramp from zero"
+    - "startup MVP-to-revenue pivot"
+
+base_map: rush-hour-arena
+starting_cash: 1900
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # MCV deploy fix is live (Wave-2). `deploy` is the headline tool.
+  tools: [observe, deploy, build, place_building, harvest, move_units, stop]
+  # Default `spawn_mcvs: false` (eval_core.py); we declare the MCV
+  # ourselves per level so the engine doesn't add a phantom second one.
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare cold-start. One patch close to the MCV spawn; generous
+  # clock; modest revenue bar. Intended chain: deploy MCV → fact;
+  # build powr (300); build proc (1400) — this auto-spawns one free
+  # harv; harvest the adjacent patch. EV grows ~150-200 cr/turn after
+  # the proc lands; reaches 500 cr soon after the chain completes.
+  # max_turns 50 → ceiling 93 + 90·49 = 4503 > 4500 ✓.
+  easy:
+    description: >
+      You start with a Construction Vehicle (MCV) and $1900, NO
+      buildings, NO harvester, NO income. There is one ore patch
+      ('mine') near your spawn. Deploy the MCV — this consumes the
+      MCV and creates a Construction Yard ('fact') one cell up-and-
+      left of the MCV. From the fact, queue a Power Plant ('powr',
+      cost 300) and place it adjacent to the fact (powr is the
+      prerequisite for the refinery). Then queue an Ore Refinery
+      ('proc', cost 1400) and place it adjacent to the fact — the
+      refinery auto-spawns one free Ore Truck ('harv'). To start the
+      harvester collecting, first `move_units` it onto the patch
+      cell, then issue a `harvest` order with that patch cell as the
+      target (the auto-cycle then continues on its own). Win = you
+      own a 'proc' AND a 'harv' AND economy_value ≥ 800 before tick
+      4500. Stalling, spending the cash on units, or deploying-and-
+      building-but-not-harvesting all lose on the clock (after the
+      chain you have only $200 left — the bar requires real harvest
+      income).
+    starting_cash: 1900
+    overrides:
+      actors:
+        # MCV at a single spawn for easy — fixed start.
+        - {type: mcv, owner: agent, position: [20, 20]}
+        # Near patch: ~6 cells east of the eventual fact at (19,19).
+        - {type: mine, owner: neutral, position: [26, 20]}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - unit_type_count_gte: {type: harv, n: 1}
+        - economy_value_gte: 800
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Same one-patch greenfield, tighter clock and higher bar (1000).
+  # The chain itself is unchanged; the medium tier discriminates a
+  # SLOW chain (one wasted turn delays the proc completion → fewer
+  # ticks of harvest income → misses the 1000 bar). max_turns 40 →
+  # ceiling 93 + 90·39 = 3603 > 3600 ✓.
+  medium:
+    description: >
+      Same cold-start as easy: MCV + $1900, NO buildings, NO income,
+      one ore patch near your spawn. Tighter deadline (tick 3600)
+      and higher bar (economy_value ≥ 1200). Deploy the MCV, build a
+      Power Plant ('powr' cost 300, adjacent to the new fact), then
+      build an Ore Refinery ('proc' cost 1400, adjacent to the fact
+      — comes with one free Ore Truck). To start the harvester
+      collecting, first `move_units` it onto the patch cell, then
+      `harvest` that same cell (the auto-cycle continues on its
+      own). After the chain you have $200 left; the bar requires
+      sustained harvest income before the clock. Stall, build-
+      units-only, deploy-only, or a slow chain all miss the bar.
+    starting_cash: 1900
+    overrides:
+      actors:
+        - {type: mcv, owner: agent, position: [20, 20]}
+        - {type: mine, owner: neutral, position: [26, 20]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - unit_type_count_gte: {type: harv, n: 1}
+        - economy_value_gte: 1200
+        - within_ticks: 3600
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+    max_turns: 40
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO MCV spawn_point
+  # groups (NORTH base / SOUTH base, round-robined by seed) AND a
+  # higher bar (1500). Each spawn has its OWN near-patch geometry
+  # (the agent must read its actual position and proc-site near the
+  # local patch, not memorise a fixed (20,20) opening). A shared FAR
+  # decoy patch sits mid-map — placing the proc near it instead of
+  # the spawn-local patch starves throughput → misses the bar.
+  # max_turns 45 → ceiling 93 + 90·44 = 4053 > 4000 ✓.
+  hard:
+    starting_cash: 1900
+    description: >
+      Cold-start under a higher bar AND a seed-varied start. Your
+      MCV may begin in the NORTH part of the map or the SOUTH part
+      depending on the seed; each start has its OWN nearby ore
+      patch. Deploy the MCV in place, build a Power Plant adjacent
+      to the new fact (cost 300), then build an Ore Refinery
+      adjacent to the fact (cost 1400 — auto-spawns one free Ore
+      Truck). To start the harvester collecting, first `move_units`
+      it onto the local patch cell, then `harvest` that same cell.
+      After the chain you have $200 left; the bar (economy_value ≥
+      1500) requires sustained harvest income before tick 4000. A
+      memorised "(20,20) deploy" opening fails on the other spawn.
+      Stall, deploy-only, build-units-only, or harv-to-the-wrong-
+      patch all lose.
+    overrides:
+      actors:
+        # Two MCV spawn groups (round-robin by seed). Each spawn is
+        # near its own ore patch; the unused other-spawn patch sits
+        # far from this MCV and is irrelevant to throughput.
+        - {type: mcv, owner: agent, position: [20, 14], spawn_point: 0}
+        - {type: mcv, owner: agent, position: [20, 26], spawn_point: 1}
+        # Spawn-local near patches (neutral actors place regardless
+        # of spawn_point filter — CLAUDE.md engine footgun; we want
+        # BOTH patches in the world so each spawn has its own near
+        # patch, and the off-spawn patch is far enough not to help).
+        - {type: mine, owner: neutral, position: [26, 14]}
+        - {type: mine, owner: neutral, position: [26, 26]}
+        # Persistent far enemy marker (LOSS-not-DRAW guarantee).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - unit_type_count_gte: {type: harv, n: 1}
+        - economy_value_gte: 1500
+        - within_ticks: 4000
+    fail_condition:
+      any_of:
+        - after_ticks: 4001
+    max_turns: 45

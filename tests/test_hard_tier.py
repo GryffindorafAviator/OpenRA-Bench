@@ -116,6 +116,13 @@ UPGRADED = [
     # flips per seed ((16,14) for NORTH, (16,28) for SOUTH), so a
     # memorised "always send to (16,14)" cannot generalise.
     "econ-multi-patch-allocation",
+    # Group F opening greenfield seed (Wave-4): cold-start from a
+    # single MCV with no buildings / no harvester / no income. Hard
+    # tier defines 2 agent spawn_point groups (NORTH (20,14) / SOUTH
+    # (20,26)) each with its OWN local ore patch ((26,14)/(26,26))
+    # so the deploy site + near-patch geometry flips per seed and a
+    # memorised "(20,20) deploy" opening cannot generalise.
+    "econ-startup-from-scratch",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
