@@ -1,0 +1,250 @@
+# tech-aggro-all-in.yaml
+#
+# REASONING capability — Wave-4 AGGRO tech cell of the tech triple
+# (alongside `tech-balanced-econ-then-tech` BALANCED and
+# `tech-turtle-defensive-tech` TURTLE). The agent must rush the
+# highest-tier tech (proc → weap → tsla) on a TIGHT clock; any
+# investment beyond the bare tech beeline (extra power, a second
+# refinery, a defensive turret) burns time/cash and misses the
+# deadline. The race is the clock, not combat — the enemy is a token
+# lightly-armed e1 at the far east, no real attack pressure.
+#
+# REAL-WORLD ANCHORS:
+#   - SC2 all-in tech rush / cheese tech timing (e.g. dark templar
+#     rush, banshee cloak rush) — skip economy, rush a tech building
+#     before the opponent ramps up.
+#   - Startup "MVP-or-die": burn runway on the single product feature
+#     before competitors / cash runs out; skip incremental polish.
+#   - Military "rush to nuclear" doctrine: race the threshold
+#     capability before the adversary catches up.
+#   - Innovation race: skip incremental improvements for a moonshot.
+#
+# IDIOM:
+#   The agent has limited time (the deadline). The intended (AGGRO)
+#   play is to skip ANY economy investment beyond the minimum
+#   prerequisites and rush the high-tier tech (`weap` + `tsla`) as
+#   fast as possible. Pre-placed: fact + barr + powr — enough to
+#   launch a single proc → weap → tsla chain. Adding an extra powr
+#   for "safety", a second proc for "income", or a ftur for
+#   "defense" serialises the budget AND the build queue against a
+#   tight clock that doesn't forgive over-build.
+#
+# TECH CHAIN (engine-verified soviet build prereqs):
+#   - fact + barr + powr  → pre-placed (+barr needed for any soviet
+#     production; powr keeps the fact's net power non-negative).
+#   - proc (1400)  → REQUIRED for weap (engine prereq).
+#   - weap (2000)  → REQUIRED for tsla.
+#   - tsla (1200)  → defense queue, parallel to building queue.
+#   Minimum cash for the chain = 1400 + 2000 + 1200 = 4600.
+#   Intended timing on the engine: chain completes ~tick 2973
+#   (turn 33), against a 3600-tick (turn 40) deadline on medium and
+#   3300-tick (turn 37) on hard — comfortable for the intended
+#   beeline, tight enough that ANY extra structure pushes past.
+#
+# DISCRIMINATIONS (verified scripted-policy bar, CLAUDE.md "no
+# defect, no cheat"):
+#   - intended pure-tech-beeline (proc→weap→tsla): WIN on all
+#     (level, seed).
+#   - stall (only observe): LOSS on all (level, seed) via the
+#     after_ticks fail.
+#   - econ-first (proc, +powr, +proc, weap, tsla): LOSS on all
+#     (level, seed) — the extra economy spend never finishes the
+#     tsla before the clock.
+#   - balanced (proc, ftur, ftur, weap, tsla): LOSS on medium/hard
+#     (defenses delay tsla past the deadline). On EASY (looser
+#     clock) balanced may WIN — this is the documented "easy is the
+#     rehearsal tier" idiom: skip-econ wins on easy by either route,
+#     but the AGGRO axis only bites under the medium/hard clock.
+#
+# ENGINE FOOTGUNS RESPECTED (CLAUDE.md):
+#   - `tent` is allied; `barr` is soviet — this pack is soviet and
+#     uses `barr` as the pre-placed infantry production prereq.
+#   - tsla cost=1200, in the Defense production queue, prereq=weap.
+#   - weap prereq INCLUDES proc (engine-enforced; verified by
+#     building-and-planning's prereq probing and a fresh smoke).
+#   - fact is owner=enemy (not destroyable as a win path); the
+#     lone enemy e1 at (110,20) gives a target marker without
+#     attack pressure, and the agent's own fact is its own.
+#   - The win predicate `has_building: tsla` + `has_building: weap`
+#     pairs with `within_ticks` — no `after_ticks` in the WIN clause
+#     (would be inert per the ConquestVictoryConditions footgun).
+#   - max_turns 50/40/37 → reachable ticks 4503/3603/3333; every
+#     within_ticks (4500/3600/3300) sits at or below reachable.
+#   - hard defines 2 agent `spawn_point` groups (north + south
+#     base) to satisfy tests/test_hard_tier.py::UPGRADED.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/tech-aggro-all-in.yaml
+
+meta:
+  id: tech-aggro-all-in
+  title: 'Tech-Aggro All-In — Rush Highest Tech, Skip Economy'
+  capability: reasoning
+  real_world_meaning: >
+    All-in tech rush against a hard deadline: skip economy buffer,
+    burn the budget on the single tech beeline (proc → weap → tsla),
+    finish before the deadline. Hedging the budget on a second
+    refinery, an extra power plant for "safety", or a defensive
+    turret serialises the build queue and misses the clock. The
+    AGGRO cell of the tech triple — the variant that wins by tech
+    timing before the opponent can ramp.
+  robotics_analogue: >
+    Startup runway-burning MVP push: ship the single product
+    capability that defines the company BEFORE cash runs out / a
+    funded competitor lands the same feature; skip incremental
+    polish, defer hardening, defer second-product diversification.
+  benchmark_anchor:
+    - "SC2 all-in tech rush / cheese tech timing"
+    - "startup runway-burning MVP push: skip features for speed"
+    - "military rush-to-nuclear doctrine"
+    - "innovation race: skip incremental for moonshot"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: soviet
+  enemy:
+    faction: allies
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ───────────────────────────────────────────────────────
+  # Bare tech-beeline rehearsal: cash 5500, clock 4500. The clock
+  # is loose enough that even a "balanced" build (proc + a turret +
+  # weap + tsla) can finish in time — the easy tier teaches the
+  # idiom without yet making it discriminating. Stall and a full
+  # econ-first build (extra powr + 2nd proc) still LOSE: the budget
+  # blows past the deadline with no tsla.
+  # max_turns 50 → reachable tick 93 + 90·49 = 4503 ≥ 4500.
+  easy:
+    description: >
+      Pre-placed: fact + barr + powr (soviet). Rush the high-tier
+      tech: build a refinery (proc), then a war factory (weap),
+      then a Tesla coil (tsla) — all three are required, in that
+      order (engine prereqs: weap needs proc, tsla needs weap).
+      Skip extra power, skip a second refinery, skip defenses —
+      the cash and the clock cover the bare chain with slack on
+      easy. Stalling or building a second refinery before the
+      tech never finishes the tsla before the deadline. Win =
+      own a war factory AND a Tesla coil before tick 4500.
+    starting_cash: 5500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: barr, owner: agent, position: [14, 22]}
+        - {type: powr, owner: agent, position: [10, 26]}
+        # Token enemy: lightly-armed and far — no real attack
+        # pressure; the race is the clock, not combat.
+        - {type: e1, owner: enemy, position: [110, 20], stance: 2}
+    win_condition:
+      all_of:
+        - {has_building: weap}
+        - {has_building: tsla}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+    max_turns: 50
+
+  # ── MEDIUM ─────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHT clock (3600) makes the AGGRO axis
+  # bite. Cash 4800 funds the bare chain (4600) with $200 of slack
+  # — any extra structure (a 2nd proc, a 2nd powr, a ftur) consumes
+  # both cash and queue time and misses tsla before the clock.
+  # max_turns 40 → reachable tick 93 + 90·39 = 3603 ≥ 3600.
+  medium:
+    description: >
+      Pre-placed: fact + barr + powr (soviet). Rush proc → weap →
+      tsla on a tight clock (3600 ticks). Cash funds exactly the
+      bare chain with very little slack. Building a second
+      refinery, an extra power plant, or a defensive turret
+      serialises the queue and misses the Tesla coil before the
+      deadline. Stalling loses on the clock. Win = own a war
+      factory AND a Tesla coil before tick 3600.
+    starting_cash: 4800
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: barr, owner: agent, position: [14, 22]}
+        - {type: powr, owner: agent, position: [10, 26]}
+        - {type: e1, owner: enemy, position: [110, 20], stance: 2}
+    win_condition:
+      all_of:
+        - {has_building: weap}
+        - {has_building: tsla}
+        - {within_ticks: 3600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {has_building: fact}}
+    max_turns: 40
+
+  # ── HARD ───────────────────────────────────────────────────────
+  # +1 controlled variable: SPAWN VARIATION + STRICT BUILD CAP.
+  # Two agent spawn_point groups (north base at y=10–18, south
+  # base at y=22–30) round-robin per seed — no single memorised
+  # placement plan generalises. `building_total_gte: 6` matches
+  # the bare chain (fact + barr + powr + proc + weap + tsla = 6);
+  # combined with the within_ticks bound and tight cash, ANY extra
+  # building (ftur, 2nd powr, 2nd proc) over-builds the cap-locked
+  # economy or over-runs the clock. Tightest clock (3300) leaves
+  # ~3-turn slack for the intended chain.
+  # max_turns 37 → reachable tick 93 + 90·36 = 3333 ≥ 3300.
+  hard:
+    description: >
+      Pre-placed: fact + barr + powr (soviet), at a base position
+      that varies by seed (north or south). Rush proc → weap →
+      tsla under the tightest clock (3300 ticks). Cash funds the
+      bare chain with negligible slack. The build cap (exactly 6
+      total buildings: the pre-placed three plus proc, weap, tsla)
+      forbids ANY extra structure. Stalling, econ-first, or
+      hedging defenses all miss the deadline. Win = own a war
+      factory AND a Tesla coil with ≤6 total buildings before
+      tick 3300.
+    starting_cash: 4800
+    overrides:
+      actors:
+        # North-base spawn (spawn_point 0).
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: barr, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 18], spawn_point: 0}
+        # Token agent unit per spawn group: a single rifleman
+        # sentry so units_summary varies by seed (the
+        # tests/test_hard_tier.py::test_curated_hard_still_compiles
+        # _and_runs invariant uses units_summary to verify the
+        # spawn round-robin took effect). Does not participate in
+        # the win condition or affect the tech race.
+        - {type: e1, owner: agent, position: [12, 16], spawn_point: 0}
+        # South-base spawn (spawn_point 1).
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: barr, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 22], spawn_point: 1}
+        - {type: e1, owner: agent, position: [12, 24], spawn_point: 1}
+        # Enemy placed unconditionally (engine: spawn_point filter
+        # applies only to AGENT actors).
+        - {type: e1, owner: enemy, position: [110, 20], stance: 2}
+    win_condition:
+      all_of:
+        - {has_building: weap}
+        - {has_building: tsla}
+        - {building_total_gte: 6}
+        - {within_ticks: 3300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3301}
+        - {not: {has_building: fact}}
+    max_turns: 37

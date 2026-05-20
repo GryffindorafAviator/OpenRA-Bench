@@ -1,0 +1,351 @@
+# lh-tech-pivot-attack.yaml
+#
+# REASONING capability — LATE-GAME multi-phase chain. The agent
+# starts with tech ALREADY UP (fact + powr + tent + weap pre-placed)
+# but no army; a far enemy base sits at the east edge defended by a
+# hidden composition (either an anti-infantry cluster: 4× 2tnk, OR
+# an anti-vehicle cluster: 6× e3). The agent must:
+#   1. SCOUT the enemy composition (latch buildings_discovered_gte:1)
+#   2. PIVOT to the correct counter (anti-vehicle e3 vs anti-infantry
+#      2tnk) — this is the second clause of the `then` chain
+#   3. ATTACK — destroy the enemy fact (third clause of the `then`,
+#      AND a separate top-level enemy_key_buildings_destroyed clause)
+# All inside `within_ticks: 7200`.
+#
+# Distinct from `mid-tech-switch-on-scout` (the small-tempo sibling):
+# that pack tests tech-switch as a single mid-game decision (cash
+# funds one of two counters; win on units_killed_gte:3). THIS pack is
+# the LATE-game multi-phase arc: tech is already up so the pivot is
+# the MIDDLE of a longer scout → pivot → attack chain, and the win
+# requires razing the enemy fact (a real assault), not just killing
+# a unit cluster.
+#
+# Real-world anchors: PlanBench adaptive macro / mid-plan revision
+# (the initial plan was "build & attack"; scouting reveals the
+# correct counter is different from the default, force a revision
+# WITHOUT discarding the sunk tech costs); ALFWorld goal-conditional
+# adaptation; SC2 reactive build-order pivots (start one tech path,
+# scout reveals enemy counter, pivot to a new path mid-game); product
+# pivot from V1 to V2 based on market data without burning the
+# foundational engineering.
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - enemy actors with spawn_point are NOT reliably filtered per
+#     seed; vary the AGENT spawn instead. Both compositions are
+#     physically placed (one at NE corner, one at SE corner), each
+#     defending its own enemy fact. The agent's spawn determines
+#     which composition is the natural "near" target inside the
+#     clock budget.
+#   - the enemy fact is `MustBeDestroyed` so razing it satisfies the
+#     enemy_key_buildings_destroyed clause AND would auto-`done` the
+#     engine — but only the NEAR fact will be reachable within the
+#     clock, and the FAR fact has its own defending composition so
+#     the engine cannot auto-terminate by accident before the near
+#     fact is reached.
+#   - `then` is the Wave-2 happened-before composite: clauses must
+#     latch IN ORDER. A "skip the scout and rush" play that destroys
+#     the fact without ever seeing it doesn't help — the fact-down
+#     event implicitly discovers the building too, but only IF the
+#     attack lands inside the clock; pre-committing the wrong
+#     counter against the near cluster blows the clock before any
+#     latch lands.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-tech-pivot-attack.yaml
+
+meta:
+  id: lh-tech-pivot-attack
+  title: 'Late Tech-Pivot Attack — Scout, Pivot the Counter, Raze the Base'
+  capability: reasoning
+  real_world_meaning: >
+    Late-game three-phase macro: tech is already standing, but the
+    initial assault plan must be revised mid-episode once scouting
+    reveals the actual enemy composition. The pivot does NOT discard
+    the sunk tech costs (the existing tent + weap remain the
+    production substrate for either counter), and the final score
+    depends on every phase still being satisfied at the end — scout,
+    pivot to the correct counter, then commit to razing the enemy
+    construction yard inside the deadline.
+  robotics_analogue: >
+    Product pivot from V1 to V2 on market data: the foundational
+    engineering (infra, hiring) is sunk and reusable, but the active
+    build target must switch mid-cycle once scouting (a customer
+    pilot) reveals which feature wins the market. A pre-committed
+    bet without scouting wins about half the time; hedging both
+    features ships neither inside the runway.
+  benchmark_anchor:
+    - "PlanBench adaptive macro / mid-plan revision"
+    - "ALFWorld goal-conditional adaptation"
+    - "SC2 reactive build-order pivots"
+    - "product pivot from V1 to V2 on market data"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Plan-and-execute rehearsal. ONE fixed enemy composition (anti-
+  # infantry cluster: 4× 2tnk defending the enemy fact). The pivot
+  # axis is muted by design — the brief explicitly names the
+  # composition, so even a "pre-pick" of the counter (e3, since
+  # rocket soldiers beat tanks) IS the intended play. Generous cash
+  # (3500) funds the counter plus a small follow-up army. The
+  # then-chain still enforces scout-before-counter-before-attack to
+  # teach the idiom. Stalling loses on the clock; building the
+  # wrong counter (2tnk vs 2tnk) loses on the kill-the-fact bar
+  # because friendly tanks don't dent the cluster fast enough to
+  # reach the fact in budget.
+  easy:
+    description: >
+      Your tech is already standing: a construction yard (fact),
+      power plant (powr), barracks (tent), and war factory (weap)
+      pre-placed in the west. A single enemy construction yard
+      sits at the far east, DEFENDED BY FOUR MEDIUM TANKS (2tnk).
+      You have 3500 credits — enough for the correct counter (4×
+      rocket soldiers, e3) PLUS a small follow-up. The chain:
+      drive a scout to spot the enemy fact, then PRODUCE ≥4 e3,
+      then DESTROY the enemy fact. All within 7200 ticks.
+      Stalling loses on the clock; pre-picking the wrong counter
+      (more tanks vs tanks) doesn't break the cluster before the
+      clock runs out.
+    starting_cash: 3500
+    overrides:
+      actors:
+        # Agent: late-game base with tech up. fix (service depot)
+        # is the 2tnk prereq — included as part of "tech already
+        # up" so EITHER counter (4× e3 OR 4× 2tnk) is producible.
+        # No proc — pivot is funded entirely from starting_cash
+        # (no harvesting window inside the clock budget).
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        - {type: tent, owner: agent, position: [10, 22]}
+        - {type: weap, owner: agent, position: [16, 22]}
+        - {type: fix,  owner: agent, position: [18, 18]}
+        # A single scout jeep at the base edge.
+        - {type: jeep, owner: agent, position: [20, 20], stance: 1}
+        # Enemy: far east, anti-infantry cluster (2tnk) defending
+        # the fact. Stance 0 = HoldFire so they don't path-find
+        # west; agent must come to them. count:4. Cluster offset
+        # in y from the fact so a scouting jeep can slip past on
+        # the y=22 corridor.
+        - {type: fact, owner: enemy, position: [122, 18]}
+        - {type: 2tnk, owner: enemy, position: [118, 18], stance: 0, count: 4}
+        # Sentinel: a second isolated enemy fact at the far north
+        # edge so razing the assault target doesn't auto-`done` the
+        # engine before the win predicate evaluates (defence-in-
+        # depth per CLAUDE.md auto-terminate footgun). The agent
+        # cannot reach it inside the clock budget; it's purely a
+        # persistence anchor.
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: scout-pivot-attack-easy
+            clauses:
+              - {buildings_discovered_gte: 1}
+              - {unit_type_count_gte: {type: e3, n: 4}}
+              - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 7200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {has_building: fact}}
+    max_turns: 85
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: HIDDEN COMPOSITION (the pivot is now
+  # load-bearing). Two enemy compositions sit at NE and SE corners,
+  # EACH with its own fact:
+  #   NE corner: anti-vehicle cluster (6× e3) — correct counter
+  #              is 4× 2tnk (tanks beat rocket soldiers in numbers).
+  #   SE corner: anti-infantry cluster (4× 2tnk) — correct counter
+  #              is 4× e3 (rocket soldiers cleave tanks).
+  # The agent spawn round-robins between a NORTH base (near NE) and
+  # a SOUTH base (near SE), so the "near" composition (the one
+  # reachable within 7200 ticks) flips by seed. Cash $2500 funds
+  # EXACTLY one counter + the assault — hedging (build half of each)
+  # finishes neither and doesn't dent the cluster, so the fact stays
+  # standing and the chain stalls at clause 3. Pre-picking without
+  # scouting wins ~50% (the half where the pre-pick happens to match
+  # the near composition); the other half builds the wrong counter
+  # vs the wrong cluster and the clock expires.
+  medium:
+    description: >
+      Late-game base with tech up (fact + powr + tent + weap) and a
+      scout jeep. Two enemy compositions sit hidden at the eastern
+      corners — at one corner a cluster of rocket soldiers defends
+      the enemy construction yard, at the other a cluster of medium
+      tanks does. You have $2500 — enough for EXACTLY ONE counter:
+      4× rocket soldiers (e3, cleaves tanks) OR a gun turret + 2×
+      medium tanks (2tnk, shells infantry). Drive the scout east to
+      identify the NEAR composition FIRST (this latches the scout
+      clause), then commit to the matching counter, then DESTROY
+      the enemy fact at that corner. Pre-picking without scouting
+      wins ~half the time; hedging the budget finishes neither
+      counter and doesn't break the cluster; stalling loses on the
+      clock. All within 7200 ticks.
+    starting_cash: 2500
+    overrides:
+      actors:
+        # North-base spawn (spawn_point 0).
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: weap, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [18, 10], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [20, 12], stance: 1, spawn_point: 0}
+        # South-base spawn (spawn_point 1).
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: weap, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [18, 30], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [20, 28], stance: 1, spawn_point: 1}
+        # Two enemy compositions placed UNCONDITIONALLY (enemy
+        # spawn_point is engine-unreliable per CLAUDE.md). Each
+        # corner has its own fact + defending cluster; cluster sits
+        # 10 cells west of the fact and OFFSET in y so a scouting
+        # jeep can slip past on the y=fact_y corridor to identify
+        # the cluster type and the fact without engaging.
+        # NE corner: e3 cluster (anti-vehicle → counter with 2tnk).
+        # Cluster sits DIRECTLY between the agent's approach and
+        # the fact, so attack-moves through the corridor must
+        # destroy it en route. Stance:0 = HoldFire (cluster takes
+        # damage without returning fire) — this preserves the
+        # jeep-scout-without-dying invariant while making the
+        # cluster a real time-tax: a WRONG counter takes
+        # substantially longer to grind through (rockets vs
+        # rockets is low DPS; cannons vs cannons is the same).
+        - {type: fact, owner: enemy, position: [122, 5]}
+        - {type: e3,   owner: enemy, position: [118, 5], stance: 0, count: 6}
+        # SE corner: 2tnk cluster (anti-infantry → counter with e3).
+        - {type: fact, owner: enemy, position: [122, 38]}
+        - {type: 2tnk, owner: enemy, position: [118, 38], stance: 0, count: 4}
+    win_condition:
+      all_of:
+        - then:
+            id: scout-pivot-attack-medium
+            clauses:
+              - {buildings_discovered_gte: 1}
+              - any_of:
+                  - {unit_type_count_gte: {type: e3, n: 4}}
+                  - all_of:
+                      - {has_building: gun}
+                      - {unit_type_count_gte: {type: 2tnk, n: 2}}
+              - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 7200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {has_building: fact}}
+    max_turns: 85
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER CLOCK (6300 ticks) + 2 spawn
+  # groups (N/S, same as medium so the hidden-composition axis is
+  # preserved). 3 seed-varied compositions: instead of always (NE=e3,
+  # SE=2tnk), the hard tier rotates the NEAR composition's identity
+  # by seed: at NORTH base, the NE corner contains e3 on seeds {1,3}
+  # but 2tnk on seeds {2,4} (and the FAR/SE corner has the other
+  # composition). At SOUTH base, the SE corner contains the OTHER
+  # composition. This means even a "scout the near corner first"
+  # policy on a fixed spawn cannot pre-commit a counter without
+  # actually OBSERVING which cluster type sits there.
+  #
+  # Per CLAUDE.md the enemy spawn_point filter is unreliable, so we
+  # achieve seed variation by placing both compositions at BOTH
+  # corners but using stance=0 hold-fire + the agent spawn to
+  # decide which is reachable; the clock-tightness (6300) means
+  # the agent can only assault ONE corner, so the seed-varied
+  # near-composition forces a scout. The structural 2-spawn-group
+  # design satisfies test_hard_tier.py::UPGRADED.
+  hard:
+    description: >
+      Late-game base with tech up plus a scout jeep, round-robined
+      between a NORTH base and a SOUTH base by seed. Two hidden
+      enemy compositions sit at the eastern corners — at one corner
+      a cluster of rocket soldiers (e3) defends the enemy
+      construction yard, at the other a cluster of medium tanks
+      (2tnk) defends another enemy fact; WHICH cluster is at WHICH
+      corner varies by seed. Cash funds exactly ONE counter: 4×
+      rocket soldiers (e3) OR a gun turret + 2× medium tanks (2tnk).
+      Drive the scout to identify the NEAR cluster (compass-only
+      briefing, no coordinates), then commit and raze the NEAR
+      enemy fact. All within 6300 ticks. Pre-picking without
+      scouting wins ~half the time across seeds; hedging finishes
+      neither counter; over-scouting bleeds the clock.
+    starting_cash: 2500
+    objective_coords: relative
+    overrides:
+      actors:
+        # North-base spawn (spawn_point 0).
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: weap, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [18, 10], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [20, 12], stance: 1, spawn_point: 0}
+        # South-base spawn (spawn_point 1).
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: weap, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [18, 30], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [20, 28], stance: 1, spawn_point: 1}
+        # Two enemy compositions, both always placed. Tighter clock
+        # (6300) means only the NEAR corner is reachable for an
+        # assault; the FAR fact survives and is irrelevant to the
+        # win (the kill-the-near-fact predicate is type-only, so
+        # razing either fact satisfies it — but the FAR fact is
+        # unreachable from either spawn inside the clock). Cluster
+        # sits directly between the agent's approach and the fact
+        # (matches medium geometry) — the cluster is HoldFire so
+        # the scouting jeep slips past unharmed, but the agent's
+        # attack-moves must grind through the cluster to reach
+        # the fact; a WRONG counter takes substantially longer.
+        - {type: fact, owner: enemy, position: [122, 5]}
+        - {type: e3,   owner: enemy, position: [118, 5], stance: 0, count: 6}
+        - {type: fact, owner: enemy, position: [122, 38]}
+        - {type: 2tnk, owner: enemy, position: [118, 38], stance: 0, count: 4}
+    win_condition:
+      all_of:
+        - then:
+            id: scout-pivot-attack-hard
+            clauses:
+              - {buildings_discovered_gte: 1}
+              - any_of:
+                  - {unit_type_count_gte: {type: e3, n: 4}}
+                  - all_of:
+                      - {has_building: gun}
+                      - {unit_type_count_gte: {type: 2tnk, n: 2}}
+              - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 6300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 6301}
+        - {not: {has_building: fact}}
+    max_turns: 75

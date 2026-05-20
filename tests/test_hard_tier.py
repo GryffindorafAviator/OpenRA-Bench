@@ -128,6 +128,15 @@ UPGRADED = [
     # proc geometry differs per seed; a memorised opening cannot
     # generalise.
     "tech-balanced-econ-then-tech",
+    # Wave-4 salvaged-from-worktree packs: agents finished authoring
+    # and validating but ran out of usage budget mid-push; rescued
+    # YAML+tests from their worktree branches and committed from the
+    # main session.
+    "lh-opening-to-tech-to-army",
+    "lh-tech-pivot-attack",
+    "mfb-tech-base-vs-economy-base",
+    "combat-harass-balanced-hit-and-run",
+    "tech-aggro-all-in",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

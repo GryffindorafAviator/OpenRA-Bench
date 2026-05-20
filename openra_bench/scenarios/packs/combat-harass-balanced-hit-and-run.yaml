@@ -1,0 +1,238 @@
+# combat-harass-balanced-hit-and-run — BALANCED pulsed harass (Wave-4)
+#
+# The first pack in the bench whose win predicate makes RETREAT
+# load-bearing — not merely allowed. Two fast jeeps (RAIDERS) face a
+# harvester cluster overwatched by ONE leashed e3 rocket soldier posted
+# a few cells off the cluster (south). Range parity: e3 anti-tank
+# rockets (Dragon, range 5) out-DPS jeeps (M60mg, range 4) head-on; a
+# jeep that stays inside Dragon range until the harvs die is shot apart
+# before it can retreat (units_lost_lte:0 on medium = perfect retreat
+# bar). The only winning policy is the pulsed (BALANCED) harass-retreat
+# cycle:
+#
+#   1. Approach the harv cluster from the west (along the harv y-axis).
+#   2. STRIKE — fire MG into the cluster from the cluster edge.
+#   3. The guard is south of the cluster — when the jeep is inside
+#      AGGRO=16 of the post, the guard LUNGES north toward the jeep.
+#   4. RETREAT west past the leash (>18 from post) so the guard
+#      snaps back to its post.
+#   5. RE-ENGAGE the next harv. Cycle until the kill bar is met
+#      WITHOUT losing any jeep.
+#
+# Range mechanics make this work: jeep MG range 4 < e3 Dragon range 5,
+# so committing trades poorly head-on. The offset geometry (guard 10+
+# cells south of the harvs) gives a 1-decision strike window before
+# the lunging guard closes Dragon range — exactly long enough for the
+# pulse to score and disengage.
+#
+# This is the BALANCED variant of the harass-retreat triple — neither
+# all-in commit (combat-harass-aggressive) nor stand-off feint
+# (combat-harass-conservative); the pulse cadence is the controlled
+# variable.
+#
+# Bar (no defect / no cheat):
+#   • stall (only observe)                → LOSS (kill bar unmet, clock)
+#   • commit-and-stay (charge & sit)      → LOSS (jeep dies to e3 rocket)
+#   • retreat-only (never engage)         → LOSS (kill bar unmet)
+#   • intended hit-run-cycle              → WIN
+#
+# Real-world anchor:
+#   SC2 muta-harass / sentry-harass (pulsed engagement with mandatory
+#   disengage on enemy reinforcement); guerrilla warfare; pulsed-load
+#   attack with retaliation avoidance. Harassment whose ROI is
+#   measured in "kill workers without losing raiders" — a strictly
+#   stronger bar than damage-traded harass.
+
+meta:
+  id: combat-harass-balanced-hit-and-run
+  title: 'Balanced Hit-and-Run — Pulsed Harvester Harass under a Leashed Defender'
+  capability: reasoning
+  real_world_meaning: >
+    BALANCED pulsed harassment under a reactive defender. Two fast
+    raiders (jeeps) must score N harvester kills against a cluster
+    overwatched by ONE leashed rocket soldier (anti-vehicle, out-DPS
+    the jeeps head-on). The defender holds its post 10+ cells off the
+    cluster but lunges at any foe within AGGRO=16 of the post and
+    snaps back past LEASH=18. Committing inside the guard's Dragon
+    range until the harvs die loses jeeps to rockets (cap is 0 on
+    medium — the BALANCED bar is that retreat ACTUALLY worked).
+    Sitting out of aggro never scores. The only winning policy is the
+    pulse: approach to the cluster edge → strike one harv → retreat
+    past leash → guard snaps back → re-engage → repeat. Retreat is
+    load-bearing — the first pack in the bench where it is required,
+    not merely permitted.
+  robotics_analogue: >
+    Pulsed manipulation under a reactive guarding agent: the policy
+    must complete a sequence of small reward-bearing actions inside
+    the guard's intervention radius, then disengage past the leash
+    before damage is taken, then re-enter — without taking any hit at
+    all. A commit-until-done policy gets damaged; a stand-off policy
+    never scores. The temporal structure of the reward (cycle of
+    engage / disengage) is what is being tested.
+  benchmark_anchor:
+    - "SC2 muta-harass / sentry-harass (pulsed engagement)"
+    - "military guerrilla warfare (hit-and-run doctrine)"
+    - "pulsed-load attack with retaliation avoidance"
+    - "RTS balanced harass: kill workers without losing raiders"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+# Topology (rush-hour-arena 128×40, playable x in [2..126], y in [2..38]):
+#   Raiders (jeeps) start at the west (x=6) on the harv-cluster
+#   latitude. Harvester cluster sits center-east at y≈10; the guard
+#   post sits 14 cells south at y≈24, offset enough that a jeep at the
+#   cluster edge (range 4 from harv) is OUTSIDE Dragon range (5) of
+#   the guard but INSIDE its AGGRO=16. The guard lunges north toward
+#   the jeep on the NEXT decision tick — exactly long enough for the
+#   pulse to score and retreat. Retreat west past x≤60 puts the jeep
+#   at distance >18 from the post, triggering snap-back.
+#   Far-east `fact` keeps the episode alive past the harv-kill moment
+#   so the win/fail evaluator sees the terminal state (no auto-done
+#   on enemy wipe collapsing to DRAW).
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 6500}
+  actors:
+    # RAIDERS — 2 jeeps at the west on the harv-cluster latitude.
+    # Fast (the only reason hit-and-run is feasible at all) and
+    # fragile (the reason retreat is mandatory).
+    - {type: jeep, owner: agent, position: [6, 10], stance: 1, count: 2}
+    # SCORE TARGETS — 3 harvesters in a tight cluster at y=10.
+    - {type: harv, owner: enemy, position: [88, 10], stance: 0}
+    - {type: harv, owner: enemy, position: [88, 12], stance: 0}
+    - {type: harv, owner: enemy, position: [90, 10], stance: 0}
+    # THE LEASHED GUARD — one e3 (anti-tank rocket, Dragon range 5)
+    # posted at (88,24), 14 cells south of the cluster centre. AGGRO=16
+    # ⇒ guard lunges at any foe within 16 of (88,24); LEASH=18 ⇒ snaps
+    # back past 18 from post. A jeep at (84,10): distance to harv =
+    # 4 (in MG range), distance to post = sqrt(16+196) ≈ 14.6 < 16 ⇒
+    # guard lunges. Retreating to x=60 puts the jeep at distance
+    # sqrt(784+196) ≈ 31 > 18 ⇒ snap-back.
+    - {type: e3, owner: enemy, position: [88, 24], stance: 2}
+    # Persistent enemy `fact` marker (far east, unarmed high-HP) keeps
+    # the episode alive past the moment the last harv dies — the win/
+    # fail evaluator must see the terminal units_killed=N + units_lost=0
+    # state instead of engine auto-done on enemy wipe collapsing to DRAW.
+    - {type: fact, owner: enemy, position: [124, 20]}
+
+levels:
+  # ── EASY ── the bare hit-and-run skill: 2 harv (kill bar 2), 1
+  # guard, attrition cap of 1 (allows ONE mistake — a single jeep loss
+  # is still winnable if the surviving jeep finishes the bar). Idle
+  # loses on the clock; commit-and-stay loses jeeps to the rocket
+  # before the bar is met.
+  easy:
+    description: >
+      Two jeeps (RAIDERS) at the west (y=10) must kill TWO harvesters
+      clustered at (88,10)/(88,12). One leashed rocket soldier posts
+      14 cells south at (88,24): it lunges at any foe within 16 cells
+      of its post and snaps back past 18. Pulse: approach east along
+      y=10 to the cluster edge (~x=84), strike one harv, retreat west
+      past x=60 so the guard snaps back, re-approach. Lose at most 1
+      jeep — before tick 5400. Idling, charge-and-stay, and
+      retreat-only all LOSE.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [6, 10], stance: 1, count: 2}
+        - {type: harv, owner: enemy, position: [88, 10], stance: 0}
+        - {type: harv, owner: enemy, position: [88, 12], stance: 0}
+        - {type: e3,   owner: enemy, position: [88, 24], stance: 2}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 2}
+        - {units_lost_lte: 1}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 62
+
+  # ── MEDIUM ── +1 controlled variable: 3 harv (kill bar 3) and the
+  # BALANCED bar — units_lost_lte: 0 (perfect retreat). Commit-and-stay
+  # is strictly fatal (the e3 will kill a jeep before all 3 harv fall);
+  # the policy must execute the cycle at least twice without taking
+  # rocket damage.
+  medium:
+    description: >
+      Two jeeps (RAIDERS) at the west (y=10) must kill THREE harvesters
+      clustered at (88,10)/(88,12)/(90,10). One leashed rocket soldier
+      posts 14 cells south at (88,24): aggro 16, leash 18. The BALANCED
+      bar: lose ZERO jeeps — retreat must actually work. Pulse:
+      approach east along y=10 to (~x=84), strike one harv, retreat
+      west past x=60 so the guard snaps back, re-engage. Cycle three
+      times. Idling, commit-and-stay (a jeep dies), and retreat-only
+      (kill bar unmet) all LOSE — before tick 5400.
+    overrides: {}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {units_lost_lte: 0}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 62
+
+  # ── HARD ── +2 controlled variables vs medium: 4 harv (kill bar 4)
+  # across TWO spread-out clusters (must coordinate retreats across
+  # both lures — the eastern cluster has its own guard so a single
+  # pulse vector can't cover all kills); and 2 spawn_point groups
+  # round-robin the raider start latitude (NORTH y=10 vs SOUTH y=30)
+  # so the approach vector and the per-cluster retreat line vary by
+  # seed. The two guards' aggro circles do NOT overlap (posts 40
+  # cells apart on x); each cluster is an independent pulse target.
+  hard:
+    description: >
+      Two jeeps must kill FOUR harvesters split across two clusters
+      with TWO leashed guards posted south of each cluster (aggro 16,
+      leash 18). Raider start latitude varies by seed (north y=10 or
+      south y=30). The BALANCED bar: lose ZERO jeeps. Pulse each
+      cluster: approach east to the cluster edge, strike one harv,
+      retreat past leash, re-engage. The two aggro circles don't
+      overlap, so the cycles run independently — but brute-charging
+      the second cluster while the first guard is still on post
+      takes rockets and loses a jeep. Before tick 5400. Idling,
+      commit-and-stay, and retreat-only all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTHERN raider staging (y=10)
+        - {type: jeep, owner: agent, position: [6, 10], stance: 1, count: 2,
+           spawn_point: 0}
+        # spawn_point 1 — SOUTHERN raider staging (y=30)
+        - {type: jeep, owner: agent, position: [6, 30], stance: 1, count: 2,
+           spawn_point: 1}
+        # Cluster A — harvs at y=10 (NORTH), guard A posted at (60,24)
+        # 14 cells south of the cluster centre.
+        - {type: harv, owner: enemy, position: [60, 10], stance: 0}
+        - {type: harv, owner: enemy, position: [60, 12], stance: 0}
+        - {type: e3,   owner: enemy, position: [60, 24], stance: 2}
+        # Cluster B — harvs at y=30 (SOUTH), guard B posted at (100,16)
+        # 14 cells north of cluster centre. Posts 40 cells apart on x
+        # AND on opposite latitudes — the two aggro=16 circles do NOT
+        # overlap (a jeep retreating from B past x=80 is outside A's
+        # leash too).
+        - {type: harv, owner: enemy, position: [100, 30], stance: 0}
+        - {type: harv, owner: enemy, position: [100, 28], stance: 0}
+        - {type: e3,   owner: enemy, position: [100, 16], stance: 2}
+        # Far-east persistent marker (keeps episode alive past wipe).
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {units_lost_lte: 0}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 62

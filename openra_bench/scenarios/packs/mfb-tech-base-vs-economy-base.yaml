@@ -1,0 +1,294 @@
+# mfb-tech-base-vs-economy-base.yaml
+#
+# REASONING capability — role-specialized 2-base layout. The agent
+# holds TWO disjoint base sites (NW + SE) and a single indivisible
+# build sequence. The decision is WHICH site gets the TECH role
+# (war factory) and WHICH site gets the ECONOMY role (refinery /
+# harvester / storage). Misplacing both production lines at one base
+# fails the cross-region win predicate; specializing the bases by
+# role wins. The SE pole sits next to the larger ore patch, so
+# ECONOMY-at-SE / TECH-at-NW is the rational placement.
+#
+# Real-world anchor: industrial site specialization (R&D campus
+# vs production campus); SC2 specialized-base placements (tech
+# base vs macro base); OR multi-warehouse role optimization;
+# distributed-systems read-replica vs write-primary mirror layout.
+#
+# WIN (every level):
+#   building_in_region:{x:20, y:20, r:10, type:weap, count:1}   (TECH @ NW)
+#   AND building_in_region:{x:140, y:60, r:10, type:proc, count:1} (ECON @ SE)
+#   AND unit_type_count_gte:{type:harv, n:2}
+#   AND economy_value_gte: 2500
+#   AND within_ticks: 6300
+#
+# FAIL (every level):
+#   any_of[ after_ticks: <budget+1>, not building_count_gte:{type:fact,n:2} ]
+#   (clock OR loss of either fact)
+#
+# Failure modes that the predicate makes LOSE (the bar):
+#   • stall (Command.observe only) — never satisfies build_in_region,
+#     after_ticks bites.
+#   • tech-and-econ bunched at NW (place BOTH weap + proc at NW):
+#     SE proc-clause never satisfied, clock expires.
+#   • tech-and-econ bunched at SE (place BOTH at SE): NW weap-clause
+#     never satisfied.
+#   • intended split (weap@NW + proc@SE, harvest both): WINS.
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   • The agent has no live adversary; a far-corner unarmed enemy
+#     `fact` pins the engine off the auto-`done`-on-enemy-elim path.
+#   • `weap` prereq is `proc` (game_data.py), so the intended order
+#     is: build proc → place at SE → build weap → place at NW. The
+#     SE proc placement is also what supplies the second harv
+#     (refineries spawn a free Ore Truck on construction → harv_count
+#     = preplaced(1) + free(1) = 2).
+#   • Tick budget: ~90 ticks/turn ⇒ max_turns ≥ 70 makes
+#     within_ticks:6300 reachable (93 + 90·69 = 6303). ✓
+#   • Map: arena generator at 160×80 cordon 4 — playable cells x∈[4,
+#     156), y∈[4, 76); (20,20) and (140,60) sit comfortably inside.
+#     The generator-spec base_map is placed inside per-level
+#     `overrides` because the `is_map_supported` helper only accepts
+#     a string id at pack level.
+#   • Spawn_point: hard tier rotates which fact ships with the
+#     starting harv (NW vs SE), so each seed presents a different
+#     base composition. CLAUDE.md spawn-filter rule: once any AGENT
+#     actor declares spawn_point, every agent actor without one is
+#     filtered out, so every agent actor on hard carries an explicit
+#     spawn_point; neutral/enemy actors are unaffected.
+
+meta:
+  id: mfb-tech-base-vs-economy-base
+  title: 'Two-Base Role Specialization — Tech Site vs Economy Site'
+  capability: reasoning
+  real_world_meaning: >
+    Role specialization across two physical sites. The agent has two
+    disjoint base footprints and an indivisible budget for the next
+    couple of structures; one site must take the TECH role (war
+    factory / R&D campus) and the other the ECONOMY role (refinery /
+    production campus / storage). Bunching both roles at one site
+    yields the headline "two production lines online" but fails the
+    geographic specialization the brief demands. The SE pole sits
+    next to the larger ore patch — ECONOMY-at-SE / TECH-at-NW is the
+    rational assignment; the reverse is logistically possible but
+    sub-optimal.
+  robotics_analogue: >
+    Multi-warehouse role optimization: a logistics network with two
+    facility footprints decides which one becomes the consolidation/
+    throughput hub (close to the inbound source) and which becomes
+    the value-add / specialized assembly site (further from supply,
+    nearer the shipping edge). Misallocating roles forces wasteful
+    cross-site transfers and blows the SLA clock.
+  benchmark_anchor:
+    - "industrial specialization (R&D campus vs production campus)"
+    - "SC2 specialized-base placements (tech base vs macro base)"
+    - "OR multi-warehouse role optimization"
+    - "distributed-systems read-replica vs write-primary"
+  author: "openra-bench"
+
+# Pack-level base_map is a string placeholder; each level's
+# `overrides` re-points it at the arena generator (160×80) so the
+# scenario runs on the wide arena we actually need. Static
+# rush-hour-arena (128×40) keeps the pack-level type-check happy.
+base_map: rush-hour-arena
+
+starting_cash: 4000
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Generous bar, no time pressure. The same two-site geography; the
+  # economy_value floor is set so even a tepid harvest cadence clears
+  # it, but the role-specialization predicate (weap@NW + proc@SE)
+  # still load-bears: bunched layouts fail the region check.
+  easy:
+    description: >
+      You hold TWO base sites: a NORTHWEST base at (20,20) and a
+      SOUTHEAST base at (140,60). Each has a Construction Yard
+      (fact), a power plant (powr), and an idle MCV for redundancy.
+      One Ore Truck (harv) is parked at the NW base. There is a
+      LARGE ore patch right next to the SE base (the SE pole is the
+      rational ECONOMY site); the NW pole is shielded by the map
+      edge and is the rational TECH site. Cash 4000 funds ONE
+      Refinery (proc, 1400) + ONE War Factory (weap, 2000) with
+      slack. WIN when you have built a War Factory inside the NW
+      region (radius 10) AND a Refinery inside the SE region (radius
+      10), with ≥2 harvesters and an economy ≥2500 within 6300
+      ticks. Bunching both at one site never satisfies the cross-
+      region predicate. Stalling never builds anything.
+    starting_cash: 4000
+    overrides:
+      base_map: {generator: arena, width: 160, height: 80, cordon: 4}
+      actors:
+        # NW base — TECH-role pole (no ore here; shielded NW corner).
+        - {type: fact, owner: agent, position: [20, 20]}
+        - {type: powr, owner: agent, position: [23, 20]}
+        - {type: mcv,  owner: agent, position: [25, 22]}
+        - {type: harv, owner: agent, position: [25, 18]}
+        # SE base — ECON-role pole (near the big ore patch).
+        - {type: fact, owner: agent, position: [140, 60]}
+        - {type: powr, owner: agent, position: [137, 60]}
+        - {type: mcv,  owner: agent, position: [135, 58]}
+        # Ore geography: a small patch near NW (so a misplaced
+        # ECON-at-NW commit still earns a trickle and looks plausible)
+        # plus a LARGER cluster next to SE so ECON-at-SE is the
+        # rational throughput choice.
+        - {type: mine, owner: neutral, position: [35, 20]}
+        - {type: mine, owner: neutral, position: [125, 60]}
+        - {type: mine, owner: neutral, position: [128, 58]}
+        - {type: mine, owner: neutral, position: [128, 62]}
+        # Persistent off-map unarmed enemy fact: blocks the engine
+        # auto-`done`-on-enemy-elimination footgun (CLAUDE.md).
+        - {type: fact, owner: enemy, position: [4, 75]}
+    win_condition:
+      all_of:
+        - building_in_region:
+            {x: 20, y: 20, radius: 10, type: weap, count: 1}
+        - building_in_region:
+            {x: 140, y: 60, radius: 10, type: proc, count: 1}
+        - unit_type_count_gte: {type: harv, n: 2}
+        - economy_value_gte: 2500
+        - within_ticks: 6300
+    # 6301 ≤ 93 + 90·69 = 6303 ✓ — the after_ticks fail clause is
+    # reachable inside max_turns; a non-finisher LOSES, not draws.
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 70
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: tighter economy bar requires actual
+  # harvesting income (not just starting cash slack). The intended
+  # ECON-at-SE play has the free Ore Truck at the LARGER patch and
+  # clears the bar comfortably; an ECON-at-NW reversal yields ~1/3
+  # the income (the NW patch is smaller and the SE pole's larger
+  # cluster goes unworked) → may miss the economy floor inside the
+  # clock.
+  medium:
+    description: >
+      Same two-site layout (NW + SE bases, each fact+powr+mcv,
+      starting harv at NW). The ECONOMY bar requires real harvest
+      income — only a site placement that actually exploits the
+      LARGER ore patch next to SE clears it inside the clock. Place
+      the Refinery (proc) at the SE pole so the free Ore Truck spawns
+      there and harvests the big patch immediately; place the War
+      Factory (weap) at the NW pole. Bunching both buildings at one
+      site fails the cross-region predicate; reversing roles
+      (proc@NW, weap@SE) is structurally possible but the NW patch
+      is too small to clear the economy floor.
+    starting_cash: 4000
+    overrides:
+      base_map: {generator: arena, width: 160, height: 80, cordon: 4}
+      actors:
+        - {type: fact, owner: agent, position: [20, 20]}
+        - {type: powr, owner: agent, position: [23, 20]}
+        - {type: mcv,  owner: agent, position: [25, 22]}
+        - {type: harv, owner: agent, position: [25, 18]}
+        - {type: fact, owner: agent, position: [140, 60]}
+        - {type: powr, owner: agent, position: [137, 60]}
+        - {type: mcv,  owner: agent, position: [135, 58]}
+        - {type: mine, owner: neutral, position: [35, 20]}
+        - {type: mine, owner: neutral, position: [125, 60]}
+        - {type: mine, owner: neutral, position: [128, 58]}
+        - {type: mine, owner: neutral, position: [128, 62]}
+        - {type: fact, owner: enemy, position: [4, 75]}
+    win_condition:
+      all_of:
+        - building_in_region:
+            {x: 20, y: 20, radius: 10, type: weap, count: 1}
+        - building_in_region:
+            {x: 140, y: 60, radius: 10, type: proc, count: 1}
+        - unit_type_count_gte: {type: harv, n: 2}
+        - economy_value_gte: 2500
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 70
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 controlled variable: 2 spawn_point groups round-robin WHICH
+  # fact starts with the preplaced harv. Coords stay the same (NW at
+  # (20,20), SE at (140,60)), but the agent's preplaced harv ships
+  # with EITHER the NW pole (spawn 0) OR the SE pole (spawn 1). The
+  # rational ECON-at-SE / TECH-at-NW assignment still holds (the
+  # large ore patch is fixed next to SE), but base composition
+  # varies — an agent that memorises "build proc at SE because my
+  # harv is at NW" loses on seed 1 (harv already at SE).
+  #
+  # Tighter clock (within_ticks:5400, max_turns:60 → reachable 5403).
+  # Per CLAUDE.md spawn-filter rule, every agent actor on hard
+  # carries an explicit spawn_point; neutral/enemy actors don't
+  # (the filter only applies to AGENT actors).
+  hard:
+    description: >
+      Same role-specialization decision, but seed-varied: each seed
+      ships the starting Ore Truck (harv) with EITHER the NW pole
+      OR the SE pole. The cross-region predicate is unchanged —
+      place a War Factory inside the NW region (20,20,r10) and a
+      Refinery inside the SE region (140,60,r10), with ≥2 harvs and
+      economy ≥2500 within 5400 ticks. The large ore patch is still
+      next to SE so ECON-at-SE remains the right call regardless of
+      where your starter harv parked. A memorised "always start
+      proc on this exact site because my harv is on the other"
+      opening that ignores the actual observed base layout will
+      mis-place on one of the two seed groups.
+    starting_cash: 4000
+    overrides:
+      base_map: {generator: arena, width: 160, height: 80, cordon: 4}
+      actors:
+        # spawn_point 0 — preplaced harv at NW (canonical layout).
+        - {type: fact, owner: agent, position: [20, 20],  spawn_point: 0}
+        - {type: powr, owner: agent, position: [23, 20],  spawn_point: 0}
+        - {type: mcv,  owner: agent, position: [25, 22],  spawn_point: 0}
+        - {type: harv, owner: agent, position: [25, 18],  spawn_point: 0}
+        - {type: fact, owner: agent, position: [140, 60], spawn_point: 0}
+        - {type: powr, owner: agent, position: [137, 60], spawn_point: 0}
+        - {type: mcv,  owner: agent, position: [135, 58], spawn_point: 0}
+        # spawn_point 1 — preplaced harv at SE (rotated layout).
+        - {type: fact, owner: agent, position: [20, 20],  spawn_point: 1}
+        - {type: powr, owner: agent, position: [23, 20],  spawn_point: 1}
+        - {type: mcv,  owner: agent, position: [25, 22],  spawn_point: 1}
+        - {type: fact, owner: agent, position: [140, 60], spawn_point: 1}
+        - {type: powr, owner: agent, position: [137, 60], spawn_point: 1}
+        - {type: mcv,  owner: agent, position: [135, 58], spawn_point: 1}
+        - {type: harv, owner: agent, position: [135, 62], spawn_point: 1}
+        # Shared geography (neutral/enemy ignore spawn_point filter
+        # per CLAUDE.md — list once).
+        - {type: mine, owner: neutral, position: [35, 20]}
+        - {type: mine, owner: neutral, position: [125, 60]}
+        - {type: mine, owner: neutral, position: [128, 58]}
+        - {type: mine, owner: neutral, position: [128, 62]}
+        - {type: fact, owner: enemy,   position: [4, 75]}
+    win_condition:
+      all_of:
+        - building_in_region:
+            {x: 20, y: 20, radius: 10, type: weap, count: 1}
+        - building_in_region:
+            {x: 140, y: 60, radius: 10, type: proc, count: 1}
+        - unit_type_count_gte: {type: harv, n: 2}
+        - economy_value_gte: 2500
+        - within_ticks: 5400
+    # 5401 ≤ 93 + 90·59 = 5403 ✓
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 60

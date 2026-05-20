@@ -1,0 +1,247 @@
+# lh-opening-to-tech-to-army.yaml
+#
+# REASONING capability — Group G long-horizon. Late 4-phase macro chain:
+#   PHASE 1: build econ (proc — refinery brings income online)
+#   PHASE 2: build tech (weap — war factory enables vehicles)
+#   PHASE 3: build army (≥4 medium tanks)
+#   PHASE 4: engage (destroy the enemy fact on the far east)
+#
+# Uses the Wave-2 `then:` happened-before composite to ENFORCE ORDER:
+# each phase must be observed-true IN SEQUENCE. A policy that
+# pre-builds tanks before the econ/tech, or attacks the enemy before
+# standing up the army, cannot satisfy the chain — the latch only
+# advances clause-by-clause once the prior clause has been observed.
+#
+# Sister pack to `longhorizon-opening-to-assault` (which uses a
+# stateless `all_of` of terminal phase markers — partial order, easy
+# to game). This pack tightens the same idea by using `then:` for
+# strict happened-before sequencing — the SC2 macro / PlanBench
+# multi-stage credit-assignment anchor.
+#
+# Real-world anchor:
+#   - SC2LE full-game macro chain (opening → tech → army → push)
+#   - lmgame-Bench multi-hour long-horizon credit assignment
+#   - PlanBench multi-stage credit assignment
+#   - product roadmap: foundation → R&D → ship → market
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-opening-to-tech-to-army.yaml
+
+meta:
+  id: lh-opening-to-tech-to-army
+  title: 'Opening → Tech → Army → Engage — Strict 4-Phase Macro Chain'
+  capability: reasoning
+  real_world_meaning: >
+    A long single-episode macro plan whose final win depends on each
+    intermediate phase being observed-true in order: stand up the
+    economy (refinery), unlock the tech (war factory), build a real
+    fighting force (≥4 medium tanks), then commit them to a positional
+    objective (the enemy headquarters). The Wave-2 `then:` composite
+    enforces strict happened-before — a policy that pre-builds units
+    before the tech, or attacks before the army is assembled, cannot
+    satisfy the chain.
+  robotics_analogue: >
+    Long-horizon agentic operation with strict stage gating: a mission
+    must complete each phase in order (sensor coverage, infrastructure,
+    fleet provisioning, terminal action) within one budget window;
+    credit at episode end requires each stage to have happened in
+    sequence — out-of-order completion forfeits the chain.
+  benchmark_anchor:
+    - "SC2LE full-game macro chain"
+    - "lmgame-Bench multi-hour long-horizon"
+    - "PlanBench multi-stage credit assignment"
+    - "product roadmap: foundation → R&D → ship → market"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: hunt
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Loose-bar rehearsal: small army (2 tanks), no time pressure
+  # (bot disabled — enemy units are inert), generous clock. The
+  # chain still bites: proc → weap → tanks → engage in order.
+  easy:
+    description: >
+      Pre-placed: agent fact + tent + powr at the west base; an enemy
+      fact at the far east (your engage target) plus a couple of
+      passive defenders. Build a refinery (proc) to bring income
+      online, then build a war factory (weap), then build 2 medium
+      tanks (2tnk), then destroy the enemy fact. The four phases
+      MUST happen IN THIS ORDER — pre-building tanks before tech, or
+      attacking before the army is assembled, cannot satisfy the
+      chain. Stalling loses on the clock; skipping any phase loses
+      because the chain never advances.
+    starting_cash: 5000
+    overrides:
+      enemy:
+        faction: soviet
+        bot_type: ''
+      actors:
+        # Agent base — fact, tent, powr, fix (NO proc, NO weap; the
+        # agent must build them in order). `fix` (Service Depot) is the
+        # 2tnk tech-prereq, pre-placed so PHASE 2 only needs the agent
+        # to build the war factory (weap) — not a Service Depot too.
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: tent, owner: agent, position: [10, 22]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        - {type: fix,  owner: agent, position: [14, 22]}
+        # Near ore patch so a built proc auto-spawns a harv with
+        # somewhere to harvest from.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Enemy: fact at far east (engage target) + two passive
+        # defenders. Bot disabled — no time pressure on easy.
+        - {type: fact, owner: enemy, position: [115, 30]}
+        - {type: e1,   owner: enemy, position: [108, 30], stance: 2}
+        - {type: e3,   owner: enemy, position: [108, 34], stance: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: macro-chain-easy
+            clauses:
+              - {has_building: proc}                               # P1: econ
+              - {has_building: weap}                               # P2: tech
+              - {unit_type_count_gte: {type: 2tnk, n: 2}}          # P3: army
+              - {enemy_key_buildings_destroyed: {types: [fact]}}   # P4: engage
+        - within_ticks: 8999
+    fail_condition:
+      any_of:
+        - {after_ticks: 9000}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 100
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HUNT BOT + tighter clock + 4 tanks.
+  # The hunt bot drips light pressure (units seek the agent), so a
+  # stall or under-built army gets ground down. Cash is tighter so
+  # the chain must be executed efficiently, not luxuriously.
+  medium:
+    description: >
+      Pre-placed: agent fact + tent + powr + fix at the west base; an
+      enemy fact at the far east (your engage target) plus a light
+      hunt-bot rifle squad dripping time pressure. Build a refinery
+      (proc), then a war factory (weap), then build 4 medium tanks
+      (2tnk), then destroy the enemy fact. The four phases MUST
+      happen IN THIS ORDER — `then:` enforces strict sequencing.
+      Pre-building tanks before tech / attacking before the army is
+      ready cannot advance the chain. Stalling loses on the clock;
+      skipping proc-or-weap loses on the chain (the tank-build
+      clause never latches without weap, and the engage clause never
+      latches without an army).
+    starting_cash: 4500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: tent, owner: agent, position: [10, 22]}
+        - {type: powr, owner: agent, position: [14, 18]}
+        # `fix` (Service Depot) is the 2tnk tech-prereq, pre-placed so
+        # the chain's PHASE 2 only needs the agent to build the war
+        # factory (weap) — not a Service Depot too.
+        - {type: fix,  owner: agent, position: [14, 22]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Enemy: fact at far east + a single rifleman to give the
+        # engage clause a defender (hunt-bot orders him toward the
+        # agent base; placed close to the enemy fact so a stall loses
+        # only on the clock, not on the base getting overrun first).
+        - {type: fact, owner: enemy, position: [115, 30]}
+        - {type: e1,   owner: enemy, position: [110, 30], stance: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: macro-chain-medium
+            clauses:
+              - {has_building: proc}
+              - {has_building: weap}
+              - {unit_type_count_gte: {type: 2tnk, n: 4}}
+              - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 80
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: 6 tanks + ≥2 spawn_point groups + tighter
+  # clock. The agent spawns NORTH (y=14) or SOUTH (y=22) by seed; a
+  # memorised opening cannot generalise because the build placement
+  # & harv geometry differ. Cash is similarly indivisible; the hunt
+  # bot's pressure scales with the longer chain (6 tanks vs 4).
+  hard:
+    description: >
+      Pre-placed: agent base (fact + tent + powr) at the west, round-
+      robined between a NORTH and SOUTH base by seed; an enemy fact
+      at the far east plus light defenders and a hunt bot dripping
+      pressure. Build a refinery (proc), then a war factory (weap),
+      then 6 medium tanks (2tnk), then destroy the enemy fact. Four
+      phases IN STRICT ORDER (`then:` composite). Pre-build / out-of-
+      order / skip-tech / pure-econ-no-attack all LOSE — only the
+      intended phased chain WINS. The seed-varied spawn means a
+      single memorised opening cannot generalise.
+    starting_cash: 5000
+    overrides:
+      actors:
+        # NORTH base spawn (spawn_point 0)
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [14, 18], spawn_point: 0}
+        # One starting rifleman at this spawn — establishes a
+        # non-building agent unit so the seed-driven start position
+        # is detectable (and the hard_tier spawn-variation contract is
+        # satisfied with a real seed-varying unit).
+        - {type: e1,   owner: agent, position: [12, 14], spawn_point: 0}
+        # SOUTH base spawn (spawn_point 1)
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 22], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [14, 22], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 26], spawn_point: 1}
+        # Shared ore geography — two patches between the two bases
+        # so harv income is symmetric whichever spawn is chosen.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Enemy: fact + a couple of riflemen for the engage clause +
+        # hunt-bot pressure. Defenders placed close to the enemy
+        # fact (not the agent's base) so a stall loses on the clock,
+        # not on the agent base getting overrun first.
+        - {type: fact, owner: enemy, position: [115, 30]}
+        - {type: e1,   owner: enemy, position: [110, 30], stance: 2}
+        - {type: e1,   owner: enemy, position: [110, 32], stance: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: macro-chain-hard
+            clauses:
+              - {has_building: proc}
+              - {has_building: weap}
+              - {unit_type_count_gte: {type: 2tnk, n: 6}}
+              - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 80
