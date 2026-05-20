@@ -464,6 +464,18 @@ UPGRADED = [
     # central intercept picket (75,25) bites the pure-B beeline
     # so a memorised opening cannot generalise across seeds.
     "rob-objective-shift-with-or-clause",
+    # Wave-6 Group I procedural-compliance pack — defensive ROE drill
+    # (IFBench negative-instruction / military ROE / BFCL V4 allowlist /
+    # security-guard react-only doctrine). The agent's base (`fact`) is
+    # probed by `patrol` raiders; defenders start on HoldFire and must
+    # be lifted via `set_stance` so the engine's stance-driven auto-fire
+    # racks up the ≥2 (easy/medium) or ≥3 (hard) kills. attack_unit /
+    # attack_move are FORBIDDEN. Hard defines TWO agent spawn_point
+    # groups (NORTH y=17..19 / SOUTH y=21..23) round-robined by seed;
+    # both staging slots cover the same fact column so the defensive
+    # footprint is symmetric per spawn but a memorised "defenders at
+    # (14,20)" cluster cannot generalise across seeds.
+    "proc-only-defend-no-attack",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
