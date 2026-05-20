@@ -1,0 +1,376 @@
+# mfb-two-base-simultaneous — concurrent two-base ramp.
+#
+# REASONING capability — multi-front production ramp. The agent owns
+# TWO already-deployed Construction Yards (fact) at distant sites
+# (WEST x=15 and EAST x=85). Starting cash funds exactly the two
+# Refinery (`proc`) commits the bar requires (2 × 1400 = 2800).
+# The agent must `build proc` twice and `place_building` each at the
+# matching base — once near the WEST fact AND once near the EAST
+# fact — and finish BOTH inside a tight clock.
+#
+# Why this tests "concurrent" / "split attention":
+#   The player's Building production queue is shared across the
+#   player (one item builds at a time, ~60 ticks per item). The only
+#   way to satisfy the bar inside the medium/hard clock is to keep
+#   the queue saturated and pipeline the place_building order with
+#   the next build order on the same turn — i.e. issue
+#   `place_building west` AND `build proc` on the turn the first
+#   proc is reported completed. An agent that serializes the two
+#   bases (build → wait → place → observe → build → wait → place)
+#   inserts 3–5 wasted turns of observation between commands and
+#   blows the deadline. An agent that stalls (only observe) never
+#   builds either proc and loses on the clock.
+#
+# Real-world anchor: multi-site facility ramp where two greenfield
+# sites must come online in parallel. SC2 simultaneous-base macro
+# (the canonical pro opening keeps every production queue saturated
+# across BOTH bases instead of pumping one to maturity first).
+# Distributed-systems geo-redundancy: two regional deployments must
+# go live concurrently — serializing the rollout leaves one region
+# uncovered past the SLA window.
+#
+# WIN (every level):
+#   has_building: fact (the agent never lost a fact)
+#   AND building_in_region:{x:15,  y:20, r:8, type:proc, count:1}
+#   AND building_in_region:{x:85,  y:20, r:8, type:proc, count:1}
+#   AND within_ticks: <tier T>
+#   (T = 2700 easy, 1850 medium, 1850 hard; the hard win uses an
+#   any_of over NORTH (y=12) and SOUTH (y=28) latitudes mirroring
+#   the seeded base placement.)
+#
+# FAIL (every level):
+#   any_of[ after_ticks: <T+1>,
+#           not has_building: fact   ← either fact razed counts ]
+#
+# Failure modes the predicate makes LOSE (the bar):
+#   • STALL (only observe()): never builds either proc → after_ticks
+#     fires → real LOSS.
+#   • SERIALIZE-WEST-THEN-EAST: build proc → wait for the queue →
+#     place west → THEN queue the 2nd proc (instead of queueing both
+#     on turn 1) → wait again → place east. Wall-clock ~1893+ ticks
+#     > medium/hard T 1850 → after_ticks 1851 fires → LOSS. Adding
+#     any observe gaps between actions makes it worse.
+#   • ONE-BASE-ONLY: build & place a proc only at the west fact
+#     (ignore east). The east `building_in_region:proc` clause is
+#     never satisfied → after_ticks fires → LOSS.
+#   • INTENDED CONCURRENT-PIPELINED: queue BOTH procs on turn 1
+#     (the queue serialises them but both are waiting from t=0),
+#     place each as soon as it is reported done. Wall-clock ~1803
+#     ticks (turn 20, both procs placed) ≤ medium/hard T 1850 → WIN.
+#     The concurrency under test is queue-saturation: the agent must
+#     commit to BOTH proc orders BEFORE the first one completes,
+#     instead of waiting to see the first placement before queueing
+#     the next.
+#
+# Engine footguns applied (per CLAUDE.md):
+#   • Map is generator-spec `{generator: arena, width:160, height:60,
+#     cordon:4}` so playable cells are x∈[4,156), y∈[4,56). Every
+#     actor and region centre sits comfortably inside.
+#   • `proc` (cost 1400) requires `powr` as a tech prereq
+#     (gamerules.rs:343). Each base is pre-placed with `fact + powr`
+#     so the Building queue and the `proc` item are both enabled at
+#     tick 0. `place_building` does NOT enforce build-adjacency
+#     (CLAUDE.md) so a proc can be placed at the FAR base from the
+#     shared player queue with a single command.
+#   • Starting cash is EXACTLY 2800 = 2 × proc cost. A third proc
+#     would not fit, so the agent cannot brute-force one extra to
+#     satisfy a missing region.
+#   • `spawn_mcvs: false` — engine default auto-seeds an MCV at
+#     mpspawn cells; we declare every actor ourselves so the
+#     starting inventory is deterministic (no spare MCV that could
+#     deploy into a third fact and satisfy a clause by accident).
+#   • A persistent unarmed enemy `fact` marker is parked in the far
+#     SE corner so the engine does not auto-`done` on
+#     all-enemies-eliminated — guarantees a real LOSS-not-DRAW on
+#     deadline timeouts (CLAUDE.md auto-done footgun).
+#   • Engine production timing: `proc` (cost 1400) builds in 840
+#     ticks (cost × build_duration_modifier / 100 = 1400 × 60 / 100).
+#     The shared Building production queue serialises items: a 2nd
+#     proc behind a 1st one in queue makes ZERO progress until the
+#     1st is placed. So the OPTIMAL pipeline is to queue BOTH procs
+#     on turn 1 — proc1 finishes at tick ~903 (turn 11), and proc2
+#     follows immediately, finishing at tick ~1713 (turn 20). Any
+#     play that delays queueing the 2nd proc adds turns to the
+#     total wall-clock.
+#   • Tick/turn alignment (CLAUDE.md, ~90 ticks/turn): every level's
+#     `after_ticks` fail is reachable inside its `max_turns` so a
+#     stall emits a LOSS, not a DRAW:
+#       easy   : after_ticks 2701 ≤ 93 + 90·31 = 2883 ✓ (max_turns 32)
+#       medium : after_ticks 1851 ≤ 93 + 90·22 = 2073 ✓ (max_turns 23)
+#       hard   : after_ticks 1851 ≤ 93 + 90·22 = 2073 ✓ (max_turns 23)
+#     Discrimination window validated empirically: the engine's actual
+#     wall-clock for the pipelined-concurrent play is queue1 done at
+#     ~tick 843 → place ~903 (turn 11) → queue2 done at ~1713 →
+#     place ~1803 (turn 20). within_ticks 1850 leaves ~47 ticks of
+#     headroom for the intended play and STILL falls short of every
+#     serialized variant (the next 90-tick decision boundary at 1893
+#     already misses).
+#   • Hard tier: two agent `spawn_point` groups round-robin the
+#     BASE LATITUDE (NORTH bases at y=12 vs SOUTH bases at y=28).
+#     Per CLAUDE.md spawn-filter rule, EVERY agent actor declares an
+#     explicit spawn_point — the base buildings are duplicated
+#     across both groups at their respective coords; otherwise the
+#     filter would drop the un-tagged actors and leave the agent
+#     bare. The two target regions move with the bases (NORTH band
+#     y=12 r=8 vs SOUTH band y=28 r=8). Neutral/enemy actors place
+#     regardless of spawn_point (CLAUDE.md).
+
+meta:
+  id: mfb-two-base-simultaneous
+  title: 'Multi-Front Build — Two Bases, Concurrent Refinery Ramp'
+  capability: reasoning
+  real_world_meaning: >
+    Concurrent multi-site facility ramp under a shared bottleneck.
+    The operator runs ONE central production queue but has TWO
+    physically distant sites that each need a fresh production line
+    online before the deadline. The decision is NOT "which site
+    first" (both are required) but "keep the bottleneck queue
+    saturated and pipeline placement at each site as the previous
+    item completes". An operator who serializes (finish all work
+    at site A before touching site B, inserting idle audit cycles
+    between commands) blows the SLA on site B even when site A is
+    flawless. The capability under test is split-attention pipelining:
+    issuing the next start-of-build order on the very same turn the
+    prior item lands at its target site.
+  robotics_analogue: >
+    Two greenfield robotics cells must each receive a critical
+    fixture (refinery / palletizer) before the launch window. The
+    fixture fabrication shop is shared (one fixture at a time), so
+    the bottleneck is queue saturation, not transport. A scheduler
+    that pipelines (fixture-1 build → install at cell A while
+    fixture-2 already started) ships both cells in one launch window;
+    a scheduler that batches (finish all of cell A, then start cell B
+    from scratch) misses cell B's deadline despite identical total
+    work.
+  benchmark_anchor:
+    - "SC2 simultaneous-base macro"
+    - "multi-plant manufacturing"
+    - "distributed-systems geo-redundancy"
+    - "multi-site facility ramp under a shared bottleneck"
+  author: "openra-bench"
+
+# Pack-level base_map is the sentinel `rush-hour-arena` so the loader
+# can map-resolve before per-level overrides materialise the actual
+# generator-spec arena .oramap (same pattern as the other mfb-* packs
+# and mcv-deploy-third-base).
+base_map: rush-hour-arena
+
+# 2 procs × 1400 = 2800. Exactly enough; a third proc would not fit.
+starting_cash: 2800
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  # build + place_building for the two procs; observe for the turn-1
+  # snapshot; stop is kept on so an idle test policy can no-op safely.
+  tools: [observe, build, place_building, stop]
+  # Engine default auto-spawns an MCV at mpspawn cells; off so the
+  # inventory is exactly what each level declares.
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 4000}  # > all per-level after_ticks (2701 / 1851)
+  # Every level supplies its own actor list via overrides so the
+  # per-tier base latitude (and hard-tier spawn variation) is
+  # audit-explicit.
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Generous clock (within_ticks 2700, max_turns 32 → reachable 2883):
+  # both the INTENDED concurrent pipeline (~3 turns) AND a leisurely
+  # serial sequence (~6–8 turns ≈ 720 ticks) clear the bar. Only
+  # STALL (no build orders at all) fails the deadline. Easy isolates
+  # "the agent must actually issue build + place orders at both
+  # bases" — no concurrency pressure yet.
+  # 2701 ≤ 93 + 90·31 = 2883 ✓
+  easy:
+    description: >
+      You hold TWO pre-built Construction Yards: a WEST base at
+      (15,20) (with a power plant powr at (18,20)) and an EAST base
+      at (85,20) (with a power plant at (88,20)). Both bases already
+      have the Building production queue enabled and the `proc`
+      (Refinery, cost 1400) buildable from the player's shared queue
+      thanks to the pre-placed powr. Your starting cash is 2800 —
+      exactly two Refineries' worth. WIN when you have a `proc`
+      placed inside the WEST region (centred at (15,20), radius 8)
+      AND a `proc` placed inside the EAST region (centred at (85,20),
+      radius 8), with both your construction yards still alive,
+      before tick 2700. Stalling (only observe) never builds
+      anything; building only one Refinery leaves the other region
+      uncovered. Both LOSE.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-two-base-simultaneous-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # WEST base — fact + powr so the player's Building queue and
+        # `proc` item are both unlocked from tick 0.
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: powr, owner: agent, position: [18, 20]}
+        # EAST base — symmetric layout.
+        - {type: fact, owner: agent, position: [85, 20]}
+        - {type: powr, owner: agent, position: [88, 20]}
+        # Persistent unarmed enemy `fact` marker at the far SE edge,
+        # outside every win region. Keeps the engine from auto-`done`
+        # on all-enemies-eliminated (the only enemy actor) so a
+        # non-winner emits a real reachable LOSS on the deadline.
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - building_in_region:
+            {x: 15, y: 20, radius: 8, type: proc, count: 1}
+        - building_in_region:
+            {x: 85, y: 20, radius: 8, type: proc, count: 1}
+        - within_ticks: 2700
+    fail_condition:
+      any_of:
+        - after_ticks: 2701
+        - not: {has_building: fact}
+    max_turns: 32
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHT clock (within_ticks 1850,
+  # max_turns 23 → reachable 2073). The intended CONCURRENT pipeline
+  # queues BOTH procs on turn 1 — proc1 finishes at tick ~843 and is
+  # placed at WEST at turn 11 (tick ~903), proc2 immediately starts
+  # in the (now unblocked) queue and is placed at EAST at turn 20
+  # (tick ~1803). Total ~1803 ticks ≤ 1850 → WIN. A serialized policy
+  # that waits to see proc1 placed before queueing proc2 adds ≥1
+  # turn (≥90 ticks) between completion and the next queue start;
+  # proc2 then lands at tick ~1893 → after_ticks 1851 fires → LOSS.
+  # Adding any observe gaps between commands makes the serialized
+  # failure mode lose by a wider margin. Stall LOSES outright on the
+  # deadline.
+  # 1851 ≤ 93 + 90·22 = 2073 ✓
+  medium:
+    description: >
+      Same TWO bases (WEST fact at (15,20) + powr at (18,20); EAST
+      fact at (85,20) + powr at (88,20)) and the same starting cash
+      2800 — but on a TIGHT clock. WIN when there is a `proc`
+      inside the WEST region (15,20,r8) AND a `proc` inside the EAST
+      region (85,20,r8), with both construction yards alive, before
+      tick 1850. Concurrency is mandatory: issue the next `build proc`
+      on the very same turn you place the previous one (keep the
+      shared production queue saturated). Stall, serialize-with-idle-
+      observes, and one-base-only all LOSE on the deadline.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-two-base-simultaneous-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: powr, owner: agent, position: [18, 20]}
+        - {type: fact, owner: agent, position: [85, 20]}
+        - {type: powr, owner: agent, position: [88, 20]}
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - building_in_region:
+            {x: 15, y: 20, radius: 8, type: proc, count: 1}
+        - building_in_region:
+            {x: 85, y: 20, radius: 8, type: proc, count: 1}
+        - within_ticks: 1850
+    fail_condition:
+      any_of:
+        - after_ticks: 1851
+        - not: {has_building: fact}
+    max_turns: 23
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: TWO seed-driven agent spawn_point groups
+  # round-robin the base LATITUDE between a NORTH layout (y=12) and
+  # a SOUTH layout (y=28). Both bases (west & east) flip together,
+  # so the agent's two target regions also flip together (NORTH
+  # band at y=12 vs SOUTH band at y=28). The win clause is an
+  # `any_of` over the two latitudes so EITHER set of regions counts
+  # — but the agent must place each proc within radius 8 of WHICHEVER
+  # latitude its facts spawned at (a memorised "always (15,20) and
+  # (85,20)" opening misses by ≥8 cells on one of the two seed
+  # groups). Same tight clock (within_ticks 1850, max_turns 23 →
+  # reachable 2073) so concurrency is still the discriminator.
+  #
+  # CLAUDE.md spawn-filter rule: once any agent actor declares
+  # spawn_point, every agent actor WITHOUT spawn_point is filtered
+  # OUT — so every base building is duplicated across BOTH spawn
+  # groups at the appropriate latitude. The enemy marker has no
+  # spawn_point (enemy actors place regardless) and is therefore
+  # listed only once.
+  # 1851 ≤ 93 + 90·22 = 2073 ✓
+  hard:
+    description: >
+      Same two-base concurrent ramp on the same tight clock, but
+      the BASE LATITUDE varies per seed. Each seed ships both your
+      pre-built construction yards at EITHER the NORTH band (y=12)
+      OR the SOUTH band (y=28); both candidate target regions move
+      with the bases. Read your starting fact positions and place
+      each Refinery within radius 8 of the matching latitude. WIN
+      when there is a `proc` inside the WEST region AND a `proc`
+      inside the EAST region (BOTH at WHICHEVER latitude your bases
+      spawned at — north OR south), with both construction yards
+      alive, before tick 1850. Stalling, serializing with idle
+      observe gaps, and one-base-only all LOSE.
+    objective_coords: relative
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-two-base-simultaneous-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # spawn_point 0 — NORTH layout (bases at y=12).
+        - {type: fact, owner: agent, position: [15, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [18, 12], spawn_point: 0}
+        - {type: fact, owner: agent, position: [85, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [88, 12], spawn_point: 0}
+        # A single HoldFire rifleman per spawn group at the WEST
+        # base — purely a SEED-DRIVEN-START marker so units_summary
+        # reveals which spawn_point was selected (the curated-hard
+        # generalization test inspects unit cells, not buildings).
+        # It plays no role in the win predicate (which checks
+        # buildings only), and stance:0 keeps it from auto-firing
+        # on the SE enemy fact marker (which has no offence anyway).
+        - {type: e1, owner: agent, position: [13, 12], stance: 0, spawn_point: 0}
+        # spawn_point 1 — SOUTH layout (bases at y=28). Per the
+        # CLAUDE.md spawn-filter rule, every base building is
+        # explicitly tagged for its group; otherwise the un-tagged
+        # actors would be filtered out and the agent would start
+        # bare.
+        - {type: fact, owner: agent, position: [15, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [18, 28], spawn_point: 1}
+        - {type: fact, owner: agent, position: [85, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [88, 28], spawn_point: 1}
+        - {type: e1, owner: agent, position: [13, 28], stance: 0, spawn_point: 1}
+        # Persistent unarmed enemy marker — not spawn_point-tagged
+        # (CLAUDE.md: enemy actors ignore the spawn_point filter).
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - any_of:
+            # NORTH match: both procs at y=12 band.
+            - all_of:
+                - building_in_region:
+                    {x: 15, y: 12, radius: 8, type: proc, count: 1}
+                - building_in_region:
+                    {x: 85, y: 12, radius: 8, type: proc, count: 1}
+            # SOUTH match: both procs at y=28 band.
+            - all_of:
+                - building_in_region:
+                    {x: 15, y: 28, radius: 8, type: proc, count: 1}
+                - building_in_region:
+                    {x: 85, y: 28, radius: 8, type: proc, count: 1}
+        - within_ticks: 1850
+    fail_condition:
+      any_of:
+        - after_ticks: 1851
+        - not: {has_building: fact}
+    max_turns: 23
