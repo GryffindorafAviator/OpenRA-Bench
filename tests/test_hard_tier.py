@@ -56,6 +56,11 @@ UPGRADED = [
     # MCV's start corner (NW vs SW) per seed, so the deploy site and
     # the patrol's relative defensibility differ across seeds.
     "mcv-deploy-and-build",
+    # B1 — live ore-patch defense vs Wave 2 raider bot. Hard tier
+    # round-robins agent base between a north-flank (y=14..22) and
+    # south-flank (y=18..26) staging, both covering the same patch
+    # column against three raider vectors (north/central/south).
+    "mid-economy-under-fire",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

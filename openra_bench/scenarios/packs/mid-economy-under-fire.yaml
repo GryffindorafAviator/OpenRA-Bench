@@ -1,0 +1,262 @@
+# mid-economy-under-fire — live ore-patch defense vs raider bot
+#
+# An ongoing-attack economy: harvesters work the ore patches next to
+# your base while a worker-priority `raider` enemy bot drives one (or
+# more) units straight at the harvs. The intended fire-support-around-
+# the-ore-patch policy WINS: keep the defenders ringing the patch
+# (intercepting the raider before it reaches a harv), keep all harvs
+# in `harvest` mode each turn — throughput sustained, raider dies on
+# contact. Every non-intended policy LOSES:
+#
+#   • Stall (only `observe`): defenders auto-engage and kill the
+#     raider, BUT the harvs never harvest → EV stays at 0 → bar unmet
+#     → `economy_value_gte` clause never satisfies → timeout LOSS.
+#   • Chase off-map (drive defenders east to chase the raider /
+#     attack the enemy fact marker): the harv defenders abandon the
+#     patch; the raider (or its successor on a second vector) reaches
+#     the harvs and picks them off → `unit_type_count_gte:{harv,2}` /
+#     `harv,1` fails → LOSS.
+#   • Pull-home (recall harvs to the proc/fact and hold there): the
+#     harvs stop refining → no income → bar unmet → LOSS.
+#
+# Real-world anchor: SRE during ongoing attack — defend the value-
+# generating units (the pipeline workers / harvesters), not just the
+# perimeter. The attack is not a one-shot probe; throughput must be
+# maintained THROUGH the attack. Mirrors SC2LE CollectMineralsAndGas
+# with a harass overlay, MineRL Diamond resource collection under
+# hostile mobs, lmgame-Bench resource-streaming-under-attack, and the
+# canonical SRE-under-DDoS reliability discipline.
+
+meta:
+  id: mid-economy-under-fire
+  title: 'Mid Economy Under Fire — Ore-Patch Defense vs Worker Harasser'
+  capability: action
+  real_world_meaning: >
+    Defend the value-generating units (not just the perimeter) while
+    sustaining throughput under ongoing attack. A worker-priority
+    raider bot drives at your harvesters; you must keep the harvest
+    loop running AND keep the harvesters alive. Stalling lets the
+    economy bar lapse; chasing the raider off-map abandons the
+    harvesters; pulling the harvesters home stops the income. The
+    intended policy rings defenders around the ore-patch lane so the
+    raider dies on contact while harvesters never leave the loop.
+  robotics_analogue: >
+    Pipeline / harvesting operation under harassment — autonomous
+    collectors keep visiting known resource sources, while a defender
+    fleet must intercept incoming raiders BEFORE they reach the
+    collectors, without leaving the patch unmanned. Engagement and
+    throughput run in parallel; abandoning either loses the day.
+  benchmark_anchor:
+    - "MineRL Diamond under hostile mobs"
+    - "SC2LE CollectMineralsAndGas + harass overlay"
+    - "lmgame-Bench resource-streaming under attack"
+    - "SRE under DDoS while sustaining throughput"
+  author: openra-bench
+
+# ENGINE NOTES (verified 2026-05-19 with scripted run_level + raw smoke):
+# - The `raider` ScriptedBehavior (openra-sim/src/scripted_bot.rs)
+#   targets the nearest agent `harv` each turn; falls back to nearest
+#   combat actor only when all harvs are dead. Registered bench-side in
+#   openra_bench/botgen.py (Wave 2 commit de62afe / 5f085f7).
+# - The Wave 1 harvest-income wiring (Task #14 / commit b22e3a6 era):
+#   a placed neutral `mine` actor seeds an ore patch around it, an
+#   agent `harv` issued Command.harvest(uid, mx, my) commutes to the
+#   patch and refines back to the `proc`, EV = cash + resources
+#   surfaces in signals. Measured throughput at this map: 3 active
+#   harvs ramp EV to ~5500 by tick 1803 and ~8000 by tick 2700 from a
+#   starting_cash of 0 — well clear of every tier's bar.
+# - The defender ring is built from 1tnk (vehicle): rifle e1 cannot
+#   survive a 1tnk raider, so the intended policy must use the
+#   tank-on-tank intercept. The raider 1tnk dies inside ~3 turns of
+#   engaging 3 ringed 1tnks (smoke seed 1: kills=2 by turn 10, EV=2500
+#   in flight, losses=0 — and EV climbs to 5500 by turn 20 unimpeded).
+# - Stall (only observe) leaves harvs idle → EV stays at 0 even though
+#   the auto-firing defenders happen to kill the raider. The bar is
+#   unmet ⇒ timeout LOSS via the after_ticks fail clause.
+
+base_map: rush-hour-arena
+starting_cash: 0  # all income must come from harvesting
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: raider}
+  tools: [observe, harvest, move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 7000}
+  actors:
+    # Base seed — fact for the marker, proc to refine, harvs to work.
+    - {type: fact, owner: agent, position: [8, 18]}
+    - {type: proc, owner: agent, position: [12, 18]}
+    # Three pre-placed harvs flanking the proc and lining up on the
+    # eastward ore-patch lane.
+    - {type: harv, owner: agent, position: [14, 18]}
+    - {type: harv, owner: agent, position: [14, 20]}
+    - {type: harv, owner: agent, position: [14, 22]}
+    # Three 1tnk defenders ringed east of the patch — intercept lane
+    # for the inbound raider. (Rifle e1 cannot survive 1tnk fire; the
+    # intended policy must engage tank-on-tank.)
+    - {type: '1tnk', owner: agent, position: [26, 18]}
+    - {type: '1tnk', owner: agent, position: [26, 20]}
+    - {type: '1tnk', owner: agent, position: [26, 22]}
+    # Two ore patches east of the proc — sustained harvesting target.
+    - {type: mine, owner: neutral, position: [22, 18]}
+    - {type: mine, owner: neutral, position: [22, 22]}
+    # Persistent enemy marker far east so the engine doesn't auto-`done`
+    # when the raider squad is wiped (engine auto-done on enemy-
+    # MustBeDestroyed wipe would collapse the run to DRAW before the
+    # economy_value_gte bar is satisfied).
+    - {type: fact, owner: enemy, position: [120, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare skill: one raider at the lane mouth, loose bar (2000 EV).
+  # Stall LOSES (no harvesting → EV=0); chase-off LOSES (raider
+  # reaches harvs unopposed → fail by harv count); intended ringed
+  # defense WINS comfortably by tick ~1800-2700.
+  easy:
+    description: >
+      Your ore patches sit east of your refinery (`proc` at 12,18);
+      mines at (22,18) and (22,22). Three harvesters are pre-placed;
+      three light tanks ring the patch at x=26. ONE enemy raider tank
+      is staged at the lane mouth (x=60). The raider chases your
+      harvesters specifically. Win when your economy value (cash +
+      stored resources) reaches 2000 AND at least 2 harvesters are
+      still alive, before tick 5400. Sitting idle leaves EV at 0
+      (harvesters need a `harvest` order each turn); chasing the
+      raider off-map abandons your harvesters; pulling harvesters
+      home stops the income. The intended play is to keep harvesters
+      in `harvest` mode and let your ringed tanks intercept the raider
+      as it approaches.
+    overrides: {}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 2000}
+        - {unit_type_count_gte: {type: harv, n: 2}}
+        - {within_ticks: 5400}
+    # after_ticks 5401 ≤ 93+90·60 = 5493 ⇒ deadline bites inside
+    # max_turns. Loss is reachable: either EV/harv bar unmet at the
+    # deadline OR harv count drops below 1 first.
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+    max_turns: 61
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TWO raiders staggered along the lane (at
+  # x=60 and x=80), bar 3000, must keep ≥2 harvs alive. Stall, chase,
+  # and pull-home still LOSE; intended ringed defense WINS.
+  medium:
+    description: >
+      Same ore-patch layout (mines at 22,18 and 22,22; harvs at
+      x=14; tank ring at x=26). TWO enemy raider tanks now stagger
+      down the lane (x=60 and x=80) — both target your harvesters
+      specifically. Win when economy value reaches 3000 AND at least
+      2 harvesters are still alive, before tick 5400. Stalling leaves
+      EV at 0; chasing the raiders off-map abandons the harvs; pulling
+      harvs home stops the income. The intended play is to keep the
+      tank ring on the patch and the harvesters in `harvest` mode —
+      both raiders die on contact while throughput climbs uninterrupted.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: harv, owner: agent, position: [14, 22]}
+        - {type: '1tnk', owner: agent, position: [26, 18]}
+        - {type: '1tnk', owner: agent, position: [26, 20]}
+        - {type: '1tnk', owner: agent, position: [26, 22]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Two staggered raiders — the second arrives ~9 turns after
+        # the first; chase-off-map abandons the harvs to whichever
+        # raider is currently in transit.
+        - {type: '1tnk', owner: enemy, position: [60, 20]}
+        - {type: '1tnk', owner: enemy, position: [80, 22]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 3000}
+        - {unit_type_count_gte: {type: harv, n: 2}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+    max_turns: 61
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. THREE raiders on TWO seed-driven AGENT spawn_point groups —
+  #      enemy raiders are placed at multiple vectors (north, central,
+  #      south); agent base/defenders/harvs are seed-varied between a
+  #      north (y=14..18) and south (y=22..26) staging. Spawn_point
+  #      filter applies ONLY to agent actors (oramap.rs), so enemy
+  #      raiders at all three vectors ALWAYS place on every seed; the
+  #      base orientation flips by seed.
+  #   2. Higher bar (4000 EV) AND strict attrition: lose ≤2 units
+  #      total (harvs + defenders combined).
+  hard:
+    description: >
+      A live ore-patch defense against THREE raider tanks attacking
+      from two distinct lane vectors. Your base orientation varies by
+      seed (north-flank or south-flank) — both halves cover the same
+      patch column with mines at (22,*). Win when economy value
+      reaches 4000 AND at least 2 harvesters are still alive AND you
+      have not lost more than 2 units total, before tick 5400.
+      Stalling, chasing the raiders off-map, and pulling harvesters
+      home all LOSE. The intended play is to keep the tank ring on
+      the patch (covering BOTH vectors), keep the harvesters in
+      `harvest` mode, and let the raiders die on contact.
+    overrides:
+      actors:
+        # Spawn 0 — NORTH base (y centered on 16)
+        - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 18], spawn_point: 0}
+        # Ringed tank defenders — span y=14..22 to cover BOTH the
+        # near (y=14..18) and central (y=20) raider vectors.
+        - {type: '1tnk', owner: agent, position: [26, 14], spawn_point: 0}
+        - {type: '1tnk', owner: agent, position: [26, 16], spawn_point: 0}
+        - {type: '1tnk', owner: agent, position: [26, 18], spawn_point: 0}
+        - {type: '1tnk', owner: agent, position: [26, 20], spawn_point: 0}
+        - {type: '1tnk', owner: agent, position: [26, 22], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 18], spawn_point: 0}
+        # Spawn 1 — SOUTH base (y centered on 24)
+        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 22], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [26, 18], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [26, 20], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [26, 22], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [26, 24], spawn_point: 1}
+        - {type: '1tnk', owner: agent, position: [26, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 22], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 26], spawn_point: 1}
+        # Three raider tanks staggered across the lane and the y-axis
+        # — one drives the north vector (y=16), one the central
+        # vector (y=20), one the south vector (y=24). Enemy actors
+        # are NOT spawn-filtered (oramap.rs) so all three place on
+        # every seed.
+        - {type: '1tnk', owner: enemy, position: [60, 16]}
+        - {type: '1tnk', owner: enemy, position: [80, 20]}
+        - {type: '1tnk', owner: enemy, position: [70, 24]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 4000}
+        - {unit_type_count_gte: {type: harv, n: 2}}
+        - {units_lost_lte: 2}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {units_lost_lte: 2}}
+    max_turns: 61
