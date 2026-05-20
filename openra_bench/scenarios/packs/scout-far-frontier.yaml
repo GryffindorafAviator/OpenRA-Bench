@@ -1,0 +1,218 @@
+# scout-far-frontier.yaml
+#
+# PERCEPTION capability — LONG-RANGE RECONNAISSANCE cell. The agent
+# must reveal a DISTANT FRONTIER cell (the far corner of the map) before
+# a tight clock expires. Two unit options are pre-placed in the agent's
+# base — a FAST jeep and a SLOW e1 rifle infantry — but only the jeep
+# is fast enough to cross the map inside the budget. Picking the wrong
+# (slow) unit, sending the e1 only, or stalling LOSES on the clock;
+# dispatching the jeep WINS.
+#
+# Distinct from the sibling perception packs:
+#   * scout-and-survive       — 1 jeep round-trip with mandatory return;
+#                               speed isn't the discriminator (any
+#                               infantry could in principle return too).
+#   * scout-and-report        — 2-jeep team with no-attrition extract.
+#   * scout-detect-enemy-tech — observe N distinct enemy buildings; the
+#                               capability is identification, not speed.
+#   * scout-multiple-fog-areas — fan out across N pockets; multi-asset
+#                               coverage, not single-asset reach.
+#
+# This pack is the only perception cell where the discriminator is
+# UNIT-SELECTION-BY-SPEED: two valid scout chassis are on the field;
+# only the fast one (jeep) can clear the tick budget. The "right tool
+# for the job" decision IS the test.
+#
+# Win idiom: `units_in_region_gte:{frontier, n:1} AND own_units_gte:1
+# AND within_ticks:K AND building_count_gte:{fact, n:1}`. The region
+# clause forces an agent unit to physically reach the far frontier
+# (jeep does it in ~9 turns, e1 needs ~24); the within_ticks clause
+# (K=1530/1170/990 across tiers, sized inside the per-tier max_turns
+# budget) makes the e1-only / stall plays time out as a real LOSS;
+# `own_units_gte:1` rules out a Pyrrhic loss-then-discover; the
+# `building_count_gte:fact:1` clause keeps the pre-placed agent fact
+# alive as the base anchor (also keeps the win-state observable in
+# `own_buildings`).
+#
+# Real-world anchor: military long-range reconnaissance (light cavalry
+# vs foot patrol — the right chassis for distance), ERQA recon decision
+# (pick the platform whose endurance/speed envelope covers the mission
+# radius), SC2 scout-unit selection (Reaper / scout / observer over
+# Marine for cross-map intel under a deadline). Picking the wrong
+# platform — the slow one — is the failure mode the pack is designed
+# to punish.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/scout-far-frontier.yaml
+
+meta:
+  id: scout-far-frontier
+  title: 'Scout the Far Frontier — Pick the Fast Chassis for the Long Run'
+  capability: perception
+  real_world_meaning: >
+    Long-range reconnaissance with a tight mission window: the
+    commander has two scout assets on hand — a fast light vehicle
+    (jeep) and a slow rifleman (e1) — and a frontier objective at
+    the far edge of the operational map. Real recon doctrine
+    requires matching the platform's speed/endurance envelope to
+    the mission radius; sending the foot patrol on a cross-map
+    task burns the deadline. The pack tests whether the agent
+    selects the chassis whose speed actually covers the distance
+    inside the clock, rather than dispatching the nearest unit or
+    stalling on the decision.
+  robotics_analogue: >
+    UGV fleet asset-selection under a deadline: the operator has a
+    fast wheeled UGV and a slow tracked UGV both ready in the
+    motor pool, with a survey target at the far frontier of the
+    operations area. Only the fast platform can traverse the
+    distance inside the mission window; dispatching the slow
+    platform — or hesitating — overruns the window and the survey
+    fails. The mission's first decision is the platform pick.
+  benchmark_anchor:
+    - "ERQA recon (platform selection by speed/endurance envelope)"
+    - "military long-range reconnaissance (light cavalry over foot patrol)"
+    - "SC2 scout — pick the fast unit for cross-map intel"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  # Pure-perception toolset. The agent CAN issue stop/move but the
+  # only positive action is dispatching a unit toward the frontier
+  # cell. No attack tool — combat is not the task.
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, stop]
+  planning: true
+  termination: {max_ticks: 10000}
+  actors:
+    # The agent's home base on the west. The fact is the base anchor
+    # (and is required to stay alive — `building_count_gte:fact:1`).
+    # The jeep (fast, ~12-13 cells/turn) and the e1 (slow, ~4-5
+    # cells/turn) are BOTH pre-placed: the test is the chassis-pick,
+    # not the production decision.
+    - {type: fact, owner: agent, position: [8, 20]}
+    - {type: jeep, owner: agent, position: [12, 20]}
+    - {type: e1,   owner: agent, position: [10, 22]}
+    # A persistent unarmed enemy fact at the far map edge keeps the
+    # enemy actor list non-empty so the engine never auto-`done`s on
+    # an enemy-elimination event (CLAUDE.md: enemy auto-elim ⇒ draw
+    # before win predicate is evaluated). The agent cannot reach /
+    # destroy it inside the clock anyway (no attack tool, and the
+    # frontier cell sits well clear of (125, 5)).
+    - {type: fact, owner: enemy, position: [125, 5]}
+    - {type: barr, owner: enemy, position: [125, 8]}
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Loose clock (17 turns ⇒ tick budget 1530). The jeep needs ~9
+  # turns straight east-then-south to reach (120, 30); the e1 needs
+  # ~24 turns. Jeep WINS, e1 TIMES OUT, stall TIMES OUT. The bar:
+  # only the chassis-pick discriminates outcomes — capability
+  # cleanly attributed.
+  easy:
+    description: >
+      Long-range reconnaissance with a loose clock. Your base sits
+      at the west (fact at (8, 20)) with TWO scout assets ready:
+      one fast jeep (at (12, 20)) and one slow rifle infantry
+      (e1 at (10, 22)). The frontier objective is the far cell
+      (120, 30) — surface it by getting any agent unit within
+      radius 4 of that cell before tick 1530 (~17 turns). The
+      jeep crosses in ~9 turns; the e1 needs ~24. Picking the
+      slow unit, or stalling, times out as a real LOSS.
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 120, y: 30, radius: 4, n: 1}}
+        - {own_units_gte: 1}
+        - {within_ticks: 1530}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1531}
+        - {not: {own_units_gte: 1}}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 17
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER CLOCK (13 turns ⇒ tick budget
+  # 1170). Still comfortably solvable by a jeep dispatch (~9 turns),
+  # but the e1's ~24-turn cross-map traverse is now even further
+  # past the deadline. No structural change to the map / actors —
+  # only the budget tightens, so the discrimination remains "did
+  # the agent pick the fast chassis?"
+  medium:
+    description: >
+      Same setup as easy — fact at (8, 20), one jeep at (12, 20),
+      one e1 at (10, 22), frontier objective at (120, 30) — but
+      the clock is tightened to tick 1170 (~13 turns). The jeep
+      reaches in ~9 turns; the e1 cannot. Dispatch the jeep, or
+      time out as a LOSS.
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 120, y: 30, radius: 4, n: 1}}
+        - {own_units_gte: 1}
+        - {within_ticks: 1170}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1171}
+        - {not: {own_units_gte: 1}}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 13
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 more controlled variable: TWO SEED-VARIED SPAWN GROUPS
+  # (NORTH base at y=8 vs SOUTH base at y=32) and a SPAWN-MATCHED
+  # frontier (NE at (120, 5) for NORTH, SE at (120, 35) for SOUTH)
+  # so a memorised frontier coordinate cannot generalise. The clock
+  # is also tighter (12 turns ⇒ tick budget 1080). The jeep handles
+  # the diagonal in ~9 turns; the e1 still needs ~24. The hard win
+  # is `any_of` over the two spawn-matched frontier regions so the
+  # team's discovery counts only at the FRONTIER matching its base
+  # latitude (a NORTH base committing to the SE frontier overshoots
+  # the budget by ~30 cells of off-axis travel).
+  hard:
+    description: >
+      Two seed-varied base latitudes: NORTH base (fact at (8, 8),
+      jeep at (12, 8), e1 at (10, 10)) or SOUTH base (fact at
+      (8, 32), jeep at (12, 32), e1 at (10, 34)). The frontier
+      objective tracks the base latitude — NE cell (120, 5) for a
+      NORTH start, SE cell (120, 35) for a SOUTH start — and the
+      clock tightens to tick 1080 (~12 turns). Dispatch the jeep
+      to the SPAWN-MATCHED frontier; the e1 cannot cover the
+      distance, and an off-axis commit to the wrong frontier
+      blows the budget.
+    overrides:
+      actors:
+        # NORTH spawn group (spawn_point: 0)
+        - {type: fact, owner: agent, position: [8,  8],  spawn_point: 0}
+        - {type: jeep, owner: agent, position: [12, 8],  spawn_point: 0}
+        - {type: e1,   owner: agent, position: [10, 10], spawn_point: 0}
+        # SOUTH spawn group (spawn_point: 1)
+        - {type: fact, owner: agent, position: [8,  32], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [12, 32], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [10, 34], spawn_point: 1}
+        # Persistent unarmed enemy anchors (CLAUDE.md: enemy actors
+        # do NOT honour spawn_point — duplicated across both groups
+        # by placement only once each; one fact at NE corner and one
+        # at SE corner keep the enemy actor list non-empty across
+        # both seeds and provide a non-frontier visual landmark).
+        - {type: fact, owner: enemy, position: [125, 3]}
+        - {type: fact, owner: enemy, position: [125, 37]}
+        - {type: barr, owner: enemy, position: [123, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            - {units_in_region_gte: {x: 120, y: 5,  radius: 4, n: 1}}
+            - {units_in_region_gte: {x: 120, y: 35, radius: 4, n: 1}}
+        - {own_units_gte: 1}
+        - {within_ticks: 1080}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1081}
+        - {not: {own_units_gte: 1}}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 12
