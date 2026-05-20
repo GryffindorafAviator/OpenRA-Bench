@@ -252,6 +252,23 @@ UPGRADED = [
     # the actual base latitude.
     "def-multi-direction",
     "def-surprise-flank-react",
+    # Wave-7 REASONING pack — intel-driven adaptive defense
+    # (PlanBench replanning / military reactive defense / intel-driven
+    # facility hardening anchor). Sibling/inverse of
+    # def-position-expected-direction (which DECLARES the threat axis
+    # in the brief): this pack HIDES the axis, so the agent must
+    # SCOUT to find the enemy's forward outpost before committing
+    # pillboxes on that lane. Hard tier defines two agent
+    # spawn_point groups (NORTH base y=16 / SOUTH base y=24) round-
+    # robined by seed; both north (y=4) and south (y=36) enemy
+    # outposts always place (enemy actors don't honour spawn_point —
+    # CLAUDE.md), so each seed faces the SAME scout-then-fortify
+    # discipline from a flipped base latitude. A memorised "always
+    # scout/defend NORTH" opening WINS the NORTH-spawn seeds by
+    # coincidence but LOSES the SOUTH-spawn seeds (clause 1 of the
+    # then-chain never latches AND the south rush razes the
+    # SOUTH-spawn fact), so no fixed-axis opening generalises.
+    "def-position-revealed-direction",
     # Wave-5 Group F cash-reserve / treasury management pack (SC2 cash
     # overflow / financial runway / operational reserve anchor). Hard
     # tier defines two agent spawn_point groups (NORTH base y=14 /
@@ -635,6 +652,21 @@ UPGRADED = [
     # bearing. Hard discriminates via kill-speed (tight within_ticks
     # 1200) + spawn-variation generalisation.
     "combat-tank-vs-tank-engagement",
+    # Wave-7 REASONING pack — CAPEX-vs-OPEX capital allocation under
+    # rush pressure (PlanBench resource-allocation / financial
+    # allocation / SC2 production: pump units now vs lay second
+    # factory anchor). Starting cash ($3400) funds EITHER 4× 2tnk
+    # (immediate force, OPEX) OR 1× weap second factory (long-run
+    # capacity, CAPEX). Rusher band is incoming at t=0 ⇒ buy-now
+    # WINS, build-weap-first LOSES. Hard tier defines two agent
+    # spawn_point groups (NORTH base y=14 / SOUTH base y=26) round-
+    # robined by seed; rusher bands always place at BOTH latitudes
+    # (enemy actors don't honour spawn_point — CLAUDE.md) but the
+    # rusher bot targets the agent centroid, so the active threat
+    # axis flips per seed. Inert HoldFire e1 per group surfaces the
+    # spawn variation via units_summary (the buy-vs-build base is
+    # otherwise building-only).
+    "econ-buy-vs-build-decision",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

@@ -1,0 +1,331 @@
+# econ-buy-vs-build-decision — capex-vs-opex under rush pressure
+#
+# REASONING capability. The pack frames a CAPEX-vs-OPEX capital
+# allocation decision under time pressure: starting cash is exactly
+# enough for EITHER
+#
+#   (A) BUY 4× medium tanks (2tnk) NOW   — $850 × 4 = $3400 — OPEX,
+#       immediate combat capability from the pre-placed war factory;
+#   (B) BUILD a SECOND war factory (weap) — $2000 — CAPEX, doubles
+#       per-turn tank production capacity over the LONG run, but at
+#       the cost of leaving no cash for an immediate force (residual
+#       $1400 ≈ 1 tank only).
+#
+# A rusher band is staged at the lane mouth from t=0 and charges the
+# agent fact (rusher targets the agent centroid). The timing is set so
+# that the BUY-NOW play (queue 4× 2tnk immediately from the existing
+# weap, attack-move them east to intercept) blunts the rush before the
+# fact dies; the BUILD-WEAP-FIRST play spends 2000cr + 1+ turn of
+# placement and queue lockout on a second factory, fielding only 1
+# tank before the rush razes the fact ⇒ LOSS.
+#
+# Real-world anchors:
+#   • CAPEX vs OPEX — invest in long-run capacity vs spend on
+#     immediate operations.
+#   • PlanBench resource-allocation under deadline pressure.
+#   • SC2 production: when a rush is incoming, the right answer is to
+#     pump units NOW from existing production buildings, NOT to lay
+#     down a second factory.
+#   • Disaster response: existing capacity must be used right now;
+#     buying a second fleet vehicle is for next quarter, not for the
+#     incident in progress.
+#
+# DISCRIMINATIONS (CLAUDE.md bar — no defect, no cheat, no draw):
+#
+#   • stall (only observe): LOSS — no defenders ⇒ rush razes fact ⇒
+#     `not has_building:fact` fail bites; also after_ticks bites.
+#   • build-weap-first (queue+place weap, spend 2000, then build
+#     2tnk with residual cash): LOSS — placement+queue lockout means
+#     the first tank does not field until well after the rush has
+#     reached the fact; the fact is razed ⇒ LOSS.
+#   • intended buy-now (queue 2tnk × 4 from the pre-placed weap
+#     starting turn 1, attack-move them east to intercept the rush
+#     at the lane mouth, racking up kills): WIN.
+#
+# Real LOSS, not DRAW: every level carries a `not has_building:fact`
+# fail clause AND a tick-aligned `after_ticks` clause inside
+# max_turns (engine advances ~90 ticks per decision turn under
+# interrupts; we keep the deadline comfortably reachable so the
+# stall / build-weap LOSS is reached as a real timeout / fact-loss).
+#
+# Engine facts used (CLAUDE.md / prompt_v2 codex):
+#   • 2tnk cost $850, prereqs `weap` + `fix` (allied service depot —
+#     gamerules.rs tech gate; both pre-placed ⇒ buildable turn 1).
+#   • weap cost $2000, prereq `proc` (pre-placed ⇒ buildable turn 1).
+#   • `place_building` has no adjacency requirement (CLAUDE.md), so
+#     the BUILD-WEAP play can put its second factory anywhere
+#     in-bounds — the LOSS is from cash drain + production lockout,
+#     not from placement difficulty.
+#   • `rusher` scripted bot relentlessly charges the agent centroid
+#     (the `fact`), reliable timing for the buy-now intercept window.
+#   • interrupts (enemy_unit_spotted, own_unit_destroyed) give the
+#     agent the opening-tempo signals it needs to react inside the
+#     rush window without burning fixed-cadence turns.
+#   • Unarmed enemy `fact` marker far east keeps the episode alive
+#     past the last rusher death (CLAUDE.md auto-done footgun).
+#   • Hard tier defines 2 agent spawn_point groups (NORTH base
+#     y=14 / SOUTH base y=26) — UPGRADED contract; the rusher band
+#     places at BOTH latitudes every seed (enemy actors don't honour
+#     spawn_point, CLAUDE.md) but the rusher targets the AGENT
+#     centroid so the active band is always the one in the agent's
+#     latitude.
+#
+# Sibling pack candidate (not implemented here): the INVERSION —
+# slow enemy + sustained pressure ⇒ tech-up (build weap) WINS,
+# burn-cash-on-4-tanks LOSES (small force runs out in the long
+# horizon). This pack focuses cleanly on the BUY-NOW capability.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_econ_buy_vs_build_decision.py -q
+
+meta:
+  id: econ-buy-vs-build-decision
+  title: 'Capex vs Opex Under Rush Pressure — Buy 4 Tanks NOW or Build a Second Factory?'
+  capability: reasoning
+  real_world_meaning: >
+    A fixed cash budget funds EITHER an immediate force (buy 4× medium
+    tanks RIGHT NOW from the pre-placed war factory) OR a long-run
+    capacity upgrade (build a SECOND war factory to double per-turn
+    tank production). A rusher band is incoming at the lane mouth from
+    turn 0 and charges the agent's construction yard. The intended
+    play reads the threat timing and commits the budget to immediate
+    units; spending it on capacity instead leaves no force for the
+    rush, and the construction yard is razed before the new factory
+    fields a single tank. The pack frames the classic CAPEX-vs-OPEX
+    decision: invest for tomorrow vs operate for today.
+  robotics_analogue: >
+    Operational capacity allocation under a live incident: the budget
+    funds either an immediate dispatch of available robots (OPEX —
+    use existing fleet capacity right now to handle the incident) or
+    procurement of a second loading dock that will double dispatch
+    throughput over the next quarter (CAPEX — long-run capacity). An
+    in-progress incident makes the CAPEX play wrong: spending on the
+    second loading dock now leaves the site undefended, and the
+    incident escalates before the new capacity comes online.
+  benchmark_anchor:
+    - "PlanBench resource-allocation"
+    - "capex vs opex"
+    - "financial allocation"
+    - "SC2 production: pump units now vs lay second factory"
+  author: openra-bench
+
+base_map: rush-hour-arena
+# Exactly enough for EITHER 4× 2tnk ($850 × 4 = $3400) OR 1× weap
+# ($2000, with $1400 residual = 1 tank's worth). Spec: the cash
+# equates to a single coherent decision — buy 4 tanks OR build a
+# second factory. A mixed mini-spend (weap + 1 tank) underdelivers
+# on either axis.
+starting_cash: 3400
+
+base:
+  agent:
+    faction: allies
+  # `rusher`: relentless concentrated charge at the agent's centroid
+  # (the agent fact). Predictable timing — the canonical rush-defense
+  # opponent (sister pack: `defense-rush-survive`).
+  enemy:
+    faction: soviet
+    bot_type: rusher
+  tools:
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Re-decide the instant a rusher unit appears at the lane mouth or
+  # one of our tanks dies — opening rush-defense is reactive, not on
+  # fixed cadence. (Same idiom as defense-rush-survive.)
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+  # Pre-placed (per the design sketch + the buy-now actionability
+  # requirement): fact (loss-critical), proc (refinery — weap prereq),
+  # powr (power for the production queues — CLAUDE.md underpowered-
+  # queue footgun), weap (war factory) AND fix (Service Depot — the
+  # 2tnk tech-prereq on allies). Both weap and fix together make
+  # 2tnk immediately buildable on turn 1, so the BUY-NOW option is
+  # actionable WITHOUT any prior tech step. The agent starts
+  # unit-less: the defending force must be produced from the budget
+  # — that's the whole decision.
+  actors:
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: proc, owner: agent, position: [14, 18]}
+    - {type: powr, owner: agent, position: [14, 22]}
+    - {type: weap, owner: agent, position: [18, 20]}
+    - {type: fix,  owner: agent, position: [18, 22]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare buy-vs-build skill. A LIGHT rush (4× e1) charges the fact
+  # from x=70 (60 cells west of the fact at x=10). Buying 4 tanks
+  # and attack-moving east intercepts the rush comfortably; building
+  # a second weap leaves only enough cash for 1 tank and the rush
+  # razes the fact. Stall loses (no defenders ⇒ fact razed).
+  # Kill bar low (3) so the bar attributes to the BUY decision, not
+  # to combat micro.
+  easy:
+    description: >
+      A rusher band (4 rifle infantry) is charging your construction
+      yard from the lane mouth. Your starting cash ($3400) is exactly
+      enough for EITHER 4 medium tanks (build 2tnk × 4 from the
+      pre-placed war factory at $850 each) OR a second war factory
+      (build weap at $2000, leaving only $1400 = 1 tank). Spend on
+      whichever wins the next 40 turns — the rush is incoming NOW.
+      Win when ≥3 enemy units are killed AND your construction yard
+      (fact) is still standing AND the clock has not run out
+      (tick ≤ 3600). Stall, build-the-second-factory-first, or
+      under-spend all fail.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: weap, owner: agent, position: [18, 20]}
+        - {type: fix,  owner: agent, position: [18, 22]}
+        # Light rush — 4× e1 at the lane mouth (x=70, same row as
+        # fact). Stance 3 ⇒ fires on contact. At ~1 cell per ~12
+        # ticks, the 60-cell crawl to the fact takes ~720 ticks ≈
+        # 8 turns — enough time for the buy-4-tanks chain to field
+        # and intercept BUT not enough for the build-second-weap
+        # chain to field even 1 tank.
+        - {type: e1, owner: enemy, position: [70, 20], stance: 3, count: 4}
+        # Far unarmed enemy marker — anti-DRAW. Without this the
+        # engine auto-`done`s the moment the last rusher dies (the
+        # rusher band is the only enemy "MustBeDestroyed" otherwise)
+        # and the win/fail check never runs in the terminal frame.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1499}
+    # Tick budget: max_turns 25 ⇒ max reachable tick = 93 + 90·24 =
+    # 2253 (fixed-cadence). Stall (observe-only) reaches ~1500
+    # ticks well inside max_turns (~88 ticks/turn observed for a
+    # no-op episode), so after_ticks 1500 BITES before max_turns
+    # exhausts ⇒ a real reachable timeout LOSS, not a draw.
+    # We use building_count_gte (counts positions in own_buildings,
+    # the live list) instead of has_building (checks
+    # own_building_types, a set that can lag a step behind the
+    # destruction event under engine auto-done) — see CLAUDE.md
+    # own-elimination footgun.
+    fail_condition:
+      any_of:
+        - {after_ticks: 1500}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 25
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: HEAVIER rush AND tighter cash. The band is 5× e1 + 1× e3
+  # at the same x=70 lane mouth. Kill bar raised to 5. The 4-tank
+  # response still WINS comfortably (4 tanks shred e1 at range and
+  # outrange the e3 rocket); the build-weap response still LOSES (the
+  # second factory's first tank fields too late + only 1 tank ⇒
+  # rocket soldier kills it). Same clock, same fact-loss fail.
+  medium:
+    description: >
+      A larger rusher band (5 rifle infantry + 1 rocket soldier) is
+      charging your construction yard. Your starting cash ($3400) is
+      exactly enough for EITHER 4 medium tanks (build 2tnk × 4 from
+      the pre-placed war factory) OR a second war factory (build
+      weap, residual $1400 = 1 tank). The rush is incoming NOW.
+      Win when ≥5 enemy units are killed AND your fact is still
+      standing AND the clock has not run out (tick ≤ 3600). Stall,
+      build-the-second-factory-first, or under-spend all fail.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: weap, owner: agent, position: [18, 20]}
+        - {type: fix,  owner: agent, position: [18, 22]}
+        # Heavier rush — same x=70 lane mouth. 5× e1 staggered
+        # rifle wave. 4 tanks at rng4.75 dps22 each (88 dps total)
+        # eat the wave; build-weap-first chain produces ≤1 tank by
+        # the time the rush arrives and the band overruns the fact.
+        - {type: e1, owner: enemy, position: [70, 20], stance: 3, count: 5}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1499}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1500}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 25
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: seed-driven base latitude. TWO agent spawn_point groups
+  # (NORTH base y=14 / SOUTH base y=26) round-robined by seed; the
+  # rusher band places at BOTH latitudes every seed (enemy actors
+  # don't honour spawn_point — CLAUDE.md oramap.rs footgun), but
+  # the `rusher` bot always targets the agent centroid so the active
+  # threat axis flips per seed. The buy-vs-build decision is
+  # IDENTICAL across spawns (the cash, the war factory, the
+  # response shape are all symmetric) — a memorised "rush comes
+  # from y=14" opening cannot generalise, but the capability
+  # generalises cleanly. Kill bar 6, same clock.
+  hard:
+    description: >
+      Two rusher bands (one north y=14, one south y=26) are visible
+      at the lane mouth but the rusher bot always charges YOUR
+      construction yard (whichever latitude you spawned at). Your
+      starting cash ($3400) is exactly enough for EITHER 4 medium
+      tanks (build 2tnk × 4 from the pre-placed war factory) OR a
+      second war factory (build weap, residual $1400 = 1 tank).
+      The rush is incoming NOW. Win when ≥6 enemy units are killed
+      AND your fact is still standing AND the clock has not run out
+      (tick ≤ 3600). Stall, build-second-factory-first, or
+      under-spend all fail. The base latitude varies by seed so a
+      single memorised pre-pick cannot generalise — the buy-now
+      decision must be made from the live threat reading.
+    overrides:
+      actors:
+        # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [14, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: weap, owner: agent, position: [18, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [18, 16], spawn_point: 0}
+        # Inert spawn-witness e1 (HoldFire) per group: required for
+        # the hard-tier units_summary spawn-variation check (the
+        # building-only base has no `units_summary` entries by
+        # default; see build-power-online-first for the same
+        # idiom). Stance 0 + base-adjacent placement makes it
+        # functionally inert — does not move, does not fire, does
+        # not shift the rusher's centroid target.
+        - {type: e1, owner: agent, position: [12, 14], spawn_point: 0, stance: 0}
+        # ── AGENT spawn 1 — SOUTH base (y=26) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: weap, owner: agent, position: [18, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [18, 28], spawn_point: 1}
+        - {type: e1, owner: agent, position: [12, 26], spawn_point: 1, stance: 0}
+        # ── NORTH rusher band (y=14) — always places ──────────────
+        # Rusher targets agent centroid, so on a NORTH spawn this
+        # band charges the fact directly; on a SOUTH spawn it
+        # angles southward (the rusher's relentless charge always
+        # reorients to the centroid). Bands kept light (4× e1 each)
+        # so 4 medium tanks at the base auto-fire enough kills to
+        # clear the bar before fact damage compounds.
+        - {type: e1, owner: enemy, position: [70, 14], stance: 3, count: 4}
+        # ── SOUTH rusher band (y=26) — always places ──────────────
+        - {type: e1, owner: enemy, position: [70, 26], stance: 3, count: 4}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 5}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1499}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1500}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 25
