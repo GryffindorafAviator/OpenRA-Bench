@@ -846,6 +846,19 @@ UPGRADED = [
     # east) and a memorised "drive east on y=20" plan mis-targets
     # from both spawns.
     "tp-rush-objective-very-fast",
+    # Wave-8 REASONING sacrifice pack — forlorn hope / military
+    # sacrifice doctrine / SC2 expendable strike package anchor.
+    # 6× 2tnk + 4× e3 staged at the west must raze an enemy `fact`
+    # at the far-east objective region (110,20) inside a tight
+    # clock; survival is NOT required (no own_units_gte clause).
+    # Hard defines TWO agent spawn_point groups (NORTH staging y≈10
+    # vs SOUTH staging y≈30) round-robined by seed; the defender
+    # picket (4 e3 + 1 4tnk) and objective fact at (110,20) place
+    # every seed (enemy actors don't honour spawn_point — CLAUDE.md)
+    # so the all-in-commit task is symmetric per spawn but the
+    # approach vector flips and a memorised "drive east on y=20"
+    # opening cannot generalise across seeds.
+    "combat-suicide-charge-mission",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

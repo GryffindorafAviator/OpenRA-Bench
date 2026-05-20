@@ -1,0 +1,196 @@
+meta:
+  id: combat-suicide-charge-mission
+  title: 'Suicide Charge — Sacrifice the Force to Raze a High-Value Objective'
+  capability: reasoning
+  real_world_meaning: >
+    Forlorn hope / military sacrifice doctrine. A high-value enemy
+    construction yard (`fact`) sits at the far east of the map,
+    heavily defended; the agent's small force at the west cannot
+    survive the engagement. The OBJECTIVE is the building's
+    destruction — survival is NOT required. A "preserve the force"
+    policy that engages carefully and tries to save units loses on
+    the clock (the picket grinds attackers down and they never
+    arrive); only an all-in commit that drives the WHOLE force
+    straight at the objective and trades every attacker for damage
+    on the fact actually razes it in time. This is delayed-terminal
+    credit assignment with an explicit cost-vs-objective trade-off:
+    every unit lost looks locally negative, but the only successful
+    plan accepts the loss of all of them.
+  robotics_analogue: >
+    Expendable strike package / single-use intervention: a fleet of
+    cheap drones must destroy a critical adversary asset under a
+    hard deadline; loiter or stand-off attacks miss the window, so
+    the planner must commit every platform on a one-way attack
+    trajectory, accepting total platform loss as the operating cost
+    of mission success.
+  benchmark_anchor:
+    - "military sacrifice doctrine / forlorn hope (West & East canonical)"
+    - "SC2 expendable strike package (all-in cost-objective trade)"
+    - "MicroRTS / SC2LE attack-the-base under deadline with attrition-OK"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+# The discriminator: the enemy fact at (110,20) is guarded by an
+# anti-armor picket (e3 rocket infantry + 4tnk heavy tank). A
+# careful "preserve the force" approach (skirmish, retreat, regroup,
+# pick off targets) cannot land enough damage on the fact before the
+# deadline — the e3 cluster outranges and out-damages the 2tnk column
+# in a stand-off, and any retreat resets the clock. The intended
+# play commits ALL six tanks plus the four e3 escorts straight east,
+# absorbing fire and trading every attacker for the seconds of
+# face-time needed to raze the fact. Win is buildings-only; force
+# wipe is NOT a fail.
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination:
+    max_ticks: 12000
+    # CRITICAL for the sacrifice anchor: disable the engine's
+    # auto-`done` flag on full agent-force elimination. Without this
+    # the engine ends the run the moment the last attacker dies,
+    # even if the objective fact has already been razed and
+    # within_ticks is still satisfied — collapsing the win into a
+    # draw. Enemy-units flag is left off too; the SENTINEL fact
+    # already keeps MustBeDestroyed enemy buildings alive past the
+    # objective fact's destruction; e3/4tnk defenders don't matter
+    # for victory conditions.
+    agent_units_killed: false
+    enemy_units_killed: false
+  actors:
+    # ── Strike package (west) — 6× 2tnk + 4× e3 ──
+    # Stance 1 = ReturnFire so they push without burning ammo on
+    # patrol fire en route; the all-in commit relies on attack_move
+    # / attack_unit at the end of the lane. Spread vertically across
+    # y=16..24 so the column isn't focus-fired into a single column
+    # on approach.
+    - {type: 2tnk, owner: agent, position: [6, 16], stance: 1, count: 2}
+    - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 2}
+    - {type: 2tnk, owner: agent, position: [6, 24], stance: 1, count: 2}
+    - {type: e3,   owner: agent, position: [8, 18], stance: 1, count: 2}
+    - {type: e3,   owner: agent, position: [8, 22], stance: 1, count: 2}
+    # ── Defender — `guard` bot, leashed (lunge then snap back). e3
+    # rockets shred 2tnk armour at range 5; 4tnk heavy brawls close.
+    # Medium picket = 3 e3 (anti-armor wall) + 1 4tnk (HP sponge);
+    # spread vertically (y=16/20/24) to cover the west approach
+    # corridor — an all-in commit still cracks it but trades half
+    # the force in doing so. On EASY, lighter picket (see override).
+    - {type: e3,   owner: enemy, position: [104, 16], stance: 2}
+    - {type: e3,   owner: enemy, position: [104, 20], stance: 2}
+    - {type: e3,   owner: enemy, position: [104, 24], stance: 2}
+    - {type: 4tnk, owner: enemy, position: [108, 20], stance: 2}
+    # Objective: the high-value enemy fact at far east (110, 20).
+    - {type: fact, owner: enemy, position: [110, 20]}
+    # Sentinel fact — far north corner, never engaged. Keeps the
+    # episode ALIVE past objective-fact destruction so within_ticks
+    # can evaluate on the terminal frame (the CLAUDE.md auto-done
+    # footgun on MustBeDestroyed enemy buildings).
+    - {type: fact, owner: enemy, position: [122, 4]}
+
+levels:
+  # ── EASY ── the bare sacrifice skill: light defender (only 2× e3
+  # + 1× 4tnk). A preserve-the-force plan still times out, but the
+  # all-in commit razes the fact comfortably.
+  easy:
+    description: >
+      A defended enemy construction yard sits at the far east
+      (110, 20). Your strike package (6 tanks + 4 rocket infantry)
+      at the west cannot survive the engagement intact. You DO
+      NOT need to keep your units alive — the objective is the
+      enemy fact's DESTRUCTION before the deadline. A careful,
+      preserve-the-force approach times out on the clock; commit
+      the WHOLE force straight east at the objective, accept the
+      losses, and raze the fact.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 16], stance: 1, count: 2}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 2}
+        - {type: 2tnk, owner: agent, position: [6, 24], stance: 1, count: 2}
+        - {type: e3,   owner: agent, position: [8, 18], stance: 1, count: 2}
+        - {type: e3,   owner: agent, position: [8, 22], stance: 1, count: 2}
+        - {type: e3,   owner: enemy, position: [104, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 22], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [108, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [110, 20]}
+        - {type: fact, owner: enemy, position: [122, 4]}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 110, y: 20, radius: 6, types: [fact]}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+    max_turns: 62
+
+  # ── MEDIUM ── +1 controlled variable: heavier defender (3× e3 +
+  # 1× 4tnk — the base composition). The preserve-the-force trap
+  # tightens: any standoff loses ground; the all-in commit still
+  # wins but trades nearly the whole package.
+  medium:
+    description: >
+      Heavier picket (3 rocket infantry spread y=16/20/24 + 1
+      heavy tank) on the enemy fact at (110, 20). Same task: raze
+      the fact before the deadline; survival is NOT required. The
+      careful, preserve-the-force approach reliably times out —
+      the e3 outrange your tanks in any standoff. Commit
+      everything, all-in, straight at the objective.
+    overrides: {}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 110, y: 20, radius: 6, types: [fact]}
+        - {within_ticks: 6400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 6401}
+    max_turns: 73
+
+  # ── HARD ── +1 controlled variable: seed-chosen staging latitude
+  # (two spawn_point groups, NORTH y=10 / SOUTH y=30) so the all-in
+  # vector flips per seed and can't be memorised; picket adds one
+  # more e3 (heavy on top of the heavy-2tnk pair). Tight deadline.
+  hard:
+    description: >
+      Strongest defender on the far-east enemy fact at (110, 20);
+      your strike package stages from a seed-chosen latitude
+      (NORTH or SOUTH) so the all-in vector varies per seed. Raze
+      the fact before the (tight) deadline. Survival is NOT
+      required — every unit may be spent. The careful preserve
+      plan and any partial commit both time out; only the
+      whole-force all-in commit lands enough damage on the fact.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging (y=8..12)
+        - {type: 2tnk, owner: agent, position: [6, 8],  stance: 1, count: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, count: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, count: 2, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [8, 9],  stance: 1, count: 2, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [8, 11], stance: 1, count: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging (y=28..32)
+        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, count: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 32], stance: 1, count: 2, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [8, 29], stance: 1, count: 2, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [8, 31], stance: 1, count: 2, spawn_point: 1}
+        # Defender — symmetric picket on the objective fact (enemy
+        # actors don't honour spawn_point — see CLAUDE.md; the same
+        # picket meets either spawn). Hard adds one e3 vs medium.
+        - {type: e3,   owner: enemy, position: [104, 16], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 24], stance: 2}
+        - {type: e3,   owner: enemy, position: [106, 20], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [108, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [110, 20]}
+        - {type: fact, owner: enemy, position: [122, 4]}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 110, y: 20, radius: 6, types: [fact]}
+        - {within_ticks: 7200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+    max_turns: 82
