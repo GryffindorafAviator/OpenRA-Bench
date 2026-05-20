@@ -1,0 +1,280 @@
+# Validate: python -m openra_bench.scenarios.validate packs/build-rally-point-management.yaml
+#
+# BUILD-RALLY-POINT-MANAGEMENT (Wave-8 ACTION: production logistics —
+# set the production building's rally point to a FORWARD staging area
+# so freshly-built units arrive on the front line in time to engage,
+# instead of piling up at the base default).
+#
+# Real-world anchor: production / warehouse SLA. A factory whose
+# default ship-to address is the loading dock will pile inventory at
+# the dock; pieces never reach the field. Reset the rally point
+# (the "ship-to" address) to the forward distribution point and the
+# pipeline flows. The decision is a single ACTION — a one-shot
+# `set_rally_point` on the barracks (`tent`) BEFORE the production
+# clock starts burning — that re-routes every subsequent unit. Stall,
+# observe-only, or build-without-rally policies pile units at the
+# tent exit ~38 cells from the forward zone, never engage in time,
+# and LOSE on the deadline. Benchmark anchors: SC2 rally management /
+# production logistics / warehouse SLA.
+#
+# Engine facts used (verified against the installed openra_train wheel):
+#
+# 1. `set_rally_point([building_id], target_x, target_y)` is exposed by
+#    the engine as a building-scoped order (CLAUDE.md tool table /
+#    openra_bench/agent.py:244). Units produced from that building
+#    after the order is issued automatically receive a MOVE order to
+#    the rally cell on spawn — verified in a smoke probe: with the
+#    tent at (24,22) and rally set to (62,20), spawned e1s leave the
+#    exit cell (23,21) and walk to a free cell in the rally disc; the
+#    first unit arrives by tick ~1083, three units are inside r≤5 of
+#    (62,20) by tick ~903 (production rate ≈ one e1 per ~270 ticks),
+#    and the cluster destroys the enemy `barr` at (62,20) by tick
+#    ~1533–1800.
+# 2. Default (no rally call): produced infantry idle at the tent's
+#    own exit cells (23,21)..(26,25) — verified in the same probe.
+#    None ever enter the radius-5 disc around (62,20), and the enemy
+#    `barr` is never engaged. The `units_in_region_gte` and
+#    `units_killed_gte` win clauses therefore never satisfy without
+#    an explicit forward rally.
+# 3. The tool palette is intentionally MINIMAL — `observe`, `build`,
+#    `set_rally_point`, `stop` only. NO `move_units` / `attack_move`,
+#    so the agent cannot route produced units forward by hand-driving
+#    every batch; the rally point is the SOLE forward-projection
+#    mechanism. This makes the test load-bearing on the advertised
+#    capability (and also matches the real production-logistics
+#    framing: the operator sets the ship-to once, not per unit).
+# 4. The forward kill target is an enemy `barr` (Barracks — MustBe-
+#    Destroyed, no return-fire weapon, ~1500HP) at (62,20). A wave
+#    of rallied rifle infantry chews it down in ~600–800 ticks of
+#    sustained contact. `barr` has no weapon so my arriving units
+#    are not slaughtered on contact (a pillbox at the same cell
+#    would kill rally-arrivals one-at-a-time and starve the kill
+#    clause). The `units_killed_gte:1` clause registers when the
+#    barr falls. The persistent unarmed enemy `fact` at (140,20)
+#    keeps the engine's all-enemies-destroyed auto-`done` gated, so
+#    a non-finisher reaches the deadline as a real LOSS (not DRAW).
+# 5. Tick alignment: engine advances ~90 ticks per decision turn,
+#    so within_ticks ≤ 93 + 90·(max_turns − 1) is required (CLAUDE.md
+#    engine fact). fail_condition uses `after_ticks = within_ticks
+#    + 1` so a non-finisher LOSES on the very next tick after the
+#    window closes. Easy gives generous slack; medium tightens the
+#    clock so a late rally (e.g. after several stall turns) misses.
+# 6. Hard tier: `spawn_point` filter applies ONLY to AGENT actors,
+#    and ANY agent actor with spawn_point causes agent actors WITHOUT
+#    spawn_point to be filtered out (CLAUDE.md oramap.rs footgun).
+#    So the agent base (fact + powr + tent) is DUPLICATED across both
+#    spawn_point groups (NORTH y=14 / SOUTH y=26) at the spawn-
+#    matched coords; the enemy barr at (62,20) and persistent enemy
+#    `fact` at (140,20) have no spawn_point and always place. Both
+#    NORTH and SOUTH spawns have equivalent travel distance to the
+#    centreline forward zone (~44 cells diagonal). An inert HoldFire
+#    `e1` spawn-witness per group surfaces the seed-driven variation
+#    via `units_summary` (the building-only base would otherwise be
+#    invisible to the hard-tier shared spawn-variation test).
+# 7. Engine quirk avoidance: `barr` IS MustBeDestroyed (unlike `silo`
+#    — see CLAUDE.md silo footgun), so destroying it counts cleanly
+#    toward `units_killed`. The persistent enemy `fact` is far enough
+#    (140,20) that no produced units stray to it during the test.
+
+meta:
+  id: build-rally-point-management
+  title: 'Set the Rally Point Forward — Production Logistics Under a Deadline'
+  capability: action
+  real_world_meaning: >
+    Production logistics / warehouse SLA: a factory whose default
+    ship-to is the loading dock will pile inventory at the dock —
+    pieces never reach the field. The decision is a single ACTION
+    — set the production building's RALLY POINT (its "ship-to"
+    address) to a FORWARD staging area at the front, BEFORE the
+    production clock starts burning. Once the rally is set, every
+    subsequent freshly-built unit auto-routes to the front; the
+    operator does not have to micromanage each batch. Without that
+    one-shot reset, the default rally is right next to the building
+    and the units pile at the base ~38 cells from the action, never
+    engage in time, and the SLA (the tick deadline) is missed.
+  robotics_analogue: >
+    Production-pipeline standing-order routing: a manufacturing or
+    fulfilment system whose default routing rule sends finished
+    goods to the dock will starve the downstream customer; a single
+    standing-order change ("ship every unit produced at this site
+    to dock B at the forward distribution centre") re-routes the
+    entire pipeline. This is also the SC2 rally-point primitive —
+    one click on the production building, every subsequent unit
+    walks to the rally cell — and the analogue is exactly what
+    real-world logistics calls "set the default ship-to".
+  author: openra-bench-wave8
+  benchmark_anchor:
+    - "SC2 rally management"
+    - "production logistics"
+    - "warehouse SLA"
+
+base_map: rush-hour-arena
+starting_cash: 1500
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # MINIMAL palette: the rally point is the SOLE forward-projection
+  # mechanism. No move_units / attack_move so the agent cannot route
+  # produced units forward by hand-driving every batch; matches the
+  # real production-logistics framing (set the ship-to once).
+  tools: [observe, build, set_rally_point, stop]
+  spawn_mcvs: false
+  planning: false
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare ACTION: set rally forward once, queue infantry. Generous
+  # clock. fact (20,20), powr (22,22), tent (24,22). Enemy barr at
+  # (62,20). max_turns 30 → reachable tick 93 + 90·29 = 2703 > 2700 ✓.
+  # Rally-forward policy: first units enter (62,20) r=5 by tick ~903,
+  # barr destroyed by tick ~1533–1800; well inside 2700.
+  # No-rally / stall / build-only-no-rally: units idle at
+  # (23,21)..(26,25), never enter region, never engage barr → LOSS
+  # on the deadline.
+  easy:
+    description: >
+      Production logistics opening. You start with a Construction
+      Yard ('fact') at (20,20), a Power Plant ('powr') at (22,22),
+      and a Barracks ('tent') at (24,22) — total cash $1500. An
+      enemy Barracks ('barr', the kill target) sits at the FORWARD
+      staging area (62,20) ≈38 cells east of your tent. Win = at
+      least 3 of your units inside a radius-5 disc around (62,20)
+      AND ≥1 enemy unit/building killed AND before tick 2700. The
+      tent's default rally point is right next to the tent —
+      freshly-built infantry pile at (23–26, 21–25) and never
+      engage. You must call set_rally_point on the tent with
+      target (62,20) BEFORE (or right after) you queue the first
+      Rifle Infantry ('e1', cost 100), so every subsequent unit
+      walks to the forward zone and chews the enemy barr down.
+      Stalling, building without setting the rally forward, or
+      setting the rally to a near-base cell all miss the deadline
+      and LOSE.
+    starting_cash: 1500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [20, 20]}
+        - {type: powr, owner: agent, position: [22, 22]}
+        - {type: tent, owner: agent, position: [24, 22]}
+        # The forward kill target — unarmed enemy barracks at the
+        # forward staging area. ~1500HP, no return fire, falls in
+        # ~600–800 ticks to a wave of rallied e1.
+        - {type: barr, owner: enemy, position: [62, 20]}
+        # Persistent unarmed enemy marker — keeps engine auto-done
+        # gated so non-finishers reach the deadline as real LOSS.
+        - {type: fact, owner: enemy, position: [140, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 62, y: 20, radius: 5, n: 3,
+            label: "the forward staging area at (62,20) (~38 cells east of the Barracks)"}}
+        - {units_killed_gte: 1}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - after_ticks: 2701
+        - not: {has_building: fact}
+    max_turns: 30
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER CLOCK. Same opening, same enemy
+  # geometry, same starting cash, but within_ticks 1900. max_turns
+  # 22 → reachable tick 93 + 90·21 = 1983 > 1900 ✓. Rally-forward
+  # still wins (barr killed by ~1533–1800 against deadline 1900),
+  # but a model that stalls for even a few turns before setting the
+  # rally misses the window. Stall / no-rally still LOSE outright.
+  medium:
+    description: >
+      Same opening — fact (20,20), powr (22,22), tent (24,22),
+      $1500 — but the SLA tightens. Enemy 'barr' kill target at
+      (62,20); win requires ≥3 of your units inside a radius-5
+      disc around (62,20) AND ≥1 kill AND before tick 1900 (tight
+      — a few stall turns before the rally call will miss the
+      window). Tent default rally piles units at the base; you
+      must call set_rally_point on the tent with target (62,20)
+      and queue infantry ('e1', cost 100) IMMEDIATELY. Stall,
+      no-rally, or rally-to-a-near-base-cell all LOSE on the
+      deadline.
+    starting_cash: 1500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [20, 20]}
+        - {type: powr, owner: agent, position: [22, 22]}
+        - {type: tent, owner: agent, position: [24, 22]}
+        - {type: barr, owner: enemy, position: [62, 20]}
+        - {type: fact, owner: enemy, position: [140, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 62, y: 20, radius: 5, n: 3,
+            label: "the forward staging area at (62,20) (~38 cells east of the Barracks)"}}
+        - {units_killed_gte: 1}
+        - {within_ticks: 1900}
+    fail_condition:
+      any_of:
+        - after_ticks: 1901
+        - not: {has_building: fact}
+    max_turns: 22
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO agent base spawn_
+  # point groups (NORTH y=14 / SOUTH y=26) round-robined by seed.
+  # The pre-placed fact + powr + tent (and therefore the unit-
+  # emergence cells) flip per seed, so a memorised "rally to
+  # (62,20) from y=22" opening cannot generalise — the model must
+  # still rally to the centreline forward zone (62,20), but from
+  # its OWN tent (which is at y=16 or y=28 depending on the seed).
+  # Travel distance is symmetric per spawn (~44 cells diagonal to
+  # the centreline (62,20)). Same tight clock as medium. max_turns
+  # 22 → reachable tick 1983 > 1900 ✓.
+  hard:
+    description: >
+      Same SLA-tight opening as medium (forward zone (62,20),
+      enemy 'barr' there, ≥3 units in r=5 disc + ≥1 kill before
+      tick 1900) but your Construction Yard, Power Plant, and
+      Barracks may begin in the NORTH band (y≈16) or the SOUTH
+      band (y≈28) of the map depending on the seed. Read the
+      tent's actual position from the observation and call
+      set_rally_point on the tent with target (62,20) — the
+      centreline forward zone is fixed regardless of which spawn
+      you got. A memorised "set rally from y=22" opening will
+      still target (62,20), but your tent id and starting cells
+      will differ per seed. The Barracks default rally piles
+      units at the base; without an explicit forward rally call
+      the units never reach (62,20) and the SLA is missed.
+    starting_cash: 1500
+    overrides:
+      actors:
+        # Two agent base spawn groups (round-robin by seed) — same
+        # shape (fact + powr + tent) at NORTH (y=14..16) and SOUTH
+        # (y=26..28). Per the oramap.rs footgun (CLAUDE.md), every
+        # agent actor must declare spawn_point or it is filtered out
+        # by the presence of any spawn-grouped agent actor.
+        - {type: fact, owner: agent, position: [20, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [22, 16], spawn_point: 0}
+        - {type: tent, owner: agent, position: [24, 16], spawn_point: 0}
+        - {type: fact, owner: agent, position: [20, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [22, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [24, 28], spawn_point: 1}
+        # Inert spawn-witness e1 per group (HoldFire) so the hard-
+        # tier shared spawn-variation test sees seed-driven cell
+        # variation via units_summary; the e1 is functionally inert
+        # (no move_units / attack tool exposed, so it cannot be
+        # commanded, and with HoldFire + barr at (62,20) being
+        # ~40 cells away it cannot auto-fire either).
+        - {type: e1, owner: agent, position: [26, 14], spawn_point: 0, stance: 0}
+        - {type: e1, owner: agent, position: [26, 26], spawn_point: 1, stance: 0}
+        # Enemy actors don't honour spawn_point — placed once.
+        - {type: barr, owner: enemy, position: [62, 20]}
+        - {type: fact, owner: enemy, position: [140, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 62, y: 20, radius: 5, n: 3,
+            label: "the forward staging area at (62,20) — the centreline ≈40 cells east of your Barracks"}}
+        - {units_killed_gte: 1}
+        - {within_ticks: 1900}
+    fail_condition:
+      any_of:
+        - after_ticks: 1901
+        - not: {has_building: fact}
+    max_turns: 22

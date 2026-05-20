@@ -888,6 +888,21 @@ UPGRADED = [
     # then-commit on the latitude-matching corner wins on every
     # seed.
     "scout-detect-base-direction",
+    # Wave-8 ACTION pack — production logistics / SC2 rally management /
+    # warehouse SLA anchor. A one-shot `set_rally_point(tent, 62, 20)`
+    # at the opening re-routes every subsequent freshly-built unit to
+    # the FORWARD staging area; default rally leaves units idle at the
+    # tent's exit cells ~38 cells from the action and the SLA tick
+    # deadline is missed. Hard tier defines two agent base spawn_point
+    # groups (NORTH base y=14..16 / SOUTH base y=26..28) round-robined
+    # by seed; the centreline forward zone (62,20) is fixed (enemy
+    # actors don't honour spawn_point — CLAUDE.md) so each spawn faces
+    # a symmetric ~44-cell rally to the same centreline target, and a
+    # memorised "rally from y=22" opening will mis-address the wrong
+    # tent id on one of the two spawns. Inert HoldFire spawn-witness
+    # e1 per group surfaces the variation via units_summary (the base
+    # is otherwise building-only).
+    "build-rally-point-management",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
