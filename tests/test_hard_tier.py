@@ -500,6 +500,18 @@ UPGRADED = [
     # stack (y=18..22), so a memorised "drive east on y=20" opening
     # cannot generalise across the lane variants.
     "proc-tool-use-multi-distractor",
+    # Wave-6 Group E perception pack — parallel multi-region scout
+    # (Watch-And-Help concurrent multi-task / SMAC distributed
+    # exploration / SC2 multi-scout coverage / military distributed
+    # reconnaissance doctrine anchor). 3 jeeps must split across K
+    # foggy regions; sending all jeeps to one region or touring all
+    # regions with a single jeep loses on the K-discovery bar or the
+    # clock. Hard defines two agent spawn_point groups (NW y=6..12 /
+    # SW y=28..34) round-robined by seed; the K=4 region layout is
+    # symmetric N/S so the sweep corridor (NW→NE on the north edge
+    # vs SW→SE on the south edge) flips per seed and a memorised
+    # single-corner reading order cannot generalise across spawns.
+    "scout-multiple-fog-areas",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

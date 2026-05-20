@@ -1,0 +1,202 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/scout-multiple-fog-areas.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# PERCEPTION focus — PARALLEL multi-region scouting. The map hides one
+# marker building in EACH of K disjoint fog regions (NE / SE / far-E /
+# NW / SW depending on tier). The win predicate is
+# `buildings_discovered_gte:K` — the model must DISCOVER every marker
+# within the clock. The agent owns 3 jeeps. The discriminating
+# decision is whether to DISPATCH the jeeps in PARALLEL (one per
+# region, all arriving roughly simultaneously) or commit a degenerate
+# policy that breaks one tooth:
+#
+#   * stall            — never visits any region        → LOSES on clock
+#   * all-to-NE-only   — discovers K=1 of K regions     → LOSES on win bar
+#   * single-jeep-tour — one jeep walks A→B→C serially  → LOSES on clock
+#   * intended SPLIT   — 3 jeeps fan out concurrently   → WINS in time
+#
+# Real-world anchor: SC2 multi-scout coverage (one worker per map
+# corner so the opening intel arrives in parallel rather than serially);
+# military distributed reconnaissance doctrine (several recon teams
+# dispatched to different sectors simultaneously because a single
+# patrol cannot cover the area of operations in the intelligence
+# window); Watch-And-Help concurrent multi-task / SMAC distributed
+# exploration (multi-agent benchmarks whose binding tooth is parallel
+# task assignment with non-overlapping coverage).
+#
+# Tick-budget calibration (rush-hour-arena is 128x40; jeep speed on
+# this open grid empirically clocks at ~5.9 ticks/cell):
+#   medium (K=3, regions NE+SE+far-E mid):
+#     intended split (3 jeeps to 3 regions, parallel)        ≈ 903 ticks
+#     single-jeep tour NE→far-E→SE (122+16+16 ≈ 154 cells)   ≈ 1083 ticks
+#   hard (K=4, regions NE+SE+NW-mid+SW-mid; 2 spawn groups):
+#     intended split (top jeep NW→NE; bottom jeep SW→SE)     ≈ 903 ticks
+#     single-jeep tour NW→NE→SE→SW (231 cells)               ≈ 1353 ticks
+# `within_ticks` is set BETWEEN the split-time and the tour-time so
+# the split WINS and the tour LOSES. Easy keeps a generous budget
+# because K=2 makes a single-jeep tour cheap (~1083 ticks for both
+# corners on the east edge) — easy is the bare-skill rehearsal, not
+# the discrimination tier.
+#
+# Engine-footgun notes (see CLAUDE.md):
+#   * Every region marker is a MustBeDestroyed Soviet building
+#     (`proc`). When a partial play (e.g. all-to-NE) levels one
+#     marker the OTHERS stay alive in fog so the engine does NOT
+#     auto-`done` — the clock fires the LOSS cleanly. No off-objective
+#     persistence marker is needed because the unvisited-in-fog markers
+#     fill that role on every degenerate policy.
+#   * Markers stay passive: `proc` is unarmed so it never engages a
+#     scouting jeep on sight, keeping the perception channel pure.
+#   * `units_lost_lte:1` is structurally inert here (no enemy units
+#     exist, only unarmed buildings) but is kept in both clauses
+#     per the cell contract so that any future variant adding
+#     hostiles keeps the same predicate shape.
+
+meta:
+  id: scout-multiple-fog-areas
+  title: 'Scout Multiple Fog Areas — Split, Don''t Tour'
+  capability: perception
+  real_world_meaning: >
+    Multi-region reconnaissance under a hard intelligence deadline:
+    every sector must be eyed before commit. A single patrol cycled
+    A→B→C blows the deadline because B and C wait while A is read;
+    sending the whole team to one sector leaves the others blank. The
+    advertised capability is concurrent multi-sector dispatch — one
+    sensor per region, all arriving roughly together.
+  robotics_analogue: >
+    Multi-robot area surveillance with one drone per sector and a
+    bounded intel-window: drones must launch in parallel so every
+    sector is observed before the window closes; serialising one
+    drone across all sectors misses the deadline, and committing the
+    full fleet to one sector leaves the others unobserved.
+  benchmark_anchor:
+    - "Watch-And-Help concurrent multi-task scout"
+    - "SMAC distributed exploration"
+    - "SC2 multi-scout coverage"
+    - "military distributed reconnaissance doctrine"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 10000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  easy:
+    description: >
+      Two foggy regions hide one marker building each — one in the
+      NORTH-EAST corner (Refinery 'proc' at ~124,4) and one in the
+      SOUTH-EAST corner (Refinery 'proc' at ~124,36). You own three
+      jeeps in the west staging column. Discover BOTH markers before
+      tick 1800. The intended play is to dispatch one jeep to each
+      corner in parallel — a stall never reaches either; sending the
+      whole fleet to one corner leaves the other in fog. The deadline
+      is generous: this tier rehearses the split-dispatch reflex
+      without yet penalising the slower single-jeep tour.
+    overrides:
+      actors:
+        # Three jeeps in the west staging column. Pre-split rows so
+        # the obvious read is "one jeep per row → one region per jeep".
+        - {type: jeep, owner: agent, position: [5, 14]}
+        - {type: jeep, owner: agent, position: [5, 20]}
+        - {type: jeep, owner: agent, position: [5, 26]}
+        # Region markers — each a MustBeDestroyed Soviet refinery
+        # (no defenders, no auto-fire). The unvisited marker stays
+        # alive in fog and keeps the episode running so a partial
+        # play loses on the clock (no engine auto-done degeneracy).
+        - {type: proc, owner: enemy, position: [124, 4]}    # NE region
+        - {type: proc, owner: enemy, position: [124, 36]}   # SE region
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 2}
+        - {units_lost_lte: 1}
+        - {within_ticks: 1800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1801}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 22
+
+  medium:
+    description: >
+      THREE foggy regions hide one marker building each — NORTH-EAST
+      (Refinery 'proc' at ~124,4), SOUTH-EAST (Refinery 'proc' at
+      ~124,36), and far-EAST mid-band (Refinery 'proc' at ~124,20).
+      You own three jeeps in the west staging column. Discover ALL
+      THREE markers before tick 1050. The clock is tight: dispatching
+      one jeep to each region in parallel lands every discovery in
+      time, but sending a single jeep to TOUR all three serially
+      cannot reach the third before the deadline. Sending all three
+      jeeps to one corner only ever satisfies one of the three region
+      discoveries and loses on the win bar.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [5, 14]}
+        - {type: jeep, owner: agent, position: [5, 20]}
+        - {type: jeep, owner: agent, position: [5, 26]}
+        - {type: proc, owner: enemy, position: [124, 4]}    # NE region
+        - {type: proc, owner: enemy, position: [124, 36]}   # SE region
+        - {type: proc, owner: enemy, position: [124, 20]}   # far-E mid
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 3}
+        - {units_lost_lte: 1}
+        - {within_ticks: 1050}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1051}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 13
+
+  hard:
+    description: >
+      FOUR foggy regions hide one marker building each — NORTH-EAST
+      ('proc' at ~124,4), SOUTH-EAST ('proc' at ~124,36),
+      NORTH-mid ('proc' at ~60,4), and SOUTH-mid ('proc' at ~60,36).
+      You own three jeeps; one jeep must SWEEP two regions on a
+      single corridor (NW→NE on the north edge, SW→SE on the south
+      edge). The clock is tight (tick 1300) — a single jeep touring
+      all four regions blows the deadline. The staging corner
+      round-robins per seed: even seeds stage NW, odd seeds stage
+      SW. A memorised four-region reading order from one corner does
+      not generalise; the model must re-derive which two regions the
+      "top" jeep sweeps and which two the "bottom" jeep sweeps from
+      its actual start row.
+    overrides:
+      actors:
+        # spawn_point 0 — three jeeps staged NW (y=6..12).
+        - {type: jeep, owner: agent, position: [5, 6],  spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 9],  spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 12], spawn_point: 0}
+        # spawn_point 1 — three jeeps staged SW (y=28..34).
+        - {type: jeep, owner: agent, position: [5, 28], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5, 31], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5, 34], spawn_point: 1}
+        # Four region markers — corners + mid-N + mid-S so the
+        # single-jeep tour distance is large (NW→NE→SE→SW ≈ 231
+        # cells ≈ 1353 ticks > the 1300-tick budget) but the
+        # north-edge / south-edge SWEEP for two adjacent regions
+        # is short (60 + 64 ≈ 124 cells ≈ 740 ticks per sweep).
+        - {type: proc, owner: enemy, position: [124, 4]}    # NE
+        - {type: proc, owner: enemy, position: [124, 36]}   # SE
+        - {type: proc, owner: enemy, position: [60, 4]}     # N-mid
+        - {type: proc, owner: enemy, position: [60, 36]}    # S-mid
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 4}
+        - {units_lost_lte: 1}
+        - {within_ticks: 1300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1301}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 16
