@@ -328,6 +328,14 @@ UPGRADED = [
     "scout-and-report",
     # Wave-6 salvage: agent timeout pre-commit
     "combat-retreat-after-engagement",
+    # Wave-8 BCP-evacuation: doomed base, EVAC mobile force east to
+    # a pre-designated safe zone before attrition busts the survival
+    # cap. Hard tier defines 2 spawn_point groups that flip the
+    # safe-zone latitude (NORTH (90,12) vs SOUTH (90,28)) per seed;
+    # the base + heavy assault stay fixed (enemy actors don't honour
+    # spawn_point — CLAUDE.md), so the per-seed read is "which
+    # corridor did MY tanks start in" → "EVAC to the matching zone".
+    "def-evacuation",
     # Wave-6 proc-checklist-no-deviation: strict ordered visit-
     # checklist (IFBench step-order / PlanBench strict ordering /
     # aviation pre-flight / SOP no-skip-no-reorder anchor). Hard

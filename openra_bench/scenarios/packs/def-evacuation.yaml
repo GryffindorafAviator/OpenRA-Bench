@@ -1,0 +1,432 @@
+# def-evacuation — EVACUATE the mobile force from a doomed base
+# (Wave-8 REASONING capability).
+#
+# Real-world anchors:
+#   - Business Continuity Planning (BCP) evacuation: when the primary
+#     site is irrecoverably compromised, the policy is NOT to defend
+#     the site (sunk cost) but to MOVE PEOPLE / ASSETS to the
+#     pre-designated safe rally point BEFORE the site dies. Hours-of-
+#     warning matter; minutes of hesitation become casualties.
+#   - Emergency-management EVAC doctrine (NFPA / FEMA): once "shelter-
+#     in-place" is no longer survivable, the order is EVAC to the
+#     muster point. Loitering at the doomed site loses everyone.
+#   - SC2 "GG-walk" retreat micro: when the base is being overrun and
+#     cannot be held, dragoons/marines walk OFF-MAP to a hidden
+#     proxy / ally base rather than die defending the main. Live
+#     units rebuild; dead ones don't.
+#
+# Idiom (the bar — the doomed-base discrimination):
+#
+#   • stall (only observe):                LOSS.
+#       Tanks sit at the NORTH shoulder of the base; the heavy
+#       enemy guards lunge in (GUARD_AGGRO ~16, the staging tanks
+#       at (10,10..14) are 7..11 cells from the assault at (17,18..22))
+#       and grind the immobile 5 tanks to 0 inside the engagement
+#       window. After all tanks are dead, `own_units_gte:1` fail
+#       fires (tick ~600..1800) → real reachable LOSS.
+#
+#   • hold-the-base (attack_move at the assault / camp the fact):
+#       LOSS. The 3× 3tnk + 6× e3 hard-counters 5× 2tnk at close
+#       range — the heavies' anti-armour cannons trade 2-for-1
+#       with the medium-tank column while the rocket infantry
+#       stack damage from outside cannon range. The defenders die
+#       before they clear the assault → `own_units_gte` fail.
+#
+#   • intended EVAC east (move_units east to the safe zone): WIN.
+#       The agent abandons the doomed base on turn 1 and orders
+#       all 5 tanks east along the NORTH corridor (y≈12) to the
+#       safe zone at (90,12). The pathfinder routes the column
+#       past the assault outside leash range (~18); once past
+#       x≈35 the column is uncontested all the way east. ≥3 tanks
+#       make it inside the r=6 zone before the deadline. The fact
+#       and proc ARE expected to die — that is not a fail clause;
+#       only `own_units_gte:N` and the deadline are.
+#
+# Engine guardrails (every footgun from CLAUDE.md / SCENARIO_QUALITY):
+#   - Map: rush-hour-arena (128×40 playable). Doomed base + assault
+#     at the WEST (x=10..18, y around 20). Tanks staged at the
+#     NORTH shoulder (x=10, y=10..14). Safe zone at the EAST along
+#     the NORTH corridor (x=90, y=12, r=6). Distance ~80 cells.
+#     2tnk at ~3 cells/turn ⇒ ~27 turns to reach the safe zone;
+#     max_turns 50 ⇒ comfortable. All actor cells inside the
+#     playable bounds (x∈[2,126], y∈[2,38]).
+#   - Persistent enemy `fact` far east AS AN ANTI-DRAW MARKER.
+#     Without a persistent enemy actor the engine auto-done's on
+#     enemy-elimination before the win/fail evaluator runs, and a
+#     "retreat-east" win-by-reach run collapses to DRAW (CLAUDE.md
+#     footgun #5). The far-east fact also doubles as a visual
+#     anchor for the safe muster direction.
+#   - Enemy bot is `guard` (not `hunt`). guard holds post (the
+#     base assault stays AT the base and razes the fact + proc),
+#     auto-fires in range, lunges within GUARD_AGGRO ~16, snaps
+#     back past GUARD_LEASH ~18. Critical: a `hunt` bot would
+#     chase the retreating column with 3tnks across the entire
+#     map and the survival cap would be unwinnable regardless of
+#     agent skill — `guard` keeps the discrimination on the EVAC
+#     DECISION (move on turn 1 vs hold/stall), not on the
+#     unwinnable pursuit micro.
+#   - The agent's `fact` + `proc` ARE EXPECTED TO DIE. Critically
+#     the fail clause does NOT include `not has_building:fact` —
+#     losing the base is the SET-UP not a fail trigger.
+#   - `own_units_gte:1` is safe as a fail clause here because the
+#     agent STARTS with 5 tanks (units_gte holds on turn 1 — no
+#     `not own_units_gte:1` mis-fire on a unit-less start, the
+#     documented footgun from `economy-force-buildup`).
+#   - Tick budget: max_turns 50 with `enemy_unit_spotted` +
+#     `own_unit_destroyed` interrupts enabled ⇒ verified ~3000..
+#     3700 reachable across 50 turns (interrupt-mode step cut).
+#     easy `within_ticks: 2700` / `after_ticks: 2701`; medium and
+#     hard `within_ticks: 2400` / `after_ticks: 2401` ⇒ both bite
+#     well inside max_turns.
+#   - 5× 2tnk pre-placed: this matches the "≥N tanks/infantry" spec.
+#     5 starting allows up to 2 in-transit losses while still meeting
+#     the n:3 region clause (own_units_gte:3 is the survival cap).
+#   - Hard tier: 2× `spawn_point` groups (NORTH safe-zone (90,12)
+#     vs SOUTH safe-zone (90,28)) to satisfy the test_hard_tier
+#     UPGRADED contract. Per CLAUDE.md spawn_point contract: ALL
+#     agent actors in hard carry spawn_point (the fact/proc
+#     duplicated across both groups at identical cells so the
+#     doomed-base setup is identical per seed).
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/def-evacuation.yaml
+
+meta:
+  id: def-evacuation
+  title: 'Evacuate the Doomed Base — Retreat East to the Safe Zone'
+  capability: reasoning
+  real_world_meaning: >
+    The primary base is being overrun by a heavy assault that
+    structurally cannot be repelled with the units on hand — the
+    fact and proc WILL fall regardless of what the agent does.
+    The correct play is not to fight the doomed-defence (sunk
+    cost) but to EVACUATE the remaining mobile force EAST to a
+    pre-designated safe zone before attrition reduces the column
+    below the survival floor. Win = ≥3 of the 5 starting tanks
+    inside the safe-zone radius, ≥3 still alive, before the
+    deadline. Stalling loses (the assault wipes the immobile
+    tanks at the base); holding loses (the heavy + rocket
+    composition out-trades the 2tnk column); only the prompt
+    EVAC-east order wins.
+  robotics_analogue: >
+    Business-Continuity-Planning (BCP) evacuation and NFPA / FEMA
+    emergency-management EVAC doctrine — when shelter-in-place is
+    no longer survivable, the policy must abandon the compromised
+    site and route to the pre-designated muster point. Same
+    pattern in cloud-incident response (drain a region under
+    irrecoverable outage to a healthy peer), in wildfire and
+    chemical-spill EVAC, and in SC2 GG-walk macro micro
+    (preserve the army when the base cannot be saved).
+  benchmark_anchor:
+    - "BCP evacuation (business continuity planning)"
+    - "emergency management EVAC (NFPA / FEMA muster-point doctrine)"
+    - "SC2 retreat / GG-walk: preserve army when base is doomed"
+    - "cloud incident region-drain to healthy peer"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  # `guard` bot holds post (spawn_cell) with GUARD_LEASH ~18 — the
+  # heavy assault sits ON the doomed base from turn 1 and razes the
+  # fact + proc, but does NOT pursue retreating tanks past leash
+  # range. This makes the EVAC genuinely *survivable* (the spec's
+  # 5×2tnk start force can cleanly disengage if ordered east on
+  # turn 1) while still making "hold" structurally unwinnable (the
+  # assault is in firing range of the base from tick 0). A hunt
+  # bot would chase the retreating column with 3tnks across the
+  # whole map, blowing the survival cap regardless of agent skill;
+  # `guard` keeps the discrimination on the EVAC DECISION, not on
+  # the unwinnable pursuit.
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  # Combat / movement only — no build / no harvest. The decision
+  # under test is "abandon the doomed base; route the mobile
+  # force to the safe muster point", not production.
+  tools: [observe, move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant a tank is destroyed (en-route attrition
+  # signal) or a hunt-band unit is spotted (gives the agent the
+  # contact frame the moment outriders close on the retreating
+  # column). Decision-relevant interrupts only.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare EVAC skill: lighter enemy assault (2× 3tnk + 4× e3).
+  # The base still falls (heavy + rockets out-trade the column) but
+  # less overwhelming, and the EVAC-east route is uncontested past
+  # x=40. own_units_gte:3 survival bar (lose up to 2 tanks), n:3
+  # at the safe zone — comfortable for the intended EVAC.
+  easy:
+    description: >
+      Your base (fact + proc) at the WEST edge (10,20) is under a
+      heavy assault that WILL raze the base — 2 heavy tanks (3tnk)
+      and 4 anti-tank rocket infantry (e3) are already in firing
+      range. You have 5 medium tanks (2tnk) staged at the NORTH
+      shoulder of the base. A safe zone is set up at the EAST edge
+      along the NORTH corridor at (90,12). Win by getting ≥3 of
+      your tanks within radius 6 of (90,12) AND keeping ≥3 tanks
+      alive, BEFORE tick 2700. The base is EXPECTED to fall —
+      losing the fact is not a fail. Stalling loses (the assault
+      pulls in on the shoulder and grinds the immobile tanks);
+      holding the base loses (you cannot out-trade the heavy +
+      rocket composition); only prompt EVAC-east wins.
+    overrides:
+      actors:
+        # ── Doomed base (agent) ─────────────────────────────────
+        # fact + proc at (10,20). EXPECTED to fall to the hunt
+        # assault — there is NO fail clause on losing the base.
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [13, 20]}
+        # 5× 2tnk pre-placed staging at the NORTH shoulder of the
+        # base (y=10..14) — OUTSIDE the central y=18..22 firing
+        # line of the assault and just outside GUARD_AGGRO (~16)
+        # from the enemy heavies at (17..18, 18..22): from (10,14)
+        # to (17,18) is dist sqrt(49+16)≈8, INSIDE aggro range —
+        # so a stalling reserve at the shoulder still gets pulled
+        # in by the guard lunge and ground down. The intended EVAC
+        # immediately moves east toward (90,10), clearing the
+        # leash zone (~18) within ~3 turns and then proceeding
+        # uncontested. stance:1 (ReturnFire) — return fire on the
+        # way out but don't auto-chase. The base (fact + proc at
+        # y=20) sits BETWEEN the tanks and the assault and IS the
+        # primary target the guards fire on first turn.
+        - {type: 2tnk, owner: agent, position: [10, 8],  stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 9],  stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 10], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1}
+        # ── Heavy assault at the base (enemy) ────────────────────
+        # 2× 3tnk + 4× e3 placed AT the doomed base (x=15..18,
+        # y=18..22, around the fact + proc) — in firing range of
+        # the BASE on turn 1. Stance:3 so they auto-engage. The
+        # base structurally cannot be held: 3tnk anti-armour
+        # cannons + e3 Dragon launchers raze the fact + proc
+        # inside the first ~5 turns. The guards' GUARD_LEASH ~18
+        # means they don't pursue the EVAC column past about
+        # x=35, so the EAST half of the map is uncontested once
+        # the tanks clear the leash zone.
+        - {type: 3tnk, owner: enemy, position: [17, 19], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [17, 21], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 21], stance: 3}
+        - {type: e3,   owner: enemy, position: [18, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [18, 21], stance: 3}
+        # ── Anti-DRAW persistent enemy fact ─────────────────────
+        # Unarmed marker at the far east — anchors the muster
+        # direction AND keeps the engine from auto-done'ing on
+        # enemy-elimination before the win/fail evaluator runs
+        # (CLAUDE.md footgun: enemy-elim collapses retreat
+        # scenarios to DRAW).
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        # ≥3 tanks INSIDE the EAST safe zone along the NORTH
+        # corridor (90,12) r=6.
+        - {units_in_region_gte: {x: 90, y: 12, radius: 6, n: 3}}
+        # Survival cap: ≥3 tanks still alive (lose at most 2).
+        - {own_units_gte: 3}
+        # Deadline — tick 2700 inside max_turns 50. Interrupt-mode
+        # ticks ~60..75/turn ⇒ ~3000..3750 reachable across 50
+        # turns (verified). The deadline must bite for a tanks-
+        # alive-but-not-evacuated draw to become a real LOSS, so
+        # 2700 is intentionally tight against the ~3000-tick
+        # interrupt-mode budget.
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        # Real reachable LOSS on the clock (the "alive but
+        # not-in-zone" path). Tick 2701 < 3000 interrupt-mode
+        # max ⇒ reachable inside max_turns 50.
+        - {after_ticks: 2701}
+        # Force-wipe LOSS (hold-the-base and stall both hit
+        # this — the guards lunge on the shoulder ⇒ stalling
+        # tanks die ~tick 600..1800).
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: HEAVIER assault (3× 3tnk + 6× e3)
+  # AND tighter clock (within_ticks 3600). The base falls faster;
+  # the hold-the-base play loses faster. The EVAC route is still
+  # uncontested past x=40 (the hunt band concentrates at the base
+  # initially) — the intended EVAC still wins comfortably, but the
+  # decision MUST come on turn 1 (a 1-2 turn delay can put a tank
+  # within enemy cannon range as the column starts east).
+  medium:
+    description: >
+      Your base (fact + proc) at the WEST edge (10,20) is under a
+      HEAVIER assault that WILL raze the base — 3 heavy tanks
+      (3tnk) and 6 anti-tank rocket infantry (e3) are already in
+      firing range. You have 5 medium tanks (2tnk) staged at the
+      NORTH shoulder of the base. A safe zone is set up at the
+      EAST edge along the NORTH corridor (90,12). Win by getting
+      ≥3 of your tanks within radius 6 of (90,12) AND keeping ≥3
+      tanks alive, BEFORE tick 2400. The base is EXPECTED to fall
+      — losing the fact is not a fail. Stalling loses; holding
+      loses; only prompt EVAC-east wins. The clock is tighter
+      than easy — a 1-2 turn delay leaves the column inside the
+      assault leash and bleeds the survival cap.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [13, 20]}
+        # 5× 2tnk at the NORTH shoulder — same staging as easy so
+        # the natural EVAC corridor is the NORTH y=10..14 lane.
+        - {type: 2tnk, owner: agent, position: [10, 8],  stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 9],  stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 10], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1}
+        # Heavier enemy assault — 3× 3tnk + 6× e3 at the base.
+        # The extra 3tnk + 2× e3 (over easy) shorten the time
+        # the column can dawdle at the shoulder before the guard
+        # lunge pulls in and the 3tnk cannons grind it down. The
+        # enemy band is held to y=18..22 (no flank e3 at y=17 /
+        # y=23 — those were close enough to the NORTH corridor at
+        # y=10..14 to puncture the EVAC column en route).
+        - {type: 3tnk, owner: enemy, position: [17, 18], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [17, 20], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [17, 22], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 18], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 21], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 22], stance: 3}
+        - {type: e3,   owner: enemy, position: [18, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [18, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 90, y: 12, radius: 6, n: 3}}
+        - {own_units_gte: 3}
+        # Tighter clock vs easy (2400 vs 2700) ⇒ the EVAC order
+        # must come on turn 1 to leave room for the ~25-turn
+        # ~80-cell east march. Tick 2401 reachable inside
+        # interrupt-mode budget.
+        - {within_ticks: 2400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2401}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO `spawn_point` groups
+  # rotate the SAFE-ZONE LATITUDE per seed (NORTH (90,12) vs SOUTH
+  # (90,28)). The base and the heavy assault stay at (10,20) for
+  # both spawns (enemy actors don't honour spawn_point — CLAUDE.md);
+  # the per-seed difference is WHICH safe zone the agent must
+  # evacuate TO. A memorised "always move east to (90,20)" opening
+  # cannot generalise — the agent must read its starting tank
+  # cluster's y-band to pick the matching safe corridor.
+  #
+  # Hard ALSO adds a second hunt sub-group (4× e3 spawn_point group
+  # 2 — symmetric mid-map outriders that pursue the retreating
+  # column) per the spec ("hard ≥2 spawn_point groups"). The
+  # extra mid-map fire forces the EVAC to thread NORTH or SOUTH
+  # of the central pinch.
+  #
+  # NOTE on the spawn_point contract: only AGENT actors honour
+  # spawn_point. The enemy fact + heavy base assault always place
+  # (so the base ALWAYS falls regardless of the agent spawn). The
+  # NORTH spawn group has tanks staged at y=12..14 ⇒ a "match
+  # latitude" read on the agent's own starting y selects the
+  # NORTH (90,12) safe zone; SOUTH spawn group staged at y=26..28
+  # selects the SOUTH (90,28) safe zone.
+  hard:
+    description: >
+      Your base (fact + proc) at the WEST edge (10,20) is under a
+      heavy assault that WILL raze the base — 3 heavy tanks
+      (3tnk) and 6 anti-tank rocket infantry (e3) are already in
+      firing range. You have 5 medium tanks (2tnk), staged in a
+      seed-chosen corridor (NORTH at y≈13 OR SOUTH at y≈27 — read
+      your own tank cluster's y from obs to choose the matching
+      safe zone). The safe zone is set up at either (90,12) IF
+      your tanks started NORTH or (90,28) IF your tanks started
+      SOUTH. Win by getting ≥3 of your tanks within radius 6 of
+      YOUR safe zone AND keeping ≥3 tanks alive, BEFORE tick 2400.
+      The base is EXPECTED to fall. Stalling loses; holding the
+      base loses; evacuating to the WRONG safe zone leaves you
+      outside the win radius; only EVAC to YOUR safe zone wins.
+    overrides:
+      actors:
+        # ── Doomed base (duplicated across both spawn groups) ────
+        # Per CLAUDE.md: if ANY agent actor declares spawn_point,
+        # every agent actor WITHOUT spawn_point is filtered out.
+        # So fact + proc carry both spawn_point tags at the same
+        # cell — the doomed-base setup is identical per seed.
+        - {type: fact, owner: agent, position: [10, 20], spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 20], spawn_point: 1}
+        - {type: proc, owner: agent, position: [13, 20], spawn_point: 0}
+        - {type: proc, owner: agent, position: [13, 20], spawn_point: 1}
+        # ── spawn_point 0 — NORTH corridor (y=8..12) ────────────
+        # 5× 2tnk staged at the north shoulder of the base, just
+        # outside GUARD_AGGRO ~16 from the southmost assault unit
+        # at (16,18): dist from (10,12)→(16,18)=sqrt(36+36)≈8.5;
+        # the central cluster ((10,10)→(16,18) = sqrt(36+64)≈10)
+        # is INSIDE aggro so a stalling tank gets pulled to the
+        # assault, but the EVAC corridor (y<10) is clear of fire
+        # within ~2 turns of movement. The agent reads its own
+        # cluster y from obs (median ≈ 10) → selects the NORTH
+        # safe zone (90,12).
+        - {type: 2tnk, owner: agent, position: [10, 8],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 9],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0}
+        # ── spawn_point 1 — SOUTH corridor (y=28..32) ───────────
+        # Mirror staging on the south side. Median y ≈ 30 →
+        # selects the SOUTH safe zone (90,28).
+        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 31], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 32], stance: 1, spawn_point: 1}
+        # ── Heavy assault at the base (always places) ───────────
+        # 3× 3tnk + 6× e3 at the doomed base (x=15..18, y=18..22).
+        # The assault is on the fact/proc on turn 1 regardless of
+        # which spawn the agent started at. Confined to y=18..22 so
+        # the NORTH (y=10..14) AND SOUTH (y=26..28) EVAC corridors
+        # are outside direct rocket-infantry firing range.
+        - {type: 3tnk, owner: enemy, position: [17, 18], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [17, 20], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [17, 22], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 18], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 21], stance: 3}
+        - {type: e3,   owner: enemy, position: [16, 22], stance: 3}
+        - {type: e3,   owner: enemy, position: [18, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [18, 21], stance: 3}
+        # Anti-DRAW persistent enemy fact, off-axis at the far
+        # east. The corridor approach to the safe zones is
+        # uncontested past the base — the discrimination is the
+        # decision (EVAC vs hold/stall) AND, for hard, the
+        # latitude-read for the matching corridor. Adding mid-map
+        # outriders would put the corridor tanks in indirect
+        # fire range and make the survival cap stochastically
+        # unreachable — the design holds the corridor clear so
+        # an early correct EVAC always WINs.
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        # The `any_of` over the two safe zones: either NORTH
+        # (matching spawn_point 0) OR SOUTH (matching spawn_point
+        # 1) satisfies the geometry. A wrong-zone EVAC puts the
+        # column at the OPPOSITE y-band and falls outside both
+        # (distance from (90,12) to (90,28) is 16 > 2·r=12).
+        - any_of:
+            - {units_in_region_gte: {x: 90, y: 12, radius: 6, n: 3}}
+            - {units_in_region_gte: {x: 90, y: 28, radius: 6, n: 3}}
+        - {own_units_gte: 3}
+        - {within_ticks: 2400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2401}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
