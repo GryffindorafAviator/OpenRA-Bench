@@ -227,56 +227,47 @@ levels:
         - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
         - {type: tent, owner: agent, position: [6,  12], spawn_point: 0}
         - {type: powr, owner: agent, position: [6,  16], spawn_point: 0}
-        # FRONT line pre-placed at BOTH latitudes (2 pbox each). Enemy
-        # bands at the opposite latitude still march on the fact
-        # (rusher targets the agent centroid; enemy actors ignore
-        # spawn_point — CLAUDE.md) so without the opposite latitude
-        # also being front-defended, the OTHER band would loop around
-        # and raze the fact regardless of layout choice. The agent
-        # inherits front coverage at BOTH y; the test is whether they
-        # ADD DEPTH (rear layer) at their OWN spawn latitude — the
-        # spawn-varied lane is which rear y to build at.
+        # FRONT line pre-placed at the NORTH latitude (2 pbox).
         - {type: pbox, owner: agent, position: [25, 13], spawn_point: 0}
         - {type: pbox, owner: agent, position: [25, 15], spawn_point: 0}
-        - {type: pbox, owner: agent, position: [25, 25], spawn_point: 0}
-        - {type: pbox, owner: agent, position: [25, 27], spawn_point: 0}
         - {type: e1,   owner: agent, position: [3,  14], stance: 2, spawn_point: 0}
-        # spawn_point 1 — SOUTH base (y=26). Same dual-front coverage.
+        # spawn_point 1 — SOUTH base (y=26). Mirrored layout.
         - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
         - {type: tent, owner: agent, position: [6,  24], spawn_point: 1}
         - {type: powr, owner: agent, position: [6,  28], spawn_point: 1}
-        - {type: pbox, owner: agent, position: [25, 13], spawn_point: 1}
-        - {type: pbox, owner: agent, position: [25, 15], spawn_point: 1}
         - {type: pbox, owner: agent, position: [25, 25], spawn_point: 1}
         - {type: pbox, owner: agent, position: [25, 27], spawn_point: 1}
         - {type: e1,   owner: agent, position: [3,  26], stance: 2, spawn_point: 1}
-        # Two staggered bands at distinct latitudes (enemy actors are
-        # not honoured by spawn_point — CLAUDE.md — so both bands
-        # always arrive regardless of which agent spawn was picked).
-        # The agent's chosen layer position must cover the relevant
-        # lane; the OTHER lane's band attrites past the agent base
-        # (the fact still has to survive).
-        - {type: e1, owner: enemy, position: [110, 14], stance: 3, count: 3}
-        - {type: e3, owner: enemy, position: [112, 14], stance: 3, count: 1}
-        - {type: e1, owner: enemy, position: [110, 26], stance: 3, count: 3}
-        - {type: e3, owner: enemy, position: [112, 26], stance: 3, count: 1}
+        # Single concentrated band at mid-y. Rushers seek the agent
+        # centroid (which IS the agent fact at y=14 OR y=26 by spawn),
+        # so the band turns toward the spawned latitude. A dual band
+        # (one at each latitude) would double the pressure on the
+        # un-defended OPPOSITE latitude (enemy actors don't honour
+        # spawn_point — CLAUDE.md) and is overdetermined for testing
+        # topology choice.
+        - {type: e1, owner: enemy, position: [110, 20], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [112, 20], stance: 3, count: 1}
         - {type: fact, owner: enemy, position: [120, 20]}
-    # The agent inherits FRONT coverage at BOTH latitudes (4 pbox);
-    # the test is whether it ADDS DEPTH at its OWN spawn latitude by
-    # building 2 REAR pbox at the matching y. Either rear-region
-    # (north y=14 OR south y=26) satisfies the layered bar — the model
-    # must pick the rear y that matches its own fact position
-    # (the spawn-varied lane). Plain "build 4 rear at one latitude"
-    # also wins (count≥2 in region is satisfied) — that's fine, the
-    # CAPABILITY tested is "add depth at the live lane".
+    # The agent inherits FRONT coverage at its spawned latitude.
+    # The test is whether it ADDS DEPTH at the matching y by building
+    # 2 REAR pbox. Either rear-region (north y=14 OR south y=26)
+    # satisfies the layered bar — the model picks the rear y that
+    # matches its own fact position (the spawn-varied lane). A model
+    # that always builds rear at y=20 (or only one fixed latitude)
+    # wins half the seeds and loses the other half — exactly the
+    # generalization gap the spawn variation is designed to surface.
     win_condition:
       all_of:
-        - building_count_gte: {type: pbox, n: 6}
+        - building_count_gte: {type: pbox, n: 4}
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 4500
         - any_of:
-          - building_in_region: {x: 15, y: 14, radius: 4, type: pbox, count: 2}
-          - building_in_region: {x: 15, y: 26, radius: 4, type: pbox, count: 2}
+          - all_of:
+            - building_in_region: {x: 25, y: 14, radius: 4, type: pbox, count: 2}
+            - building_in_region: {x: 15, y: 14, radius: 4, type: pbox, count: 2}
+          - all_of:
+            - building_in_region: {x: 25, y: 26, radius: 4, type: pbox, count: 2}
+            - building_in_region: {x: 15, y: 26, radius: 4, type: pbox, count: 2}
     fail_condition:
       any_of:
         - after_ticks: 4501

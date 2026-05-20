@@ -89,14 +89,44 @@ def make_layered_2_2():
     )
 
 
-def make_layered_3_2(front_y, rear_y):
-    """Hard-tier intended: 4 front pbox are pre-placed (2 at each
-    latitude); agent adds 2 REAR pbox at its OWN spawn latitude →
-    total 6 pbox: 4 front + 2 rear-at-spawn. `front_y` is unused;
-    it's kept in the signature for symmetry with the test caller."""
-    return _make_cluster_builder([
-        (15, rear_y - 1), (15, rear_y + 1),
-    ])
+def make_hard_intended():
+    """Hard intended: read the spawned fact y from the observation,
+    then build 2 REAR pbox at (15, fact_y∓1) to add depth at the
+    live lane (the spawn-varied lane). 2 FRONT pbox at the spawned
+    latitude are inherited; the un-spawned latitude has nothing
+    (so the test is "add rear at MY y", not "fill in everywhere")."""
+    state = {"fact_y": None}
+
+    def policy(rs, C):
+        own_b = rs.get("own_buildings") or []
+        if state["fact_y"] is None:
+            for b in own_b:
+                if b.get("type") == "fact":
+                    state["fact_y"] = int(b.get("cell_y", 20))
+                    break
+        if state["fact_y"] is None:
+            return [C.observe()]
+        fy = state["fact_y"]
+        cells = [(15, fy - 1), (15, fy + 1)]
+        pbox_count_at_cells = sum(
+            1 for b in own_b
+            if b.get("type") == "pbox"
+            and (int(b.get("cell_x", 0)), int(b.get("cell_y", 0))) in cells
+        )
+        if pbox_count_at_cells >= len(cells):
+            return [C.observe()]
+        prod = rs.get("production") or []
+        prod_items = [p.get("item") for p in prod if isinstance(p, dict)]
+        n_in_q = sum(1 for it in prod_items if it == "pbox")
+        cmds = []
+        need = len(cells) - pbox_count_at_cells - n_in_q
+        for _ in range(max(0, need)):
+            cmds.append(C.build("pbox"))
+        target = cells[pbox_count_at_cells]
+        cmds.append(C.place_building("pbox", target[0], target[1]))
+        return cmds
+
+    return policy
 
 
 def make_stack_front():
@@ -212,23 +242,18 @@ def test_intended_layered_policy_wins_every_seed(level):
         )
 
 
-def test_intended_layered_3_2_wins_hard_every_seed():
-    """Hard tier — the agent commits 3+2 at whichever latitude its
-    base spawned (try BOTH and take whichever wins; the any_of win
-    accepts either)."""
+def test_intended_layered_wins_hard_every_seed():
+    """Hard tier — the agent reads its own fact y from the observation
+    and adds 2 REAR pbox at the matching latitude. The any_of win
+    accepts either latitude; the model picks the live one."""
     c = compile_level(load_pack(PACK), "hard")
     for seed in SEEDS:
-        # spawn_point round-robins 0/1 by seed; without knowing which
-        # one this seed picked, try both latitudes and require at
-        # least one to win — the model in the field will read its own
-        # fact position from the observation.
-        wins = []
-        for (fy, ry) in [(14, 14), (26, 26)]:
-            r = run_level(c, make_layered_3_2(fy, ry), seed=seed)
-            wins.append(r.outcome == "win")
-        assert any(wins), (
-            f"hard seed{seed}: at least one layered 3+2 latitude "
-            f"must WIN (model picks latitude from its own fact pos)"
+        r = run_level(c, make_hard_intended(), seed=seed)
+        assert r.outcome == "win", (
+            f"hard seed{seed}: intended layered (front inherited + rear "
+            f"at matching latitude) must WIN; got {r.outcome} "
+            f"(tick={r.signals.game_tick}, "
+            f"bldgs={r.signals.own_buildings})"
         )
 
 
