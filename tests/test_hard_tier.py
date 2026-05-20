@@ -424,6 +424,19 @@ UPGRADED = [
     # "ignore build, drive y=20 east" opening from one spawn does not
     # generalise — every seed picks the correct spawn-matched lane.
     "proc-tool-use-with-distractor",
+    # Wave-6 perception pack — CICERO/Diplomacy deep recon, ERQA off-
+    # axis perception, intelligence-ops "search unconventional
+    # locations", SC2 hidden-base detection. The map presents an
+    # obvious eastern decoy presence (3× e1 pickets at x=92..98); the
+    # REAL enemy `fact` is in an off-axis corner (far NW on easy/
+    # medium, NW OR SW on hard). Hard tier defines two agent
+    # spawn_point groups (NORTH-leaning (15,16) / SOUTH-leaning
+    # (15,24)) round-robined by seed; both hidden-base candidates
+    # (NW + SW) place every seed (enemies don't honour spawn_point
+    # — CLAUDE.md), so the spawn rotation flips which off-axis
+    # corner is the SHORTER reach but EITHER hidden-base discovery
+    # satisfies the win.
+    "scout-discover-hidden-base",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

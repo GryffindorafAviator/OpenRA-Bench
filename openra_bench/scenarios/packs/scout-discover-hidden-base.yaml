@@ -1,0 +1,276 @@
+# scout-discover-hidden-base.yaml
+#
+# PERCEPTION capability — OFF-AXIS deep recon. The map presents a
+# decoy "obvious enemy presence" in the EAST (a few scattered e1
+# pickets along the spawn latitude), but the REAL enemy base — a
+# `fact` — is tucked in a far OFF-AXIS corner (NW for easy/medium,
+# either NW or SW per seed on hard) BEHIND the scouts' spawn area.
+# A model that follows the obvious east breadcrumb sweeps the
+# decoys, finds no base, and loses on the clock; only a scout that
+# explicitly searches an UNCONVENTIONAL direction (back over its
+# shoulder, into the spawn-side corner) discovers the base in time.
+#
+# Real-world / benchmark anchors:
+#   • CICERO Diplomacy deep recon — the enemy's true centre of
+#     gravity is hidden in a region you don't expect; surface-level
+#     indicators are deliberate misdirection.
+#   • ERQA off-axis perception — the answer is OFF the obvious
+#     compass axis (the scene's salient bearing is a distractor).
+#   • Intelligence operations — search unconventional locations,
+#     don't anchor on the loudest signal.
+#   • SC2 hidden-base detection — the proxy / hidden expansion sits
+#     where a "rush east" scout never looks.
+#
+# Distinct from siblings:
+#   • perception-frontier-reading — discover N pockets, no decoy
+#     misdirection (the frontier is genuinely the unexplored mass).
+#   • perception-target-vs-fog — decoys are non-building UNITS in a
+#     near-east pocket; the target is FARTHER east. Direction is
+#     still east — the test is "infer the empty pocket rules out
+#     the near region", not "the obvious direction is a trap".
+#   • scout-and-survive — discover + RETURN; direction is east.
+#   • lh-scout-react-counter — observation-driven 3-phase chain
+#     (reasoning capability), not perception alone.
+# THIS pack is the only perception cell where the WIN-RELEVANT
+# direction is OFF the salient compass axis and the obvious
+# pickets are a load-bearing distractor.
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   • `fact` has cost 0 and is unarmed but is a `MustBeDestroyed`
+#     building, so destroying it auto-`done`s the engine. We keep
+#     a second persistent enemy building (`barr`) so an accidental
+#     fact kill before the win is evaluated can't drop the run to
+#     DRAW. (The decoy `e1` units alone are not a sufficient
+#     anti-auto-done anchor since they can be killed mid-trip.)
+#   • `move_units` auto-fires opportunistically; the east decoys
+#     are `stance:0` (HoldFire) so jeeps passing east only LOSE
+#     time, not units — the loss when bruting east is the CLOCK,
+#     not attrition. (Attacking the decoys with `attack_unit` is a
+#     separate failure pattern; the jeep DPS vs e1 stack is poor,
+#     but the dominant failure is the missed deadline.)
+#   • Spawn rows for the scouts (y≈18..22, x≈8..12) sit a
+#     conservative ≥12 cells south of the easy hidden fact at
+#     (10, 6) — outside the jeep's vision radius (~6) so the fact
+#     is genuinely fogged at t=0 and discovery requires deliberate
+#     NW travel.
+#   • Hard rotates the AGENT spawn between two groups; the
+#     hidden-base candidate set is augmented with a SW corner
+#     `fact` so the OFF-AXIS hint set grows. Per CLAUDE.md, enemy
+#     actors don't honour `spawn_point`, so BOTH NW + SW candidate
+#     facts place every seed; the spawn rotation flips which one
+#     is the SHORTER off-axis reach. EITHER hidden-base discovery
+#     satisfies `buildings_discovered_gte:1` — the model's job is
+#     to read which corner is closer from its own spawn and
+#     commit there.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/scout-discover-hidden-base.yaml
+
+meta:
+  id: scout-discover-hidden-base
+  title: 'Scout the Hidden Base — Search Off the Obvious Axis'
+  capability: perception
+  real_world_meaning: >
+    Deep reconnaissance against an opponent that has DELIBERATELY
+    deployed surface-level decoys on the obvious axis (eastward
+    pickets) to draw your scouts the wrong way. The actual enemy
+    base of operations is in an unconventional corner you must
+    explicitly choose to look at — typically the corner near your
+    own spawn, "behind" your forward direction. A model that
+    anchors on the loudest indicator (the visible eastern pickets)
+    will sweep the decoy zone and miss the base; the capability
+    under test is whether the model proactively searches OFF the
+    salient axis when the obvious axis returns no high-value
+    finding.
+  robotics_analogue: >
+    SAR / counter-IED reconnaissance where the obvious threat
+    cue (a scatter of low-value targets along the apparent
+    approach corridor) is a feint; the high-value cache sits in
+    an unconventional location operators must explicitly elect to
+    sweep instead of following the obvious line.
+  benchmark_anchor:
+    - "CICERO/Diplomacy deep recon (enemy hidden where you don't expect)"
+    - "ERQA off-axis perception (answer is off the salient compass axis)"
+    - "intelligence ops: search unconventional locations"
+    - "SC2 hidden-base detection (proxy/hidden expansion)"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  # Scout-style toolset per spec: move, attack (so attacking the
+  # decoys is a legitimate but losing option — bruting them burns
+  # the clock AND can chip the jeep), and stop.
+  tools: [move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 10000}
+  actors:
+    # West-centre spawn (two jeeps); the obvious-east axis runs
+    # straight along this latitude band so the eastern decoys sit
+    # right on the natural compass heading.
+    - {type: jeep, owner: agent, position: [10, 20], count: 2}
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # The bare skill: only one hidden base candidate (far NW corner),
+  # one obvious eastern decoy cluster. The hidden fact is NW of
+  # spawn (a ~14-cell move from spawn-centre); a model that scouts
+  # the east decoys returns empty-handed and loses on the clock.
+  # The off-axis hint is direct: NO building is east; the only
+  # building IS the hidden NW one.
+  easy:
+    description: >
+      2 jeep scouts at west-centre (10, 20). Two enemy rifle decoys
+      sit east (around x=95, y=20) along the spawn latitude — they
+      LOOK like the enemy presence to investigate. The REAL enemy
+      base — a single `fact` — is tucked in the FAR NW corner
+      (10, 6), BEHIND the spawn (just above the scouts' starting
+      cells). Win by discovering the hidden fact inside the clock
+      without losing more than 1 jeep. Sweeping east, attacking
+      decoys, or stalling all LOSE — only an explicit NW push
+      reveals the real base in time.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [10, 20], count: 2}
+        # Obvious east decoys — HoldFire (stance:0) so they don't
+        # instakill a passing jeep; they're a time-bait, not a
+        # combat wall. Attacking them is a legitimate but losing
+        # use of the attack_unit tool.
+        - {type: e1, owner: enemy, position: [95, 20], stance: 0}
+        - {type: e1, owner: enemy, position: [98, 21], stance: 0}
+        # The HIDDEN enemy base: a lone fact in the far NW corner,
+        # outside the jeep's vision radius (~6) from spawn at
+        # (10, 20) — distance √(0² + 14²) = 14 cells north.
+        - {type: fact, owner: enemy, position: [10, 6]}
+        # Anti-auto-done anchor: a second persistent enemy
+        # building (`barr`) co-located near the hidden fact so a
+        # razed fact (post-discovery) cannot collapse the run to
+        # a draw before the win predicate is evaluated. Kept
+        # inside the same fog pocket so it doesn't hand a "free"
+        # discovery from a different direction.
+        - {type: barr, owner: enemy, position: [12, 8]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 3600}
+        - {units_lost_lte: 1}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 41
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: the hidden base is FARTHER from spawn
+  # (still NW but pushed deeper toward the corner, x=6 y=5), AND
+  # the east decoys are reinforced into a more convincing
+  # "obvious enemy presence" (3× e1 spread across two cells).
+  # The clock still admits the off-axis NW route; it does NOT
+  # admit a "first sweep east, find nothing, THEN reverse to NW"
+  # play — the decoy detour eats too much budget.
+  medium:
+    description: >
+      2 jeep scouts at west-centre (10, 20). THREE enemy rifle
+      decoys form a more convincing "obvious enemy" cluster east
+      (around x=92..98, y=19..21). The REAL enemy base — a
+      `fact` — is even deeper in the FAR NW corner (6, 5). Win
+      by discovering the hidden fact inside a tighter clock
+      without losing more than 1 jeep. The deadline does NOT
+      admit a sweep-east-first-then-reverse-NW play; only an
+      immediate off-axis NW push wins in time. Decoy-sweep,
+      brute-attack, and stall all LOSE.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [10, 20], count: 2}
+        - {type: e1, owner: enemy, position: [92, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [95, 20], stance: 0}
+        - {type: e1, owner: enemy, position: [98, 21], stance: 0}
+        - {type: fact, owner: enemy, position: [6, 5]}
+        - {type: barr, owner: enemy, position: [10, 7]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 3000}
+        - {units_lost_lte: 1}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3001}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 34
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 more controlled variable: TWO seed-varied agent spawn
+  # groups (NORTH-leaning vs SOUTH-leaning west-centre) AND a
+  # SECOND hidden-base candidate in the far SW corner so the
+  # off-axis hint set grows. A model that anchors on "the
+  # off-axis answer is always NW" (memorised from medium) is no
+  # longer safe — the SHORTER off-axis reach now flips per seed
+  # (NW for the N-leaning spawn, SW for the S-leaning spawn).
+  # Per CLAUDE.md enemy actors don't honour spawn_point so BOTH
+  # candidate facts place every seed; the spawn rotation
+  # controls which one is the cheap reach. The east decoys are
+  # unchanged. Clock is tightened so the obvious-east sweep is
+  # an even cleaner LOSS on the deadline; the bare-skill
+  # off-axis push (to the nearer corner) still wins.
+  #
+  # Note on discrimination: because the win is
+  # `buildings_discovered_gte:1` and discovery isn't region-
+  # scoped, a "always go NW" policy can still WIN from the
+  # SOUTH spawn by paying the longer reach — but the longer
+  # reach plus the tightened clock leaves no slack for any
+  # decoy detour. The intended capability under test is
+  # unchanged (search OFF the obvious east axis); the spawn
+  # rotation exists to satisfy the suite's UPGRADED contract
+  # (≥2 agent spawn_point groups) and to make the model's
+  # reasoning surface ("which off-axis corner is closer from MY
+  # spawn?") rather than memorise a single absolute corner.
+  hard:
+    description: >
+      2 jeep scouts at west-centre, NORTH-leaning (15, 16) or
+      SOUTH-leaning (15, 24) by seed. The east decoys (around
+      x=92..98) remain the obvious-presence misdirection. TWO
+      real hidden bases exist — a `fact` in the far NW corner
+      (5, 5) AND a `fact` in the far SW corner (5, 35). Both
+      spawn every seed (per engine semantics); the spawn
+      rotation controls which corner is the SHORTER off-axis
+      reach. Discovering EITHER hidden base inside the
+      tightened clock without losing more than 1 jeep wins.
+      The east sweep, brute attack, stall, and any decoy
+      detour all bust the clock and LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — scouts staged NORTH-leaning at (15, 16).
+        - {type: jeep, owner: agent, position: [15, 16], count: 2, spawn_point: 0}
+        # spawn_point 1 — scouts staged SOUTH-leaning at (15, 24).
+        - {type: jeep, owner: agent, position: [15, 24], count: 2, spawn_point: 1}
+        # Obvious east decoys (HoldFire — time-bait, not lethal).
+        - {type: e1, owner: enemy, position: [92, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [95, 20], stance: 0}
+        - {type: e1, owner: enemy, position: [98, 21], stance: 0}
+        # Hidden base candidate A — far NW corner (≥15 cells
+        # from both spawn cells so neither auto-discovers it).
+        - {type: fact, owner: enemy, position: [5, 5]}
+        - {type: barr, owner: enemy, position: [7, 7]}
+        # Hidden base candidate B — far SW corner. Both place
+        # every seed; the spawn rotation just flips which is the
+        # SHORT off-axis reach. Discovery of EITHER satisfies
+        # the win.
+        - {type: fact, owner: enemy, position: [5, 35]}
+        - {type: barr, owner: enemy, position: [7, 33]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 1}
+        - {within_ticks: 2700}
+        - {units_lost_lte: 1}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 31
