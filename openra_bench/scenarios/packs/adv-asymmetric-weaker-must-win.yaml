@@ -1,0 +1,296 @@
+# adv-asymmetric-weaker-must-win — REASONING capability: underdog
+# asymmetric combat. The agent fields 2× medium tanks (2tnk) against a
+# numerically and qualitatively stronger enemy garrison (4× e1 rifle
+# infantry plus 1× heavy tank 3tnk on medium/hard). Head-on combat
+# LOSES — the heavy tank's cannon out-DPSs a 2-medium-tank column at
+# close range and the 2tnk pair is gone before the infantry are
+# cleared. The only winning play exploits TERRAIN/ANGLE and the
+# heavy's guard-bot leash: stage OFF-AXIS (north or south corridor,
+# NOT the y=20 cluster latitude), approach the infantry from a flank
+# that keeps the agent OUTSIDE the heavy's aggro radius (≈16 cells
+# from its spawn cell), pick off the rifle infantry one at a time
+# from the north/south face, and retreat past the heavy's leash
+# (≈18) any time it lunges. Hit-and-run, not stand-and-fight.
+#
+# Real-world anchors:
+#   - Asymmetric / guerrilla warfare doctrine: a weaker force defeats
+#     a stronger one by refusing decisive engagement, exploiting
+#     terrain and mobility, and engaging in piecemeal hit-and-run
+#     where the local force ratio favours the weaker side.
+#   - SC2 asymmetric / underdog micro: outnumbered light units beat a
+#     stronger composition by isolating and picking off support units
+#     while kiting the main threat (e.g. mutas vs a stalker-immortal
+#     deathball — kill stalkers while keeping immortals leashed).
+#   - Military underdog doctrine: economy-of-force, attack the weak
+#     element first, never present a target the enemy's strongest
+#     element can fix.
+#
+# Idiom (the four-policy bar):
+#   • stall (only observe)                → LOSS. Kill bar never met;
+#     the deadline LOSES. (Enemy `guard` bot holds post, won't wipe
+#     the agent — pure clock loss.)
+#   • charge head-on (attack_move east on y=20) → LOSS on medium/hard.
+#     The 2tnk column meets the e1 wall and engages, then the 3tnk
+#     lunges within aggro (16) and out-trades the medium pair before
+#     the kill bar is met. `own_units_gte:1` fails (both 2tnks dead).
+#   • brute attack_move east (any latitude) → LOSS on medium/hard.
+#     Same close-range trade once the column enters the cluster's
+#     combined fire envelope.
+#   • intended off-axis kite-and-pick      → WIN. Stage off-axis
+#     (e.g. north y=10), advance to a flank cell that is within 2tnk
+#     range (≈5) of an e1 but OUTSIDE the 3tnk's aggro radius (16
+#     from its spawn cell at the east face of the cluster), kill the
+#     e1, retreat past the leash any time the 3tnk lunges, repeat
+#     until the kill bar is met. Heavy is never engaged head-on.
+#
+# Topology (rush-hour-arena 128 × 40; playable x in [2..126], y in
+# [2..38]):
+#   - Agent fact at the far west (4, 20) anchors `has_building:fact`
+#     and persistence — also covers the "unit-less start" footgun
+#     (predicate fail uses `not has_building:fact`, not
+#     `not own_units_gte:1`, even though both clauses are present).
+#   - The 4× e1 garrison is clustered on the WEST face of the
+#     enemy yard area (around x=74..78). The 3tnk sits at the EAST
+#     face (x=90, 20); its aggro 16 covers a circle around (90,20)
+#     that does NOT include flank cells like (74, 12) — those cells
+#     are within 2tnk range of an e1 at (74, 20) but outside the
+#     heavy's aggro envelope.
+#   - Persistent enemy `fact` sentinel at (124, 20) prevents engine
+#     auto-`done` on the moment the last killable enemy unit dies —
+#     win/fail predicates can evaluate cleanly.
+#
+# Engine notes (per CLAUDE.md):
+#   - `guard` bot: holds spawn_cell, auto-fires in range, lunges at
+#     nearest foe within GUARD_AGGRO ≈ 16, snaps back past
+#     GUARD_LEASH ≈ 18. The kite cycle relies on the leash to
+#     re-park the 3tnk after each engagement burst.
+#   - `fact` is `MustBeDestroyed`. The agent's own fact gives
+#     `has_building:fact` truth; the enemy sentinel fact prevents
+#     premature auto-`done` if the 3tnk dies first.
+#   - Enemy actors do NOT honour `spawn_point` (CLAUDE.md): only
+#     agent actors are spawn-filtered. The enemy garrison ALWAYS
+#     places identically across all seeds; spawn variation is in
+#     the agent staging latitude.
+#   - `move_units` auto-fires opportunistically; in the kite cycle
+#     the 2tnks auto-engage any e1 that walks into range during a
+#     retreat order (a benefit, not a problem).
+#
+# Pack-name note: this is the "underdog" foil to combat-kite-jeep-vs-
+# tank (which kites a single heavy with 3 raiders for fast-vs-slow
+# micro). Here the asymmetry is COMPOSITION (numerically weaker AND
+# qualitatively weaker on the heavy axis): the weaker side must
+# reason about which sub-target to engage, what the heavy's leash
+# permits, and HOW to commit to a flank — pure speed micro doesn't
+# rescue you.
+
+meta:
+  id: adv-asymmetric-weaker-must-win
+  title: 'Asymmetric Underdog — 2 Mediums Must Beat a Stronger Garrison via Flank-Pick'
+  capability: reasoning
+  real_world_meaning: >
+    Two medium tanks must inflict enough kills on a stronger enemy
+    garrison (a wall of rifle infantry plus a heavy tank on medium
+    and hard) to satisfy a kill bar — without losing the pair. Head-
+    on combat is a decisive LOSS: the heavy out-trades the medium
+    column at close range and the infantry wall holds the pair in
+    place long enough for the heavy to close. The only winning play
+    is asymmetric: stage off-axis, approach the infantry on a flank
+    that keeps the mediums outside the heavy's aggro envelope, pick
+    off the infantry one at a time from the flank, and retreat past
+    the heavy's leash any time it lunges. The skill measured is
+    weaker-side reasoning: which sub-target to commit to (the soft
+    infantry, not the hard heavy), which approach vector keeps the
+    column outside the strongest threat's fire envelope, and when
+    to disengage before being fixed.
+  robotics_analogue: >
+    Asymmetric / guerrilla doctrine for a force-on-force
+    multi-robot encounter: a numerically and qualitatively weaker
+    team must refuse decisive engagement with the strongest opposing
+    asset, exploit terrain and mobility advantages, and pick off
+    weaker support assets piecemeal where the local force ratio is
+    favourable. The decision under test is approach-vector planning
+    (stay outside the strongest threat's effective radius) and
+    sub-target prioritisation (engage soft targets, not hard ones).
+  benchmark_anchor:
+    - "SC2 asymmetric"
+    - "asymmetric warfare"
+    - "guerrilla tactics"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 6500}
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Bare asymmetric skill (no heavy tank yet): 2× 2tnk vs 2× e1
+  # infantry. The infantry can't damage medium-tank armour
+  # meaningfully, but the kill bar (units_killed_gte:2) requires
+  # actually committing to engage and finishing the e1s. Stall LOSES
+  # on the clock (kill bar unmet — the `guard` enemies hold post and
+  # won't approach the agent fact, so it's a pure clock loss). Brute
+  # attack_move WINS on easy — no heavy means no out-trade — which
+  # is the point of the easy tier: bare commit-and-kill, no
+  # asymmetry pressure yet.
+  easy:
+    description: >
+      Two of your medium tanks (2tnk) at the west of the map (x≈8,
+      y=20) must kill TWO enemy rifle infantry (e1) holding post at
+      the east-centre cluster (around x=78, y=20). The infantry
+      can't damage your tanks meaningfully — driving east and
+      finishing them works. You MUST keep at least one tank alive
+      AND retain your construction yard (`fact` at 4,20). Before
+      tick 5400. Stalling loses on the clock.
+    overrides:
+      actors:
+        # AGENT MEDIUMS — both on the y=20 lane; head-on works on
+        # easy because there is no heavy to out-trade.
+        - {type: 2tnk, owner: agent, position: [8, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [8, 22], stance: 1}
+        # AGENT FACT — anchor for `has_building:fact` and persistence.
+        - {type: fact, owner: agent, position: [4, 20]}
+        # ENEMY GARRISON — 2 e1s on the cluster latitude.
+        - {type: e1, owner: enemy, position: [78, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [80, 20], stance: 2}
+        # SENTINEL — persistent enemy fact far east prevents engine
+        # auto-`done` on enemy unit wipe collapsing to DRAW.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 2}
+        - {own_units_gte: 1}
+        - {within_ticks: 5400}
+        - {has_building: fact}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+    max_turns: 61
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: the garrison gains 1× 3tnk heavy
+  # tank at the EAST face of the cluster AND swells to 4× e1 rifle
+  # infantry on the WEST face. Now the asymmetry bites — a head-on
+  # column meets the e1 wall and is fixed long enough for the 3tnk
+  # to lunge (aggro 16 from spawn at 90,20) and out-DPS the medium
+  # pair before the kill bar (4 kills) is met. The intended play
+  # stages OFF-AXIS (north y=10 corridor) and approaches the e1s
+  # from the north flank — flank cells like (74, 14) are within
+  # 2tnk range (≈5) of an e1 at (74,20) but OUTSIDE the 3tnk's
+  # aggro radius (16) from its spawn at (90,20) (distance
+  # sqrt(16²+6²) ≈ 17 > 16), so the e1s die one at a time without
+  # ever drawing the heavy off post.
+  medium:
+    description: >
+      Two medium tanks (2tnk) at the west of the map must kill FOUR
+      enemy rifle infantry (e1) that form a wall on the west face of
+      the east-centre cluster (around x=74, y=18..22), behind which
+      a HEAVY enemy tank (3tnk) holds post on the east face (90,20).
+      The heavy's cannon out-DPSs your medium pair at close range —
+      a head-on push along y=20 fixes you against the infantry wall
+      long enough for the heavy to lunge into range and finish you.
+      The only winning play is to stage OFF-AXIS (e.g. on the north
+      corridor y=10), approach the infantry from a flank cell that
+      is within your tank's gun range of an infantryman but OUTSIDE
+      the heavy's aggro radius, pick off the infantry one at a time,
+      and retreat past the heavy's leash any time it lunges. Keep
+      at least one tank alive AND retain your construction yard
+      (`fact` at 4,20). Before tick 5400. Stall, head-on charge,
+      and brute attack_move east all LOSE.
+    overrides:
+      actors:
+        # AGENT MEDIUMS — stage OFF-AXIS on the north corridor
+        # (y=10) so the asymmetric flank-pick play is the natural
+        # opening; a y=20 charge re-routes through the e1 wall.
+        - {type: 2tnk, owner: agent, position: [8, 10], stance: 1}
+        - {type: 2tnk, owner: agent, position: [8, 12], stance: 1}
+        - {type: fact, owner: agent, position: [4, 20]}
+        # ENEMY INFANTRY WALL — 4 e1s on the WEST face of the
+        # cluster. Spread across (74,18)..(76,22) so they don't
+        # collapse onto a single tile.
+        - {type: e1, owner: enemy, position: [74, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [74, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [74, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [76, 20], stance: 2}
+        # ENEMY HEAVY — at the EAST face of the cluster. Aggro 16
+        # from (90,20): a 2tnk at (74,14) is distance
+        # sqrt(16²+6²) ≈ 17 (outside aggro), so the flank-pick
+        # cells do NOT pull the heavy off post.
+        - {type: 3tnk, owner: enemy, position: [90, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {own_units_gte: 1}
+        - {within_ticks: 5400}
+        - {has_building: fact}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+    max_turns: 61
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +1 more controlled variable vs medium: TWO agent spawn_point
+  # groups (NORTH staging y=12 / SOUTH staging y=28) round-robined
+  # by seed (anti-memorisation: the working flank vector flips per
+  # seed). The enemy garrison is identical to medium (same e1 wall
+  # + 3tnk at 90,20) — enemy actors don't honour spawn_point per
+  # CLAUDE.md, so both seeds face the SAME garrison from a
+  # different approach corridor. Tightened deadline (~4500 ticks)
+  # — a sluggish kite cadence runs the clock; the asymmetric play
+  # has to be efficient.
+  hard:
+    description: >
+      Two medium tanks (2tnk) stage at one of two west-of-map
+      corridors (NORTH y=12 OR SOUTH y=28, chosen by seed —
+      anti-memorisation). The garrison is identical to medium —
+      4× rifle infantry (e1) walling the west face of the cluster
+      (around x=74) and 1× HEAVY tank (3tnk) at the east face
+      (90,20). Whichever corridor you stage on, the working flank
+      attack is on YOUR side of the cluster (north flank from a
+      north spawn; south flank from a south spawn). Head-on along
+      y=20 still LOSES. Stage off-axis, approach the infantry on
+      the flank that keeps you outside the heavy's aggro envelope,
+      pick the infantry off, retreat past the leash any time the
+      heavy lunges. Keep at least one tank alive AND retain your
+      construction yard (`fact` at 4,20). Before tick 4500.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging corridor (y=12). Natural
+        # flank attack from the north face of the cluster.
+        - {type: 2tnk, owner: agent, position: [8, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [8, 13], stance: 1, spawn_point: 0}
+        - {type: fact, owner: agent, position: [4, 20], spawn_point: 0}
+        # spawn_point 1 — SOUTH staging corridor (y=28). Mirror.
+        - {type: 2tnk, owner: agent, position: [8, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [8, 29], stance: 1, spawn_point: 1}
+        - {type: fact, owner: agent, position: [4, 20], spawn_point: 1}
+        # ENEMY GARRISON — places identically across seeds (enemy
+        # actors are not spawn_point-filtered per CLAUDE.md).
+        - {type: e1, owner: enemy, position: [74, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [74, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [74, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [76, 20], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [90, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {own_units_gte: 1}
+        - {within_ticks: 4500}
+        - {has_building: fact}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+        - {not: {has_building: fact}}
+    max_turns: 51

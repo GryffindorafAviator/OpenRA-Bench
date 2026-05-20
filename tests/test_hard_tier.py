@@ -528,6 +528,17 @@ UPGRADED = [
     # the active fact, but it is heavy enough to overwhelm any
     # defence that isn't a CLUSTER around the correct fact.
     "build-defensive-tower-cluster",
+    # Wave-7 REASONING asymmetric-underdog pack — SC2 asymmetric /
+    # guerrilla tactics / asymmetric warfare anchor. 2× 2tnk vs 4× e1
+    # + 1× 3tnk; head-on loses, off-axis flank-pick (outside the
+    # 3tnk's aggro envelope) wins. Hard defines two agent spawn_point
+    # groups (NORTH staging y=12 / SOUTH staging y=28) round-robined
+    # by seed; the enemy garrison (e1 wall + 3tnk on the east face)
+    # ALWAYS places (enemy actors don't honour spawn_point —
+    # CLAUDE.md), so either staging latitude faces the same asymmetric
+    # flank-vs-charge decision from a flipped approach axis and a
+    # memorised opening cannot generalise.
+    "adv-asymmetric-weaker-must-win",
     # Wave-7 REASONING / RPS hard-counter pack (INVERSE of combat-
     # vehicle-vs-infantry-counter) — SC2 hard-counter / anti-armor
     # procurement / military RPS anchor. Starting cash ($1800) funds
