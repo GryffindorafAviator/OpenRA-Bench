@@ -170,6 +170,13 @@ UPGRADED = [
     # flips per seed (an off-axis diagonal busts the tick budget
     # and brushes the wrong-corner patrol).
     "mfb-base-1-defend-base-2-build",
+    # Wave-4 TURTLE node of the tech triple (SC2 turtle macro /
+    # military fortify-before-research doctrine anchor). Hard defines
+    # two agent spawn_point groups (NORTH base / SOUTH base) so the
+    # base latitude varies by seed; the two hunt bands (north + south)
+    # always place and hit whichever latitude the agent occupies, so
+    # a memorised pbox-lane placement cannot generalise across seeds.
+    "tech-turtle-defensive-tech",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

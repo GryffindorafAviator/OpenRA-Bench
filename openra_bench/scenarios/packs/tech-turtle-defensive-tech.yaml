@@ -1,0 +1,342 @@
+# tech-turtle-defensive-tech.yaml
+#
+# REASONING capability — Wave-4 TURTLE variant of the tech triple.
+# Siblings: `tech-aggro-all-in` (AGGRO — race tech, skip everything
+# else) and `tech-balanced-econ-then-tech` (BALANCED — econ floor
+# first, then tech). This pack is the TURTLE cell: build defences
+# FIRST, then tech up safely behind them. A scripted `hunt` enemy
+# band of e1+e3 closes on the agent base by ~tick 1500 and will
+# raze ANY tech building (or the construction yard itself) unless
+# the lane is hardened first.
+#
+# The Wave-2 `then:[A,B,C,D]` happened-before composite enforces the
+# defence-then-tech sequencing:
+#   1. building_count_gte: {type: pbox, n: 3}   # phase 1 — anti-inf wall
+#   2. building_count_gte: {type: gun,  n: 1}   # phase 2 — anti-armour cap
+#   3. has_building: weap                       # phase 3 — tech step 1
+#   4. has_building: dome                       # phase 4 — tech step 2
+#
+# IMPORTANT engine-prereq nuance: `gun` (allied gun turret) requires
+# `weap` (engine prereq). So the natural BUILD order is:
+#   pbox×3   (clause 1 latches — defences up)
+#   weap     (clause 3 satisfied but NOT latched — chain blocked at 2)
+#   gun×1    (clause 2 latches; clause 3 greedily latches in same eval)
+#   dome     (clause 4 latches — chain complete)
+# The `then` chain still encodes "defence FIRST then tech": pbox×3
+# must be observed BEFORE the chain can advance past phase 1, so any
+# pure-tech skip cannot satisfy phase 1 → chain stuck. The hunt-bot
+# pressure is the discriminator against "skip pbox and race tech":
+# without 3 pbox up before the hunt band arrives (~tick 1500), the
+# tech buildings (or the fact itself) get razed and the
+# `not has_building: fact` fail clause fires.
+#
+# Real-world anchors:
+#   - SC2 turtle macro / "turtle to victory" defensive-tech timing
+#   - Military fortify-then-research doctrine (Cold War nuclear-shield
+#     -then-research analogue): build the shield BEFORE the new
+#     capability, so the new capability isn't lost before it ships.
+#   - Risk-averse capital allocation: hedge first (downside cap), THEN
+#     bet (upside).
+#
+# DISCRIMINATIONS (bar from CLAUDE.md — no defect, no cheat):
+#   - stall (observe only): LOSS — clock + hunt razes fact.
+#   - pure-aggro-skip-defence (race weap+dome, no pbox/gun): LOSS —
+#     hunt band reaches fact ~tick 1500 with no defences ⇒ fact razed
+#     ⇒ `not has_building: fact` fail fires.
+#   - build-only-defence-no-tech (only pbox spam, no weap/dome): LOSS
+#     — chain stuck at phase 1; clock expires.
+#   - intended defence-then-tech (pbox×3, weap, gun, dome): WIN.
+#
+# ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - allied agent: `tent` (barracks) prereq for `pbox` (600cr)
+#   - `pbox` prereq `tent`; allied + 600cr each
+#   - `gun` prereq `weap` (engine-enforced); allied + 800cr
+#   - `weap` (~2000cr) prereq `proc`
+#   - `dome` (~1000cr) prereq `proc`
+#   - `proc` (1400cr) prereq `powr` — pre-placed harv harvests it
+#   - hunt bot: every unit attacks the nearest agent unit / building
+#   - inert enemy `fact` marker far east prevents auto-DRAW on
+#     enemy-elim (the hunt band would all die otherwise)
+#   - `then:` greedy advance — once a prior clause latches, any
+#     currently-true later clauses latch in the same evaluation
+#     (proven by tests/test_then_composite.py)
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/tech-turtle-defensive-tech.yaml
+
+meta:
+  id: tech-turtle-defensive-tech
+  title: 'Tech Turtle — Fortify the Lane FIRST, THEN Tech Up Safely'
+  capability: reasoning
+  real_world_meaning: >
+    Defensive-tech sequencing under real attack pressure: build the
+    static defence line (pillboxes covering the lane mouth, then a
+    gun turret cap) BEFORE committing the budget to deeper tech
+    buildings (war factory, radar dome). A `hunt` enemy band is
+    closing on the base by ~tick 1500 and will raze any tech
+    building (or the construction yard) unless the lane is hardened
+    first. Pure aggro (race tech, skip defence) loses the base to
+    the hunt band; pure turtle (defences only, no tech) never
+    satisfies the tech clauses; only the fortify-then-research
+    sequence wins inside the budget.
+  robotics_analogue: >
+    Capability development under live adversarial threat: ship the
+    operational hardening (perimeter, monitoring, redundancy) BEFORE
+    rolling out the new capability that the adversary is incentivised
+    to disrupt. A roadmap that ships the capability without first
+    standing up the perimeter loses the capability the moment the
+    adversary arrives; a roadmap that only ever hardens never ships
+    the capability the mission requires.
+  benchmark_anchor:
+    - "SC2 turtle macro / defensive-tech timing"
+    - "military strategic-defense doctrine (fortify before research)"
+    - "Cold War nuclear-shield-then-research analogue"
+    - "risk-averse capital allocation: hedge first then bet"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: hunt
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+starting_cash: 3000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare turtle-then-tech rehearsal: a smaller hunt band (4× e1)
+  # closing slowly from the mid-map, generous clock. The chain still
+  # bites (pbox×3 must be observed-before gun-1 / weap / dome) but
+  # the income window is forgiving. Stall / pure-aggro / pure-turtle
+  # all LOSE; intended fortify-then-tech WINS.
+  # max_turns 90 → reachable tick 93 + 90·89 = 8103 ≥ 7200.
+  easy:
+    description: >
+      A small hunt-band of 4 enemy rifle infantry is closing on your
+      base from the mid-map. Build the defence line FIRST, then tech
+      up — in this order: (1) build at least 3 pillboxes (pbox), then
+      (2) build at least 1 gun turret (gun — needs a war factory),
+      (3) own a war factory (weap), (4) own a radar dome (dome). The
+      pre-placed refinery and harvester give you income. If you skip
+      defences the hunt band razes your base; if you only build
+      defences and never tech, the chain stalls; stalling loses on
+      the clock. Win = the defence-then-tech chain completed before
+      tick 7200, with the construction yard still standing and ≥1
+      own unit.
+    starting_cash: 3000
+    overrides:
+      actors:
+        # Agent base — fact + tent + powr per spec, PLUS proc + harv +
+        # mine so income flows from turn 1 (the tech chain needs
+        # ~5600 cash on top of the ~1800 for the 3 pbox; without harv
+        # income the bare starting_cash cannot fund the chain). Layout
+        # puts vulnerable buildings (fact, proc) WEST and the screen
+        # / pbox lane mouth to the EAST so the hunt band hits the
+        # defences BEFORE the income building.
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [8,  18]}
+        - {type: powr, owner: agent, position: [6,  20]}
+        # Second powr — three pbox each drain -20 power and the
+        # tech buildings (weap −30, dome −40) push the surplus
+        # negative without it; underpowered queues construct very
+        # slowly, so weap never completes inside the clock.
+        - {type: powr, owner: agent, position: [6,  22]}
+        - {type: proc, owner: agent, position: [6,  16]}
+        - {type: harv, owner: agent, position: [8,  22]}
+        # Mine to the WEST of base so the harv has somewhere to go
+        # without crossing the lane mouth (the hunt band's lane).
+        - {type: mine, owner: neutral, position: [2,  20]}
+        # Three starting riflemen guarding the EAST lane mouth — the
+        # first line that engages the hunt band and gives pbox×3 time
+        # to come online.
+        - {type: e1,   owner: agent, position: [16, 20], stance: 3, count: 3}
+        # Hunt band — 4× e1 starting east at x=95. At ~3–4 cells/turn
+        # the band needs ~20+ turns (~tick 2200) to reach the lane
+        # mouth at x≈16 (where the screen sits) — enough budget for
+        # pbox×3 (build/place ≈ 15 turns) to stand up first. The
+        # starting riflemen blunt the leading edge for a few more
+        # turns.
+        - {type: e1, owner: enemy, position: [95, 20], stance: 3, count: 4}
+        # Unarmed high-HP enemy marker far east — prevents engine
+        # auto-DRAW on enemy-elimination once the hunt band dies
+        # (CLAUDE.md footgun).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: defense-then-tech-easy
+            clauses:
+              - {building_count_gte: {type: pbox, n: 3}}
+              - {building_count_gte: {type: gun,  n: 1}}
+              - {has_building: weap}
+              - {has_building: dome}
+        - {within_ticks: 7200}
+        - {own_units_gte: 1}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {has_building: fact}}
+    max_turns: 90
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVIER hunt band (6× e1 + e3 mix) closing
+  # FROM CLOSER, plus an attrition cap (units_lost_lte: 4). The hunt
+  # band reaches the lane mouth faster, so the pbox-first phase must
+  # be executed promptly — over-investing in tech before the wall
+  # bleeds the small starting unit pool past the cap.
+  # max_turns 80 → reachable tick 93 + 90·79 = 7203 ≥ 7200.
+  medium:
+    description: >
+      A heavier hunt-band — 4 rifle infantry plus 1 rocket soldier
+      (e3) — is closing on your base from the far east. Build the
+      defence line FIRST, then tech up — in this order: (1) ≥3
+      pillboxes (pbox), (2) ≥1 gun turret (gun — needs war factory),
+      (3) war factory (weap), (4) radar dome (dome). Same fail
+      conditions as easy plus an attrition cap: you may lose at most
+      6 of your own units. Skipping defences loses the base to the
+      hunt band; building only defences never satisfies the tech
+      chain; stalling loses on the clock; sloppy turtling that
+      bleeds the starting infantry past 6 lost also loses.
+    starting_cash: 3000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [8,  18]}
+        - {type: powr, owner: agent, position: [6,  20]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        - {type: proc, owner: agent, position: [6,  16]}
+        - {type: harv, owner: agent, position: [8,  22]}
+        - {type: mine, owner: neutral, position: [2,  20]}
+        # Starting defenders: 6 e1 + 2 e3 at the EAST lane mouth to
+        # blunt the hunt band's leading edge while the pbox wall
+        # stands up. The attrition cap (units_lost_lte: 6) is
+        # measurable from this real baseline and adds the "don't
+        # over-bleed the screen" axis.
+        - {type: e1,   owner: agent, position: [16, 20], stance: 3, count: 6}
+        - {type: e3,   owner: agent, position: [16, 22], stance: 3, count: 2}
+        # Hunt band — heavier (4 e1 + 2 e3) starting far east at
+        # x=105 so the band needs ~25 turns (~tick 2800) to reach
+        # the lane mouth at x≈18. The pbox×3 wall (built ≈ tick
+        # 1500) and starting screen blunt it before it reaches the
+        # fact / proc. Hunt is the discriminator against pure-aggro
+        # (no defences ⇒ fact razed ⇒ fail).
+        - {type: e1, owner: enemy, position: [105, 20], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [107, 20], stance: 3, count: 1}
+        # Inert enemy `fact` marker (anti-DRAW).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: defense-then-tech-medium
+            clauses:
+              - {building_count_gte: {type: pbox, n: 3}}
+              - {building_count_gte: {type: gun,  n: 1}}
+              - {has_building: weap}
+              - {has_building: dome}
+        - {within_ticks: 7200}
+        - {own_units_gte: 1}
+        - {units_lost_lte: 6}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {has_building: fact}}
+        - {not: {units_lost_lte: 6}}
+    max_turns: 80
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: TWO hunt bands (8× total) hitting from
+  # TWO latitudes (north y=10 and south y=30), AND ≥2 spawn_point
+  # groups so the agent base latitude varies by seed. The pbox bar
+  # is raised to 8 to cover both lanes (4 per lane). Same clock; same
+  # attrition cap.
+  # max_turns 80 → reachable tick 93 + 90·79 = 7203 ≥ 7200.
+  hard:
+    description: >
+      Two hunt-bands hit your base from two different latitudes
+      (north and south). Your base stages from a seed-chosen
+      latitude — a single memorised pillbox cell cannot generalise.
+      Build the defence line FIRST, then tech up — in this order:
+      (1) ≥8 pillboxes (pbox — enough to cover both lanes),
+      (2) ≥1 gun turret (gun — needs war factory), (3) war factory
+      (weap), (4) radar dome (dome). Same attrition cap (≤6 own
+      lost) and clock (tick 7200) as medium. Skip defences, only-
+      defences, or over-attrition all lose; only the full fortify-
+      then-tech chain wins.
+    starting_cash: 3000
+    overrides:
+      actors:
+        # NORTH base spawn (spawn_point 0). Layout: vulnerable
+        # buildings (fact, proc) to the WEST; screen + future pbox
+        # lane mouth to the EAST so the hunt band hits defences
+        # BEFORE the income building.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [8,  12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  14], spawn_point: 0}
+        # Extra powr per spawn — 8 pbox is -160 power; needed.
+        - {type: powr, owner: agent, position: [6,  16], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8,  10], spawn_point: 0}
+        - {type: proc, owner: agent, position: [6,  10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [8,  16], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [16, 14], stance: 3, count: 6, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [16, 16], stance: 3, count: 2, spawn_point: 0}
+        # SOUTH base spawn (spawn_point 1) — symmetric.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [8,  28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  24], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8,  30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [6,  30], spawn_point: 1}
+        - {type: harv, owner: agent, position: [8,  24], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [16, 26], stance: 3, count: 6, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [16, 24], stance: 3, count: 2, spawn_point: 1}
+        # Two ore patches, one per spawn cluster (engine doesn't
+        # filter neutral actors by spawn_point — both placed). Mines
+        # west of base so the harv loop doesn't cross the lane.
+        - {type: mine, owner: neutral, position: [2,  14]}
+        - {type: mine, owner: neutral, position: [2,  26]}
+        # Two hunt bands at distinct latitudes (both ALWAYS placed
+        # — enemy actors with no spawn_point are not filtered). The
+        # hunt bot drives each unit at the nearest agent target,
+        # so whichever lane the agent's base occupies will be hit
+        # by one band; the OTHER band will also turn in (the seed-
+        # varied spawn means the agent can't pre-commit to one lane).
+        - {type: e1, owner: enemy, position: [100, 10], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [102, 10], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [100, 30], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [102, 30], stance: 3, count: 1}
+        # Inert enemy `fact` marker (anti-DRAW).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: defense-then-tech-hard
+            clauses:
+              - {building_count_gte: {type: pbox, n: 8}}
+              - {building_count_gte: {type: gun,  n: 1}}
+              - {has_building: weap}
+              - {has_building: dome}
+        - {within_ticks: 7200}
+        - {own_units_gte: 1}
+        - {units_lost_lte: 6}
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {has_building: fact}}
+        - {not: {units_lost_lte: 6}}
+    max_turns: 80
