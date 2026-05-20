@@ -1,0 +1,261 @@
+# combat-rocket-soldier-anti-vehicle — REASONING capability: RPS counter
+# selection (inverse of combat-vehicle-vs-infantry-counter / sibling of
+# combat-focus-fire-priority). The enemy is a pre-placed band of HEAVY
+# tanks (3tnk on easy/medium, 4tnk mammoths on hard). Starting cash funds
+# EXACTLY ONE coherent composition; the agent must pick the right unit
+# TYPE to counter heavy armour:
+#
+#   • e3 (rocket soldier, anti-vehicle Dragon launcher, range 4, anti-
+#     armour DPS) — the INTENDED counter. 6× e3 ($300 each = $1800)
+#     shreds heavy armour at range; the heavies cannot close fast enough
+#     before rocket DPS strips their HP.
+#   • 1tnk (light tank, $700) — WRONG counter. The cash budget only buys
+#     ~2 light tanks; light cannons vs heavy armour lose attrition (3tnk
+#     hp 450 / dps 30 vs 1tnk hp ~200) — the lights die before the heavy
+#     stack does.
+#   • e1 (rifle infantry, $100) — WRONG counter. e1 has no anti-armour
+#     weapon (cannot scratch heavy tank armour); spamming 18× e1 racks
+#     up zero kills and the kill bar fails.
+#   • stall — kill bar never met; the timeout LOSES.
+#
+# Real-world anchor: anti-armour procurement decision (TOW/Javelin/RPG
+# vs armoured concentration) — the right asset class is determined by
+# the threat composition, not by cost or volume. Buying a lot of the
+# wrong asset (light AFVs vs main battle tanks) loses force-on-force.
+# Benchmark anchor: SC2 hard-counter (mutalisk vs marine, marine vs
+# zergling) — picking the matchup-winning unit type IS the decision.
+# Sibling: mid-tech-switch-on-scout (scout-THEN-counter) and lh-tech-
+# pivot-attack (scout-pivot-attack); THIS pack reveals the threat
+# (heavy tanks visible on easy / fog-revealed on medium); the question
+# is purely the RPS counter CHOICE, not the scout-first ordering.
+#
+# Engine guardrails:
+#   • Map: rush-hour-arena (128 × 40, playable x in [2..126], y in
+#     [2..38]). Agent base x≈10; enemy heavy band x≈70 (within e3
+#     range-4 of the agent's eastward attack-move column).
+#   • Persistent far-east enemy `fact` keeps the episode alive past
+#     the moment the heavies fall so the win predicate evaluates
+#     (CLAUDE.md auto-done footgun).
+#   • Pre-placed agent: fact + powr + tent + weap + fix so BOTH
+#     counters are PRODUCIBLE — the RPS choice is not gated by
+#     missing prereqs (build('1tnk') and build('e3') both compile).
+#   • `not own_units_gte:1` is NOT used in fail_condition because
+#     the agent starts unit-less (CLAUDE.md footgun from
+#     economy-force-buildup); fact loss + after_ticks are the
+#     fail clauses.
+#   • after_ticks/within_ticks are inside max_turns budget
+#     (tick ≤ 93 + 90·(max_turns-1)).
+#   • Hard tier defines 2 spawn_point groups (NORTH base y=12 /
+#     SOUTH base y=28) round-robined by seed — satisfies
+#     test_hard_tier.py::UPGRADED. The enemy heavy band is
+#     centre-mid (y=20) so both spawns face symmetric pursuit
+#     geometry (e3 range 4 reaches across the y-gap once units
+#     advance to the engagement column).
+
+meta:
+  id: combat-rocket-soldier-anti-vehicle
+  title: 'Rocket Soldier vs Heavy Armour — Pick the Hard-Counter Unit Type'
+  capability: reasoning
+  real_world_meaning: >
+    A starting cash budget that funds exactly one coherent composition
+    must be allocated against a pre-placed enemy band of HEAVY TANKS
+    (3tnk Soviet heavy on easy/medium, 4tnk Mammoth on hard). The agent
+    must train ROCKET SOLDIERS (e3, the anti-vehicle Dragon launcher),
+    not light tanks (1tnk — the budget buys only ~2, which lose
+    attrition to heavy armour) and not rifle infantry (e1 — no anti-
+    armour weapon, racks up zero kills against tank armour). The
+    decision is the RPS counter CHOICE (matchup-winning unit type)
+    given the visible threat composition.
+  robotics_analogue: >
+    Anti-armour procurement against an armoured concentration: a
+    fielded inventory of TOW / Javelin / RPG launchers defeats a
+    main-battle-tank column, while an equivalent budget spent on
+    light AFVs or rifle squads is force-on-force inferior. Asset
+    CLASS — not cost or count — determines the engagement outcome.
+  benchmark_anchor:
+    - "SC2 hard-counter"
+    - "anti-armor procurement"
+    - "military RPS"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: ''}
+  tools:
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 8000
+  actors: []
+
+levels:
+  # ── EASY ───────────────────────────────────────────────────────────
+  # Bare RPS-counter skill. Enemy: 2 visible heavy tanks (3tnk),
+  # HoldFire (stance:0) so they sit and absorb fire — the agent's e3s
+  # can engage at range without being chased. Cash $1800 buys exactly
+  # 6× e3 (the intended counter), OR ~2 1tnks (wrong: 2 light tanks
+  # die fast to 2 heavies), OR ~18 e1 (wrong: no anti-armour, kills=0).
+  # Kill bar: ≥1 enemy heavy down. Generous clock (≤4500 ticks).
+  easy:
+    description: >
+      Pre-placed: fact + powr + tent + weap + fix in the centre-west.
+      Two enemy HEAVY TANKS (3tnk Soviet, hp 450 / dps 30) sit
+      visible at the centre-east (x=70, y=18..22), HoldFire — they
+      will absorb your fire from the engagement column. You have
+      $1800 — enough for EXACTLY ONE composition: train 6× rocket
+      soldiers (e3, anti-vehicle Dragon launcher, $300 each), OR
+      ~2 light tanks (1tnk, $700 — but light cannons lose attrition
+      to heavy armour), OR ~18 rifle infantry (e1, $100 — no anti-
+      armour weapon, cannot scratch tank armour). Train the e3,
+      advance east, and kill at least ONE enemy heavy tank before
+      tick 4500. Stalling, spamming e1, and building light tanks
+      all LOSE on the kill bar or the clock.
+    starting_cash: 1800
+    overrides:
+      actors:
+        # Agent base — both counters producible (weap for 1tnk,
+        # tent for e3).
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [14, 20]}
+        - {type: tent, owner: agent, position: [10, 24]}
+        - {type: weap, owner: agent, position: [14, 24]}
+        - {type: fix,  owner: agent, position: [18, 20]}
+        # Enemy: 2 visible heavy tanks at the engagement column.
+        # stance:0 (HoldFire) so they sit and absorb rocket fire
+        # rather than chasing the e3 stack out of range.
+        - {type: 3tnk, owner: enemy, position: [70, 18], stance: 0}
+        - {type: 3tnk, owner: enemy, position: [70, 22], stance: 0}
+        # Persistent far-east enemy fact — prevents engine auto-done
+        # on heavy-tank wipe collapsing the run to DRAW.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: e3, n: 6}}
+        - {units_killed_gte: 1}
+        - {own_units_gte: 1}
+        - {has_building: fact}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+    max_turns: 51
+
+  # ── MEDIUM ─────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: enemy heavies are FOG-CONCEALED
+  # (no pre-placed visibility) AND a third heavy is added (3× 3tnk).
+  # The agent still has line-of-sight to the engagement column once
+  # the e3 stack advances; the brief still names "heavy tanks" so the
+  # RPS choice is purely the counter axis, not "scout to learn what's
+  # there". Cash $1800 still buys exactly the 6× e3 composition. Kill
+  # bar tightens to ≥2 heavies down.
+  medium:
+    description: >
+      Pre-placed: fact + powr + tent + weap + fix in the centre-west.
+      THREE enemy HEAVY TANKS (3tnk Soviet) sit at the centre-east
+      under fog (x=70, y=18..22), HoldFire. You have $1800 — enough
+      for EXACTLY ONE composition: train 6× rocket soldiers (e3, the
+      anti-vehicle counter), or 2× light tanks (wrong — light cannons
+      lose attrition to heavy armour), or 18× rifle infantry (wrong
+      — no anti-armour weapon). Train the e3, advance east, and kill
+      at least TWO enemy heavy tanks before tick 4500. Stalling,
+      spamming e1, and building light tanks all LOSE.
+    starting_cash: 1800
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [14, 20]}
+        - {type: tent, owner: agent, position: [10, 24]}
+        - {type: weap, owner: agent, position: [14, 24]}
+        - {type: fix,  owner: agent, position: [18, 20]}
+        # THREE heavy tanks at the engagement column (HoldFire).
+        - {type: 3tnk, owner: enemy, position: [70, 18], stance: 0}
+        - {type: 3tnk, owner: enemy, position: [70, 20], stance: 0}
+        - {type: 3tnk, owner: enemy, position: [70, 22], stance: 0}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: e3, n: 6}}
+        - {units_killed_gte: 2}
+        - {own_units_gte: 1}
+        - {has_building: fact}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+    max_turns: 51
+
+  # ── HARD ───────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. Enemy upgraded to 4tnk MAMMOTH (hp 600 / dps 40+) — even
+  #      heavier armour, so the wrong-counter penalty is harsher
+  #      (light tanks even more outclassed; e1 still zero-effect).
+  #   2. TWO agent spawn_point groups (NORTH base y=12 / SOUTH base
+  #      y=28) round-robined by seed — required by hard-tier curation
+  #      contract (UPGRADED in tests/test_hard_tier.py). The enemy
+  #      4tnk band is centred mid-map (y=20) so both spawns face
+  #      symmetric pursuit geometry (each base's eastward column
+  #      meets the heavies at the same x).
+  # Kill bar: ≥2 mammoths down; tighter clock (≤3600 ticks).
+  hard:
+    description: >
+      Pre-placed base (fact + powr + tent + weap + fix) at one of two
+      starting latitudes (NORTH base near y=12 OR SOUTH base near
+      y=28, chosen by seed, anti-memorisation). Three MAMMOTH TANKS
+      (4tnk Soviet, hp 600 / dps 40+ / dual cannon+missile) sit at
+      the centre-east engagement column (x=70, y=18..22) under fog,
+      HoldFire. You have $1800 — enough for EXACTLY ONE composition:
+      train 6× rocket soldiers (e3, the anti-vehicle counter). Light
+      tanks (1tnk) and rifle infantry (e1) cannot beat mammoth
+      armour. Train the e3, advance east from your base, and kill at
+      least TWO mammoth tanks before tick 3600.
+    starting_cash: 1800
+    overrides:
+      actors:
+        # NORTH base spawn (spawn_point 0).
+        - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 12], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 16], spawn_point: 0}
+        - {type: weap, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [18, 12], spawn_point: 0}
+        # Single scout jeep at the base edge — a token unit so the
+        # seed-driven spawn placement is observable in
+        # `units_summary` (required by the hard-tier curation test
+        # in tests/test_hard_tier.py). The jeep's MG cannot scratch
+        # heavy armour so it does not alter the RPS-counter
+        # decision; the load-bearing build is still e3.
+        - {type: jeep, owner: agent, position: [18, 14], stance: 1, spawn_point: 0}
+        # SOUTH base spawn (spawn_point 1).
+        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 24], spawn_point: 1}
+        - {type: weap, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [18, 28], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [18, 26], stance: 1, spawn_point: 1}
+        # Heavy enemy band — mammoth tanks, centre-mid latitude so
+        # both spawns face symmetric pursuit geometry. (Enemy actors
+        # without spawn_point ALWAYS place — CLAUDE.md.)
+        - {type: 4tnk, owner: enemy, position: [70, 18], stance: 0}
+        - {type: 4tnk, owner: enemy, position: [70, 20], stance: 0}
+        - {type: 4tnk, owner: enemy, position: [70, 22], stance: 0}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: e3, n: 6}}
+        - {units_killed_gte: 2}
+        - {own_units_gte: 1}
+        - {has_building: fact}
+        - {within_ticks: 3600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {has_building: fact}}
+    max_turns: 41
