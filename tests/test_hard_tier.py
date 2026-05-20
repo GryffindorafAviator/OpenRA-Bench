@@ -397,6 +397,10 @@ UPGRADED = [
     # is symmetric across y=20 so both spawns face the same pincer
     # decision.
     "combat-pincer-coordination",
+    # Wave-6 ACTION cell — escort fragile VIP (harv) through cumulative
+    # arty walls; hard tier defines 2 agent spawn_point groups (NORTH y=14
+    # / SOUTH y=26) round-robined by seed.
+    "combat-protect-vip-escort",
     # Wave-6 Group D combat-micro pack: SC2 flank micro / military
     # flank-maneuver doctrine / force-multiplier-through-angle-of-
     # attack anchor. Hard tier defines two agent spawn_point groups
