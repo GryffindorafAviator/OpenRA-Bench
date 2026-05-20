@@ -71,9 +71,15 @@ A scenario is defective if any of the following hold:
 - **`power_surplus_gte` is currently inert** (obs reports
   `power_provided / power_drained = 0`). Do **not** rely on it as a
   sole discriminator.
-- **`deploy` is unimplemented** in the installed wheel (MCV never
-  becomes a Construction Yard). Build-radius creep is the supported
-  alternative.
+- **`deploy` now works** for scenario-declared MCVs (the historical
+  "unimplemented" footgun was a two-bug interaction: `classify_actor`
+  in `openra-sim/src/gamerules.rs` returned `Vehicle` for MCV, and
+  the env.rs `kind_for_unit_type` fallback defaulted to `Infantry`.
+  Both fixed; see `tests/test_mcv_deploy.py`.) Scenario actor
+  `{type: mcv}` + `Command.deploy([mcv_id])` removes the MCV,
+  creates an agent `fact`, and re-enables Building/Defense
+  production queues — so a build-radius scenario can launch from a
+  single starter MCV.
 - **Scripted bot `guard`:** holds its post (`spawn_cell`), auto-fires
   in range, lunges at the nearest foe within `GUARD_AGGRO ≈ 16`,
   snaps back past `GUARD_LEASH ≈ 18` — the bait-able-defender idiom
