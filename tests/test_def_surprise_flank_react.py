@@ -17,9 +17,10 @@ The win predicate makes all three axes load-bearing:
 * `units_killed_gte:4` ⇒ the south rush must actually be engaged
   (stay-NORTH never engages, the 4 defenders sit at y≈14 while the
   rusher band walks past them at y≈20..32);
-* `own_units_gte:3` ⇒ ≥3 defenders must survive (the south rush
+* `own_units_gte:2` ⇒ ≥2 defenders must survive (the south rush
   reaching the fact splashes the close defenders even if some
-  trade);
+  trade); the bar is set at 2 because a 4-defender screen vs
+  4-5 e1 rifle infantry head-on trades roughly 2-for-2.
 * `within_ticks:4500` paired with `after_ticks:4501` ⇒ a non-finisher
   is a real reachable timeout LOSS (50 turns × ≤90 ticks/step reaches
   ≥4503 in interrupt mode), never a draw.
@@ -132,7 +133,7 @@ def make_intended():
     arrive on the SURPRISE axis, not the intel axis), then commit all
     four defenders to engage them. The 4 defenders intercept the rush
     before/at the fact, focus-fire on the visible rusher cluster,
-    kill ≥4 and keep ≥3 alive; fact survives → WIN.
+    kill ≥4 and keep ≥2 alive; fact survives → WIN.
     """
 
     def policy(rs, C):

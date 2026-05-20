@@ -262,7 +262,7 @@ levels:
       all_of:
         - building_count_gte: {type: fact, n: 1}
         - units_killed_gte: 4
-        - own_units_gte: 3
+        - own_units_gte: 2
         - within_ticks: 4500
     fail_condition:
       any_of:
@@ -318,7 +318,7 @@ levels:
       all_of:
         - building_count_gte: {type: fact, n: 1}
         - units_killed_gte: 4
-        - own_units_gte: 3
+        - own_units_gte: 2
         - within_ticks: 4500
     fail_condition:
       any_of:
@@ -329,76 +329,73 @@ levels:
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 controlled variable: TWO spawn_point groups round-robin the
-  # AGENT's base latitude per seed (NORTH-staged base centred at
-  # (20, 12) OR SOUTH-staged base centred at (20, 28)). The intel
-  # in the brief always says "the enemy will attack from the side
-  # AWAY from your base" — i.e. on the NORTH spawn the intel says
-  # SOUTH (and the pre-built defence is south of the base); on the
-  # SOUTH spawn the intel says NORTH (and the pre-built defence is
-  # north of the base). The actual rush bands are placed on BOTH
-  # latitudes (per CLAUDE.md, enemy actors don't honour spawn_point)
-  # and the bot charges the agent centroid — so for EACH spawn the
-  # "matching" band approaches FROM THE SAME SIDE as the agent's
-  # base (the opposite side from the intel + pre-built defence),
-  # i.e. the SURPRISE axis matches across both seeds.
-  #
-  # The win condition has an `any_of` over the two correct intercept
-  # regions so a defender push to the WRONG side (the intel side /
-  # the pre-built side) fails to engage the band on the matching
-  # side. Kill bar (4), throughput (3) and fact-survival are
-  # unchanged; an attrition cap (units_lost_lte:2) tightens the
-  # margin — only a clean intercept on the matching side keeps
-  # losses ≤2.
+  # AGENT's base LONGITUDE per seed (WEST-staged base at x=20 OR
+  # EAST-staged base at x=40). The intel always says "the enemy
+  # will attack from the NORTH" and the pre-built defence is always
+  # on the NORTH lane of each spawn (same as easy/medium). The
+  # actual rush always arrives from the SOUTH (the surprise axis).
+  # The capability test is the same detect-and-redeploy doctrine
+  # as easy/medium — but the fact's x-position varies per seed, so
+  # a memorised "move defenders to (20,26)" opening does NOT
+  # generalise; only the doctrine ("intercept south of THIS spawn's
+  # fact, x-aligned with this spawn's base") does. An attrition cap
+  # (units_lost_lte:2) tightens the margin vs medium — a late
+  # commit or a sloppy intercept overshoots the cap and loses,
+  # even if the fact survives.
   hard:
     description: >
-      INTEL said the enemy will attack from the side AWAY from your
-      base — but be ready for anything. Your base sits at one of two
-      latitudes (NORTH at y=12 OR SOUTH at y=28, chosen by seed).
-      The "prepared" defence — two pillboxes plus your four rifle
-      defenders — is pre-positioned on the OPPOSITE side of the
-      base from where you are (consistent with the intel). The
-      actual rush will arrive from the SAME side as your base (the
-      surprise axis). Identify the ACTUAL attack direction from your
-      observation, then re-position your defenders to that side and
-      intercept BEFORE the rush reaches the construction yard.
-      Destroy at least 4 enemy units AND keep ≥3 of your own alive
-      AND lose at most 2 defenders AND keep the construction yard
-      standing before tick 4500. Stalling, sticking with the
-      pre-built defence layout, and pure-building all LOSE.
+      INTEL said the enemy will attack from the NORTH — but be ready
+      for anything. Your construction yard sits at one of two
+      LONGITUDES (WEST at x=20 OR EAST at x=40, chosen by seed),
+      with two pillboxes and four rifle defenders pre-positioned in
+      the NORTH lane of your spawn (the intel direction). The actual
+      rush arrives from the SOUTH (the surprise axis) on both seeds,
+      x-aligned with YOUR base's column. Identify the ACTUAL attack
+      direction from your observation, then re-position your
+      defenders SOUTH of YOUR construction yard and intercept
+      BEFORE the rush reaches it. Destroy at least 4 enemy units
+      AND keep ≥2 of your own alive AND lose at most 2 defenders
+      AND keep the construction yard standing before tick 4500.
+      Stalling, sticking with the pre-built NORTH defence layout,
+      and pure-building all LOSE.
     overrides:
       actors:
-        # ── spawn_point 0 — NORTH-staged base ───────────────────────
-        # Base at (20, 12). Intel "says SOUTH" → pre-built defence
-        # is SOUTH of the base at y=24, defenders parked next to it
-        # (stance:0 HoldFire: the prepared defence is RESERVED for
-        # its intel axis and does NOT auto-engage; only an explicit
-        # attack order makes them shoot). Surprise: actual matching
-        # rush band approaches from the NORTH at y=4 (the same side
-        # as the base — north of the pre-built defence). The rusher
-        # band charges the agent centroid and reaches the fact AT
-        # y=12 well before the def screen down at y=24 can engage
-        # (range ≈ 6 — 12 cells out of reach).
-        - {type: fact, owner: agent, position: [20, 12], spawn_point: 0}
-        - {type: pbox, owner: agent, position: [20, 24], spawn_point: 0}
-        - {type: pbox, owner: agent, position: [22, 24], spawn_point: 0}
-        - {type: e1, owner: agent, position: [18, 24], stance: 0, spawn_point: 0}
-        - {type: e1, owner: agent, position: [20, 26], stance: 0, spawn_point: 0}
-        - {type: e1, owner: agent, position: [22, 26], stance: 0, spawn_point: 0}
-        - {type: e1, owner: agent, position: [24, 24], stance: 0, spawn_point: 0}
-        # ── spawn_point 1 — SOUTH-staged base ───────────────────────
-        # Base at (20, 28). Intel "says NORTH" → pre-built defence
-        # is NORTH of the base at y=16, defenders parked next to it
-        # (stance:0). Surprise: actual matching rush band approaches
-        # from the SOUTH at y=36 (the same side as the base — south
-        # of the pre-built defence). The fact at y=28 is 12 cells
-        # south of the def screen — out of range.
-        - {type: fact, owner: agent, position: [20, 28], spawn_point: 1}
-        - {type: pbox, owner: agent, position: [20, 16], spawn_point: 1}
-        - {type: pbox, owner: agent, position: [22, 16], spawn_point: 1}
-        - {type: e1, owner: agent, position: [18, 16], stance: 0, spawn_point: 1}
-        - {type: e1, owner: agent, position: [20, 14], stance: 0, spawn_point: 1}
-        - {type: e1, owner: agent, position: [22, 14], stance: 0, spawn_point: 1}
-        - {type: e1, owner: agent, position: [24, 16], stance: 0, spawn_point: 1}
+        # Hard tier: the intel direction is FIXED ("rushers will come
+        # from the NORTH" — the brief, same as easy/medium) and the
+        # actual rush direction is FIXED (SOUTH — the surprise axis).
+        # The seed-driven variable is the AGENT base LONGITUDE (x
+        # coord) — two spawn_point groups round-robin a WEST-staged
+        # base (x=20) and an EAST-staged base (x=40). The capability
+        # test is the same on both spawns: identify that the actual
+        # rush comes from the SOUTH (not the announced NORTH) and
+        # re-position the defenders SOUTH of THIS spawn's fact to
+        # intercept the rush before it reaches it. A single
+        # memorised intercept cell ("move defenders to (20,26)")
+        # does NOT generalise because the fact's x-position varies
+        # per seed; the doctrine ("intercept south of THIS spawn's
+        # fact") does. An attrition cap (units_lost_lte:2) tightens
+        # the margin — a late commit overshoots the cap.
+        #
+        # ── spawn_point 0 — WEST-staged base (x=20) ─────────────────
+        # Same geometry as easy/medium: fact at (20,20), pre-built
+        # defence on the NORTH lane y=14, defenders at y=14/16
+        # (stance:0 HoldFire so they don't engage passively).
+        - {type: fact, owner: agent, position: [20, 20], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [20, 14], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [22, 14], spawn_point: 0}
+        - {type: e1, owner: agent, position: [18, 14], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [20, 16], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [22, 16], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [24, 14], stance: 0, spawn_point: 0}
+        # ── spawn_point 1 — EAST-staged base (x=40) ─────────────────
+        # Same geometry translated east by 20 cells.
+        - {type: fact, owner: agent, position: [40, 20], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [40, 14], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [42, 14], spawn_point: 1}
+        - {type: e1, owner: agent, position: [38, 14], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [40, 16], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [42, 16], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [44, 14], stance: 0, spawn_point: 1}
         # ── Enemy rush bands ────────────────────────────────────────
         # CLAUDE.md: enemy actors WITHOUT spawn_point ALWAYS place
         # regardless of the agent's spawn group, so we declare BOTH a
@@ -412,8 +409,8 @@ levels:
         # base) — so the matching-side band has the SHORTER path
         # and is the immediate threat; the opposite-side band has
         # to walk across the whole map to arrive.
-        - {type: e1, owner: enemy, position: [20, 4],  stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 4}
+        - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 5}
+        - {type: e1, owner: enemy, position: [40, 36], stance: 3, count: 5}
         # Note: enemies don't honour spawn_point — both bands always
         # place. The matching-side band (same latitude as the agent
         # base) is the immediate threat and the trigger for the
@@ -429,7 +426,7 @@ levels:
       all_of:
         - building_count_gte: {type: fact, n: 1}
         - units_killed_gte: 4
-        - own_units_gte: 3
+        - own_units_gte: 2
         - units_lost_lte: 2
         - within_ticks: 4500
     fail_condition:
