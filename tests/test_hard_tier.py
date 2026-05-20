@@ -667,6 +667,19 @@ UPGRADED = [
     # spawn variation via units_summary (the buy-vs-build base is
     # otherwise building-only).
     "econ-buy-vs-build-decision",
+    # Wave-7 ACTION pack — cut-off encirclement (Cannae doctrine /
+    # SC2 encirclement / "the hammer needs an anvil"). Strike force
+    # must position ONE tank in the eastern cut-off region BEFORE
+    # engaging the centre cluster with the rest, otherwise either
+    # the column gets bled by e3 Dragon fire (brute-east) or the
+    # cluster is wiped with no tank east (brute-centre). Hard tier
+    # defines two agent spawn_point groups (NORTH staging y=12..15 /
+    # SOUTH staging y=25..28) round-robined by seed; the centre
+    # cluster is symmetric across y=20 so both spawns face the same
+    # encirclement geometry from a flipped flank latitude, and a
+    # memorised "always flank via the north" opening cannot
+    # generalise across seeds.
+    "combat-prevent-retreat",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
