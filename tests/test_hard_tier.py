@@ -102,6 +102,13 @@ UPGRADED = [
     # matching corner-return regions so a scout must return to
     # its OWN spawn corner.
     "scout-and-survive",
+    # Wave-4 AGGRO node of the harvester-harass triple. Hard tier
+    # rotates the raider strike force between two west-edge
+    # corridors (north y=10..14 vs south y=26..30) so the
+    # engagement geometry against the symmetric enemy garrison
+    # (two 3tnk defenders + four harvs around proc 80,20) varies
+    # per seed.
+    "combat-harass-aggro-commit",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
