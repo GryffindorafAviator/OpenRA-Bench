@@ -394,6 +394,18 @@ UPGRADED = [
     # cannot accidentally clip the northern (y=4) or southern (y=36)
     # waypoints en route). _NO_ENEMY pack — only fail is the timeout.
     "proc-checklist-no-deviation",
+    # Wave-9 procedural-compliance seed — clean BFCL V4 relevance /
+    # IFBench instruction-following / SOC runbook strict allowlist
+    # fidelity (quiet baseline of strict-toolban-fidelity-under-
+    # pressure: same allowlist primitive, no harasser temptation; the
+    # discipline must hold under quiet conditions). Hard defines two
+    # agent spawn_point groups (NW jeep staging y=8 / SW jeep staging
+    # y=32) round-robined by seed; the agent `fact` is duplicated at
+    # (10,20) in BOTH spawn groups so the building_count_gte:fact:1
+    # clause is stable across seeds. The controlled variable across
+    # tiers is the clock (loose easy → tight medium/hard) plus the
+    # spawn variation on hard.
+    "proc-strict-toolban-fidelity",
     # Wave-6 Group I procedural-compliance seed — τ²-bench distractor
     # handling / IFBench irrelevant-tool ignoring / BFCL V4 relevance
     # (refuse to call a tool that isn't needed) / operator discipline
