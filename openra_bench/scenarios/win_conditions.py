@@ -189,6 +189,16 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
         <= float(v.get("radius", 5)) ** 2
     )
     >= int(v.get("count", 1)),
+    # Procedural-compliance / strict-toolban family: triggers when the
+    # agent has invoked tools on the level's `forbidden_tools` list at
+    # least N times this episode. Typical use is in a fail clause as
+    # `tool_violations_gte: 1` (zero-tolerance), but >1 also lets a pack
+    # tolerate up to N slips before failing. The counter is maintained
+    # by eval_core.run_level — see ScenarioPack/Level.forbidden_tools.
+    "tool_violations_gte": lambda c, v: getattr(
+        c.signals, "tool_violations", 0
+    )
+    >= int(v),
 }
 
 LEAF_KEYS = frozenset(_PREDICATES)

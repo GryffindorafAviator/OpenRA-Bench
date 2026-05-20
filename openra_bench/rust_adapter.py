@@ -131,6 +131,15 @@ class EpisodeSignals:
     # waypoint_sequence's ordered-visit progress, keyed by sequence id).
     # Reset for free: EpisodeSignals is reconstructed each episode.
     seq_progress: dict = field(default_factory=dict)
+    # Per-episode tool-use accounting for the strict-toolban / procedural-
+    # compliance family. tools_called counts each tool name the agent
+    # invoked this episode; tool_violations counts how many of those calls
+    # were on the scenario's forbidden_tools list. The `tool_violations_gte`
+    # predicate reads from here (typically as a fail clause). Tracking is
+    # bench-side (see eval_core.run_level), so scripted policies are
+    # graded by the same rule as live models.
+    tools_called: dict[str, int] = field(default_factory=dict)
+    tool_violations: int = 0
     # Outcome is synthesized (Rust has no result field): a scenario is
     # "won" when all enemy buildings have been discovered AND/OR all
     # enemy units neutralized — refined per-scenario in Phase 2 rubrics.

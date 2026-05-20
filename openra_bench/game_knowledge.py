@@ -201,6 +201,11 @@ _PHRASES: dict[str, Any] = {
         + "+".join((v or {}).get("types", []))
         + f" at the base near ({(v or {}).get('x')},{(v or {}).get('y')})"
     ),
+    "tool_violations_gte": lambda v: (
+        "you used a forbidden tool (instant fail)"
+        if int(v) <= 1
+        else f"you used a forbidden tool ≥{v} times"
+    ),
 }
 
 

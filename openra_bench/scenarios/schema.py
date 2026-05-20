@@ -110,6 +110,12 @@ class Level(BaseModel):
         description="Per-level economy budget (overrides pack default; "
         "engine default 5000 when unset everywhere).",
     )
+    # Procedural-compliance family: any agent command whose tool name is
+    # in this list increments signals.tool_violations (bench-side track,
+    # see eval_core). Use as a fail clause via the
+    # `tool_violations_gte` predicate — usually `tool_violations_gte: 1`
+    # for a strict zero-tolerance allowlist. Empty list = no constraint.
+    forbidden_tools: list[str] = Field(default_factory=list)
 
 
 class ScenarioConfig(BaseModel):
@@ -155,6 +161,7 @@ class CompiledLevel(BaseModel):
     fog_mode: str = "vision"
     config_name: str | None = None
     objective_coords: Literal["exact", "relative"] = "exact"
+    forbidden_tools: list[str] = Field(default_factory=list)
 
 
 class ScenarioPack(BaseModel):
@@ -222,6 +229,7 @@ class ScenarioPack(BaseModel):
             else self.starting_cash,
             map_supported=map_supported,
             objective_coords=lvl.objective_coords,
+            forbidden_tools=list(lvl.forbidden_tools or []),
         )
 
     def config_names(self) -> list[str]:

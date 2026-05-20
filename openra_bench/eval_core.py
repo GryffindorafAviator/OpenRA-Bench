@@ -78,6 +78,31 @@ class EpisodeResult:
     reward_vector: dict = field(default_factory=dict)
 
 
+_CMD_NAME_RE = __import__("re").compile(r"Command::([A-Z][A-Za-z0-9]*)")
+
+
+def _cmd_tool_name(cmd: Any) -> str | None:
+    """Decode the snake_case tool name from a Command repr.
+
+    The Rust pyo3 Command enum stringifies as ``Command::VariantName { … }``
+    or ``Command::VariantName``. We extract the variant and convert to
+    snake_case to match the bench's tool-name vocabulary (and the
+    `tools:` / `forbidden_tools:` allowlist keys in YAML). Returns
+    ``None`` for anything that doesn't match — defensive; never raises.
+    """
+    m = _CMD_NAME_RE.search(repr(cmd))
+    if not m:
+        return None
+    variant = m.group(1)
+    # CamelCase → snake_case (MoveUnits → move_units, AttackUnit → attack_unit)
+    out: list[str] = []
+    for i, ch in enumerate(variant):
+        if i and ch.isupper():
+            out.append("_")
+        out.append(ch.lower())
+    return "".join(out)
+
+
 def scripted_explore_agent(render_state: dict, Command: Any) -> list:
     """Baseline reference agent: walk every unit toward the nearest
     unexplored frontier cell. Exercises the move path; a useful
@@ -203,9 +228,23 @@ def run_level(
         interrupt_mode = bool(enabled_sig) and raw_env is not None and hasattr(
             raw_env, "step_until_event"
         )
+        # Strict-toolban / procedural-compliance accounting: any cmd whose
+        # tool name is in compiled.forbidden_tools increments
+        # signals.tool_violations (read by the tool_violations_gte
+        # predicate). Tracked here so scripted and live-model policies
+        # are graded by the exact same rule.
+        forbidden = {str(t).lower() for t in (compiled.forbidden_tools or [])}
         for turns in range(1, compiled.max_turns + 1):
             rs = adapter.render_state()
             cmds = agent_fn(rs, env.Command) or [env.Command.observe()]
+            for _cmd in cmds:
+                _tn = _cmd_tool_name(_cmd)
+                if _tn:
+                    adapter.signals.tools_called[_tn] = (
+                        adapter.signals.tools_called.get(_tn, 0) + 1
+                    )
+                    if _tn in forbidden:
+                        adapter.signals.tool_violations += 1
             if not conceded:
                 conceded = any("Surrender" in repr(c) for c in cmds)
             interrupt = None
