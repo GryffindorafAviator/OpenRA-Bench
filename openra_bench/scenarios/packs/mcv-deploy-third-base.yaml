@@ -1,0 +1,323 @@
+# MCV-DEPLOY-THIRD-BASE — Group A seed (Mid-Late: 3rd MCV → 3rd base).
+# Tri-region operational footprint: the agent must commit ALL THREE
+# MCVs to DISTINCT target regions (NE / SE / S-CENTER), not bunch them
+# at one spot and not abandon any. Real-world anchor: a distribution
+# network with three production/supply/distribution sites placed across
+# distinct geographies for maximum coverage.
+#
+# Why this is harder than mcv-deploy-second-base:
+#   - 3 distinct deploy decisions (1 MCV → 1 region, x3) instead of 2,
+#   - 3 separate `building_in_region` checks (one per region) so the
+#     model cannot collapse coverage onto one or two regions,
+#   - longer horizon (within_ticks 6300 → max_turns ~75) so movement
+#     across a wider 160x80 arena is a real factor,
+#   - a light enemy patrol near each target on medium/hard creates
+#     incidental MCV risk en route (lose any MCV → cannot deploy it →
+#     missing region → LOSS).
+#
+# Wave-2 MCV deploy fix (commits bdedc55 OpenRA-Rust + b0cb710
+# OpenRA-Bench, validated by tests/test_mcv_deploy.py) is the
+# pre-requisite: `Command.deploy([mcv_id])` removes the MCV and
+# creates an agent-owned `fact` at offset (mcv_x-1, mcv_y-1). The
+# whole pack rests on that contract.
+#
+# Engine tick/turn budget (CLAUDE.md): ~90 ticks/turn, tick ≤
+# 93 + 90·(max_turns − 1). For within_ticks 6300 we need max_turns ≥
+# 70 (reachable tick at 70 turns = 93 + 90·69 = 6303). We use 75 for
+# slack on hard's combat detours.
+#
+# Engine footguns applied:
+#   - `spawn_mcvs: false` — the engine default is true (auto-seeds an
+#     extra MCV at the map's mpspawn cells), polluting the unit count
+#     and the deploy decision. The pack declares every actor itself.
+#   - Persistent unarmed enemy `fact` MARKER at the east edge
+#     prevents engine auto-`done` via all-enemies-eliminated, so a
+#     non-winner emits a real LOSS on the deadline (never a DRAW).
+#   - The west existing agent `fact` counts toward `building_count_gte:
+#     {type: fact, n: 3}` (so the agent needs +2 deploys at minimum
+#     to satisfy that bar) — but the THREE region predicates EACH
+#     require a fact in their target region, and the west fact is in
+#     NONE of them, so the agent MUST deploy all three MCVs at the
+#     three target regions to win. (The `n: 3` bar plus the three
+#     region predicates together are the no-cheat seal: any laziest
+#     play that ignores 1+ MCVs fails the corresponding region.)
+#   - Hard tier: ≥2 agent spawn_point groups so the whole MCV CLUSTER
+#     rotates between WEST (group 0) and EAST (group 1) starts — the
+#     closest region for each MCV flips per seed, so a memorised
+#     assignment cannot generalise.
+#
+# Region geometry (all radius 8, well inside the playable 160×80
+# arena cordon: x∈[4,156], y∈[4,76]):
+#   - NE       : center (130, 15)
+#   - SE       : center (130, 65)
+#   - S-CENTER : center ( 75, 70)
+# Easy MCV positions land each MCV INSIDE a distinct region (the
+# resulting fact cell at (mcv_x-1, mcv_y-1) is in the region). Medium
+# and hard require movement: MCVs start clustered or in inappropriate
+# pairings so the agent must move at least one MCV across a long
+# stretch to populate every region.
+
+meta:
+  id: mcv-deploy-third-base
+  title: 'MCV Deploy Third Base — Tri-Region Operational Footprint'
+  capability: reasoning
+  real_world_meaning: >
+    Tri-region facility footprint — each site at the RIGHT region for
+    coverage. The operator commits THREE indivisible mobile assets to
+    three DISTINCT geographies so the resulting network covers all
+    three regions. Bunching two assets in one region wastes a deploy
+    and leaves one region uncovered; abandoning an asset entirely
+    leaves another uncovered. The decision is committing each asset
+    to its designated region (which the start positions hint at on
+    easy and which the model must reason about on medium/hard).
+  robotics_analogue: >
+    Autonomous-fleet multi-FOB deployment for redundant coverage —
+    three mobile platforms each transition from mobile to fixed
+    (deploy is irreversible: the platform anchors and converts into a
+    forward operating base), one per designated coverage region, so
+    the resulting tri-FOB network maximises overall coverage and
+    redundancy across the operational theatre.
+  benchmark_anchor:
+    - "SC2LE 3-base macro"
+    - "MicroRTS multi-front expansion"
+    - "distribution-network multi-warehouse planning"
+    - "tri-region operational footprint"
+  author: "openra-bench"
+
+# Wider 160×80 arena (cordon 4) — fits THREE well-separated regions
+# (NE, SE, S-CENTER) plus a west base, the spread the tri-region
+# footprint requires. The pack-level base_map is the rush-hour-arena
+# sentinel (a known-supported string the loader can resolve before the
+# per-level `overrides.base_map` generator spec replaces it). Per-level
+# overrides materialise the actual arena .oramap.
+base_map: rush-hour-arena
+
+# starting_cash: 0 — the agent never needs to BUILD anything. Every
+# objective is satisfied purely by deploying MCVs. The 0 cash is the
+# explicit signal that build/place_building tools are not the path.
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Tools include build/place_building so the tool list isn't lying
+  # about what the engine accepts, but cash:0 makes them inert — the
+  # path is move_units + deploy only.
+  tools: [observe, deploy, move_units, build, place_building, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8500}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare skill: each MCV starts INSIDE its designated region (the
+  # fact cell after deploy lands at (mcv_x-1, mcv_y-1), still inside
+  # radius 8 of the region center). The decision is purely "deploy
+  # ALL THREE, not just one or two" — no movement, no enemies.
+  # All target regions are inside agent vision (no fog scout needed).
+  # max_turns 75 → reachable tick 93 + 90·74 = 6753 > 6300 ✓
+  # (the deadline bites; a stall emits LOSS, not DRAW).
+  easy:
+    description: >
+      You have THREE Construction Vehicles (MCV), each pre-positioned
+      AT a distinct target region (NE, SE, and S-CENTER), plus one
+      existing Construction Yard (fact) at your starter base in the
+      west. Deploy EACH MCV in place — each deploy consumes the MCV
+      and creates a new fact one cell up-and-left of the MCV's
+      position, inside its designated region. Win = you own ≥3 facts
+      total AND there is a fact near (130,15) AND a fact near
+      (130,65) AND a fact near (75,70), before tick 6300. Deploying
+      only 1 or 2 MCVs leaves an uncovered region and LOSES. Losing
+      an MCV before deploying it also LOSES (its region stays
+      uncovered).
+    overrides:
+      base_map:
+        generator: arena
+        name: mcv-deploy-third-base-arena
+        width: 160
+        height: 80
+        cordon: 4
+      actors:
+        # Existing west agent fact (the starter base). Does NOT count
+        # toward any of the three target-region predicates (none of
+        # them are in the west), but DOES count toward the
+        # `building_count_gte: {type: fact, n: 3}` total bar.
+        - {type: fact, owner: agent, position: [15, 40]}
+        # Three MCVs already inside their designated regions. After
+        # deploy, fact lands at (mcv_x-1, mcv_y-1):
+        #   (131,16) → fact (130,15) — exactly NE region center
+        #   (131,66) → fact (130,65) — exactly SE region center
+        #   ( 76,71) → fact ( 75,70) — exactly S-CENTER center
+        - {type: mcv, owner: agent, position: [131, 16]}
+        - {type: mcv, owner: agent, position: [131, 66]}
+        - {type: mcv, owner: agent, position: [76, 71]}
+        # Persistent unarmed enemy `fact` MARKER at the far east edge,
+        # outside all three target regions. Keeps the episode alive
+        # past any partial outcome (the all-enemies-eliminated
+        # auto-`done` is gated on this surviving) so a non-winner
+        # emits a real reachable LOSS on the deadline, never a DRAW.
+        - {type: fact, owner: enemy, position: [150, 40]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 3}
+        - building_in_region: {x: 130, y: 15, radius: 8, type: fact, count: 1}
+        - building_in_region: {x: 130, y: 65, radius: 8, type: fact, count: 1}
+        - building_in_region: {x: 75, y: 70, radius: 8, type: fact, count: 1}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        # Pre-fail clause: if the agent has not produced ≥2 facts by
+        # tick 4000 the run is unwinnable (no time to move+deploy
+        # the remaining MCV). Catches a stall LONG before the main
+        # deadline, so playback shows the genuine LOSS reason.
+        - all_of:
+            - after_ticks: 4000
+            - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 75
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: the MCVs no longer start inside their target regions —
+  # they're clustered around the west starter base. The agent must
+  # MOVE each MCV to a distinct region (the assignment is the
+  # decision) and then deploy. A LIGHT enemy patrol sits near each
+  # target so a slow / wandering MCV may be lost en route (no
+  # patrol is on the optimal direct line — they're offset).
+  # Same tick budget; target regions are in fog (the model must
+  # ground them from the coordinate disclosure).
+  # max_turns 75 → reachable tick 6753 > 6300 ✓
+  medium:
+    description: >
+      Same THREE Construction Vehicles, but this time clustered at
+      your starter base in the west — you must MOVE each one to its
+      target region BEFORE deploying. Three target regions (NE near
+      (130,15), SE near (130,65), S-CENTER near (75,70)) each need
+      ONE fact. A light Soviet patrol sits near each target — keep
+      to a direct path and the patrol will only graze you. Win = you
+      own ≥3 facts total AND there is a fact in each of the three
+      target regions, before tick 6300. Losing any MCV before its
+      deploy leaves a region uncovered and LOSES; bunching two MCVs
+      in one region also LOSES (a region is left uncovered).
+    overrides:
+      base_map:
+        generator: arena
+        name: mcv-deploy-third-base-arena
+        width: 160
+        height: 80
+        cordon: 4
+      enemy: {faction: soviet, cash: 0, bot_type: patrol}
+      actors:
+        # Same west starter fact as easy.
+        - {type: fact, owner: agent, position: [15, 40]}
+        # Three MCVs CLUSTERED at the starter base (varied positions
+        # so they're distinct cells, but all within a few cells of
+        # the west fact). The agent must reason about which MCV
+        # should head to which region.
+        - {type: mcv, owner: agent, position: [20, 35]}
+        - {type: mcv, owner: agent, position: [20, 40]}
+        - {type: mcv, owner: agent, position: [20, 45]}
+        # Light Soviet patrols near each target (stance 2 = return
+        # fire only — the patrol bot oscillates around spawn cell;
+        # placed OFFSET from each region's center so the direct
+        # approach is unthreatened, a meandering MCV gets grazed).
+        - {type: e1, owner: enemy, position: [115, 12], stance: 2}
+        - {type: e1, owner: enemy, position: [115, 68], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 68],  stance: 2}
+        # Persistent far enemy marker (LOSS-not-DRAW guarantee).
+        - {type: fact, owner: enemy, position: [150, 40]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 3}
+        - building_in_region: {x: 130, y: 15, radius: 8, type: fact, count: 1}
+        - building_in_region: {x: 130, y: 65, radius: 8, type: fact, count: 1}
+        - building_in_region: {x: 75, y: 70, radius: 8, type: fact, count: 1}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - all_of:
+            - after_ticks: 4500           # half-way through, must have ≥2 facts
+            - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 75
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: TWO agent spawn_point groups rotate the whole MCV
+  # CLUSTER between WEST and EAST starts. The same three target
+  # regions stay fixed (enemy actors don't honour spawn_point per
+  # CLAUDE.md), but which corner an MCV starts in determines which
+  # target is CLOSEST — a memorised "MCV-i goes to region-j"
+  # assignment cannot generalise across seeds.
+  # max_turns 75 → reachable tick 6753 > 6300 ✓
+  hard:
+    description: >
+      Same tri-region objective (NE, SE, S-CENTER each need a fact)
+      under tighter pressure. Your three Construction Vehicles cluster
+      at either the WEST or the EAST edge of the map depending on the
+      run — read your MCVs' positions and assign each to the region
+      it can reach fastest. A doubled Soviet patrol sits near each
+      target. Win = you own ≥3 facts total AND there is a fact in
+      each of the three target regions, before tick 6300. Losing any
+      MCV before its deploy LOSES (the region stays uncovered);
+      bunching two MCVs in one region LOSES (a region uncovered).
+    objective_coords: relative
+    overrides:
+      base_map:
+        generator: arena
+        name: mcv-deploy-third-base-arena
+        width: 160
+        height: 80
+        cordon: 4
+      enemy: {faction: soviet, cash: 0, bot_type: patrol}
+      actors:
+        # West starter fact (duplicated across both spawn groups so
+        # whichever group is selected, the starter base is present —
+        # see CLAUDE.md note on the spawn_point filter dropping every
+        # un-tagged agent actor when ANY agent actor is tagged).
+        - {type: fact, owner: agent, position: [15, 40], spawn_point: 0}
+        - {type: fact, owner: agent, position: [15, 40], spawn_point: 1}
+        # WEST MCV cluster (group 0) — closest region is S-CENTER
+        # (75,70) at ~70 cells, NE (130,15) at ~115, SE (130,65) at
+        # ~115. The agent must commit one MCV to the far NE and one
+        # to the far SE despite the western starter — the natural
+        # west-side "do nothing" laziest play leaves both east
+        # regions uncovered.
+        - {type: mcv, owner: agent, position: [20, 35], spawn_point: 0}
+        - {type: mcv, owner: agent, position: [20, 40], spawn_point: 0}
+        - {type: mcv, owner: agent, position: [20, 45], spawn_point: 0}
+        # EAST MCV cluster (group 1) — closest regions are NE and SE;
+        # S-CENTER (75,70) is the far target. Inversion of group 0:
+        # an agent that memorised "always head south-east first"
+        # on group 0 will leave S-CENTER uncovered on group 1.
+        - {type: mcv, owner: agent, position: [145, 35], spawn_point: 1}
+        - {type: mcv, owner: agent, position: [145, 40], spawn_point: 1}
+        - {type: mcv, owner: agent, position: [145, 45], spawn_point: 1}
+        # Doubled patrols (one extra unit per region vs medium) —
+        # attrition risk is real, but each patrol's spawn cell is
+        # offset from the region center so the optimal direct
+        # approach is still unthreatened.
+        - {type: e1, owner: enemy, position: [115, 12], stance: 2}
+        - {type: e1, owner: enemy, position: [117, 14], stance: 2}
+        - {type: e1, owner: enemy, position: [115, 68], stance: 2}
+        - {type: e1, owner: enemy, position: [117, 66], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 68],  stance: 2}
+        - {type: e1, owner: enemy, position: [62, 66],  stance: 2}
+        # Persistent far enemy marker (LOSS-not-DRAW guarantee). NOT
+        # tagged with spawn_point — enemy actors place regardless
+        # (CLAUDE.md: spawn_point filter applies only to AGENT
+        # actors).
+        - {type: fact, owner: enemy, position: [150, 75]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 3}
+        - building_in_region: {x: 130, y: 15, radius: 8, type: fact, count: 1}
+        - building_in_region: {x: 130, y: 65, radius: 8, type: fact, count: 1}
+        - building_in_region: {x: 75, y: 70, radius: 8, type: fact, count: 1}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - all_of:
+            - after_ticks: 4500
+            - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 75

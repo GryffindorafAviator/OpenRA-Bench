@@ -62,14 +62,15 @@ UPGRADED = [
     # column against three raider vectors (north/central/south).
     "mid-economy-under-fire",
     # Other mcv-deploy-* siblings (defensible-site, near-resource,
-    # second-base, third-base, relocate-under-pressure) register
-    # themselves via their own Wave-3 commits as they land.
+    # relocate-under-pressure) register themselves via their own
+    # Wave-3 commits as they land.
     # Group A seed: hard tier stages the spare MCV NE-leaning vs
     # SE-leaning by seed; the win predicate accepts a deploy at
     # either candidate region (NE or SE) so the model must pick the
     # NEAREST one — cross-map diagonal blows the tick budget.
     "mcv-deploy-second-base",
     # Group A seed (this commit): hard tier seed-varies the FRESH
+    # Group A seed (sibling commit): hard tier seed-varies the FRESH
     # MCV's start column (40,20 vs 60,20) with the matching safe
     # shoulders, so a single memorised relocation cell cannot
     # generalise across seeds.
@@ -78,6 +79,11 @@ UPGRADED = [
     # harvest income); hard tier defines 2 symmetric spawn_point groups
     # (north/south base) so each seed gets its own near-patch geometry.
     "mcv-deploy-near-resource",
+    # Wave-2 MCV deploy + tri-region operational footprint: 3 MCVs
+    # must each deploy at a DISTINCT target region (NE/SE/S-CENTER);
+    # hard tier rotates the WHOLE MCV cluster between WEST and EAST
+    # starts so the per-MCV nearest-region assignment flips per seed.
+    "mcv-deploy-third-base",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
