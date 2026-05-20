@@ -64,6 +64,11 @@ UPGRADED = [
     # Other mcv-deploy-* siblings (defensible-site, near-resource,
     # second-base, third-base, relocate-under-pressure) register
     # themselves via their own Wave-3 commits as they land.
+    # Group A seed: hard tier stages the spare MCV NE-leaning vs
+    # SE-leaning by seed; the win predicate accepts a deploy at
+    # either candidate region (NE or SE) so the model must pick the
+    # NEAREST one — cross-map diagonal blows the tick budget.
+    "mcv-deploy-second-base",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

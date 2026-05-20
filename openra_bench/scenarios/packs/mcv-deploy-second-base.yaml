@@ -1,0 +1,188 @@
+meta:
+  id: mcv-deploy-second-base
+  title: 'Second-Base Ramp-Up — Deploy the 2nd MCV at the Target Region'
+  capability: reasoning
+  real_world_meaning: >
+    Multi-site facility ramp-up — the second production site is not just
+    a duplicate; it must be PLACED at the right location (the briefed
+    expansion region) to add real capacity / redundancy. Deploying the
+    spare MCV next to base #1, or in an unrelated corner, gives the
+    headline "two facilities online" but ZERO geographic ramp-up.
+    The decision is WHERE to put base #2, not whether to deploy at all.
+  robotics_analogue: >
+    Autonomous fleet establishing a second forward operating base at a
+    strategic location: the spare base-builder unit has to drive to the
+    designated expansion zone and stand up the new FOB there, not just
+    park next to FOB #1 or end up in the wrong sector.
+  author: autonomous-loop
+  benchmark_anchor:
+    - SC2LE 2-base macro
+    - MicroRTS expansion timing
+    - geographic-expansion product strategy
+    - multi-site facility ramp-up for redundancy / capacity
+
+# Map: rush-hour-arena (128x40) — wide enough to put base #1 in the
+# WEST (x≈15) and the briefed expansion region in the EAST (x≈90),
+# with the spare MCV staged at center so deploying NEXT TO base #1 is
+# clearly different from deploying at the target region.
+base_map: rush-hour-arena
+
+# Enough for a couple of cheap structures at the new site after
+# deploy; not enough to win by spam. The target predicate is purely
+# "place a fact at (90,y) within radius 8" — cash is flavor, not the
+# load-bearing decision.
+starting_cash: 500
+
+base:
+  agent:
+    faction: allies
+    cash: 500
+  enemy:
+    faction: soviet
+    cash: 0
+    bot_type: ''
+  tools:
+    - observe
+    - deploy
+    - move_units
+    - build
+    - place_building
+    - stop
+  planning: true
+  termination:
+    max_ticks: 30000
+  # NOTE: every agent actor in this pack carries an explicit
+  # `spawn_point` because hard adds a second spawn group; per the
+  # spawn-filter rule (CLAUDE.md), once ANY agent actor declares a
+  # spawn_point, every agent actor without one is filtered out. easy
+  # and medium use only group 0 — group 0 is the singleton spawn,
+  # round-robin still picks group 0 on every seed. Hard overrides
+  # this list and supplies both groups (NE vs SE staging).
+  actors:
+    # ── Pre-placed base #1 (WEST) — fact + tent + powr + proc ──
+    # Far enough west that base #1 is OUTSIDE the eastern target
+    # region (radius 8 around (90,20)), so a "deploy MCV next to
+    # existing base" play satisfies `building_count_gte:fact,2` but
+    # FAILS the `building_in_region:fact,1` clause.
+    - {type: fact, owner: agent, position: [15, 20], spawn_point: 0}
+    - {type: tent, owner: agent, position: [15, 23], spawn_point: 0}
+    - {type: powr, owner: agent, position: [18, 20], spawn_point: 0}
+    - {type: proc, owner: agent, position: [18, 23], spawn_point: 0}
+    # ── Spare MCV at map center; deploy at target region for the win
+    - {type: mcv, owner: agent, position: [60, 20], spawn_point: 0}
+    # ── Persistent unarmed enemy `fact` in the far NE so the engine
+    # does not auto-`done` on enemy-elimination before the win/fail
+    # predicates are evaluated (CLAUDE.md auto-done footgun). Placed
+    # well outside the target region so it doesn't satisfy any
+    # agent-side predicate.
+    - {type: fact, owner: enemy, position: [124, 4]}
+
+levels:
+  easy:
+    description: >
+      You have base #1 in the WEST (a Construction Yard at ~(15,20)
+      with tent, powr, proc). A SECOND MCV is parked at the center of
+      the map (~(60,20)). Your task: drive that second MCV to the
+      EASTERN expansion region (centered at (90,20), radius 8) and
+      DEPLOY it there to create a second Construction Yard. WIN when
+      you own ≥2 facts AND at least one fact sits inside the eastern
+      region, within 5400 ticks. Deploying the MCV next to base #1 or
+      leaving it parked does NOT win — the second fact must be IN the
+      eastern region.
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - building_in_region:
+            {x: 90, y: 20, radius: 8, type: fact, count: 1}
+        - within_ticks: 5400
+    # after_ticks ≤ 93 + 90·(max_turns-1) ⇒ the deadline must be
+    # REACHABLE inside max_turns (else timeout draws instead of
+    # losing). 5401 ≤ 93 + 90·70 = 6393. ✓
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+    max_turns: 70
+  medium:
+    description: >
+      Same multi-site expansion: deploy the second MCV at the EASTERN
+      region (centered at (90,20), radius 8). A lone enemy patrol
+      lurks near the target region — the MCV is fragile, so a careless
+      straight-line approach can be intercepted before deploy.
+      Tighter clock; the right play is still drive-east-and-deploy,
+      with awareness of the patrol.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [15, 20], spawn_point: 0}
+        - {type: tent, owner: agent, position: [15, 23], spawn_point: 0}
+        - {type: powr, owner: agent, position: [18, 20], spawn_point: 0}
+        - {type: proc, owner: agent, position: [18, 23], spawn_point: 0}
+        - {type: mcv, owner: agent, position: [60, 20], spawn_point: 0}
+        # Lone patrol near the target region (light pressure, stance:2).
+        - {type: e1, owner: enemy, position: [95, 20], stance: 2, count: 2}
+        # Persistent off-map enemy fact (anti auto-done).
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - building_in_region:
+            {x: 90, y: 20, radius: 8, type: fact, count: 1}
+        - within_ticks: 4500
+    # 4501 ≤ 93 + 90·59 = 5403. ✓
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {has_building: fact}
+    max_turns: 60
+  hard:
+    description: >
+      Two candidate expansion regions — one in the NORTH-EAST (around
+      (95,10), radius 8), one in the SOUTH-EAST (around (95,30),
+      radius 8). Each seed stages your spare MCV closer to ONE corner
+      (NE staging vs SE staging); both corners have enemy patrols.
+      Drive the MCV to the NEAREST candidate region and deploy there —
+      cutting diagonally to the FAR corner costs both time and a
+      collision with the wrong-corner patrol. Either NE or SE deploy
+      counts; deploying next to base #1 does NOT.
+    overrides:
+      actors:
+        # Base #1 is fixed for both seed groups: duplicate every
+        # garrison/structure actor across spawn_point 0 AND 1 at the
+        # SAME coords (per the spawn-filter rule in CLAUDE.md — once
+        # any agent actor declares spawn_point, anything without one
+        # is filtered out).
+        - {type: fact, owner: agent, position: [15, 20], spawn_point: 0}
+        - {type: tent, owner: agent, position: [15, 23], spawn_point: 0}
+        - {type: powr, owner: agent, position: [18, 20], spawn_point: 0}
+        - {type: proc, owner: agent, position: [18, 23], spawn_point: 0}
+        - {type: fact, owner: agent, position: [15, 20], spawn_point: 1}
+        - {type: tent, owner: agent, position: [15, 23], spawn_point: 1}
+        - {type: powr, owner: agent, position: [18, 20], spawn_point: 1}
+        - {type: proc, owner: agent, position: [18, 23], spawn_point: 1}
+        # MCV staging varies by seed: NE-leaning vs SE-leaning.
+        - {type: mcv, owner: agent, position: [60, 10], spawn_point: 0}
+        - {type: mcv, owner: agent, position: [60, 30], spawn_point: 1}
+        # Two enemy patrols (light pressure), one at each candidate
+        # corner. The patrol at the FAR corner hardens the wrong-way
+        # play; the near-corner patrol is small enough that a careful
+        # straight-in deploy still completes in budget.
+        - {type: e1, owner: enemy, position: [95, 10], stance: 2, count: 2}
+        - {type: e1, owner: enemy, position: [95, 30], stance: 2, count: 2}
+        # Persistent off-map enemy fact (anti auto-done).
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - any_of:
+            - building_in_region:
+                {x: 95, y: 10, radius: 8, type: fact, count: 1}
+            - building_in_region:
+                {x: 95, y: 30, radius: 8, type: fact, count: 1}
+        - within_ticks: 3800
+    # 3801 ≤ 93 + 90·49 = 4503. ✓ Tight enough that crossing diagonally
+    # to the wrong corner (≈ 40 cells + traffic) won't finish.
+    fail_condition:
+      any_of:
+        - after_ticks: 3801
+        - not: {has_building: fact}
+    max_turns: 50
