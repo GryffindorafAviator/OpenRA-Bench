@@ -185,6 +185,13 @@ UPGRADED = [
     # target pair flips per seed and a single memorised bait line
     # cannot generalise across seeds.
     "combat-bait-counter-attack",
+    # Wave-4 Group D combat-micro kite pack (SC2 kiting / cavalry
+    # skirmish anchor). Hard tier defines two agent spawn_point groups
+    # (NORTH corridor y=10 vs SOUTH corridor y=30) round-robined by
+    # seed; the heavy tank is centred mid-latitude so the kite vector
+    # flips per seed and no memorised "retreat west on y=20" opening
+    # generalises.
+    "combat-kite-jeep-vs-tank",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

@@ -1,0 +1,238 @@
+# combat-kite-jeep-vs-tank — combat micro: KITE a slow heavy unit
+# with fast light raiders (Wave-4, Group D).
+#
+# Real-world anchors:
+#   - SC2 kiting micro (vulture/muta vs marines): fast light unit
+#     repeatedly moves into range, fires, retreats before the slower /
+#     bursty heavy unit can close and one-shot.
+#   - Cavalry-vs-pikeman maneuver doctrine (charge to contact, retreat,
+#     wheel, re-engage) — the fire-and-maneuver counterpart to
+#     stand-and-fight.
+#   - Military fire-and-maneuver doctrine; skirmisher tactics; the
+#     economy-of-force principle (small mobile force defeats heavier
+#     concentrated foe via mobility advantage).
+#
+# Idiom (the four-policy bar):
+#   • stall (only observe)              → LOSS. The hunt-bot heavy tank
+#     closes on the raiders' centroid; even if it never arrived, the
+#     kill bar (units_killed_gte:1) is unmet → after_ticks LOSS.
+#   • stand-and-shoot (commit at range, never move) → LOSS. The heavy
+#     tank's cannon out-trades raider weapons head-on; the raiders die
+#     before the tank's HP runs out. units_killed=1 in the best case
+#     but lost ≥2 raiders → not own_units_gte:2 → LOSS.
+#   • brute attack_move east            → LOSS. Same as commit — the
+#     hunt-bot heavy closes to point-blank and out-trades the column.
+#   • intended kite (move-AWAY when tank in close, then attack_unit at
+#     range; repeat)                     → WIN. The raider speed
+#     advantage lets the policy keep the tank at the edge of the
+#     raiders' fire envelope but outside the heavy's lethal close-range
+#     window. Whittle the tank down across multiple fire-then-retreat
+#     cycles.
+#
+# Pack-name note: the catalogue id is `combat-kite-jeep-vs-tank` for
+# continuity with the Wave-4 brainstorm in SCENARIO_BACKLOG.md (Group
+# D, "Mid kite ranged // micro; SC2 kiting"). The doctrinal SC2 anchor
+# (vulture vs marines) is fast-light-vehicle vs slow-infantry — i.e.
+# the "kite" frame is about FAST-vs-SLOW unit-speed asymmetry, not
+# specifically jeep-vs-3tnk. In OpenRA-Rust the engine-realised
+# raider-vs-heavy trade that satisfies the bar uses the allies medium
+# tank (2tnk, faster + can damage 3tnk) as the raider rather than the
+# literal jeep (jeep MG is anti-infantry, does not dent heavy armour
+# in the current engine weapons table). The IDIOM under test is the
+# move-away + attack_unit kite cycle — the unit-pairing is the
+# vehicle for that test.
+#
+# Topology (rush-hour-arena 128 × 40, playable x in [2..126], y in
+# [2..38]):
+#   - Raiders stage at centre-west (x≈28..30) on the engagement
+#     latitude. Spread across three cells (not stacked on one) so the
+#     stack doesn't pin-pile in retreat.
+#   - The heavy tank starts centre-east (x≈80) and is owned by the
+#     hunt bot so it actively PURSUES the raiders' centroid (the
+#     spec's "tank pursues centroid"); the kite cycle starts on
+#     contact with no fog-blind opening turn.
+#   - Persistent unarmed enemy `fact` marker (far east, x=124) keeps
+#     the episode alive past the moment the tank dies so the win
+#     predicate is evaluated rather than preempted by engine auto-done
+#     on enemy wipe collapsing to DRAW.
+
+meta:
+  id: combat-kite-jeep-vs-tank
+  title: 'Combat Micro — Kite a Slow Heavy Tank with Fast Raiders'
+  capability: action
+  real_world_meaning: >
+    Three fast tank raiders must kill ONE enemy heavy tank that is
+    actively HUNTING the raiders' centroid. The only winning play is
+    kiting: each turn, if the heavy tank is closing into one-shot
+    range, MOVE the raiders AWAY (using their speed advantage) and
+    attack_unit the heavy from outside its lethal close-range
+    window. Repeat until the heavy falls. Stand-and-fight LOSES — the
+    heavy tank's cannon out-trades raider weapons at close range and
+    a static engagement collapses raider HP before the heavy's. The
+    skill being measured is combat micro: target a moving threat,
+    exploit the unit-speed asymmetry, and string together a sequence
+    of move-away + attack_unit cycles instead of issuing one beeline
+    order.
+  robotics_analogue: >
+    Fast/light agents defeating a slow/heavy adversary by exploiting
+    a mobility asymmetry: a closed-loop policy of evade-then-engage,
+    rather than a one-shot beeline. The decision under test is per-turn
+    proximity control (stay outside lethal radius, fire at range).
+  benchmark_anchor:
+    - "SC2 kiting micro (vulture/muta-vs-marines)"
+    - "cavalry-vs-pikeman maneuver"
+    - "military fire-and-maneuver doctrine"
+    - "skirmisher tactics"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: hunt}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 6500}
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Bare kite skill: 3 medium-tank raiders vs 1 LIGHT enemy tank
+  # (1tnk — light/allies-style armour). Easier trade: even a slightly
+  # clumsy kite cycle leaves ≥1 raider alive (the survival bar is ≥1,
+  # not ≥2 as on medium/hard). Stall LOSES on the clock + hunt-bot
+  # tank wipes the idle stack; stand-and-shoot still LOSES because
+  # the bot closes and the tank cannon out-trades raider weapons
+  # head-on even on the lighter tank.
+  easy:
+    description: >
+      Three fast medium-tank raiders (2tnk) at the centre-west (y=20)
+      must kill ONE enemy light tank (1tnk) that is actively HUNTING
+      your raiders from centre-east (x≈80, y=20). The tank can
+      out-trade raider weapons at close range; the only winning play
+      is the KITE cycle — when the tank closes into lethal range,
+      MOVE your raiders a few cells AWAY along the lane, then
+      attack_unit the tank from outside its close-range window;
+      repeat. Keep at least ONE raider alive. Stalling (observe only)
+      LOSES (kill bar unmet; the hunt-bot tank also reaches your
+      stack and one-shots it). Standing still and trading shots
+      LOSES (the tank cannon out-trades raider weapons at close
+      range). Brute attack_move east LOSES (same — no disengage).
+      Before tick 4500.
+    overrides:
+      actors:
+        # RAIDERS — 3 medium tanks spread across three cells at
+        # centre-west to avoid stacking on a single tile (which pins
+        # them in retreat).
+        - {type: 2tnk, owner: agent, position: [28, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [30, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [28, 21], stance: 1}
+        # THE HEAVY (easier variant: 1tnk light tank).
+        - {type: 1tnk, owner: enemy, position: [80, 20], stance: 2}
+        # Persistent far-east enemy fact — prevents engine auto-done
+        # on enemy unit wipe collapsing the run to DRAW.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {own_units_gte: 1}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 51
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: the heavy unit becomes 3tnk (Soviet
+  # heavy, longer cannon range, higher damage), AND the survival bar
+  # tightens to ≥2 raiders. A sloppy stand-and-shoot drops the raider
+  # stack to ≤1 survivor in trade (verified by smoke run); the kite
+  # cycle keeps the heavy at the edge of fire range, preserving the
+  # survival bar.
+  medium:
+    description: >
+      Three medium-tank raiders (2tnk) at the centre-west (y=20) must
+      kill ONE enemy HEAVY tank (3tnk) that is actively HUNTING your
+      raiders from centre-east (x≈80, y=20). The heavy tank's cannon
+      out-trades raider weapons at close range and can one-shot a
+      raider; standing still loses raiders faster than the tank's HP
+      runs out. The only winning play is the KITE cycle — when the
+      tank closes within ~6 cells, MOVE your raiders ~5 cells AWAY
+      along the lane, then attack_unit the tank from outside its
+      close-range window; repeat. Keep at least TWO raiders alive
+      (a sloppy stand-and-shoot routinely trades the whole stack;
+      the kite cycle preserves the survival bar). Stall, stand-and-
+      shoot, and brute attack_move all LOSE. Before tick 4500.
+    overrides:
+      actors:
+        # Raiders stage off the tank's centroid latitude (y=10
+        # corridor, not the tank's y=20) so the hunt-bot heavy must
+        # close DIAGONALLY — the y-axis lag gives the kite cycle a
+        # reactive window. Raiders spread across three cells.
+        - {type: 2tnk, owner: agent, position: [28,  9], stance: 1}
+        - {type: 2tnk, owner: agent, position: [30, 10], stance: 1}
+        - {type: 2tnk, owner: agent, position: [28, 11], stance: 1}
+        # Heavy tank on the mid-latitude — hunts the y=10 raider
+        # centroid.
+        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {own_units_gte: 2}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 2}}
+    max_turns: 51
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. Tighter deadline (~3600 ticks instead of ~4500) — the kite
+  #      cadence has to be efficient: dawdle and the clock LOSES.
+  #   2. TWO agent spawn_point groups (NORTH y=10 vs SOUTH y=30
+  #      starting latitude) round-robined by seed, so the kite vector
+  #      flips per seed and a memorised "always retreat west on y=20"
+  #      opening cannot generalise. The heavy tank is centred mid-map
+  #      on the mid-latitude (y=20) between the two corridors so both
+  #      spawns face a symmetric pursuit geometry from the hunt bot.
+  hard:
+    description: >
+      Three medium-tank raiders (2tnk) stage at one of two
+      centre-west corridors (NORTH y=10 OR SOUTH y=30, chosen by
+      seed, anti-memorisation). A single HEAVY enemy tank (3tnk)
+      starts centre-east (x≈80) on the mid-latitude (y=20) and is
+      actively HUNTING your raiders — whichever corridor you start
+      in, the tank closes on you. The cannon out-trades raider
+      weapons at close range; the only winning play is the KITE
+      cycle — when the tank closes within ~6 cells, MOVE your
+      raiders ~5 cells AWAY along your lane, then attack_unit the
+      tank from outside its close-range window; repeat. Keep at
+      least TWO raiders alive AND finish before tick 3600. Stall,
+      stand-and-shoot, and brute attack_move all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH corridor (y=10)
+        - {type: 2tnk, owner: agent, position: [28, 9],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [30, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [28, 11], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH corridor (y=30)
+        - {type: 2tnk, owner: agent, position: [28, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [30, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [28, 31], stance: 1, spawn_point: 1}
+        # Heavy tank centred on the mid-latitude — symmetric pursuit
+        # geometry from either spawn corridor.
+        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {own_units_gte: 2}
+        - {within_ticks: 3600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {own_units_gte: 2}}
+    max_turns: 41
