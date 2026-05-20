@@ -241,6 +241,18 @@ UPGRADED = [
     # bait/strike vector flips per seed.
     "coord-diversionary-attack",
     "def-in-depth",
+    # Wave-8 REASONING pack — concurrent defence + construction under
+    # active attack (SRE simultaneous incident-response + capacity-add /
+    # military business continuity / ops triage during incident anchor).
+    # Hard tier defines two agent spawn_point groups (NORTH base y=14 /
+    # SOUTH base y=26) round-robined by seed; heavy rush bands always
+    # place at BOTH candidate latitudes (enemy actors don't honour
+    # spawn_point — CLAUDE.md), so the on-latitude band converges on
+    # the active fact and a memorised "build at (10,20)" plan misses
+    # the active cluster region. Both streams (pbox build + tank
+    # dispatch) must run concurrently from t=0 at the spawn-matched
+    # latitude.
+    "def-while-building",
     # Wave-7 reasoning pack — distributed defence across three
     # concurrent attack lanes (graph min-cut / military multi-front /
     # distributed-systems load-balancing anchor). Hard tier defines
@@ -686,6 +698,62 @@ UPGRADED = [
     # harv exists, so each spawn defends its OWN supply lane on its
     # OWN y-band and a memorised opening cannot generalise.
     "econ-protect-harvester-route",
+    # Wave-8 ACTION pack — timed-stance-flip ambush trigger discipline
+    # (military ROE ambush doctrine / SC2 stance micro / USMC FM 7-8
+    # linear-ambush anchor). 4× 2tnk pre-staged at a choke on stance:0
+    # (HoldFire); the agent MUST `set_stance` to AttackAnything AT THE
+    # RIGHT TIME (when the inbound hunt squad enters the kill zone) to
+    # wipe the bunched column with one concentrated cannon salvo.
+    # Hard defines TWO agent spawn_point groups (NORTH choke y=18..20
+    # vs SOUTH choke y=20..22) round-robined by seed; both close the
+    # same fact column (x=10) so the doctrine generalises but a
+    # memorised "fire when enemy reaches (40,20)" cell cannot.
+    "def-stance-mgmt-hold-then-attack",
+    # Wave-8 REASONING pack — bypass a prepared frontal line via a far
+    # off-axis fog lane and strike the undefended HQ from behind (SC2
+    # hidden assault / military surprise attack / fog warfare anchor).
+    # 4× 2tnk vs a west-facing pbox+e3 wall at x=50, y=15..25; the
+    # objective fact is undefended at (100,20). Hard defines TWO agent
+    # spawn_point groups (NORTH staging y=14..17 / SOUTH staging
+    # y=23..26) round-robined by seed; the line is symmetric across
+    # y=20 so each spawn faces the same fog-flank decision but the
+    # bypass latitude flips per seed (NORTH spawn → fog via y=2; SOUTH
+    # spawn → fog via y=38) — a memorised "always fog-flank via the
+    # north" opening cannot generalise across seeds.
+    "combat-attack-from-behind-fog",
+    # Wave-8 REASONING pack — capacity planning / distributed-systems
+    # back-pressure / FIFO inventory. 3-harv high-throughput economy
+    # saturates the proc cap (2000) fast; the agent MUST build silos
+    # (+3000 cap each) to absorb the overflow or the EV bar is
+    # unreachable. Hard defines TWO agent spawn_point groups (NORTH
+    # base y=14 vs SOUTH base y=26) round-robined by seed; each spawn
+    # has its own near-patch geometry so a memorised silo placement
+    # cell cannot generalise.
+    "econ-overflow-to-silos",
+    # Wave-8 PERCEPTION pack — long-range reconnaissance / chassis
+    # selection by speed (ERQA recon / military light-cavalry-over-
+    # foot-patrol / SC2 scout-unit selection anchor). A fast jeep and a
+    # slow e1 are BOTH pre-placed in the agent base; only the jeep is
+    # fast enough to reach the far frontier inside the clock. Hard
+    # defines TWO agent spawn_point groups (NORTH base y=8 / SOUTH
+    # base y=32) with spawn-matched frontier targets (NE (120, 5) /
+    # SE (120, 35)) round-robined by seed; the win clause is `any_of`
+    # over the two frontier regions so the jeep must drive to the
+    # frontier matching its OWN base latitude (an off-axis cross-
+    # diagonal commit blows the budget).
+    "scout-far-frontier",
+    # Wave-8 PERCEPTION pack — exact-count force sizing (POMDP exact-
+    # count / ScienceWorld census / SC2 scout-count anchor). 2 jeep
+    # scouts must count the K hidden defenders at the far-east enemy
+    # fact, then queue EXACTLY K medium tanks (2tnk) — under-build
+    # loses the attrition trade, over-build (queue 7) misses the
+    # tight clock. Hard tier defines two agent spawn_point groups
+    # (NORTH base y=14 / SOUTH base y=26) round-robined by seed; the
+    # K=5 defender cloud + enemy fact always place at mid-y (enemies
+    # don't honour spawn_point — CLAUDE.md), so the scout-then-build
+    # discipline generalises across spawns but a memorised "scout at
+    # y=20" opening cannot.
+    "scout-count-defenders",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
