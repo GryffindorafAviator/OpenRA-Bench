@@ -512,6 +512,16 @@ UPGRADED = [
     # vs SW→SE on the south edge) flips per seed and a memorised
     # single-corner reading order cannot generalise across spawns.
     "scout-multiple-fog-areas",
+    # Wave-6 ROBUSTNESS / adversarial robustness seed — surprise 2nd-
+    # wave handling (military follow-on wave doctrine / SC2 second-
+    # attack timing / ops incident-after-incident triage anchor). Hard
+    # tier defines two agent spawn_point groups (NORTH base y=12 /
+    # SOUTH base y=28) round-robined by seed; symmetric Wave-2 squads
+    # at BOTH fog corners (NE y=8 / SE y=32) always place (enemy
+    # actors don't honour spawn_point — CLAUDE.md), so which corner
+    # the surprise wave arrives FROM flips per seed and a memorised
+    # "expect Wave 2 from NE" disposition cannot generalise.
+    "rob-unexpected-enemy-spawn",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

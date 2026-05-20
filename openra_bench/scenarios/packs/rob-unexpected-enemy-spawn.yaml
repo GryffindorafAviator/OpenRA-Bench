@@ -1,0 +1,354 @@
+# rob-unexpected-enemy-spawn.yaml
+#
+# REASONING capability — Wave-6 ROBUSTNESS / adversarial robustness:
+# surprise SECOND wave from an UNEXPECTED direction. The agent has
+# an obvious 4-unit hunter cluster (Wave 1) closing in from the centre
+# on its starting vision row; a SECOND wave was PRE-PLACED at a fog
+# corner (NE on easy/medium, both NE+SE on hard) and closes in by
+# ~tick 1500 in a hunt pattern from a different bearing than Wave 1.
+# Winning requires defeating BOTH waves (`units_killed_gte`),
+# keeping the base (`has_building:fact`), AND keeping enough force
+# alive (`own_units_gte:2`). The relevant capability is RESERVING
+# capacity for a follow-on attack — keeping the defender screen
+# centred on the base instead of chasing routers to the corner and
+# leaving the base exposed.
+#
+# Real-world / benchmark anchors:
+#   - Adversarial robustness: surprise wave / follow-on attack handling.
+#   - Military follow-on wave doctrine ("the battle isn't over when
+#     the enemy you see is dead"; second-echelon engagement).
+#   - SC2 second-attack timing (the canonical "second push" the
+#     defender must reserve forces against).
+#   - Operations: incident-after-incident triage (the same operator is
+#     immediately re-paged on a fresh incident from a different
+#     subsystem — the relevant skill is reserving capacity).
+#
+# DISCRIMINATIONS (no defect, no cheat — every brute/lazy play LOSES):
+#
+#   • stall (observe only): the 5 pre-placed defenders are stance:3
+#     (AttackAnything) and auto-engage hostiles in range, but with no
+#     explicit pursuit they sit out of weapon arc as the hunters
+#     converge from the centre. Across ~5000 ticks the static garrison
+#     bleeds out under attrition; the `units_killed_gte` bar is never
+#     met (kills ≈ 0) AND own_units drops to zero → fail-clause fires
+#     (LOSS, not a draw, before tick 5400).
+#
+#   • forward-rush (chase the visible enemies all the way to the fog
+#     corner): the defender screen attack-moves to the Wave-2 fog
+#     corner (90, 8); en route Wave 1 from the centre walks PAST the
+#     base (5 e1 hunters bee-line to the agent centroid which is now
+#     east of the fact); the corner-bound defenders take attrition
+#     bombardment from the converged hunter swarm, and either die out
+#     (`own_units_gte:1` fail) or fail to reach the kill bar inside
+#     the `after_ticks:5401` deadline → LOSS.
+#
+#   • intended prepare-for-2nd-wave: engage closest threat with
+#     `attack_move`, but CAP the chase distance so defenders never
+#     stray more than ~12 cells from the fact. When the 2nd wave
+#     closes in from the fog corner the screen is already pulled
+#     back to base-adjacent range and intercepts it before fact
+#     contact. Both waves dead (kill bar met), fact alive,
+#     own_units_gte:2 satisfied → WIN.
+#
+# ENGINE FACTS (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - Bot `hunt` (openra-sim/src/scripted_bot.rs::Hunt): each enemy
+#     unit pursues the NEAREST agent target. Hunt-driven e1 cover
+#     ~1 cell per 1.8 ticks, so the centre cluster at x=80 reaches
+#     the defender outpost at x=14 in ~120 ticks (well before tick
+#     200); the fog-corner Wave-2 squads at (90, 8) reach the base
+#     latitude in ~tick 400..1000 depending on path congestion —
+#     close to the "~tick 1500" spec target.
+#   - The defender screen is 3× 2tnk (medium tank, durable + dual-
+#     purpose anti-armor / anti-infantry cannon) + 2× e3 (rocket
+#     soldier, range 7, high anti-vehicle DPS). 5× e1 alone get
+#     overwhelmed by hunt-bot e1s at melee in the first 200 ticks
+#     (verified — see git history); the 2tnk durability is needed
+#     to absorb the opening rush, the e3 range is needed to bleed
+#     the trailing waves.
+#   - Pre-placed defenders are stance:3 (AttackAnything) so the
+#     "stall" baseline is genuinely passive (no agent input
+#     required for any auto-fire) and the FAILURE MODE on stall is
+#     a slow attrition bleed across the whole ~5400-tick budget,
+#     not an instant first-turn force-wipe.
+#   - Inert enemy `fact` marker far east (anti-DRAW): without a
+#     persistent enemy actor the engine auto-`done`s on enemy-elim
+#     once both waves die, before the win/fail evaluator runs
+#     (CLAUDE.md rule 5).
+#   - Tick budget: max_turns 90 with `enemy_unit_spotted` +
+#     `own_unit_destroyed` interrupts → in practice ~60..75 ticks
+#     per re-decision → reachable tick at max_turns ≈ 5400..6750.
+#     `after_ticks: 5401` fires inside this band so a non-winner is
+#     a real reachable timeout LOSS, never a draw.
+#   - `enemy_unit_spotted` interrupt → re-decide the instant Wave 2
+#     becomes visible (faster detection of the surprise axis).
+#   - `own_unit_destroyed` interrupt → re-decide when a defender
+#     falls.
+#   - The pre-placed 5 defenders + fact + proc (no tent / cash 0)
+#     means the model CANNOT train fresh infantry — the binding
+#     decision is RESERVING the starting force, not out-producing
+#     the threat.
+#   - hard tier: 2 agent spawn_point groups (NORTH base y=12 /
+#     SOUTH base y=28) so the corner the surprise wave comes FROM
+#     flips per seed; symmetric Wave-2 squads at BOTH corners
+#     always place (enemy actors ignore spawn_point — CLAUDE.md),
+#     so a single memorised "expect Wave 2 from NE" disposition
+#     cannot generalise.
+
+meta:
+  id: rob-unexpected-enemy-spawn
+  title: 'Surprise Second Wave — Reserve Forces for the Follow-On'
+  capability: reasoning
+  real_world_meaning: >
+    Adversarial robustness on the temporal axis: the obvious threat
+    (a 4-unit cluster near the agent's starting vision) is just the
+    OPENING; a SECOND wave was pre-placed at a fog corner and closes
+    in from an unexpected bearing by ~tick 1500 in a hunt pattern.
+    Winning requires destroying BOTH waves AND keeping the base AND
+    keeping enough force alive. The relevant capability is RESERVING
+    capacity for a follow-on attack — not committing every defender
+    to the visible battle and chasing routers far from the base.
+    "Battle finished, push deep" is the canonical military / SRE
+    failure mode this trains against.
+  robotics_analogue: >
+    Incident-after-incident triage: a fresh page arrives from a
+    different subsystem the moment the operator resolves the visible
+    incident; the operator must keep enough on-call capacity in
+    reserve to handle the follow-on instead of fully committing
+    every responder to the first symptom. Adversarial robustness:
+    treating the first observable threat as ground truth and
+    over-fitting the response to it leaves the system exposed when
+    the adversary stages a second engagement from a different angle.
+  benchmark_anchor:
+    - 'adversarial robustness: surprise wave handling'
+    - 'military follow-on wave doctrine'
+    - 'ops: incident-after-incident triage'
+    - 'SC2 second-attack timing'
+  author: openra-bench
+
+base_map: rush-hour-arena
+# Cash 0: the model CANNOT train fresh defenders (no tent and no
+# cash) — the binding decision is RESERVING the starting 5-unit
+# garrison for the surprise 2nd wave, not out-producing the threat.
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+  # Hunt bot — each enemy unit pursues the nearest agent target. The
+  # Wave-2 squad starts FAR from any agent unit at a fog corner; once
+  # it closes inside vision the agent's defender centroid pulls it in.
+  enemy:
+    faction: soviet
+    bot_type: hunt
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Re-decide the instant a fresh enemy unit becomes visible (the
+  # surprise-wave detection signal) or a defender is lost.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+  # Default actor list (overridden per-level). fact + proc at the
+  # west base, no tent / no cash — the agent cannot train replacements.
+  actors:
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: proc, owner: agent, position: [6,  20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # 2nd wave SMALLER (3 e1) than Wave 1 (4 e1). Kills bar 7 — the
+  # full kill-able enemy force on this level — so the policy MUST
+  # defeat BOTH waves (a forward chase that leaves the centre
+  # cluster to bombard the screen at long range cannot reach kills=7
+  # before the screen is wiped). max_turns 90 with interrupts
+  # → reachable tick ~5400..6750; `after_ticks: 5401` bites well
+  # inside this band so non-win is a reachable LOSS.
+  easy:
+    description: >
+      Adversarial robustness — surprise second wave (easy). An obvious
+      4-unit rifle cluster sits at the centre of the arena and closes
+      in on your base; a SECOND smaller wave (3 rifles) is pre-placed
+      at a fog corner and will close in from an unexpected bearing in
+      a hunt pattern by ~tick 1500. Your 5 pre-placed defenders
+      (3 medium tanks + 2 rocket soldiers) are your ENTIRE force —
+      you have no barracks and no cash so you cannot train
+      replacements. To WIN you must, before tick 5400, kill ≥7 enemy
+      units across BOTH waves AND still have your construction yard
+      (fact) standing AND still have ≥2 of your own units alive.
+      Stalling (passive defence — the garrison bleeds out under
+      attrition), chasing the visible cluster all the way to the
+      fog corner (Wave 1 walks past your base while your screen is
+      far afield), or busting the attrition floor (≤3 own units lost)
+      all LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [6,  20]}
+        # 5 pre-placed defenders (3× 2tnk + 2× e3), stance:3
+        # (AttackAnything — they auto-engage hostiles in weapon arc
+        # but do not actively pursue beyond their range). 5× e1 alone
+        # cannot survive the opening hunt-bot rush (verified —
+        # melee'd in ~200 ticks); the 2tnk durability + e3 reach are
+        # both needed for the screen to hold the line.
+        - {type: 2tnk, owner: agent, position: [14, 20], stance: 3}
+        - {type: 2tnk, owner: agent, position: [14, 18], stance: 3}
+        - {type: 2tnk, owner: agent, position: [14, 22], stance: 3}
+        - {type: e3,   owner: agent, position: [16, 19], stance: 3}
+        - {type: e3,   owner: agent, position: [16, 21], stance: 3}
+        # Wave 1 — obvious 4-unit cluster at the centre on the
+        # base latitude. Stance:3 + hunt bot drives them straight
+        # at the agent centroid; they arrive at the defender
+        # outpost by ~tick 150.
+        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 4}
+        # Wave 2 — SMALLER (3 e1) pre-placed at NE fog corner. Hunt
+        # bot closes in from y=8 (out of agent's initial vision row);
+        # arrives at base latitude ~tick 600..1000.
+        - {type: e1, owner: enemy, position: [90, 8], stance: 3, count: 3}
+        # Inert enemy `fact` marker far east (anti-DRAW): keeps the
+        # episode alive past the last killed hunter so the win/fail
+        # evaluator runs.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - units_killed_gte: 7
+        - has_building: fact
+        - own_units_gte: 2
+        - within_ticks: 5400
+    # Non-win must be a real LOSS, not a draw. `after_ticks: 5401`
+    # is reachable inside max_turns (in practice ~5400..6750 with
+    # interrupts); fact-loss and own-units-zero both fail explicitly.
+    # NOTE: WIN requires ≥2 alive (the reserve-capacity test); FAIL
+    # fires on full wipe (≥1 alive ensures the episode hasn't ended
+    # in total elimination).
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+        - not: {own_units_gte: 1}
+    max_turns: 90
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: 2nd wave EQUAL to first (4 e1) → kills bar 8
+  # (the canonical spec value). Same clock, same fail.
+  medium:
+    description: >
+      Adversarial robustness — surprise second wave (medium). An
+      obvious 4-unit rifle cluster sits at the centre and closes in
+      on your base; a SECOND wave OF EQUAL SIZE (4 rifles) is
+      pre-placed at a fog corner and closes in from an unexpected
+      bearing in a hunt pattern by ~tick 1500. Your 5 pre-placed
+      defenders (3 medium tanks + 2 rocket soldiers) are your ENTIRE
+      force — no barracks, no cash. To WIN you must, before tick
+      5400, kill ≥8 enemy units across BOTH waves AND still have
+      your construction yard (fact) standing AND still have ≥2 of
+      your own units alive. Stalling, chasing the visible cluster
+      all the way to the fog corner, or attrition-busting all LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [6,  20]}
+        - {type: 2tnk, owner: agent, position: [14, 20], stance: 3}
+        - {type: 2tnk, owner: agent, position: [14, 18], stance: 3}
+        - {type: 2tnk, owner: agent, position: [14, 22], stance: 3}
+        - {type: e3,   owner: agent, position: [16, 19], stance: 3}
+        - {type: e3,   owner: agent, position: [16, 21], stance: 3}
+        # Wave 1 — 4-unit cluster (canonical spec count).
+        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 4}
+        # Wave 2 — EQUAL size (4 e1) at NE fog corner.
+        - {type: e1, owner: enemy, position: [90, 8], stance: 3, count: 4}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - units_killed_gte: 8
+        - has_building: fact
+        - own_units_gte: 2
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+        - not: {own_units_gte: 1}
+    max_turns: 90
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: 2nd wave from TWO fog corners (NE + SE)
+  # so the surprise direction flips per seed via 2 agent spawn_point
+  # groups (NORTH base y=12 / SOUTH base y=28). Enemy actors ignore
+  # spawn_point (CLAUDE.md) — both Wave-2 squads always place. The
+  # AGENT spawn round-robins between NORTH and SOUTH, so the SAME-
+  # latitude surprise hits FIRST (closer geometry) and the OPPOSITE-
+  # latitude one is the late follow-on. The model cannot memorise a
+  # single fog-corner heading.
+  #
+  # Wave-2 squads are 4 e1 each (4 + 4 = 8 wave-2 units + 4 wave-1 =
+  # 12 total) and the kill bar is raised to 9 — both waves together
+  # produce more than enough kills if the defender screen survives,
+  # but a forward chase or attrition bust cannot reach 9 before the
+  # screen is wiped. Same clock; same tick-aligned fail.
+  hard:
+    description: >
+      Adversarial robustness — surprise second wave (hard). The
+      obvious 4-unit cluster sits at the centre; TWO Wave-2 squads
+      are pre-placed at OPPOSITE fog corners (NE and SE) and the
+      one at the SAME latitude as your base arrives FIRST while
+      the OPPOSITE corner one is the long-haul late follow-on.
+      Your base round-robins between a NORTH and a SOUTH latitude
+      so which corner the surprise wave arrives from cannot be
+      memorised. Your 5 pre-placed defenders (3 medium tanks + 2
+      rocket soldiers) are your ENTIRE force — no barracks, no
+      cash. To WIN you must, before tick 5400, kill ≥9 enemy units
+      across BOTH waves AND still have your construction yard
+      (fact) standing AND still have ≥2 of your own units alive.
+      Stalling, chasing one fog corner deep, or attrition bust all
+      LOSE.
+    overrides:
+      actors:
+        # ── spawn_point 0 — NORTH base (y=12). ─────────────────────
+        - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [6,  12], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 12], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 10], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 14], stance: 3, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [16, 11], stance: 3, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [16, 13], stance: 3, spawn_point: 0}
+        # ── spawn_point 1 — SOUTH base (y=28). ─────────────────────
+        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [6,  28], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 28], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 26], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 30], stance: 3, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [16, 27], stance: 3, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [16, 29], stance: 3, spawn_point: 1}
+        # Wave 1 — obvious 4-unit cluster at the centre on the mid
+        # latitude (y=20). The hunt bot drives them toward the
+        # nearest agent target so the cluster naturally engages
+        # whichever base is occupied, after a ~one-second detour
+        # toward the mid-latitude.
+        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 4}
+        # Wave 2 — TWO 4-unit squads pre-placed at BOTH fog corners
+        # (NE y=8 and SE y=32). Enemy actors ignore spawn_point so
+        # BOTH always place; whichever corner is at the same
+        # latitude as the agent reaches the base FIRST (the EARLY
+        # surprise), the OPPOSITE-latitude squad arrives LATER
+        # (the LATE follow-on).
+        - {type: e1, owner: enemy, position: [90, 8],  stance: 3, count: 4}
+        - {type: e1, owner: enemy, position: [90, 32], stance: 3, count: 4}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - units_killed_gte: 9
+        - has_building: fact
+        - own_units_gte: 2
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+        - not: {own_units_gte: 1}
+    max_turns: 90
