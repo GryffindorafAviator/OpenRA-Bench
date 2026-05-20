@@ -522,6 +522,23 @@ UPGRADED = [
     # the surprise wave arrives FROM flips per seed and a memorised
     # "expect Wave 2 from NE" disposition cannot generalise.
     "rob-unexpected-enemy-spawn",
+    # Wave-6 ROBUSTNESS / reasoning seed — PlanBench replanning under
+    # exogenous loss / SC2 rebuild-after-trade / military force-regen /
+    # ScienceWorld error recovery anchor. Agent commands 4 heavy tanks
+    # (3tnk) + a production base (fact + powr + weap + fix); a pre-
+    # placed enemy 4tnk strike force at the lane mouth lands its
+    # opening salvo on tick 0 (stance:3) and kills 1+ agent tanks;
+    # the agent must commission replacements from the war factory with
+    # the reserve cash AND continue the eastward assault to clear the
+    # e1 garrison. Hard tier defines two agent spawn_point groups
+    # (NORTH-flank scout (16,14) vs SOUTH-flank scout (16,28)) round-
+    # robined by seed; the central combat force + base buildings are
+    # SHARED across both groups (per CLAUDE.md, base buildings are
+    # duplicated under both spawn_points because ANY agent actor with
+    # a spawn_point causes agent actors WITHOUT a spawn_point to be
+    # filtered out), so the strike geometry is symmetric but a
+    # memorised opening cannot generalise.
+    "rob-unit-loss-recovery",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
