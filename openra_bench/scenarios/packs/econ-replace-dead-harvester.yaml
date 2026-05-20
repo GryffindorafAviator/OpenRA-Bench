@@ -1,0 +1,283 @@
+# econ-replace-dead-harvester — replan after exogenous worker death
+#
+# REASONING capability — mid-game REPLAN after an exogenous worker
+# loss. The agent starts with 3 working harvesters on 2 ore patches
+# (the income floor is already met) plus enough cash for EXACTLY one
+# replacement harvester (starting_cash 1100 = 1× harv). A small enemy
+# tank strike (a single 4tnk with the `raider` worker-priority bot)
+# kills ONE specific harvester early in the episode; the pre-placed
+# own 3tnk defenders neutralise the 4tnk after the harv kill lands.
+# The scenario is the "what now" decision: the agent must
+#   1. notice the harv died (units_summary shows only 2 harvs),
+#   2. `build('harv')` to replace the dead one with the indivisible
+#      reserve cash, AND
+#   3. re-issue `harvest` to every harvester (the freshly-built one
+#      AND the survivors whose harvest loop was interrupted by the
+#      kill event), so throughput recovers before the deadline.
+#
+# Real-world anchor: PlanBench replanning under exogenous loss
+# (gold-standard); ScienceWorld error recovery; SC2LE replace-killed-
+# workers reflex; disaster-recovery: worker replacement.
+#
+# ENGINE NOTES (verified 2026-05-19 with /tmp/probe3.py + scripted
+# /tmp/probe_econ_replace.py against installed openra_train wheel):
+#  - The `raider` ScriptedBehavior (openra-sim/src/scripted_bot.rs)
+#    targets the nearest agent harvester each tick (falls back to
+#    nearest combat actor only when all harvs are dead). Binding the
+#    attacker target to "harvester" cleanly defeats the auto-engage-
+#    on-nearest-foe failure mode that defeats `hunt` here (with any
+#    pre-placed defender closer to the attack group than the harvs,
+#    `hunt` re-targets to the defender and the harv never dies).
+#  - Engine 4tnk (dps 40, range 5, hp 600) vs harv (hp 600, unarmed)
+#    kills the harv in ~15 ticks. The own 3tnk pair (dps 30 each at
+#    range 5) is placed at distance 3-4 from the 4tnk's firing
+#    position, just inside sight (default 4 cells for non-buildings),
+#    so they engage on turn 1: 60 dps vs 4tnk hp 600 ⇒ 10 ticks to
+#    kill, BUT the 4tnk lands ~10 ticks of fire first ⇒ exactly the
+#    nearest harv (hp 600) dies, then the 4tnk is wiped.
+#  - Tick budget (CLAUDE.md): max_turns=60 ⇒ ceiling tick 5403 ⇒
+#    within_ticks 5400 and after_ticks 5401 both fit (deadline bites
+#    as a reachable LOSS, not a draw).
+
+meta:
+  id: econ-replace-dead-harvester
+  title: 'Replace Dead Harvester — Replan Economy After Exogenous Loss'
+  capability: reasoning
+  real_world_meaning: >
+    Reactive replan after an exogenous worker death. A productive
+    operation suddenly loses a value-generating unit to an outside
+    event; cash reserves are tuned for EXACTLY one replacement; the
+    deadline is real. The agent must notice the loss, commit the
+    reserve to rebuilding the dead worker (not to army units), and
+    redirect production back to the same revenue loop — fast enough
+    that the deadline still bites.
+  robotics_analogue: >
+    Pipeline / fleet operation where one autonomous collector is
+    destroyed mid-mission by an external hazard. The remaining
+    collectors stay in the loop; the supervisor has just enough
+    budget for a single replacement; redirecting the new unit back
+    to the same revenue source AND re-tasking the survivors (whose
+    loop was interrupted by the loss event) is the test. Spending
+    the reserve on defenders, or stalling, misses the throughput bar.
+  benchmark_anchor:
+    - "PlanBench replanning under exogenous loss"
+    - "ScienceWorld error recovery"
+    - "SC2 replace-killed-workers reflex"
+    - "disaster recovery: worker replacement"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+starting_cash: 1100  # EXACTLY one harv ⇒ indivisible replacement budget
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    # `raider` (Wave-2 scripted bot) — worker-priority: each unit
+    # specifically targets the nearest agent HARVESTER (falls back to
+    # nearest combat actor only when no harvs are alive). Picked over
+    # `hunt` because `hunt` retargets to whichever foe is geometrically
+    # closest each tick — with any pre-placed defender closer to the
+    # attack group than the harvs themselves, the attacker would
+    # auto-engage the defender instead of the harv, defeating the
+    # scenario. `raider` binds the target to the harvester category so
+    # the attacker commits to the harv kill until the defenders
+    # neutralise it.
+    bot_type: raider
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 7000
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # The bare skill: 1 harv dies, generous bar (1800 EV), need harv
+  # count back to 3 (the freshly built harv counts). Stall and over-
+  # build-army still LOSE; intended build-harv + redirect WINS.
+  easy:
+    description: >
+      You start with 3 harvesters working two ore patches (mines at
+      (22,18) and (22,22)). An enemy heavy tank attacks from the east
+      and will kill ONE of your harvesters early in the episode; your
+      pre-placed heavy tanks will finish it off. Reserve cash is
+      EXACTLY 1100 — enough for ONE replacement harvester. Win when
+      economy value (cash + stored resources) reaches 1800 AND you
+      have ≥3 harvesters alive AND your refinery is intact, before
+      tick 5400. Stalling, ignoring the dead harv, or spending the
+      reserve on army units all LOSE; the intended play is to
+      build('harv') to replace the dead one and re-issue `harvest` to
+      every harvester (the death event interrupts the surviving
+      harvs' harvest loop).
+    starting_cash: 1100
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: tent, owner: agent, position: [8, 22]}
+        # Three pre-placed harvs on the patch lane. The eastern-most
+        # (y=22) is the natural target for the raider 4tnk.
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: harv, owner: agent, position: [14, 22]}
+        # Two own 3tnk defenders flanking the patches at range 5.
+        # Engage the inbound 4tnk on Defend stance auto-engage.
+        # DPS race: 2× 3tnk (dps 60) vs 4tnk hp 600 = 10 ticks; 4tnk
+        # (dps 40) lands ~10 ticks of fire first ⇒ exactly the
+        # nearest harv (hp 600) dies, then the 4tnk is wiped.
+        - {type: '3tnk', owner: agent, position: [15, 21]}
+        - {type: '3tnk', owner: agent, position: [15, 23]}
+        # Two ore patches east of the proc.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # One enemy 4tnk staged adjacent to the eastern-most harv
+        # (range 5, harv at (14,22) ⇒ 4tnk at (18,22) is in range and
+        # the nearest agent harvester). The `raider` bot binds the
+        # target to the harvester so the 4tnk commits to the harv kill
+        # until the 3tnk pair neutralises it.
+        - {type: '4tnk', owner: enemy, position: [18, 22]}
+        # Persistent enemy marker far east so the engine doesn't auto-
+        # `done` when the 4tnk is wiped (CLAUDE.md auto-done footgun
+        # would collapse a clean run to DRAW before the economy bar).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 1800}
+        - {unit_type_count_gte: {type: harv, n: 3}}
+        - {has_building: proc}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: proc}}
+    max_turns: 60
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER BAR (2500 EV) so a replace-only-
+  # no-redirect policy (build harv but forget to re-issue harvest)
+  # LOSES. Same single-harv-dies attack profile as easy.
+  medium:
+    description: >
+      Same setup as easy — three harvesters on two ore patches; an
+      enemy heavy tank attacks from the east and kills ONE harvester
+      early. Reserve cash is EXACTLY 1100 (one harv). Win when economy
+      value reaches 2500 AND you have ≥3 harvesters alive AND your
+      refinery is intact, before tick 5400. Building the replacement
+      but failing to re-issue `harvest` to every harvester (the death
+      event interrupts the surviving harvs' harvest loop) leaves
+      throughput too low to clear the tighter bar in time. Over-
+      building army units instead of replacing the worker also misses
+      the bar; stalling is the strict floor.
+    starting_cash: 1100
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: tent, owner: agent, position: [8, 22]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: harv, owner: agent, position: [14, 22]}
+        - {type: '3tnk', owner: agent, position: [15, 21]}
+        - {type: '3tnk', owner: agent, position: [15, 23]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        - {type: '4tnk', owner: enemy, position: [18, 22]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 2500}
+        - {unit_type_count_gte: {type: harv, n: 3}}
+        - {has_building: proc}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: proc}}
+    max_turns: 60
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. Higher bar (3500 EV) with starting_cash funding TWO
+  #      replacement harvs (2200) — because TWO harvs die in staggered
+  #      raider waves (a first 4tnk near the patches, then a second
+  #      4tnk staged further east that arrives after the defenders
+  #      have wiped the first).
+  #   2. TWO seed-driven AGENT spawn_point groups (north y=14 vs
+  #      south y=22) so a memorised opening cannot generalise — the
+  #      harv positions, defender positions, and patch geometry are
+  #      symmetric but flipped per seed.
+  # Spawn_point filter applies only to AGENT actors (oramap.rs) —
+  # enemy actors are placed on every seed; the agent base orientation
+  # flips.
+  hard:
+    description: >
+      Tougher version: TWO harvesters will die in staggered raider
+      waves (a first enemy 4tnk near the patches, then a second 4tnk
+      staged further east that arrives after the defenders have wiped
+      the first). Your reserve funds EXACTLY two replacement
+      harvesters (2200 cr). Your base orientation varies by seed
+      (north-flank or south-flank) — both halves cover the same patch
+      column. Win when economy value reaches 3500 AND you have ≥3
+      harvesters alive AND your refinery is intact, before tick 5400.
+      You must replace BOTH dead harvs and re-issue `harvest` after
+      each death (the death event interrupts the surviving harvs'
+      harvest loop). Stalling, replacing only one, or spending the
+      reserve on army units all LOSE.
+    starting_cash: 2200
+    overrides:
+      actors:
+        # Spawn 0 — NORTH base.
+        - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [8, 18], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 18], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [15, 13], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [15, 19], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 18], spawn_point: 0}
+        # Spawn 1 — SOUTH base.
+        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [8, 22], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 22], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [15, 21], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [15, 27], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 22], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 26], spawn_point: 1}
+        # Two enemy 4tnk raiders staged at the patch column. The first
+        # at (18, 16) covers the north spawn; the second at (18, 24)
+        # covers the south spawn. Each is in range of exactly one of
+        # the two spawn groups' harvs; the OTHER 4tnk is too far to
+        # reach a harv within the deadline, so each seed faces exactly
+        # one effective raider against the active base orientation.
+        # (Wait — both 4tnks land on every seed since enemy actors
+        # aren't spawn-filtered. Re-tuned: stage the second 4tnk far
+        # east at (60,20) so it only arrives after the first dies and
+        # the defenders re-engage.)
+        - {type: '4tnk', owner: enemy, position: [18, 16]}
+        - {type: '4tnk', owner: enemy, position: [18, 24]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 3500}
+        - {unit_type_count_gte: {type: harv, n: 3}}
+        - {has_building: proc}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: proc}}
+    max_turns: 60
