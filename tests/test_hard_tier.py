@@ -61,6 +61,9 @@ UPGRADED = [
     # south-flank (y=18..26) staging, both covering the same patch
     # column against three raider vectors (north/central/south).
     "mid-economy-under-fire",
+    # Other mcv-deploy-* siblings (defensible-site, near-resource,
+    # second-base, third-base, relocate-under-pressure) register
+    # themselves via their own Wave-3 commits as they land.
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
@@ -107,6 +110,8 @@ NOT_APPLICABLE = {
     "risk-blockade-bypass": "hard adds a tempo gate (after_ticks) and "
     "shrinks the attrition cap; spawn variation would muddy the "
     "corridor-vs-detour route-choice signal.",
+    "proc-ordered-action-strict": "non-spatial ordered build task; "
+    "spawn variation would compete with the order-enforcement signal",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss

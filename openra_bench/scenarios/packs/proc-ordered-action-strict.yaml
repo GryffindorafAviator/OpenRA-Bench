@@ -1,0 +1,218 @@
+meta:
+  id: proc-ordered-action-strict
+  title: 'Strict Ordered Procedure — Place the Buildings in the Exact Mandated Sequence'
+  capability: action
+  real_world_meaning: >
+    Execute a procedure whose steps must run in a STRICT order: doing
+    step 3 before step 2 invalidates the procedure, never recovers, and
+    fails the run. The bench analogue of an aviation pre-flight
+    checklist (skipping a step makes the next-step check meaningless)
+    or a database migration where index-create-before-data-load is
+    mandatory. The decision is literal ORDER compliance — not what or
+    where, but WHEN relative to the other steps. A model that
+    "eventually" placed every step in any order STILL fails: the
+    procedure is graded on order, not on the final state.
+  robotics_analogue: >
+    An assembly-line robot following a strict sequence (place rivet 1,
+    then bracket, then rivet 2) where reversing a step destroys the
+    earlier work — out-of-order assembly never recovers and fails
+    inspection.
+  benchmark_anchor:
+    - PlanBench strict-ordering
+    - IFBench step-order compliance
+    - 'PERT/CPM precedence'
+    - aviation pre-flight checklist
+    - database migration ordered DDL
+  author: autonomous-loop
+
+# ENGINE / DESIGN NOTES
+# ---------------------
+# Strict ORDER of building PLACEMENTS, enforced by the `then:[A,B,...]`
+# composite (Wave 2). Each clause is a `building_in_region` at one of
+# K known coords; the `then` latch only advances when the current
+# clause becomes true, monotonically.
+#
+# The `then` operator alone is not enough: its semantics are greedy
+# late-credit (see `tests/test_then_composite.py::
+# test_then_late_a_then_b_credits_both_clauses`), so "place C then A
+# then B" would late-credit C once A and B caught up — that would let
+# wrong-order WIN. We close that hole with a fail clause:
+#
+#     "if a later-region has a building while an earlier region does
+#      NOT yet have a building, FAIL immediately"
+#
+# `eval_core.run_level` breaks the moment outcome != "draw", so the
+# wrong-order placement is a real reachable LOSS the turn it happens
+# and is unrecoverable. The intended ordered policy never triggers it.
+#
+# The brute policy "queue every build, dump all `place_building` calls
+# every turn" is also blocked: a single building queue produces ONE
+# pbox at a time, so the agent CHOOSES which coord receives the next
+# completed pbox — and a wrong choice trips the fail clause.
+#
+# Pre-placed agent fact+tent+powr (west) so pbox is buildable from
+# t=0 (no tech-tree fight; the test is order discipline, not tech
+# planning). Generous `starting_cash` so funding is not the limit.
+# Unarmed enemy `fact` marker far east keeps the episode alive past
+# any enemy-elimination auto-`done` so the win/fail evaluator runs.
+#
+# Tick / turn alignment: engine advances ~90 ticks per decision turn
+# ⇒ reachable tick at max_turns = 93 + 90·(max_turns-1). Every
+# `within_ticks` / `after_ticks` below is strictly under that
+# threshold so the deadline genuinely bites.
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - build
+    - place_building
+    - observe
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    # Agent base (west). fact + tent + powr means `pbox` is buildable
+    # immediately — the test is ORDER, not the tech tree.
+    - {type: fact, owner: agent, position: [10, 18]}
+    - {type: tent, owner: agent, position: [14, 18]}
+    - {type: powr, owner: agent, position: [10, 22]}
+    # Unarmed persistence marker (no agent attack tools, so it cannot
+    # be killed; keeps the episode alive past any enemy auto-done).
+    - {type: fact, owner: enemy, position: [115, 20]}
+
+levels:
+  # ── EASY ── the bare skill. TWO ordered placements: pbox at A
+  # (≈30,20) THEN at B (≈90,20). Generous clock and cash. Idle loses
+  # on the clock; placing B before A trips the out-of-order fail clause
+  # immediately. max_turns 30 → reachable tick 93+90·29 = 2703.
+  easy:
+    description: >
+      Place pillboxes (pbox) in this EXACT order — order is mandatory:
+        Step 1: pbox at A ≈ (30,20)
+        Step 2: pbox at B ≈ (90,20)
+      Building Step 2 first (a pillbox at B while none exists at A) is
+      an immediate LOSS — the procedure is unrecoverable. Idling loses
+      on the deadline. Only the strict A → B sequence wins.
+    starting_cash: 3000
+    win_condition:
+      all_of:
+        - then:
+            id: aviation-preflight-E
+            clauses:
+              - {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}
+              - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+        - {within_ticks: 2600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2601}
+        - {not: {has_building: fact}}
+        # Out-of-order trap: a building at B while none at A ⇒ LOSS.
+        - all_of:
+            - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}}
+    max_turns: 30
+
+  # ── MEDIUM ── +1 ordered step (3 placements) + tight clock. Same
+  # ordered-procedure mechanics; the tighter deadline makes brute /
+  # restart-and-retry impossible. max_turns 38 → reachable tick
+  # 93+90·37 = 3423.
+  medium:
+    description: >
+      Place pillboxes (pbox) in this EXACT order — order is mandatory:
+        Step 1: pbox at A ≈ (30,20)
+        Step 2: pbox at B ≈ (60,20)
+        Step 3: pbox at C ≈ (90,20)
+      Placing a LATER step before its predecessor (e.g. a pillbox at
+      B or C while none yet exists at A; or at C while none at B) is
+      an immediate LOSS — the procedure is unrecoverable. Idling
+      loses on the deadline. Only the strict A → B → C sequence wins.
+    starting_cash: 3000
+    win_condition:
+      all_of:
+        - then:
+            id: aviation-preflight-M
+            clauses:
+              - {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}
+              - {building_in_region: {x: 60, y: 20, radius: 5, count: 1}}
+              - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+        - {within_ticks: 3300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3301}
+        - {not: {has_building: fact}}
+        # Out-of-order traps. Any later-step building present while an
+        # earlier-step region is still empty ⇒ immediate LOSS.
+        - all_of:
+            - {building_in_region: {x: 60, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}}
+        - all_of:
+            - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}}
+        - all_of:
+            - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 60, y: 20, radius: 5, count: 1}}}
+    max_turns: 38
+
+  # ── HARD ── +1 ordered step (4 placements) + tight clock + a
+  # building-total ceiling so the agent cannot over-build to recover
+  # from a misplacement. max_turns 48 → reachable tick 93+90·47 = 4323.
+  # Ceiling: pre-placed fact+tent+powr = 3 ; plus the 4 ordered
+  # pillboxes = 7. building_total_gte:8 ⇒ LOSS (over-building =
+  # procedure violation, no spare pieces to brute-force around an
+  # earlier mistake).
+  hard:
+    description: >
+      Place pillboxes (pbox) in this EXACT order — order is mandatory:
+        Step 1: pbox at A ≈ (30,20)
+        Step 2: pbox at B ≈ (50,20)
+        Step 3: pbox at C ≈ (70,20)
+        Step 4: pbox at D ≈ (90,20)
+      Placing any later step before its predecessor is an immediate
+      LOSS — the procedure is unrecoverable. You may not over-build
+      (total buildings > 7 ⇒ LOSS — no spare pieces). Idling loses on
+      the deadline. Only the strict A → B → C → D sequence wins.
+    starting_cash: 4000
+    win_condition:
+      all_of:
+        - then:
+            id: aviation-preflight-H
+            clauses:
+              - {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}
+              - {building_in_region: {x: 50, y: 20, radius: 5, count: 1}}
+              - {building_in_region: {x: 70, y: 20, radius: 5, count: 1}}
+              - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+        - {within_ticks: 4200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4201}
+        - {not: {has_building: fact}}
+        # Over-building ceiling: 3 preplaced + 4 ordered pboxes = 7.
+        # An 8th building means the agent tried to brute-recover from
+        # a mistake → LOSS.
+        - {building_total_gte: 8}
+        # Out-of-order traps (each later step requires every earlier
+        # step to be present first).
+        - all_of:
+            - {building_in_region: {x: 50, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}}
+        - all_of:
+            - {building_in_region: {x: 70, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}}
+        - all_of:
+            - {building_in_region: {x: 70, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 50, y: 20, radius: 5, count: 1}}}
+        - all_of:
+            - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 30, y: 20, radius: 5, count: 1}}}
+        - all_of:
+            - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 50, y: 20, radius: 5, count: 1}}}
+        - all_of:
+            - {building_in_region: {x: 90, y: 20, radius: 5, count: 1}}
+            - {not: {building_in_region: {x: 70, y: 20, radius: 5, count: 1}}}
+    max_turns: 48
