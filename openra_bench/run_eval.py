@@ -538,7 +538,7 @@ def main(argv: list[str]) -> int:
         help="comma seeds run as a held-out split; reports the "
         "generalization gap (anti-memorization metric)",
     )
-    ap.add_argument("--provider", help="openrouter|vllm|openai (omit = scripted baseline)")
+    ap.add_argument("--provider", help="openrouter|vllm|openai|together (omit = scripted baseline)")
     ap.add_argument("--model", default="anthropic/claude-3.5-sonnet")
     ap.add_argument("--base-url")
     ap.add_argument("--no-vision", action="store_true")

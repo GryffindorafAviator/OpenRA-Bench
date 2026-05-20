@@ -22,7 +22,7 @@ from typing import Any, Literal
 
 import httpx
 
-ProviderName = Literal["openai", "vllm", "openrouter", "bedrock"]
+ProviderName = Literal["openai", "vllm", "openrouter", "bedrock", "together"]
 
 # Convenience presets; base_url/api_key_env still overridable in config.
 _PRESETS: dict[str, dict[str, str]] = {
@@ -37,6 +37,15 @@ _PRESETS: dict[str, dict[str, str]] = {
     "openai": {
         "base_url": "https://api.openai.com/v1",
         "api_key_env": "OPENAI_API_KEY",
+    },
+    # together.ai — OpenAI-compatible API. Models are namespaced like
+    # `Qwen/Qwen3.6-Plus`, `meta-llama/Llama-3.3-70B-Instruct-Turbo`,
+    # etc. Native tool-calling supported on most chat models; check
+    # https://docs.together.ai/docs/function-calling for per-model
+    # gating before enabling tool use on a new model.
+    "together": {
+        "base_url": "https://api.together.xyz/v1",
+        "api_key_env": "TOGETHER_API_KEY",
     },
 }
 
