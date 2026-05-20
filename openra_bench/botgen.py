@@ -20,6 +20,10 @@ Behaviours (all derive targets from live world state — no map coords):
   guard   — leashed defender: holds its post; lunges at a
             foe only within an aggro radius and snaps back
             past a leash (a decoy can bait it off post).
+  raider  — worker-priority harasser: each unit attacks the
+            nearest agent harvester; falls back to nearest
+            combat actor only when no harvesters are alive
+            (the faithful SC2-style worker harass).
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ from __future__ import annotations
 from typing import Any
 
 BEHAVIORS: frozenset[str] = frozenset(
-    {"hunt", "rusher", "patrol", "turtle", "guard"}
+    {"hunt", "rusher", "patrol", "turtle", "guard", "raider"}
 )
 
 

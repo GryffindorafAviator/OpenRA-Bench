@@ -15,7 +15,9 @@ from openra_bench.scenarios.schema import ScenarioPack
 
 
 def test_behaviour_catalogue():
-    assert BEHAVIORS == {"hunt", "rusher", "patrol", "turtle", "guard"}
+    assert BEHAVIORS == {
+        "hunt", "rusher", "patrol", "turtle", "guard", "raider",
+    }
 
 
 def test_read_enemy_bot_field_and_alias():
