@@ -1,0 +1,298 @@
+# EXPANSION-BALANCED-2-BASE-DEFENDED — Group B (Mid-Late: BALANCED
+# 2-base expansion, growth balanced with retention/defence).
+#
+# The BALANCED variant of the expansion triple. The agent owns a
+# starter base #1 in the NW (fact + tent + powr pre-placed) and a
+# SPARE MCV at map centre. They must:
+#   1) drive the MCV to the EASTERN target region (NE near (130,15))
+#      and deploy it ⇒ creates a 2nd `fact`,
+#   2) build a `pbox` defence at EACH base (1+ per base),
+#   3) train ≥3 infantry defenders (`e1`).
+#
+# Two light enemy `patrol` groups oscillate near BOTH the NW starter
+# base and the NE candidate region. They will not solo-rush either
+# fact in budget on their own but DO bleed an undefended base:
+#   - turtle-1-base-fortified  → satisfies pbox/units but never
+#     deploys ⇒ `building_count_gte:fact,2` fails ⇒ LOSS.
+#   - greedy-2-facts-no-defence → 2 facts visible briefly but the
+#     patrols chip both undefended bases; meanwhile no pbox is built
+#     ⇒ `building_count_gte:pbox,n:2` fails ⇒ LOSS.
+#   - intended-2-facts-with-defence → deploy + pbox at EACH base +
+#     train 3 e1 ⇒ all clauses satisfied ⇒ WIN.
+#   - stall                    → no fact #2, no pbox, no units ⇒
+#     LOSS on the deadline (no-draw guarantee via persistent enemy
+#     `fact` marker, see CLAUDE.md auto-done footgun).
+#
+# Benchmark / real-world anchor:
+#   - SC2 standard 2-base macro / safe-expand timing — the canonical
+#     pro opening expands to the natural AND defends BOTH bases.
+#   - Sustainable growth: balance new-market entry with retention
+#     investment (defend existing market while opening another).
+#   - Product expansion-with-quality: open a new market while
+#     keeping the SLA on the original.
+#   - Balanced macro: growth + defence (the standard mirror of the
+#     AGGRO triple's growth-supremacy and the TURTLE triple's
+#     defence-supremacy).
+#
+# Wave-2 MCV deploy contract: `Command.deploy([mcv_id])` removes the
+# MCV at (mx, my) and creates an agent `fact` at (mx-1, my-1). The
+# target region NE is centred at (130, 15) radius 8; an MCV driven
+# to (131, 16) deploys into a fact at (130, 15) — dead-centre of the
+# region.
+#
+# Engine tick/turn alignment (CLAUDE.md, ~90 ticks/turn):
+#   within_ticks 5400 → reachable tick at 62 turns = 93 + 90·61 = 5583
+#   ≥ 5401 ✓ (the deadline bites; a stall emits a real LOSS not DRAW).
+#
+# Engine footguns applied:
+#   - `pbox` (cost 600) has `tent` as its prereq (per game knowledge
+#     table); base #1 is pre-placed with fact+tent+powr so the pbox
+#     queue is open from t=0 (the test is balance of WHERE / HOW
+#     MANY, not the tech tree).
+#   - `place_building` does NOT enforce build-adjacency (CLAUDE.md),
+#     so pbox at the FAR (NE) base is buildable from a single
+#     production queue at base #1 — no need to re-tech the new base.
+#   - Persistent unarmed enemy `fact` MARKER at the far SE edge
+#     prevents the all-enemies-eliminated auto-`done` so non-winners
+#     LOSE on the deadline (never DRAW). The patrols are armed so the
+#     marker is the only auto-done blocker; if both patrols are wiped
+#     the marker keeps the episode alive.
+#   - Agent starts WITH buildings (fact + tent + powr) so the
+#     "unit-less start" footgun (CLAUDE.md `not own_units_gte:1`
+#     mis-fire on turn 1) is irrelevant — fail uses `not has_building:
+#     fact` instead.
+#   - Hard tier: 2 agent spawn_point groups rotate the spare MCV's
+#     starting column between NW-leaning (60, 20) and SW-leaning
+#     (60, 40), and symmetric enemy placement (enemies don't honour
+#     spawn_point — CLAUDE.md). Both NE and SE target regions are
+#     valid on hard so each seed has a clear nearest expansion.
+
+meta:
+  id: expansion-balanced-2-base-defended
+  title: 'Expansion BALANCED — 2 Bases, Defend BOTH (Growth + Retention)'
+  capability: reasoning
+  real_world_meaning: >
+    BALANCED 2-base expansion: the agent must EXPAND to a second
+    geographic site AND retain the original — the classic
+    growth-with-quality decision. A greedy expander who opens both
+    sites but defends neither loses the original to attrition; a
+    turtle who fortifies the original site but never expands fails
+    the multi-site bar. Only a play that splits investment between
+    new-market entry AND retention infrastructure passes both halves
+    of the brief. The discrimination is whether the model RECOGNISES
+    that the standard balanced macro (expand AND defend) is the bar,
+    not the AGGRO blitzscale (expand only) nor the TURTLE single-site
+    fortress (defend only).
+  robotics_analogue: >
+    Autonomous fleet establishing a second forward operating base
+    while keeping a defensive ring around the original: the spare
+    base-builder unit drives to the briefed expansion zone AND the
+    fleet allocates a defensive turret + a small infantry escort at
+    BOTH the new AND the existing base. Skipping either side of the
+    investment loses one site to attrition / a probing intruder
+    before the multi-site network goes live.
+  benchmark_anchor:
+    - "SC2 standard 2-base macro / safe-expand timing"
+    - "sustainable growth: expand AND defend"
+    - "product expansion-with-quality: new market + retention"
+    - "balanced macro: growth+defense"
+  author: "openra-bench"
+
+# Wide enough to put base #1 in the NW (x=15), the spare MCV at
+# centre (x=80), and an eastern target region (x=130) with room for
+# defensive structures around both poles. 160x60 cordon-4 = playable
+# x∈[4, 156], y∈[4, 56].
+base_map: rush-hour-arena
+
+# Funds the balanced commit: tent is pre-placed (no $400 re-tech),
+# 2 pbox ($1200) + 3 e1 ($300) fits. Easy needs less; hard's
+# stronger garrison gets a per-level cash bump.
+starting_cash: 1500
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0, bot_type: patrol}
+  # `deploy` for the MCV; `build` + `place_building` for the
+  # pbox + e1; `move_units` to drive the MCV east; `attack_unit`
+  # / `stop` for combat micro if the model wants it. `observe`
+  # always available.
+  tools: [observe, deploy, build, place_building, move_units, attack_unit, stop]
+  planning: true
+  termination: {max_ticks: 8500}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bar dialed down: 1 pbox total (NOT 1-per-base) + 2 defenders +
+  # a single light patrol near the candidate region. The medium clock
+  # but a shorter total-pbox count, so a slow-and-steady plan still
+  # clears the bar. max_turns 65 → reachable tick 93 + 90·64 = 5853 ≥
+  # 5401 ✓
+  easy:
+    description: >
+      You hold a starter base in the NORTHWEST: a Construction Yard
+      (fact) at (15,20) with a barracks (tent) and power plant
+      (powr). A spare Construction Vehicle (MCV) is parked at the map
+      centre near (80,30). Your task is a BALANCED 2-base expansion:
+      (1) drive the MCV to the EASTERN target region (centred at
+      (130,15), radius 8) and DEPLOY it there to create a second
+      Construction Yard, AND (2) build at least 1 pillbox (pbox) for
+      base defence somewhere across your bases, AND (3) train at least
+      3 infantry (e1). A single light enemy patrol oscillates near
+      the eastern candidate. WIN when you own ≥2 facts, ≥1 pbox, and
+      ≥3 own units, before tick 5400. Stalling never deploys; a
+      greedy expand-only / a turtle defend-only both fail at least
+      one clause.
+    starting_cash: 1500
+    overrides:
+      base_map: {generator: arena, width: 160, height: 60, cordon: 4}
+      actors:
+        # Pre-placed base #1 (NW) — fact + tent + powr so the pbox
+        # build queue is open from t=0.
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: tent, owner: agent, position: [15, 23]}
+        - {type: powr, owner: agent, position: [18, 20]}
+        # Spare MCV at map centre. Drive east + 1 cell up to (131,16),
+        # deploy ⇒ fact at (130,15) — dead-centre of NE region.
+        - {type: mcv, owner: agent, position: [80, 30]}
+        # Light patrol near the NE candidate region (stance:2 =
+        # return-fire-only; the `patrol` bot oscillates around its
+        # spawn cell). Light enough that a single pbox + a couple of
+        # defenders shrugs it off.
+        - {type: e1, owner: enemy, position: [130, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [132, 20], stance: 2}
+        # Persistent unarmed enemy MARKER at the far SE edge — keeps
+        # the episode alive past any patrol-elimination auto-`done`
+        # so a non-winner LOSES on the deadline (CLAUDE.md auto-done
+        # footgun).
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - building_in_region: {x: 130, y: 15, radius: 8, type: fact, count: 1}
+        - building_count_gte: {type: pbox, n: 1}
+        - own_units_gte: 3
+        - within_ticks: 5400
+    # 5401 ≤ 93 + 90·64 = 5853 ✓
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+    max_turns: 65
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # The BALANCED challenge proper: 2 pbox + 3 defenders + a patrol at
+  # EACH base (NW + NE). The pbox count makes "1+ per base" the
+  # natural way to meet the bar (under attrition pressure from both
+  # patrols simultaneously; a 2-pbox cluster at NW lets the NE base
+  # die to the NE patrol → fact destroyed → fact count fails).
+  # max_turns 60 → reachable tick 93 + 90·59 = 5403 ≥ 5401 ✓
+  medium:
+    description: >
+      BALANCED expansion medium: same NW starter base (fact + tent +
+      powr at (15,20)) and a spare MCV at map centre (~(80,30)).
+      Drive the MCV east to the target region (centred at (130,15),
+      radius 8) and DEPLOY it; build ≥2 pillboxes (pbox) — the
+      natural placement is one at EACH base since light enemy
+      patrols oscillate near BOTH the NW starter AND the NE
+      candidate, chipping any undefended fact; and train ≥3 infantry
+      (e1). WIN when you own ≥2 facts, ≥2 pboxes, and ≥3 own units,
+      before tick 5400. A greedy expand-and-don't-defend loses a
+      base to attrition; a turtle that fortifies NW only never gets
+      the 2nd fact.
+    starting_cash: 1500
+    overrides:
+      base_map: {generator: arena, width: 160, height: 60, cordon: 4}
+      actors:
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: tent, owner: agent, position: [15, 23]}
+        - {type: powr, owner: agent, position: [18, 20]}
+        - {type: mcv, owner: agent, position: [80, 30]}
+        # Patrol near the NW starter base — chips the existing fact
+        # if undefended (forces a pbox at NW, not just at NE).
+        - {type: e1, owner: enemy, position: [30, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [30, 22], stance: 2}
+        # Patrol near the NE candidate region.
+        - {type: e1, owner: enemy, position: [130, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [132, 20], stance: 2}
+        # Persistent unarmed enemy MARKER at the far SE edge.
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - building_in_region: {x: 130, y: 15, radius: 8, type: fact, count: 1}
+        - building_count_gte: {type: pbox, n: 2}
+        - own_units_gte: 3
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: TWO agent spawn_point groups rotate the spare MCV
+  # between a NW-leaning column ((80, 20), spawn 0) and an SW-leaning
+  # column ((80, 40), spawn 1), with TWO candidate target regions
+  # (NE at (130, 15) and SE at (130, 45)). The agent must pick the
+  # NEAREST candidate region per seed. Pbox bar bumps to 3 (1+ at NW,
+  # 1+ at the chosen new base, plus 1 more anywhere) under doubled-
+  # patrol attrition; defender count to 4. Higher cash to fund the
+  # heavier garrison; tighter clock to forbid a leisurely round trip.
+  # max_turns 60 → reachable tick 5403 ≥ 4801 ✓
+  hard:
+    description: >
+      BALANCED expansion hard: same NW starter base; the spare MCV's
+      starting column varies by seed (NW-leaning vs SW-leaning).
+      There are TWO candidate eastern regions — NE near (130,15) and
+      SE near (130,45); drive the MCV to the NEAREST one and deploy.
+      Doubled patrols (2x2 e1) loiter near BOTH the NW starter AND
+      both candidate regions. WIN when you own ≥2 facts, the second
+      fact sits in EITHER candidate region, ≥3 pboxes, and ≥4 own
+      units, before tick 4800. A greedy unprotected expand loses a
+      base; a turtle never expands; a leisurely diagonal misses
+      the clock.
+    starting_cash: 2500
+    objective_coords: relative
+    overrides:
+      base_map: {generator: arena, width: 160, height: 60, cordon: 4}
+      actors:
+        # Base #1 is fixed for both seed groups — duplicate every
+        # garrison actor across spawn_point 0 AND 1 at the SAME
+        # coords (CLAUDE.md spawn-filter rule: once any AGENT actor
+        # declares spawn_point, every agent actor without one is
+        # filtered out).
+        - {type: fact, owner: agent, position: [15, 20], spawn_point: 0}
+        - {type: tent, owner: agent, position: [15, 23], spawn_point: 0}
+        - {type: powr, owner: agent, position: [18, 20], spawn_point: 0}
+        - {type: fact, owner: agent, position: [15, 20], spawn_point: 1}
+        - {type: tent, owner: agent, position: [15, 23], spawn_point: 1}
+        - {type: powr, owner: agent, position: [18, 20], spawn_point: 1}
+        # MCV starting column varies by seed: NW-leaning (towards
+        # NE candidate) vs SW-leaning (towards SE candidate).
+        - {type: mcv, owner: agent, position: [80, 20], spawn_point: 0}
+        - {type: mcv, owner: agent, position: [80, 40], spawn_point: 1}
+        # Doubled patrol at the NW starter base.
+        - {type: e1, owner: enemy, position: [30, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [30, 22], stance: 2}
+        # Doubled patrols at BOTH candidate regions (NE + SE).
+        - {type: e1, owner: enemy, position: [130, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [132, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [130, 40], stance: 2}
+        - {type: e1, owner: enemy, position: [132, 40], stance: 2}
+        # Persistent unarmed enemy MARKER at the far SE corner.
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - any_of:
+            - building_in_region: {x: 130, y: 15, radius: 8, type: fact, count: 1}
+            - building_in_region: {x: 130, y: 45, radius: 8, type: fact, count: 1}
+        - building_count_gte: {type: pbox, n: 3}
+        - own_units_gte: 4
+        - within_ticks: 4800
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - not: {has_building: fact}
+    max_turns: 60

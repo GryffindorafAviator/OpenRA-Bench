@@ -128,6 +128,14 @@ UPGRADED = [
     # proc geometry differs per seed; a memorised opening cannot
     # generalise.
     "tech-balanced-econ-then-tech",
+    # Wave-4 BALANCED node of the expansion triple (SC2 standard
+    # 2-base macro / sustainable-growth anchor). NW starter base +
+    # spare MCV at centre; balanced play is deploy + pbox at EACH
+    # base + 3 defenders. Hard rotates the spare MCV's starting
+    # column between NW-leaning (drives to NE candidate) and SW-
+    # leaning (drives to SE candidate) so the per-seed nearest-
+    # target assignment flips.
+    "expansion-balanced-2-base-defended",
     # Wave-4 salvaged-from-worktree packs: agents finished authoring
     # and validating but ran out of usage budget mid-push; rescued
     # YAML+tests from their worktree branches and committed from the
