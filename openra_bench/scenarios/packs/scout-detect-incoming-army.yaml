@@ -1,0 +1,420 @@
+# scout-detect-incoming-army.yaml
+#
+# PERCEPTION capability — Wave-6 early-warning intrusion-detection
+# pack. The classical scout-for-attack drill: an enemy army is
+# inbound from ONE OF TWO DIRECTIONS (NORTH or SOUTH on medium,
+# expanded to two simultaneous bands on hard), and the agent must
+# (a) push scouts out into the unknown to DETECT the approach
+# direction, then (b) re-position the defenders to INTERCEPT the
+# army before it reaches the base. Pure-defence-without-scouting
+# loses on the discovery bar; pure-scouting-without-positioning
+# loses on the kill bar (the army arrives at the base and overruns
+# the un-positioned defenders); stalling loses on the clock.
+#
+# This is the perception-cell sibling of the reasoning pack
+# def-pre-position-mobile-reserve (which TELLS the agent both
+# flanks are active and tests where to commit the reserve). The
+# distinct skill here is the PERCEPTION step: actively READING
+# the unknown by pushing sensors out to LOCALISE the threat axis
+# before committing the defenders.
+#
+# Real-world / benchmark anchors:
+#   - SC2 early-warn scout / scout-for-attack micro: the SC2 idiom
+#     of sacrificing a worker / overlord at a likely approach lane
+#     to detect an incoming army before it hits the base.
+#   - NORAD-style early-warning systems: a sparse network of
+#     sensors at the perimeter detects an inbound threat in time
+#     for the defending force to be vectored to the intercept.
+#   - Intrusion-detection systems (IDS): the perimeter sensor
+#     LOCALISES the breach lane; the response is targeted to that
+#     lane, not the whole perimeter.
+#   - Military reconnaissance-in-force / counter-recon screen:
+#     scouts pushed forward of the main body to detect the enemy
+#     axis of advance so the main body can be deployed on the
+#     correct lane.
+#
+# DISCRIMINATIONS (the bar — every lazy / blind / partial play
+# LOSES, only the intended scout-then-intercept play WINS):
+#
+#   • stall (observe only): tanks and scouts sit at the base. The
+#     hunt squad closes and the e3 rocket soldiers in the squad
+#     focus-fire on tanks at close range, killing ≥3 of the 5
+#     agent units (busts units_lost_lte:2) by the time the kill
+#     bar is met. LOSS.
+#
+#   • no-scout intercept-blind: tanks attack-move forward (eg
+#     east at y=20), no scouts deployed. With 2 candidate
+#     directions on medium and bands always at BOTH lanes, the
+#     mid-y attack-move puts the tanks between the two bands —
+#     they get fired on by both squads' e3s and overrun before
+#     the kill bar is met. LOSS.
+#
+#   • scout-but-no-position: scouts push out and detect (≥4
+#     discovered), but tanks stay at the base. The hunt squad
+#     arrives at the base and the e3s rocket the tanks at close
+#     range; units_lost > 2 ⇒ LOSS even though detection
+#     succeeded.
+#
+#   • intended scout-and-intercept: scouts push out (one N, one
+#     S on medium) to localise the threat axis; when the army is
+#     spotted, tanks are re-positioned (attack_move) FORWARD on
+#     the localised lane so the tank cannon's range (≈5 cells)
+#     engages the e1 stack before the e3s close to rocket range
+#     (≈3 cells). Detection bar met; tanks pick off the e1s at
+#     range; kill bar met with ≤2 lost (typically only the
+#     forward scout).
+#
+# ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - `hunt` bot: each enemy unit attacks the NEAREST agent unit
+#     (openra-sim/src/scripted_bot.rs::Hunt). With scouts pushed
+#     out toward the hunt squad's spawn lane, the hunt squad
+#     engages the scouts first (giving the tanks time to
+#     re-position); with no scouts the hunt squad walks straight
+#     at the tank cluster.
+#   - Enemy actors with NO spawn_point ALWAYS place regardless
+#     of the agent's spawn group (CLAUDE.md). Medium / hard
+#     ALWAYS place BOTH a NORTH and a SOUTH band; the agent's
+#     spawn_point varies BASE LATITUDE (hard) so a memorised
+#     intercept cell cannot generalise across seeds. The
+#     "2 seeded directions" is encoded as "both flanks active"
+#     — strictly the harder test of the same scout-for-axis
+#     capability (def-pre-position-mobile-reserve uses the same
+#     idiom for the same reason).
+#   - Tanks (2tnk) are stance:1 (ReturnFire) — they don't pursue
+#     out of range but auto-engage hostiles in range. Scouts
+#     (jeep) are stance:0 (HoldFire) so they don't pull aggro
+#     before the model issues an explicit `move_units` forward;
+#     pure-perception role (detect, not engage).
+#   - 2tnk vs e1: CLAUDE.md "2tnk cannon ~1-shots e1". 2tnk
+#     cannon range > e1 rifle range, so a tank pushed forward
+#     to engagement range kills e1s before they fire back. e3
+#     rockets vs 2tnk are damaging but the e3 range is short
+#     (~3 cells); a tank that engages the squad's e1s at cannon
+#     range whittles the squad before the e3s close — that's
+#     the load-bearing geometry the intended policy exploits.
+#   - Inert enemy `fact` marker far east, OFF-AXIS (y=2): anti-
+#     DRAW per CLAUDE.md. Without a persistent enemy actor the
+#     engine auto-`done`s on enemy-elim before the win/fail
+#     evaluator runs. Placed off-axis so it doesn't bias the
+#     hunt path or contaminate enemies_discovered (only enemy
+#     UNITS count toward enemies_discovered, not buildings).
+#   - `enemy_unit_spotted` interrupt: re-decide the instant a
+#     hunt-squad unit becomes visible — the localisation event
+#     fires immediately, not on the next 90-tick decision
+#     boundary.
+#   - `own_unit_destroyed` interrupt: re-decide when a scout or
+#     tank falls so the policy can re-commit the remaining
+#     force.
+#   - Tick budget: ~90 ticks/turn fixed-step. max_turns 50 →
+#     reachable tick 93 + 90·49 = 4503 ≥ 4501, so the
+#     `after_ticks: 4501` fail bites comfortably inside the
+#     turn cap (real reachable LOSS, never a draw).
+#
+# Distinct from siblings:
+#   * scout-and-survive — discover + return alive (no
+#     interception). This pack adds the INTERCEPT step.
+#   * scout-detect-enemy-tech — read building composition (which
+#     buildings = which tech path). This pack reads UNIT FORCES
+#     (where the army is, not what tech tree it's on).
+#   * def-pre-position-mobile-reserve — both flanks ALWAYS
+#     spotted (the agent is TOLD), tests where to commit the
+#     reserve. This pack tests the perception step that
+#     PRECEDES the commitment.
+#   * lh-scout-react-counter — scout-then-attack on the OFFENCE
+#     side (3-phase chain). This pack is purely defensive (3
+#     tank defenders + 2 jeep scouts on the WEST side, all
+#     combat starting units, no build tools).
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/scout-detect-incoming-army.yaml
+
+meta:
+  id: scout-detect-incoming-army
+  title: 'Early Warning — Scout to Detect the Incoming Army Axis, Then Intercept'
+  capability: perception
+  real_world_meaning: >
+    Early-warning intrusion detection paired with a targeted
+    response. An enemy force is inbound and the agent's defenders
+    are at the base, but the agent does NOT know which axis the
+    army will arrive on. Pure defence-without-scouting cannot
+    pre-position the defenders correctly; pure offence-without-
+    scouting commits the defenders to the wrong lane; only a
+    deliberate scout step — push sensors out, READ the approach
+    axis, then re-position the defenders FORWARD on the correct
+    lane — wins. This is the perception decision that precedes
+    a targeted defensive commitment.
+  robotics_analogue: >
+    NORAD-style early-warning network paired with QRF dispatch:
+    sparse perimeter sensors LOCALISE an incoming threat; the
+    response force is then vectored to the localised lane, not
+    spread across the whole perimeter. An IDS that detects the
+    breach lane lets the SecOps response target the right
+    subnet instead of fortifying every host. A reconnaissance-
+    in-force screen detects the enemy axis of advance so the
+    main body deploys on the correct lane.
+  benchmark_anchor:
+    - "SC2 early-warn scout / scout-for-attack"
+    - "NORAD-style early-warning systems"
+    - "intrusion detection systems (IDS)"
+    - "military reconnaissance-in-force detection"
+  author: "openra-bench"
+
+# rush-hour-arena: 128×40 playable. Agent base at the WEST
+# (x≈15, y=20). Two candidate enemy approach lanes: NORTH (y=10)
+# and SOUTH (y=30), spawn at the EAST edge (x≈100). Scouts pushed
+# from the base to a NORTH-forward (50,10) or SOUTH-forward
+# (50,30) cell each cover one of the two candidate axes — see
+# either axis when the army band closes within ~4 cells.
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  # Hunt bot: each enemy unit attacks the NEAREST agent unit
+  # (scripted_bot.rs::Hunt). With scouts pushed forward the hunt
+  # squad engages the forward scout FIRST (giving the tanks
+  # time to re-position); with no scouts the squad walks straight
+  # at the tank cluster.
+  enemy:
+    faction: soviet
+    cash: 0
+    bot_type: hunt
+  # Pure-combat toolset (NO build / NO harvest): the test is
+  # SCOUT + INTERCEPT positioning, not production.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # React the INSTANT an enemy unit becomes visible (the
+  # localisation event that the SCOUT exists to trigger) or
+  # a scout/tank is lost — the detect-and-redeploy loop is
+  # reactive, not on fixed 90-tick boundaries.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 6000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare scout-then-intercept skill: ONE hunt band, FIXED direction
+  # (NORTH y=10 every seed — no surprise). The capability is the
+  # PERCEPTION step (push a scout out and detect ≥4 enemy units
+  # early) paired with a targeted INTERCEPT (tanks re-positioned
+  # to the NORTH lane to engage at tank-cannon range BEFORE the
+  # squad's e3 rockets close). Stall loses because the e3s rocket
+  # the 3 tanks at close range and bust units_lost_lte:2 before
+  # the kill bar is met. max_turns 50 → reachable tick 4503 ≥
+  # 4501 (after_ticks fail bites inside the turn cap).
+  easy:
+    description: >
+      An enemy army (6 rifle infantry + 2 rocket soldiers) is
+      inbound from the NORTH (y=10, spawn at the east edge). You
+      have 2 jeep scouts and 3 medium tanks pre-positioned at
+      your WEST base (x≈15, y=20). Push the scouts FORWARD to
+      localise the threat axis (your defenders' vision alone is
+      not enough), then re-position the tanks to intercept the
+      approaching army on its lane BEFORE the rocket soldiers
+      close to short range. Win requires: SPOT ≥4 enemy units
+      AND destroy ≥3 of them AND lose AT MOST 2 of your own
+      units AND finish before tick 4500. Stalling at the base
+      lets the rocket soldiers close on the tanks; attacking
+      blind into the wrong lane misses the army; scouting
+      without re-positioning the tanks leaves them at the base
+      where the rockets bust the attrition cap.
+    overrides:
+      actors:
+        # 2 jeep scouts at the west base — stance:0 (HoldFire)
+        # so they don't pull aggro before the model issues an
+        # explicit forward move; pure-perception role.
+        - {type: jeep, owner: agent, position: [15, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [15, 22], stance: 0}
+        # 3 medium tanks (2tnk) at the west base — stance:1
+        # (ReturnFire) so they auto-defend if the hunt squad
+        # walks into them, but don't pursue out of range. Tanks
+        # dominate e1 at cannon range; e3 rockets close-range
+        # damage is the discriminator that punishes auto-defence
+        # (stall) without forward intercept.
+        - {type: 2tnk, owner: agent, position: [14, 19], stance: 3}
+        - {type: 2tnk, owner: agent, position: [14, 21], stance: 3}
+        - {type: 2tnk, owner: agent, position: [16, 20], stance: 3}
+        # NORTH hunt squad — 5× e1 at the east edge, y=10. The
+        # army size is tuned so the intended forward-intercept
+        # play wipes ≥3 e1s cleanly (tanks dominate per-shot,
+        # cannon outranges e1 rifle so kiting at (40,10) trades
+        # favourably); a stalling defence at the base lets the
+        # army arrive at close range where focus-fire from the
+        # e1 stack on a single tank kills it while the other
+        # tanks pick off only 1-2 enemies.
+        - {type: e1, owner: enemy, position: [100, 10], stance: 3, count: 5}
+        # Inert enemy `fact` marker far east, off-axis (y=2) so
+        # it doesn't bias the hunt path. Anti-DRAW per CLAUDE.md.
+        # Buildings don't count toward enemies_discovered (which
+        # only counts enemy UNITS), so this doesn't inflate the
+        # discovery bar.
+        - {type: fact, owner: enemy, position: [120, 2]}
+    # Win: spec bar (discover ≥4, killed ≥3, lost ≤2, within
+    # tick budget) PLUS a load-bearing FORWARD-INTERCEPT position
+    # clause — ≥1 agent unit within radius 10 of the NORTH-flank
+    # intercept point (45, 10) at win time. Stall keeps every
+    # unit at the base spawn (x≈15) → distance from (45,10) is
+    # >20 → clause fails. The forward clause is what enforces
+    # the SCOUT-AND-INTERCEPT capability: a base-only auto-
+    # defence cannot satisfy the position clause even if it
+    # happens to meet the kill bar.
+    win_condition:
+      all_of:
+        - {enemies_discovered_gte: 4}
+        - {units_killed_gte: 3}
+        - {units_lost_lte: 2}
+        - {units_in_region_gte: {x: 45, y: 10, radius: 10, n: 1}}
+        - {within_ticks: 2500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: the threat AXIS is UNCERTAIN — two
+  # candidate directions (NORTH y=10 and SOUTH y=30) with BOTH
+  # bands ALWAYS placed (engine constraint: enemy actors don't
+  # honour spawn_point — CLAUDE.md). The discrimination is the
+  # SCOUT step: a defender-only blind commit to one flank
+  # leaves the other band a clear path; the intended policy
+  # sends ONE scout NORTH and ONE scout SOUTH, localises which
+  # band is closer (the immediate threat), and commits the
+  # tanks FORWARD on that lane — engaging the e1s at cannon
+  # range while the OTHER band is still far away.
+  medium:
+    description: >
+      Two enemy army bands are inbound — one from the NORTH
+      (y=10, 4 rifle infantry + 1 rocket soldier) and one from
+      the SOUTH (y=30, 4 rifle infantry + 1 rocket soldier) —
+      both spawning at the east edge. You have 2 jeep scouts and
+      3 medium tanks pre-positioned at your WEST base. Push the
+      scouts FORWARD on BOTH candidate axes (one NORTH, one
+      SOUTH) to localise the threats, then re-position the tanks
+      to intercept on whichever lane is closing first. Win
+      requires: SPOT ≥4 enemy units AND destroy ≥3 of them AND
+      lose AT MOST 2 of your own units AND finish before tick
+      4500. Stalling at the base lets the rockets reach the
+      tanks; blind-committing all tanks mid-lane (y=20) puts
+      them between both squads' fields of fire; scouting without
+      re-positioning the tanks leaves them passively at the
+      base.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [15, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [15, 22], stance: 0}
+        - {type: 2tnk, owner: agent, position: [14, 19], stance: 3}
+        - {type: 2tnk, owner: agent, position: [14, 21], stance: 3}
+        - {type: 2tnk, owner: agent, position: [16, 20], stance: 3}
+        # NORTH hunt band — 4× e1 at the east edge, y=10.
+        - {type: e1, owner: enemy, position: [100, 10], stance: 3, count: 4}
+        # SOUTH hunt band — 4× e1 at the east edge, y=30.
+        - {type: e1, owner: enemy, position: [100, 30], stance: 3, count: 4}
+        - {type: fact, owner: enemy, position: [120, 2]}
+    # Win: discover + kill + survive + at least 1 unit on EITHER
+    # the NORTH-forward or the SOUTH-forward intercept point.
+    # The `any_of` over the two lanes is what makes this a
+    # PERCEPTION test: the agent commits forward on the lane
+    # the SCOUT has localised; blind-committing all units to
+    # one flank loses the OTHER band's enemies' kills, but
+    # crucially every non-forward position FAILS the clause.
+    win_condition:
+      all_of:
+        - {enemies_discovered_gte: 4}
+        - {units_killed_gte: 3}
+        - {units_lost_lte: 2}
+        - any_of:
+            - {units_in_region_gte: {x: 45, y: 10, radius: 10, n: 1}}
+            - {units_in_region_gte: {x: 45, y: 30, radius: 10, n: 1}}
+        - {within_ticks: 2500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven agent
+  # spawn_point groups (base at y=14 vs y=26) round-robined by
+  # seed AND a larger enemy band (5+1 + 5+1 = 12 enemies across
+  # 2 lanes). The threat axes are the same as medium (N+S both
+  # ALWAYS placed), but the agent's BASE LATITUDE varies per
+  # seed so a memorised "send scout to (50,10)" opening cannot
+  # generalise — the doctrine (scout BOTH flanks from THIS base
+  # latitude, commit tanks forward on the localised lane) does.
+  # max_turns 50, same clock as medium — tighter under the
+  # heavier band but still comfortably reachable.
+  hard:
+    description: >
+      Two enemy army bands are inbound — one from the NORTH
+      (y=10, 5 rifle infantry + 1 rocket soldier) and one from
+      the SOUTH (y=30, 5 rifle infantry + 1 rocket soldier) —
+      both spawning at the east edge. You have 2 jeep scouts and
+      3 medium tanks pre-positioned at your WEST base — the
+      base's exact LATITUDE varies per seed (a memorised opening
+      cannot generalise; the scout-and-intercept DOCTRINE still
+      applies from either start). Push the scouts FORWARD on
+      BOTH candidate axes, localise the threats, and re-position
+      the tanks to intercept on the closer lane. Win requires:
+      SPOT ≥4 enemy units AND destroy ≥3 of them AND lose AT
+      MOST 2 of your own units AND finish before tick 4500.
+      Stalling, blind defence, and one-flank-only pre-commits
+      all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — base shifted NORTH (y=14). All agent
+        # actors duplicated across BOTH spawn groups (CLAUDE.md:
+        # if ANY agent actor declares spawn_point, every agent
+        # actor WITHOUT spawn_point is filtered OUT — so we tag
+        # every agent actor).
+        - {type: jeep, owner: agent, position: [15, 12], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [15, 16], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 13], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 15], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [16, 14], stance: 3, spawn_point: 0}
+        # spawn_point 1 — base shifted SOUTH (y=26). Symmetric.
+        - {type: jeep, owner: agent, position: [15, 24], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [15, 28], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 25], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 27], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [16, 26], stance: 3, spawn_point: 1}
+        # TWO hunt bands — N (y=10) and S (y=30), 5× e1 each
+        # (10 enemies total; kill bar 3 is achievable with one
+        # successful intercept on whichever lane the agent
+        # commits to). Enemy actors don't honour spawn_point
+        # (CLAUDE.md) so both bands ALWAYS place every seed.
+        - {type: e1, owner: enemy, position: [100, 10], stance: 3, count: 5}
+        - {type: e1, owner: enemy, position: [100, 30], stance: 3, count: 5}
+        - {type: fact, owner: enemy, position: [120, 2]}
+    # Win: discover + kill + survive + at least 1 unit on EITHER
+    # the NORTH-forward or the SOUTH-forward intercept point.
+    # Same load-bearing position clause as medium; spawn-point
+    # variation is the new axis vs medium.
+    win_condition:
+      all_of:
+        - {enemies_discovered_gte: 4}
+        - {units_killed_gte: 3}
+        - {units_lost_lte: 2}
+        - any_of:
+            - {units_in_region_gte: {x: 45, y: 10, radius: 10, n: 1}}
+            - {units_in_region_gte: {x: 45, y: 30, radius: 10, n: 1}}
+        - {within_ticks: 2500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50

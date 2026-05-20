@@ -405,6 +405,17 @@ UPGRADED = [
     # y=20 so either spawn faces the same flank-vs-frontal decision
     # from a flipped bearing, and no memorised opening generalises.
     "combat-flanking-attack",
+    # Wave-6 perception pack — early-warning intrusion detection
+    # paired with targeted intercept (SC2 early-warn scout /
+    # NORAD early-warning / IDS / military reconnaissance-in-force
+    # anchor). Hard tier defines two agent spawn_point groups
+    # (NORTH base y=14 / SOUTH base y=26) round-robined by seed;
+    # two hunt bands (N y=10 + S y=30) always place (enemy actors
+    # don't honour spawn_point — CLAUDE.md), so the per-seed base
+    # latitude varies but the scout-then-intercept doctrine
+    # generalises. A memorised "send scout to (40,10) + tanks to
+    # (45,10)" opening cannot generalise across seeds.
+    "scout-detect-incoming-army",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
