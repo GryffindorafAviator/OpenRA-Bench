@@ -1,0 +1,359 @@
+# def-stance-mgmt-hold-then-attack.yaml
+#
+# ACTION capability — Wave-8 stance-flip ambush pack. Defenders (4x
+# 2tnk) are PRE-PLACED at a choke (~35,20) on stance:0 (HoldFire) so
+# they will NOT auto-engage on their own. The agent MUST `set_stance`
+# them to stance:3 (AttackAnything) at some point during the run for
+# the engine's stance-driven auto-fire to wipe the inbound rush before
+# it reaches the construction yard (fact at 10,20). A stall policy
+# that NEVER flips the stance lets the rush walk through the silent
+# choke and raze the fact — the load-bearing test is the `set_stance`
+# verb itself: without calling it, the defenders never engage and the
+# mission is forfeit; with it, the engine's auto-targeting wipes the
+# rush at the choke.
+#
+# This is the COMBAT-CELL counterpart to proc-only-defend-no-attack:
+#   - proc-only-defend-no-attack tests PROCEDURAL compliance — the
+#     defenders auto-engage once stance is lifted, BUT calling
+#     attack_unit / attack_move is a forbidden-tool LOSS. The skill is
+#     "DO NOT call the attack tool" + "lift stance at some point".
+#   - THIS pack tests STANCE MANAGEMENT in a pure combat cell — the
+#     defenders are armoured tanks (2tnk) on stance:0; the inbound
+#     force is a rifle rush; there are NO forbidden tools and NO
+#     procedural cap. The only stance-management policy that holds
+#     all the win clauses (≥K kills + ≥3 tanks alive + fact intact +
+#     within the tick budget) is one that LIFTS the stance via
+#     `set_stance` so the tank cluster's auto-targeting wipes the
+#     rush at the choke. Never-flip ⇒ tanks silent ⇒ rush razes
+#     the fact ⇒ LOSS on `not has_building:fact`.
+#
+# Real-world / benchmark anchors:
+#   - Military rules-of-engagement (ROE) drills: ambush / defended
+#     overwatch — fire authority is held until the trigger is given,
+#     at which point the overwatch element opens up and wipes the
+#     enemy column. A defended position with locked-down weapons
+#     authority is functionally undefended; lifting the engagement
+#     authority is the controllable act that turns the position into
+#     an active defence.
+#   - SC2 stance micro: pro players micro siege tanks between Hold
+#     Position / Attack stance so the main battery FIRES when the
+#     opponent's army is in range rather than chip-firing or sitting
+#     idle. The decision to flip stance IS the controllable verb;
+#     never flipping is the canonical newbie mistake.
+#   - L-shape / linear ambush doctrine (USMC FM 7-8): the kill zone
+#     is set up in advance; the trigger to engage is held until the
+#     enemy column is committed inside the zone. The discipline
+#     reduces to "do not engage until told; engage when told".
+#
+# DISCRIMINATIONS (the bar — stall LOSES on every level / seed, the
+# intended flip-the-stance play WINS on every level / seed):
+#
+#   • stall (only `observe()`): defenders stay on stance:0 the
+#     entire run. The rush walks straight at the tank cluster (the
+#     `rusher` scripted bot concentrates the band on the agent
+#     centroid every ~8 ticks; openra-sim/src/scripted_bot.rs::
+#     Rusher). With the defenders unwilling to fire, the rush
+#     overruns the cluster (tanks die without firing back), then
+#     turns on the fact (the engine auto-`done`s would short-circuit
+#     here but the inert enemy `fact` marker far east keeps the
+#     episode alive past unit-elim), and the fact is razed ⇒
+#     `not has_building:fact` LOSS. Independently, kill count
+#     stays at 0, busting `units_killed_gte` ⇒ the win predicate
+#     fails on multiple clauses, every level / seed.
+#
+#   • intended (set_stance(unit_ids, 3) once tanks are in the
+#     units_summary): the tank cluster auto-fires on every rusher
+#     band that closes to cannon range (≈5 cells; CLAUDE.md /
+#     combat-focus-fire-priority "2tnk one-shots e1"). 4× tank
+#     cannons firing on each lead e1 wipes the rush column in 1-2
+#     volleys before the rush reaches the fact. ≥K kills logged
+#     (the rush composition is sized so the kill bar is hit
+#     comfortably), ≥3 of the 4 tanks alive (the rush is e1-only —
+#     a small rifle force does not out-damage a 4-tank cluster),
+#     fact intact, well under the tick deadline ⇒ WIN every level
+#     and every hard seed.
+#
+# NOTE on the flip-immediately variant: in this combat cell with
+# stationary tanks on stance:3, the engine's auto-targeting fires
+# the instant any enemy enters cannon range — there is no behavioural
+# difference between "flip on turn 1" and "flip when the rush is in
+# the choke" because the tanks do not pursue (`stance:3 reserve auto-
+# engages the rush when it closes to cannon range and racks up
+# kills, but the reserve NEVER MOVES OUT of its starting cluster` —
+# def-pre-position-mobile-reserve / engine fact). The load-bearing
+# capability is therefore the `set_stance` verb itself; the timing
+# axis is encoded as flavour text in the level briefs (the agent is
+# told to flip when the column is in the kill zone) but the win
+# predicate measures only the EFFECT (kills + survival + fact
+# intact). A model that always flips on turn 1 WINS — that is the
+# correct outcome: the verb was called, the engine did the rest.
+# A model that never flips LOSES — the verb was the discriminator.
+#
+# ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - `rusher` bot concentrates the band on the agent centroid every
+#     ~8 ticks (openra-sim/src/scripted_bot.rs::Rusher) — the rush
+#     drives straight at the tank cluster at the choke.
+#   - `set_stance` is a first-class agent tool (openra_bench/agent.py
+#     describes 0=HoldFire, 1=ReturnFire, 2=Defend, 3=AttackAnything).
+#     A 2tnk on stance:0 will NOT auto-fire even when an enemy walks
+#     directly under its cannon; lifting to stance:3 makes it auto-
+#     engage in range. This is what makes the discipline load-
+#     bearing (a never-flip policy cannot win by accident).
+#   - 2tnk cannon vs e1: ~1-shot kill (CLAUDE.md / combat-focus-
+#     fire-priority). Cannon range > e1 rifle range, so the tanks
+#     pick off e1s before the e1s can fire back at the cluster.
+#   - Inert enemy `fact` marker far east: anti-DRAW per CLAUDE.md.
+#     Without a persistent enemy actor the engine auto-`done`s on
+#     enemy-elim before the win/fail evaluator runs.
+#   - Tick budget: ~90 ticks/turn ⇒ max_tick ≤ 93 + 90·(max_turns-1).
+#     after_ticks 4501 with max_turns 55 ⇒ 4501 ≤ 4953 ✓ (deadline
+#     bites; non-win is a real LOSS, not a draw).
+#   - Enemy actors with NO spawn_point ALWAYS place regardless of
+#     the agent's spawn group (CLAUDE.md). Hard varies the AGENT
+#     spawn (north choke y=18..20 vs south choke y=20..22) — both
+#     symmetric covers for the fact column (10,20) — while the
+#     enemy rush ALWAYS places at the same eastern band.
+#
+# Hard-tier curation: this pack IS spawn-varied on hard (defender
+# choke latitude round-robins NORTH y=18..20 / SOUTH y=20..22 by
+# seed — both still close the (35,~) choke that covers the fact
+# column at x=10). Registered in tests/test_hard_tier.py::UPGRADED.
+#
+# Benchmark anchor: military rules-of-engagement / ambush doctrine
+# (engage on trigger, not on contact); SC2 stance micro (hold-then-
+# attack); ambush-trigger discipline.
+
+meta:
+  id: def-stance-mgmt-hold-then-attack
+  title: 'Ambush Trigger Discipline — Lift Stance to Engage the Inbound Rush'
+  capability: action
+  real_world_meaning: >
+    A defended-overwatch / ambush trigger drill: four medium tanks are
+    pre-staged at a choke between the inbound enemy column and the
+    construction yard. Their standing orders are HoldFire (stance:0)
+    — they will not fire on their own. The mission is to call
+    `set_stance` to lift the engagement authority so all four tanks
+    auto-engage the rush at cannon range and wipe it before it
+    reaches the base. Never flipping the stance leaves the position
+    functionally undefended (the rush walks through unopposed and
+    razes the base); the controllable verb that turns the pre-staged
+    position into an active defence is the stance flip.
+  robotics_analogue: >
+    A weapon-system safety interlock: a turret / drone-swarm
+    perimeter is pre-staged and aimed at the avenue of approach,
+    but the trigger authority is held by the operator. The operator
+    MUST issue the engagement-authority command for the system to
+    fire on the inbound target; without that command the perimeter
+    is functionally a passive observation post and the target
+    reaches the protected asset. The skill is the operator's
+    decision to LIFT the engagement-authority lock at all — not
+    the precise moment within the engagement window.
+  benchmark_anchor:
+    - "military rules-of-engagement (ROE) ambush doctrine"
+    - "SC2 stance micro — hold-then-attack siege-tank salvo"
+    - "ambush doctrine — engagement authority lifted on trigger"
+  author: openra-bench
+
+# rush-hour-arena: 128×40 playable. Fact at the west edge (10,20).
+# The choke at x≈35 is the tank cluster's staging cell; the rush
+# spawns at the east band x≈90.
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    bot_type: rusher
+  # Combat-only toolset (NO build / NO harvest): the test is the
+  # stance-management verb (set_stance) on pre-staged defenders.
+  # attack_unit / attack_move are ALSO available (this is NOT a
+  # procedural-compliance pack) but a brute "attack_move east on
+  # turn 1" pulls the tanks out of the choke and breaks the static
+  # ambush geometry — the engine's stance-driven auto-fire is the
+  # canonical and efficient solution.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+    - set_stance
+  planning: true
+  termination:
+    max_ticks: 6000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare stance-flip skill: a single rush band (6× e1) inbound from
+  # the east. The agent must call set_stance(units, 3) at some point
+  # so the tank cluster auto-fires when the rush closes to cannon
+  # range. Stall (never flip) ⇒ tanks never engage; rush overruns
+  # the cluster (tanks die without firing); then the rush razes the
+  # fact ⇒ LOSS on `not has_building:fact`. Intended flip ⇒ all
+  # four tanks auto-fire as the rush enters cannon range, wiping
+  # the e1 column before it reaches the fact ⇒ WIN.
+  # max_turns 55 → reachable tick ≈ 4953; after_ticks 4501 bites
+  # as a real LOSS (not a draw).
+  easy:
+    description: >
+      AMBUSH TRIGGER: four medium tanks (2tnk) are pre-staged at the
+      choke (35,20) on HOLD-FIRE (stance:0). An enemy rifle rush
+      (6 e1) is inbound from the east (spawn at (90,20)) and will
+      drive straight at your tanks then at your construction yard
+      (fact at 10,20). Use `set_stance` to lift the tanks to
+      AttackAnything (stance:3) so they auto-engage the column at
+      cannon range — the canonical answer is to flip the stance
+      WHEN the rush is committed inside the choke (a generous
+      timing window on easy: any flip while the rush is approaching
+      satisfies the win). Win when ≥4 raiders are dead AND ≥3 of
+      your 4 tanks survive AND the fact still stands, before tick
+      4500. Stalling (never flipping — fact gets razed) and timeout
+      all LOSE.
+    overrides:
+      actors:
+        # Agent construction yard — west edge, the rush's ultimate
+        # target if the choke is silent.
+        - {type: fact, owner: agent, position: [10, 20]}
+        # 4× 2tnk at the choke (35,20) on stance:0 (HoldFire).
+        # They will NOT fire until the agent lifts the stance.
+        # Clustered tightly so the salvo geometry is sharp: all
+        # four cannons can fire on the same enemy cell in one tick.
+        - {type: 2tnk, owner: agent, position: [35, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [35, 20], stance: 0}
+        - {type: 2tnk, owner: agent, position: [35, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [36, 20], stance: 0}
+        # Inbound rush — 6× e1 (rifle). e1 vs 2tnk has very low
+        # damage per CLAUDE.md / combat-focus-fire-priority, so a
+        # stance-lifted 4-tank cluster wipes the column in 1-2
+        # volleys with at most 1 tank lost (own_units_gte:3 holds).
+        - {type: e1, owner: enemy, position: [90, 20], stance: 3, count: 6}
+        # Inert enemy `fact` marker far east (anti-DRAW): without a
+        # persistent enemy actor the engine auto-`done`s on enemy-
+        # elim before the win/fail evaluator runs (CLAUDE.md fact #5).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {units_killed_gte: 4}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 55
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: TIGHTER kill bar (≥5 vs ≥4) on
+  # a BIGGER rush (8× e1 vs 6× e1). The bigger column ensures the
+  # kill bar is reachable for the intended flip-the-stance policy,
+  # while the same per-tank attrition pressure on the cluster
+  # (e1-only rush at point-blank range against a 4-tank cluster
+  # cannot bust own_units_gte:3) keeps the discrimination clean:
+  # the stance-flip act is what wins; stalling loses.
+  medium:
+    description: >
+      AMBUSH TRIGGER: four medium tanks (2tnk) are pre-staged at the
+      choke (35,20) on HOLD-FIRE (stance:0). A larger rifle rush
+      (8 e1) is inbound from the east (spawn at (90,20)) and will
+      drive at your tanks then your construction yard (fact at
+      10,20). Use `set_stance` to lift the tanks to AttackAnything
+      so they auto-engage the column at cannon range — the
+      canonical answer is to flip when the rush is committed inside
+      the choke. Win when ≥5 raiders are dead AND ≥3 of your 4
+      tanks survive AND the fact still stands, before tick 4500.
+      Stalling (fact razed) and timeout both LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: 2tnk, owner: agent, position: [35, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [35, 20], stance: 0}
+        - {type: 2tnk, owner: agent, position: [35, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [36, 20], stance: 0}
+        # 8× e1 inbound — bigger rush column so the ≥5 kill bar is
+        # reachable with margin for the intended stance-flip policy.
+        - {type: e1, owner: enemy, position: [90, 20], stance: 3, count: 8}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {units_killed_gte: 5}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 55
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: ≥2 agent spawn_point
+  # groups so the choke latitude varies per seed (NORTH choke
+  # y=18..20 vs SOUTH choke y=20..22 — both cover the fact column
+  # x=10 and both sit ~55 cells east of the fact across the same
+  # choke geometry; a memorised "set_stance when the rush is at
+  # (40,20)" trigger CELL cannot generalise because the kill zone
+  # shifts in y per seed; the DOCTRINE — flip the stance so the
+  # cluster auto-engages — still applies from either spawn). The
+  # rush composition (8× e1) is the same as medium so the kill bar
+  # is achievable from either choke (rusher concentrates the band
+  # on the agent centroid every ~8 ticks; CLAUDE.md: enemy actors
+  # don't honour spawn_point so the rush always places). Same
+  # clock; same tick-aligned fail.
+  hard:
+    description: >
+      AMBUSH TRIGGER: four medium tanks (2tnk) are pre-staged at a
+      choke (~35, seed-chosen latitude — NORTH y≈19 or SOUTH y≈21)
+      on HOLD-FIRE (stance:0). A rifle rush (8 e1) drives at your
+      tanks then your construction yard (fact at 10,20). Lift the
+      tanks via `set_stance` to AttackAnything so they auto-engage
+      the column at cannon range; the choke latitude is seed-driven
+      so a memorised trigger cell does not generalise — only the
+      DOCTRINE (lift the stance so the cluster auto-engages) wins
+      on every seed. Win when ≥5 raiders are dead AND ≥3 of your 4
+      tanks survive AND the fact still stands, before tick 4500.
+    overrides:
+      actors:
+        # Fact lives outside spawn_point but CLAUDE.md: if ANY agent
+        # actor declares spawn_point, every agent actor WITHOUT
+        # spawn_point is filtered OUT — duplicate the fact across
+        # BOTH groups at the same cell.
+        - {type: fact, owner: agent, position: [10, 20], spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 20], spawn_point: 1}
+        # spawn_point 0 — NORTH choke at y=18..20 (cluster centroid y=19).
+        - {type: 2tnk, owner: agent, position: [35, 18], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [35, 19], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [35, 20], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [36, 19], stance: 0, spawn_point: 0}
+        # spawn_point 1 — SOUTH choke at y=20..22 (cluster centroid y=21).
+        - {type: 2tnk, owner: agent, position: [35, 20], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [35, 21], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [35, 22], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [36, 21], stance: 0, spawn_point: 1}
+        # Rush — same composition as medium; enemy actors don't
+        # honour spawn_point so this band always places every seed.
+        # Spawn at (90,20) — rusher concentrates the band on the
+        # agent centroid every ~8 ticks, so the column drives at
+        # whichever choke the tanks are staged at (NORTH y=19 or
+        # SOUTH y=21).
+        - {type: e1, owner: enemy, position: [90, 20], stance: 3, count: 8}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {units_killed_gte: 5}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 55
