@@ -1,0 +1,399 @@
+# scout-jeep-vs-infantry-cost-effective
+#
+# REASONING capability — cost-effective recon: pick the right tool for
+# scouting a far frontier under a tight intelligence budget.
+#
+# Real-world anchor: SC2 Reaper / worker-scout economy — when the
+# question is "what's at the far frontier?" you spend the MINIMUM cash
+# that buys the FASTEST eyes there, not the cheapest body or the most
+# durable platform. Operations-research literature calls this cost-
+# effective recon under an "intelligence budget".
+#
+# Starting cash $900 funds EXACTLY one of three coherent scout
+# investments (and the agent has only one shot inside the clock):
+#
+#   (A) BUILD 1× jeep ($600, wheeled, sight 7c, ~6 ticks/cell). The
+#       jeep is the dedicated scout platform: wheeled top speed beats
+#       any tracked or foot mover, sight 7c is the widest in the codex
+#       for this budget, and the chassis fields in ~540 ticks. From
+#       the war factory exit ~(19,20) to the FRONTIER (110,20) the
+#       drive is ~91 cells × ~6 t/cell ≈ 546 ticks ⇒ jeep enters the
+#       frontier region around tick ~1100. INTENDED — WIN.
+#
+#   (B) BUILD 1× 1tnk light tank ($700, tracked, sight 6c). Affordable
+#       on the budget but TRACKED is slower than wheeled (~7-8
+#       ticks/cell) and tanks field slower than jeeps (build ≈ 630
+#       ticks). First tank crosses the frontier closer to tick ~1400.
+#       WRONG TOOL — too expensive for what it delivers AND too slow
+#       to make the within_ticks deadline. LOSS.
+#
+#   (C) BUILD 9× e1 rifle infantry ($100 ea × 9 = $900, foot, sight
+#       4c, ~15 ticks/cell). Even one rifleman built first (~90 ticks)
+#       and walked east covers 96 cells × ~15 t/cell ≈ 1440 ticks ⇒
+#       first e1 enters the frontier region around tick ~1530, past
+#       the medium / hard within_ticks 1200 deadline (and on easy the
+#       clock is loose enough to let a single e1 sneak in, which is
+#       why easy is loose — see tier-axis notes). The 3-rifle spread
+#       (which the brief calls out as the "infantry company" play)
+#       is even worse — sequential builds keep pushing the median
+#       arrival later. WRONG TOOL on medium/hard. LOSS.
+#
+#   (D) STALL (observe only): no eyes on the frontier ⇒
+#       units_in_region_gte never satisfies ⇒ after_ticks fires ⇒
+#       LOSS, never DRAW.
+#
+# The capability under test is the cost-vs-speed reasoning a Reaper
+# scout in SC2 or a UAV procurement officer applies: cheaper-per-body
+# (e1) is NOT cheaper-per-info when the metric is "eyes at the far
+# frontier inside the clock", and more-expensive-per-body (1tnk) is
+# also wrong because the marginal speed bought by tracked armour is
+# negative relative to the wheeled scout chassis. The jeep at $600
+# is the cost-effective optimum.
+#
+# Engine facts used (CLAUDE.md / prompt_v2 codex / gamerules.rs):
+#   • jeep $600, wheeled, sight 7c — the dedicated scout chassis.
+#   • 1tnk $700, tracked, sight 6c — affordable on the budget but
+#     SLOWER than the jeep both in build queue and in travel speed.
+#   • e1 $100, foot, sight 4c — cheapest body but the slowest mover;
+#     foot speed is ~2.5× slower than wheeled on this open arena.
+#   • `weap` is the jeep / 1tnk production building (prereq: proc);
+#     `tent` is the e1 production building (prereq: powr); both are
+#     pre-placed so EACH option is buildable from turn 1.
+#   • `2tnk` ($850) and heavier tanks need the allied service depot
+#     `fix` as a tech prereq, which is intentionally NOT pre-placed —
+#     so the heavy-armour temptation ("save cash for a big scout") is
+#     mechanically blocked, keeping the comparison crisp on the three
+#     buildable alternatives the brief enumerates.
+#   • jeep speed on this open arena empirically ~6 ticks/cell
+#     (calibrated from `scout-multiple-fog-areas`); foot mover speed
+#     ~15 ticks/cell (≈ jeep / 2.5).
+#   • Build queue rate ≈ 0.9 ticks per credit (cross-checked vs
+#     `mcv-deploy-and-build`: powr $300 ≈ 270 ticks; tent $400 ≈
+#     360 ticks). So jeep $600 ≈ 540 ticks; 1tnk $700 ≈ 630 ticks;
+#     e1 $100 ≈ 90 ticks.
+#   • Persistent unarmed enemy `fact` MARKER at the frontier prevents
+#     the engine auto-`done` (all-enemies-eliminated) path from
+#     collapsing a non-finisher to DRAW (CLAUDE.md).
+#   • `place_building` is NOT used (the base is fully pre-placed
+#     and the model only needs `build` + `move_units`), so the build-
+#     adjacency footgun does not apply.
+#   • Hard tier: `spawn_point` filter applies ONLY to AGENT actors,
+#     and ANY agent actor with spawn_point causes agent actors WITHOUT
+#     spawn_point to be filtered out (CLAUDE.md oramap.rs). So every
+#     agent base building AND the inert seed-witness e1 are
+#     DUPLICATED across both spawn_point groups at the spawn-matched
+#     coords; the enemy `fact` marker has no spawn_point and always
+#     places.
+#   • Inert HoldFire (`stance: 0`) `e1` per spawn group: seed-witness
+#     so `tests/test_hard_tier.py::test_curated_hard_still_compiles_
+#     and_runs` can observe the spawn variation via `units_summary`
+#     (per the build-power-online-first idiom). The e1 has the same
+#     foot speed (~15 t/cell) so even if the agent (mis-)tries to
+#     `move_units` it east as a "free scout" it cannot reach the
+#     frontier inside the medium / hard within_ticks 1200 budget
+#     (96 cells × 15 = 1440 ticks > 1200). The free-scout temptation
+#     therefore LOSES on those tiers; the easy tier's loose clock
+#     (within_ticks 1800) DOES admit the pre-placed e1 east-walk —
+#     intentionally loose, so easy measures only the basic "send a
+#     mover east" skill (any unit type counts), and medium/hard
+#     measure the cost-vs-speed reasoning.
+#
+# Discriminations (CLAUDE.md bar — no defect, no cheat, no draw):
+#
+#   • stall (observe only): LOSS on every tier / every hard seed —
+#     no unit ever enters the frontier region; after_ticks fires.
+#   • build-only-1tnk (queue 1× light tank from weap and drive east):
+#     LOSS on medium / hard — tank fields ~tick 630, crosses 91
+#     cells × ~7-8 t/cell ≈ 660 ticks ⇒ arrives ~tick 1290, past
+#     within_ticks 1200; easy admits it (loose clock).
+#   • build-only-e1 (spam riflemen and walk them east): LOSS on
+#     medium / hard — first e1 fields ~tick 90, walks 96 cells × 15
+#     t/cell ≈ 1440 ticks ⇒ arrives ~tick 1530, past within_ticks
+#     1200; easy admits a single e1 (within_ticks 1800).
+#   • walk-the-pre-placed-e1-east (use the seed-witness e1 as a free
+#     scout): LOSS on medium / hard — same foot speed, ~1440 ticks
+#     to cross 96 cells, past within_ticks 1200; easy admits it.
+#   • intended build-jeep (queue 1× jeep from weap and drive east):
+#     WIN on every tier / every hard seed — jeep fields ~tick 540,
+#     crosses 91 cells × ~6 t/cell ≈ 546 ticks ⇒ arrives ~tick 1100,
+#     comfortably inside within_ticks 1200 (medium / hard) AND
+#     within_ticks 1800 (easy).
+#
+# Discrimination axis summary:
+#   easy   — bare "build something fast that can reach the frontier"
+#            skill (loose clock; ALL of jeep / 1tnk / e1 / walk-the-
+#            pre-placed-e1 WIN as long as the model commits to going
+#            east). The teeth here is stall vs commit.
+#   medium — tight clock (within_ticks 1200): NOW the cost-vs-speed
+#            reasoning bites — only jeep WINS, all other compositions
+#            lose on the clock.
+#   hard   — tight clock AND 2 agent spawn_point groups (NORTH base
+#            y=14 / SOUTH base y=26) round-robined by seed; the
+#            frontier marker stays at (110, 20) and is equidistant
+#            from both spawns, so the reasoning generalises while a
+#            memorised "always send east on y=20" opening does not.
+#
+# Real LOSS, not DRAW: every level carries `not building_count_gte:
+# fact:1` as a defensive guard (essentially impossible on this pack
+# — there is no enemy combat — but kept per CLAUDE.md idiom) AND a
+# tick-aligned `after_ticks = within_ticks + 1` clause inside
+# max_turns so a non-finisher LOSES on the very next tick after the
+# window closes.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_scout_jeep_vs_infantry_cost_effective.py -q
+
+meta:
+  id: scout-jeep-vs-infantry-cost-effective
+  title: 'Cost-Effective Recon — Buy the Jeep, Not the Tank or the Rifle Squad'
+  capability: reasoning
+  real_world_meaning: >
+    A fixed intelligence budget ($900) funds EITHER a dedicated scout
+    vehicle (1× jeep, $600, wheeled, sight 7c — the cost-effective
+    optimum), OR a light tank that's slower AND more expensive
+    (1× 1tnk, $700, tracked, sight 6c — the over-investment), OR a
+    rifle company that's cheap-per-body but too slow on foot
+    (9× e1, $100 ea, sight 4c — the under-investment). The mission
+    is "put eyes on the far frontier inside a tight clock". The
+    correct decision is to spend the MINIMUM that buys the FASTEST
+    eyes at range: the jeep. Picking the tank wastes capital on
+    armour you don't need AND fields a slower mover; picking
+    infantry buys cheaper bodies that physically can't cover the
+    distance inside the deadline. The capability under test is
+    cost-effective tool selection for a reconnaissance objective.
+  robotics_analogue: >
+    UAV / sensor-platform procurement under an intelligence budget:
+    the mission is to read a remote location inside a deadline, not
+    to engage anything. A small/cheap drone with the right sensor
+    payload and the right cruise speed dominates either a heavier
+    armoured platform (over-spend on capability you don't need) or
+    a swarm of slow ground sensors (under-spend on mobility). The
+    procurement decision is cost-vs-speed for an information goal,
+    not raw capability or raw unit count.
+  benchmark_anchor:
+    - "SC2 Reaper scout economy"
+    - "OR cost-effective recon"
+    - "intelligence budget"
+  author: openra-bench
+
+base_map: rush-hour-arena
+# Cash sized to fund exactly ONE coherent scout investment:
+#   * 1× jeep    = $600 (intended; $300 unspent — that's fine, the
+#                  budget is the upper bound, not a use-it-all spec)
+#   * 1× 1tnk    = $700 (the over-spend; tracked is slower than jeep)
+#   * 9× e1      = $900 (the under-spend; foot is too slow)
+# 2tnk / 3tnk / 4tnk are not buildable: 2tnk needs `fix` (not pre-
+# placed) and 3tnk / 4tnk are soviet and need `dome` (also not
+# pre-placed). So the heavy-armour temptation is mechanically gated
+# out, keeping the comparison crisp on the three buildable options.
+starting_cash: 900
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  # Pure-recon tool surface: build (queue a scout), move_units
+  # (drive it east), stop (cancel a move). NO `attack_unit` /
+  # `attack_move` — the mission is to OBSERVE the frontier, not to
+  # engage anything (and there is no live enemy combat force to
+  # engage with anyway). NO `place_building` — the base is fully
+  # pre-placed.
+  tools:
+    - build
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 4000
+  # Pre-placed: fact (loss-critical anchor), proc (weap prereq +
+  # economy), powr (queue power), tent (e1 production — keeps the
+  # under-spend option ACTIONABLE so the model is being graded on
+  # PICKING the right scout, not on which queues are open), weap
+  # (jeep / 1tnk production). The agent starts unit-less in the
+  # default base — the scout must be PRODUCED from the budget, that
+  # IS the test. (Hard tier adds an inert HoldFire `e1` per spawn
+  # group as a seed-witness; see hard.)
+  actors:
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: proc, owner: agent, position: [14, 18]}
+    - {type: powr, owner: agent, position: [14, 22]}
+    - {type: tent, owner: agent, position: [16, 22]}
+    - {type: weap, owner: agent, position: [18, 20]}
+    # FRONTIER MARKER — unarmed enemy `fact` at the far frontier.
+    # The win clause's `units_in_region_gte` reads agent units in
+    # radius 5 around (110, 20); this `fact` marker is the in-
+    # universe landmark the brief names ("the FAR enemy outpost at
+    # the eastern frontier"). It is loss-critical for the engine
+    # auto-`done` mitigation: without a persistent enemy
+    # MustBeDestroyed actor, the engine could auto-`done` on the
+    # last enemy-actor death — but here there are no enemy units
+    # at all, so the marker just keeps the episode alive through
+    # the win/fail evaluator's terminal frame.
+    - {type: fact, owner: enemy, position: [110, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Loose clock (within_ticks 1800). Discrimination is bare "send a
+  # mover east": stall LOSES, but EITHER jeep / 1tnk / e1 commits
+  # WIN because the slow movers have time to reach the frontier in
+  # the loose window. This is the deliberate easy-tier reduction:
+  # one variable (commit-to-go-east) at a time, with the cost-vs-
+  # speed reasoning RESERVED for medium / hard (CLAUDE.md tier
+  # cadence: easy = bare skill).
+  easy:
+    description: >
+      You command an allied scout base (fact + proc + powr + tent +
+      weap). Starting cash $900. Your mission is to put a unit on
+      the FAR enemy outpost at the eastern frontier (centred at
+      (110, 20), radius 5) before tick 1800. The cash funds EITHER
+      1× jeep ($600, wheeled, sight 7c) OR 1× light tank ($700,
+      tracked, sight 6c) OR 9× rifle infantry ($100 ea, foot, sight
+      4c) — pick ONE coherent commit and drive it east. Win when
+      ≥1 of your units is in the frontier region AND your
+      construction yard still stands AND the clock has not run out.
+      Stalling (no commit) fails on the deadline.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: tent, owner: agent, position: [16, 22]}
+        - {type: weap, owner: agent, position: [18, 20]}
+        - {type: fact, owner: enemy, position: [110, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 110, y: 20, radius: 5, n: 1}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1800}
+    # Tick budget: max_turns 21 ⇒ max reachable tick = 93 + 90·20 =
+    # 1893 (fixed-cadence). after_ticks 1801 ≤ 1893 ⇒ a staller hits
+    # the deadline BEFORE max_turns exhausts ⇒ real reachable
+    # timeout LOSS, not a draw. The `not building_count_gte:fact:1`
+    # clause is the defensive own-base-loss guard (no enemy
+    # aggression on this pack — essentially impossible — but kept
+    # per CLAUDE.md idiom).
+    fail_condition:
+      any_of:
+        - {after_ticks: 1801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 21
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis vs easy: TIGHT clock (within_ticks 1200) — the cost-vs-
+  # speed reasoning now bites. Empirical timings:
+  #   • jeep (intended): build ~540 + drive ~546 ≈ tick 1086 ⇒ WIN
+  #   • 1tnk           : build ~630 + drive ~660 ≈ tick 1290 ⇒ LOSS
+  #   • e1             : build ~90  + walk  ~1440 ≈ tick 1530 ⇒ LOSS
+  #   • stall          : never reaches ⇒ LOSS
+  # Same map, same budget, same pre-placed base; ONLY the deadline
+  # has tightened (CLAUDE.md: "one new controlled variable per tier").
+  medium:
+    description: >
+      You command an allied scout base (fact + proc + powr + tent +
+      weap). Starting cash $900. Mission: put a unit on the FAR
+      enemy outpost at the eastern frontier (centred at (110, 20),
+      radius 5) before tick 1200. The cash funds EITHER 1× jeep
+      ($600, wheeled, sight 7c) OR 1× light tank ($700, tracked,
+      sight 6c) OR 9× rifle infantry ($100 ea, foot, sight 4c). The
+      clock is TIGHT — only the fastest scout chassis (the jeep)
+      can field AND traverse 91 cells of arena before the deadline.
+      The tank's tracked treads cost ~120 extra ticks of travel time
+      AND its $700 production queues ~90 extra ticks; the infantry
+      cover ~15 ticks/cell on foot, ~1440 ticks just to traverse
+      after a quick ~90-tick build. Win when ≥1 of your units is
+      in the frontier region AND your construction yard still
+      stands AND the clock has not run out. Stalling and the wrong-
+      chassis commits all fail on the deadline.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: tent, owner: agent, position: [16, 22]}
+        - {type: weap, owner: agent, position: [18, 20]}
+        - {type: fact, owner: enemy, position: [110, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 110, y: 20, radius: 5, n: 1}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1200}
+    # Tick budget: max_turns 15 ⇒ max reachable tick = 93 + 90·14 =
+    # 1353 (fixed-cadence). after_ticks 1201 ≤ 1353 ⇒ real timeout
+    # LOSS, not a draw, on every wrong commit.
+    fail_condition:
+      any_of:
+        - {after_ticks: 1201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 15
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis vs medium: TWO agent spawn_point groups (NORTH base
+  # y=14 / SOUTH base y=26) round-robined by seed. The frontier
+  # marker stays at (110, 20) — equidistant from both spawn
+  # latitudes (cell-distance 91 cells east + 6 cells y-offset; the
+  # extra y-offset adds at most ~36 ticks of travel for a jeep, well
+  # inside the 1200 deadline's ~100-tick margin). The cost-vs-speed
+  # reasoning is the SAME decision on either spawn; the spawn
+  # variation prevents a memorised "always start at (10,20)"
+  # opening from generalising trivially.
+  #
+  # Per CLAUDE.md (oramap.rs): any agent actor with `spawn_point`
+  # causes agent actors WITHOUT `spawn_point` to be filtered OUT;
+  # so every base building (fact + proc + powr + tent + weap) AND
+  # the inert seed-witness `e1` are duplicated across BOTH
+  # spawn_point groups at the matching coords. The enemy frontier
+  # `fact` has NO spawn_point and places on every seed.
+  hard:
+    description: >
+      You command an allied scout base. Starting cash $900. Your
+      base spawns either at the NORTH (y=14) or SOUTH (y=26)
+      latitude (chosen by seed). Mission: put a unit on the FAR
+      enemy outpost at the eastern frontier (centred at (110, 20),
+      radius 5) before tick 1200. The cash funds EITHER 1× jeep
+      ($600, wheeled, sight 7c) OR 1× light tank ($700, tracked,
+      sight 6c) OR 9× rifle infantry ($100 ea, foot, sight 4c). The
+      clock is TIGHT — only the fastest scout chassis (the jeep)
+      can field AND traverse the arena in time, regardless of which
+      spawn latitude you started at. Win when ≥1 of your units is
+      in the frontier region AND your construction yard still
+      stands AND the clock has not run out. Stalling and the wrong-
+      chassis commits all fail on the deadline.
+    overrides:
+      actors:
+        # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [14, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: tent, owner: agent, position: [16, 16], spawn_point: 0}
+        - {type: weap, owner: agent, position: [18, 14], spawn_point: 0}
+        # Inert seed-witness e1 (HoldFire stance: 0) per group —
+        # required for the hard-tier units_summary spawn-variation
+        # check (test_hard_tier::test_curated_hard_still_compiles_
+        # and_runs reads unit cells, not building cells). Placed
+        # base-adjacent and HoldFire so it does not interact with
+        # the win predicate (foot speed ~15 t/cell × 96 cells ≈
+        # 1440 ticks > within_ticks 1200 — the e1 cannot reach the
+        # frontier inside the deadline even if the agent (mis-)
+        # tries to use it as a "free scout").
+        - {type: e1, owner: agent, position: [12, 14], spawn_point: 0, stance: 0}
+        # ── AGENT spawn 1 — SOUTH base (y=26) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: weap, owner: agent, position: [18, 26], spawn_point: 1}
+        - {type: e1, owner: agent, position: [12, 26], spawn_point: 1, stance: 0}
+        # FRONTIER MARKER — equidistant from both spawn latitudes
+        # (cell-distance 100 cells from either NW or SW base).
+        - {type: fact, owner: enemy, position: [110, 20]}
+    win_condition:
+      all_of:
+        - {units_in_region_gte: {x: 110, y: 20, radius: 5, n: 1}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 15

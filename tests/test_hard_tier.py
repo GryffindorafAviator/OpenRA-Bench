@@ -774,6 +774,22 @@ UPGRADED = [
     # per-spawn strike geometry symmetric — a memorised "(10,18) rebuild
     # cell" cannot generalise across seeds.
     "build-engineer-rebuild-after-loss",
+    # Wave-8 REASONING pack — cost-effective recon under an
+    # intelligence budget (SC2 Reaper / worker-scout economy / OR
+    # cost-effective recon anchor). Cash $900 funds EITHER 1× jeep
+    # ($600, wheeled, sight 7c — INTENDED), 1× 1tnk ($700, tracked,
+    # sight 6c — over-spend, slower), or 9× e1 ($100 ea, foot,
+    # sight 4c — under-spend, too slow). Medium / hard tighten the
+    # clock to within_ticks 1200 so only the jeep can field and
+    # traverse 91 cells in time. Hard tier defines two agent
+    # spawn_point groups (NORTH base y=14 / SOUTH base y=26) round-
+    # robined by seed; the frontier marker at (110, 20) is
+    # equidistant so the cost-vs-speed decision generalises across
+    # spawns while a memorised "always start at (10, 20)" opening
+    # does not. Inert HoldFire `e1` per spawn group surfaces the
+    # spawn variation via units_summary (the scout base is otherwise
+    # building-only at reset).
+    "scout-jeep-vs-infantry-cost-effective",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
