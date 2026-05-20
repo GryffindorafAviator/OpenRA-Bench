@@ -1,0 +1,345 @@
+# mfb-third-base-against-clock — Wave-7 REASONING pack.
+#
+# Greedy 3-base macro against a deadline. The agent already runs TWO
+# bases:
+#   • WEST  base: fact at (15,20) + proc at (18,20) + powr at (15,23)
+#   • MID   base: fact at (50,20) + proc at (53,20)
+# The remaining task is to plant a THIRD base (a refinery `proc`) in
+# the FAR-EAST target region (centre (90,20), radius 8) BEFORE the
+# clock. Starting cash + accruing income are sized so the agent CAN
+# build a 3rd `proc` + place it at the far-east IF they prioritise
+# expansion over army; a "build army only" play burns cash on units
+# and never funds the proc → LOSS; a stall play never builds anything
+# → LOSS.
+#
+# Real-world anchor (binding meta.benchmark_anchor):
+#   • SC2 3-base timing macro (the canonical "third base before the
+#     opponent's timing attack" decision — secure the third before
+#     committing to army production).
+#   • MicroRTS expansion (multi-base economy ramp under time
+#     pressure).
+#   • Industrial site expansion against an incumbent (a third
+#     production site must come online by a SLA deadline; investment
+#     in headcount/army is the WRONG allocation if it forecloses on
+#     the new site).
+#
+# WIN (every level, per the Wave-7 spec):
+#   all_of[
+#     building_in_region: {x: 90, y: 20, radius: 8, type: proc, count: 1}
+#     building_count_gte: {type: proc, n: 3}
+#     has_building: fact
+#     within_ticks: T
+#   ]
+#
+# FAIL (every level):
+#   any_of[
+#     after_ticks: T+1               (clock bites; reachable inside max_turns)
+#     not has_building: fact         (last fact destroyed; recovery impossible)
+#   ]
+#
+# Failure modes the predicate makes LOSE (the bar, scripted-validated):
+#   • STALL (only `observe()`)               — no buildings ever placed → after_ticks.
+#   • ARMY-ONLY (build('e1') on a loop)      — cash burnt on infantry, no 3rd proc
+#                                              → building_in_region clause never
+#                                              fires → after_ticks.
+#   • PLACE-PROC-AT-WEST (build proc, place adjacent to west base)
+#                                            — building_count_gte:proc,n:3 fires
+#                                              but building_in_region:(90,20,r8)
+#                                              does NOT → after_ticks.
+#   • INTENDED EXPAND-3RD-BASE (build proc + place at (90,20))
+#                                            — both clauses satisfied → WIN.
+#
+# Engine footguns applied (CLAUDE.md):
+#   • `place_building` does NOT enforce build-adjacency (CLAUDE.md
+#     "Engine facts you must internalise") — placing a `proc` at far-
+#     east (x=90, y=20) from an order issued at either west or mid
+#     base works in one shot.
+#   • Persistent unarmed enemy `fact` marker at the far SE corner so
+#     the engine does NOT auto-`done` on enemies-eliminated; a
+#     non-winner emits a real reachable LOSS on the deadline, not a
+#     DRAW.
+#   • The starting WEST proc spawns a free Ore Truck (harv) on
+#     construction at engine S0 (per the suite's established
+#     "preplaced proc → free harv" idiom), giving accruing income to
+#     fund the 3rd proc.
+#   • Tick alignment: `within_ticks` must be reachable inside
+#     `max_turns` (engine advances ~90 ticks/turn ⇒ reachable max =
+#     93 + 90·(N−1)). Every level satisfies this with margin.
+#   • Hard tier: TWO agent `spawn_point` groups rotate the agent base
+#     latitude between NORTH (y=20 baseline) and SOUTH (y=50 mirror).
+#     The far-east target region also flips between (90,20) for the
+#     NORTH spawn and (90,50) for the SOUTH spawn (an `any_of` over
+#     the two candidate regions; either landing wins, but you should
+#     place where your bases actually are — placing at the off-axis
+#     region wastes time and may bust the tick budget). Every agent
+#     actor on hard carries an explicit `spawn_point`; enemy actors
+#     (the persistent far marker) don't (CLAUDE.md spawn-filter rule:
+#     applies only to AGENT actors).
+#   • `building_in_region` checks Euclidean distance² ≤ radius². At
+#     radius 8 the cell at (90,20) is dead-centre; (95,22) is at
+#     distance √29 ≈ 5.4 → safely inside. Placement at (90,20) lands
+#     the proc footprint at that cell.
+#   • The proc cost is 1400. Starting cash is sized per-level so the
+#     INTENDED play funds the 3rd proc with margin; the army-only
+#     play exhausts cash on infantry (`e1` cost 100) before the proc
+#     can be funded.
+#
+# Budget derivation (per level):
+#   • easy   — within_ticks 6300, max_turns 72 → reachable tick 6483 ≥ 6301 ✓
+#   • medium — within_ticks 4500, max_turns 56 → reachable tick 5043 ≥ 4501 ✓
+#   • hard   — within_ticks 5400, max_turns 64 → reachable tick 5763 ≥ 5401 ✓
+#
+# UPGRADED registration: append "mfb-third-base-against-clock" to
+# tests/test_hard_tier.py::UPGRADED (this pack defines ≥2 agent
+# spawn_point groups on hard).
+
+meta:
+  id: mfb-third-base-against-clock
+  title: 'Third Base Against the Clock — Greedy 3-Base Macro Expansion'
+  capability: reasoning
+  real_world_meaning: >
+    A 3-base macro timing decision. The agent already runs two bases
+    and a workable income; the next decision is whether to invest the
+    incoming cash into ARMY (defence / pressure) or into a THIRD base
+    site that secures long-term economic supremacy. The pack is tuned
+    so that the agent CAN fund the 3rd refinery and stand the site up
+    at the far-east target before the deadline IF they prioritise
+    expansion — but the deadline is tight enough that a "spend on
+    army instead" play forfeits the third base (the cash is gone, the
+    new site never appears, the SLA expires) and a stall play (no
+    decisions at all) likewise loses on the clock.
+  robotics_analogue: >
+    Industrial site expansion against an incumbent: a logistics
+    operator with two live sites must stand a third site up by a
+    contractual deadline to win the regional bid. Diverting capex
+    into operational headcount at the existing sites (more drivers,
+    more pickers) feels safer but blows the deadline; only
+    committing the budget to the new site's groundworks delivers the
+    third footprint in time.
+  benchmark_anchor:
+    - "SC2 3-base macro"
+    - "MicroRTS expansion"
+    - "industrial site expansion"
+  author: "openra-bench"
+
+# Pack-level base_map is the sentinel `rush-hour-arena` so the loader
+# can map-resolve before per-level `overrides.base_map` materialises
+# the actual arena .oramap (same idiom as expansion-aggro-3-base-greedy,
+# mfb-tech-base-vs-economy-base, etc.).
+base_map: rush-hour-arena
+
+starting_cash: 2000
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  tools: [observe, build, place_building, harvest, move_units, stop]
+  planning: true
+  termination: {max_ticks: 8500}
+  # Every level supplies its own actor list via `overrides.actors`.
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare skill: generous cash (2400) and a generous clock (6300
+  # ticks ⇒ ~70 decision turns). The intended play funds and places
+  # the 3rd proc at the far-east region; stall and army-only both
+  # LOSE on the clock. The east-region target is at (90,20) r8 — a
+  # single `build('proc') + place_building('proc', 90, 20)` lands
+  # the third site inside the region.
+  # max_turns 72 → reachable tick 93 + 90·71 = 6483 ≥ 6301 ✓
+  easy:
+    description: >
+      You hold TWO bases on a 128×40 arena: a WEST base (Construction
+      Yard at (15,20), Refinery at (18,20), Power Plant at (15,23))
+      and a MID base (Construction Yard at (50,20), Refinery at
+      (53,20)). Your starting cash is 2400 — enough for ONE more
+      Refinery (`proc`, cost 1400) with margin. The brief is to
+      stand up a THIRD base in the FAR-EAST target region centred at
+      (90,20), radius 8 — build a Refinery and `place_building`
+      ('proc', 90, 20). WIN when you own ≥3 refineries, ≥1 of them
+      sits inside the eastern target region, and you still own a
+      Construction Yard — before tick 6300. Stalling builds nothing
+      → clock LOSS. Spending the budget on infantry instead of the
+      3rd refinery → no 3rd refinery → clock LOSS. Placing the 3rd
+      refinery adjacent to your west or mid base (out of the east
+      region) → building_in_region fails → clock LOSS.
+    starting_cash: 2400
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-third-base-against-clock-arena
+        width: 128
+        height: 40
+        cordon: 4
+      actors:
+        # WEST base — fact + proc + powr (the proc auto-spawns a free
+        # Ore Truck on construction at S0 → accruing income).
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: proc, owner: agent, position: [18, 20]}
+        - {type: powr, owner: agent, position: [15, 23]}
+        # MID base — fact + proc (a second free Ore Truck spawns
+        # here at S0).
+        - {type: fact, owner: agent, position: [50, 20]}
+        - {type: proc, owner: agent, position: [53, 20]}
+        # Ore mines: one cluster near each existing base (for the
+        # preplaced harvs to work) AND one cluster near the FAR-EAST
+        # target region (so the newly-placed 3rd proc has ore in
+        # range — flavour for income continuity, not a predicate).
+        - {type: mine, owner: neutral, position: [22, 20]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        - {type: mine, owner: neutral, position: [57, 20]}
+        - {type: mine, owner: neutral, position: [57, 22]}
+        - {type: mine, owner: neutral, position: [95, 20]}
+        - {type: mine, owner: neutral, position: [95, 22]}
+        # Persistent UNARMED enemy `fact` MARKER at the far SE corner,
+        # outside every win predicate. Keeps the engine off the
+        # all-enemies-eliminated auto-`done` so a non-winner emits a
+        # real reachable LOSS on the deadline (anti-DRAW guarantee).
+        - {type: fact, owner: enemy, position: [124, 35]}
+    win_condition:
+      all_of:
+        - building_in_region:
+            {x: 90, y: 20, radius: 8, type: proc, count: 1}
+        - building_count_gte: {type: proc, n: 3}
+        - has_building: fact
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {has_building: fact}
+    max_turns: 72
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: tighter clock (4500 ticks ⇒ ~50 decision
+  # turns) AND slightly reduced starting cash (1800 — still funds the
+  # 3rd proc with margin, but army-only plays exhaust the budget on
+  # infantry before the proc could be funded). Same geography.
+  # max_turns 56 → reachable tick 93 + 90·55 = 5043 ≥ 4501 ✓
+  medium:
+    description: >
+      Same two-base layout (WEST at (15,20), MID at (50,20)) on the
+      same 128×40 arena, tighter clock. Starting cash is 1800 — enough
+      for the 3rd Refinery (`proc`, cost 1400) with margin, but a
+      build-army-only commitment burns it on infantry and forecloses
+      on the third site. Stand up the third base in the FAR-EAST
+      target region centred at (90,20), radius 8 — build a Refinery
+      and `place_building('proc', 90, 20)`. WIN when you own ≥3
+      refineries, ≥1 of them sits inside the eastern target region,
+      and you still own a Construction Yard — before tick 4500.
+      Stalling, army-only, and placing the 3rd refinery anywhere
+      OUTSIDE the eastern target region all LOSE.
+    starting_cash: 1800
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-third-base-against-clock-arena
+        width: 128
+        height: 40
+        cordon: 4
+      actors:
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: proc, owner: agent, position: [18, 20]}
+        - {type: powr, owner: agent, position: [15, 23]}
+        - {type: fact, owner: agent, position: [50, 20]}
+        - {type: proc, owner: agent, position: [53, 20]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        - {type: mine, owner: neutral, position: [57, 20]}
+        - {type: mine, owner: neutral, position: [57, 22]}
+        - {type: mine, owner: neutral, position: [95, 20]}
+        - {type: mine, owner: neutral, position: [95, 22]}
+        - {type: fact, owner: enemy, position: [124, 35]}
+    win_condition:
+      all_of:
+        - building_in_region:
+            {x: 90, y: 20, radius: 8, type: proc, count: 1}
+        - building_count_gte: {type: proc, n: 3}
+        - has_building: fact
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {has_building: fact}
+    max_turns: 56
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable vs medium: TWO agent spawn_point groups
+  # rotate the agent base latitude between NORTH (y=20 baseline) and
+  # SOUTH (y=50 mirror). The win clause is an `any_of` over the two
+  # candidate FAR-EAST regions (one per latitude) — either landing
+  # wins, but you should pick the one your bases ACTUALLY occupy
+  # (placing at the wrong-latitude region wastes time AND requires a
+  # cross-map order). A memorised "place at (90,20)" generalises to
+  # the NORTH spawn but mis-places on the SOUTH spawn.
+  # max_turns 64 → reachable tick 93 + 90·63 = 5763 ≥ 5401 ✓
+  hard:
+    description: >
+      Same 3-base expansion task under richer pressure. Your two
+      pre-placed bases stage at EITHER the NORTH latitude (y≈20) on
+      one set of seeds or the SOUTH latitude (y≈50) on the other —
+      read your actual base layout before committing the 3rd-proc
+      placement. There are TWO candidate FAR-EAST target regions
+      (one at (90,20) and one at (90,50), each radius 8); either
+      landing wins, but you should pick the one in line with your
+      bases — the off-latitude region requires a cross-map order
+      that may bust the tick budget. WIN when you own ≥3 refineries,
+      ≥1 of them sits inside EITHER eastern target region, and you
+      still own a Construction Yard — before tick 5400. Stalling,
+      army-only, and placing the 3rd refinery outside both eastern
+      regions all LOSE.
+    objective_coords: relative
+    starting_cash: 1800
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-third-base-against-clock-arena
+        width: 128
+        height: 64
+        cordon: 4
+      actors:
+        # spawn_point 0 — NORTH base layout (y=20 baseline). The
+        # preplaced harvester is staged at the NORTH latitude so the
+        # spawn-driven start variation is observable through
+        # `units_summary` at reset (the engine-side hard-tier curation
+        # test reads unit cells, not building cells).
+        - {type: fact, owner: agent, position: [15, 20], spawn_point: 0}
+        - {type: proc, owner: agent, position: [18, 20], spawn_point: 0}
+        - {type: powr, owner: agent, position: [15, 23], spawn_point: 0}
+        - {type: fact, owner: agent, position: [50, 20], spawn_point: 0}
+        - {type: proc, owner: agent, position: [53, 20], spawn_point: 0}
+        - {type: harv, owner: agent, position: [22, 20], spawn_point: 0}
+        # spawn_point 1 — SOUTH base layout (y=50 mirror).
+        - {type: fact, owner: agent, position: [15, 50], spawn_point: 1}
+        - {type: proc, owner: agent, position: [18, 50], spawn_point: 1}
+        - {type: powr, owner: agent, position: [15, 53], spawn_point: 1}
+        - {type: fact, owner: agent, position: [50, 50], spawn_point: 1}
+        - {type: proc, owner: agent, position: [53, 50], spawn_point: 1}
+        - {type: harv, owner: agent, position: [22, 50], spawn_point: 1}
+        # Shared geography (neutral/enemy ignore spawn_point filter
+        # per CLAUDE.md — list once). Ore near each candidate target
+        # region.
+        - {type: mine, owner: neutral, position: [22, 20]}
+        - {type: mine, owner: neutral, position: [22, 50]}
+        - {type: mine, owner: neutral, position: [57, 20]}
+        - {type: mine, owner: neutral, position: [57, 50]}
+        - {type: mine, owner: neutral, position: [95, 20]}
+        - {type: mine, owner: neutral, position: [95, 50]}
+        # Persistent unarmed enemy marker (anti auto-done) — far SE,
+        # outside every candidate target region.
+        - {type: fact, owner: enemy, position: [124, 59]}
+    win_condition:
+      all_of:
+        - any_of:
+            - building_in_region:
+                {x: 90, y: 20, radius: 8, type: proc, count: 1}
+            - building_in_region:
+                {x: 90, y: 50, radius: 8, type: proc, count: 1}
+        - building_count_gte: {type: proc, n: 3}
+        - has_building: fact
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+    max_turns: 64

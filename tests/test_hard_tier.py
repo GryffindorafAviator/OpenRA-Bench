@@ -189,6 +189,18 @@ UPGRADED = [
     # memorised "place at (90,20)" generalises to NORTH but mis-places
     # on SOUTH.
     "mfb-third-base-against-clock",
+    # Wave-7 Group B reasoning pack — concurrent two-base ramp (SC2
+    # simultaneous-base macro / multi-plant manufacturing /
+    # distributed-systems geo-redundancy anchor). Hard tier defines
+    # two agent spawn_point groups (NORTH base latitude y=12 / SOUTH
+    # base latitude y=28) round-robined by seed; both candidate
+    # target regions move with the bases (NORTH (15,12)+(85,12) vs
+    # SOUTH (15,28)+(85,28)), so a memorised "always (15,20) /
+    # (85,20)" opening misses both regions on either seed group. A
+    # single HoldFire rifleman per spawn group acts as a seed-driven
+    # start MARKER so units_summary reveals which spawn fired (no
+    # role in the win predicate, which is buildings-only).
+    "mfb-two-base-simultaneous",
     # Wave-4 TURTLE node of the tech triple (SC2 turtle macro /
     # military fortify-before-research doctrine anchor). Hard defines
     # two agent spawn_point groups (NORTH base / SOUTH base) so the

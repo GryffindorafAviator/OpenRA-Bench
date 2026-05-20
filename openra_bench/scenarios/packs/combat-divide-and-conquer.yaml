@@ -1,0 +1,329 @@
+# combat-divide-and-conquer — Split a two-cluster enemy and beat them
+# in detail (engage one while keeping the other unengaged), instead of
+# pushing the midpoint where BOTH clusters bear on the strike force.
+#
+# Wave-7 reasoning seed (capability: reasoning).
+#
+# Real-world / benchmark anchors:
+#   - Military divide-and-conquer / defeat-in-detail doctrine: never
+#     engage two mutually-supporting enemy groups at once; position so
+#     only one is in contact at a time.
+#   - SMAC squad-isolation micro: split a coupled defender by drawing
+#     one squad's aggro / staying outside the other's sight envelope,
+#     then concentrate fire 4-vs-N(one cluster) instead of 4-vs-2N.
+#   - CICERO "split the opposing coalition" tactic: temporarily isolate
+#     a single opponent so your force ratio is favourable, then pivot
+#     to the next opponent after the first is removed.
+#
+# Mechanism (engine-load-bearing geometry):
+#   - The agent commands 4× medium tanks (2tnk) staging at the west
+#     edge (x≈6, y=20). Two enemy clusters sit at x=60 — Cluster A at
+#     y=15 (3× e3 Dragon anti-tank rocketeers + 1× 1tnk light tank,
+#     stance:3 AttackAnything) and Cluster B at y=25 (same composition).
+#     The clusters are 10 cells apart vertically; e3 Dragon range ~5,
+#     1tnk cannon range ~4-5.
+#   - Engaging at the MIDPOINT (60,20): the lead tank sits ~5 cells
+#     from EVERY e3 in BOTH clusters and is inside Manhattan-5 of
+#     all 6 rocketeers AND both enemy light tanks simultaneously.
+#     Under stance:3 the enemy units ALSO advance, so the converging
+#     8-unit mass shreds the lead 2tnk in concentrated fire — the
+#     own_units_gte:3 (medium) / own_units_gte:4 (hard) survival bar
+#     busts before the agent clears either cluster.
+#   - Flanking to (60,5) — well NORTH of Cluster A: agent enters
+#     Manhattan-5 range of Cluster A (at y=15) only after pushing
+#     south on the y axis; Cluster B at y=25 is Manhattan ≥20 away,
+#     so its e3/1tnk are out of weapon range AND outside the
+#     stance:3-hunt aggro lock-on for several turns. The 4-tank
+#     concentrated focus-fire clears Cluster A while Cluster B is
+#     still closing the gap. Once A is dead, the agent pivots to
+#     (60,35) — well SOUTH of Cluster B — and repeats. Both kills
+#     happen in 1-vs-1-cluster geometry, preserving the survival bar.
+#
+# Discrimination bar (the four-script policy bar):
+#   • stall (only observe)                → LOSS. Enemy clusters at
+#     x=60 don't reach the agent at x=6 inside the budget AND the kill
+#     bar (≥6 medium / ≥8 hard) is never met → after_ticks LOSS.
+#   • brute attack_move east on y=20      → LOSS on medium/hard.
+#     The column marches into the midpoint where BOTH clusters bear
+#     simultaneously; lead tank dies in concentrated fire, agent
+#     loses ≥2 tanks → own_units_gte bar busts.
+#   • greedy (charge cluster A's centre directly from y=20)
+#                                          → LOSS on medium/hard.
+#     The y=20 approach still puts the column inside Cluster B's
+#     reach as it advances; B closes during the A-engagement and
+#     the agent fights both at once anyway.
+#   • intended flank-A-then-flank-B-cycle → WIN. Northern flank
+#     engages A in isolation, eliminates it, then southern flank
+#     engages B in isolation. All 4 tanks survive on medium; ≥3
+#     on hard (cap allows 1 attrition).
+#
+# Engine guardrails (per CLAUDE.md / SCENARIO_REVIEW_CHECKLIST.md):
+#   - Map: rush-hour-arena (128 × 40 cells, playable x in [2..126],
+#     y in [2..38]). Strike force stages at x=6; enemy clusters at
+#     x=60; agent owns a `fact` HQ at the deep-west rear (x=4, y=20)
+#     so `has_building:fact` in the WIN predicate enforces base
+#     survival AND keeps the episode alive past the moment both
+#     clusters are wiped (no DRAW collapse via engine auto-`done`
+#     on enemy elimination — the agent base persists).
+#   - All `after_ticks: 4501` fail clauses fit inside max_turns 51
+#     (~90 ticks/turn ⇒ tick ≤ 93 + 90·50 = 4593 ⇒ deadline bites).
+#   - Cluster cells: y=14/16 and y=24/26 (CLAUDE.md notes some mid-
+#     map cells silently fail to place enemy clusters — these
+#     off-by-one cells avoid (60,20)/(60,28). The cluster anchor y
+#     stays close enough to the e3 5-range to satisfy the midpoint-
+#     overlap condition).
+#   - Enemy stance:3 (AttackAnything) makes both clusters auto-fire
+#     AND auto-advance on any in-range agent; the head-on midpoint
+#     LOSS depends on BOTH clusters bearing on the lead tank.
+#   - Hard tier defines TWO agent spawn_point groups (NORTH staging
+#     y=12 vs SOUTH staging y=28) round-robined by seed; enemy
+#     clusters are symmetric across y=20 (Cluster A always at y=15,
+#     Cluster B always at y=25) so either spawn faces the same
+#     divide-and-conquer decision but the FIRST flank target flips
+#     per seed (NORTH spawn engages A first; SOUTH spawn engages
+#     B first). A memorised "always flank north first" opening
+#     cannot generalise across seeds.
+
+meta:
+  id: combat-divide-and-conquer
+  title: 'Combat Reasoning — Divide and Conquer Two Mutually-Supporting Enemy Clusters'
+  capability: reasoning
+  real_world_meaning: >
+    Four medium tanks (2tnk) at the west edge face TWO enemy clusters
+    at x=60 — a NORTH cluster at y=15 and a SOUTH cluster at y=25 —
+    each composed of 3 anti-tank rocket soldiers (e3, Dragon, range
+    ~5) plus 1 light tank (1tnk). The clusters are 10 cells apart;
+    pushing east on the midpoint axis (y=20) puts the lead tank inside
+    weapon range of BOTH clusters at once, and under AttackAnything
+    stance the 8-unit mass converges and concentrates fire on the
+    lead, busting the survival bar before either cluster is cleared.
+    The winning play is divide-and-conquer (defeat in detail): flank
+    well NORTH (e.g. y=5) so only Cluster A's units are in range and
+    line-of-sight; eliminate A while Cluster B is still ≥20 cells
+    away and closing; then pivot SOUTH (y=35) and repeat against B
+    in isolation. Each engagement is a clean 4-vs-4 trade instead of
+    a 4-vs-8 mass.
+  robotics_analogue: >
+    Two-front engagement with mutually-supporting defenders: hitting
+    the midpoint between coupled adversaries lets BOTH fire on the
+    leading agent simultaneously, doubling the incoming DPS share.
+    Spatial positioning that breaks line-of-sight or stays outside
+    the second adversary's aggro / weapon envelope sequences the
+    encounter into two 1-vs-1 trades (favourable force ratio per
+    trade), at the cost of route length and clock.
+  benchmark_anchor:
+    - "SMAC squad-isolation"
+    - "CICERO splitting"
+    - "military divide-and-conquer"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant a tank is lost or an enemy is spotted — the
+  # divide-and-conquer micro is reactive; without these the model
+  # only re-targets on the next turn boundary and any concentrated
+  # volley is fatal to the tight survival bar.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Bare divide-and-conquer skill: lighter clusters (2× e3 each, no
+  # enemy armour). Stall LOSES on the kill bar; brute may squeak by
+  # on this lighter geometry (acceptable per SCENARIO_REVIEW_CHECKLIST
+  # inert-easy-teeth convention — the divide-vs-converge delta lives
+  # on medium and hard).
+  easy:
+    description: >
+      You command 4 medium tanks (2tnk) staging at the west edge
+      (x=6, y=18..21). Two enemy clusters sit at x=60: a NORTH
+      cluster at y=15 (2× e3 anti-tank rocketeers, range ~5) and
+      a SOUTH cluster at y=25 (same). The clusters are 10 cells
+      apart — engaging on the y=20 midpoint puts you in range of
+      both at once. The winning play is divide-and-conquer: flank
+      one cluster (e.g. via y=5 or y=35), eliminate it, then pivot
+      to the other. Your construction yard (fact) sits at the deep
+      rear (4,20); it must survive. Win when 4 enemies are killed,
+      at least 3 of your tanks remain, your fact still stands, and
+      the deadline (tick 4500) has not passed.
+    overrides:
+      actors:
+        # STRIKE FORCE — 4 medium tanks at the west edge, stance:1
+        # ReturnFire so they only engage when ordered.
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        # AGENT HQ — `fact` at the deep west rear; far from any
+        # enemy patrol radius so it survives the engagement. The
+        # WIN predicate `has_building:fact` enforces base survival
+        # AND keeps the episode alive past full enemy elimination
+        # (no DRAW collapse on engine auto-`done`).
+        - {type: fact, owner: agent, position: [4, 20]}
+        # CLUSTER A — NORTH at (60,15), 2× e3. Stance:3 (AttackAnything)
+        # so it auto-fires and chases on any in-range agent.
+        - {type: e3, owner: enemy, position: [60, 14], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 16], stance: 3}
+        # CLUSTER B — SOUTH at (60,25), 2× e3.
+        - {type: e3, owner: enemy, position: [60, 24], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 26], stance: 3}
+        # Persistent far-east enemy `fact` sentinel — out of every
+        # flank route, keeps the episode alive past full cluster
+        # elimination so within_ticks / own-survival predicates
+        # evaluate on the terminal frame (no DRAW collapse via
+        # engine auto-`done` when the last MustBeDestroyed enemy
+        # unit falls). This is the standard combat-pack sentinel
+        # pattern (see combat-pincer-coordination, combat-flanking-
+        # attack).
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {own_units_gte: 3}
+        - {has_building: fact}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+        - {not: {has_building: fact}}
+    max_turns: 51
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: clusters grow to 3× e3 + 1× 1tnk
+  # each (heavy clusters; 8 enemies total). The light tanks give each
+  # cluster enough anti-armour DPS at close range that the midpoint
+  # head-on charge bleeds ≥2 of 4 tanks before clearing either side →
+  # busts own_units_gte:3. The divide-and-conquer flank cycle clears
+  # one cluster at a time in clean 1-vs-1-cluster geometry, preserving
+  # all 4 tanks.
+  medium:
+    description: >
+      You command 4 medium tanks (2tnk) staging at the west edge
+      (x=6, y=18..21). Two HEAVY enemy clusters sit at x=60: a NORTH
+      cluster at y=15 (3× e3 anti-tank rocketeers + 1× 1tnk light
+      tank) and a SOUTH cluster at y=25 (same). The clusters are
+      10 cells apart — engaging on the y=20 midpoint puts you inside
+      weapon range of BOTH clusters at once (8 enemies firing on the
+      lead). The winning play is divide-and-conquer: flank well
+      NORTH (e.g. y=5) so only Cluster A is in range, eliminate it,
+      then pivot SOUTH (e.g. y=35) and engage Cluster B in isolation.
+      Your construction yard (fact) at (4,20) must survive. Win when
+      8 enemies are killed, at least 3 of your tanks remain, your
+      fact still stands, and the deadline (tick 4500) has not passed.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: fact, owner: agent, position: [4, 20]}
+        # CLUSTER A — NORTH at y=14/16 (avoid (60,15) anchor exact
+        # by spreading into two off-by-one cells; the e3 5-range
+        # still covers a tank at (60,20) → both clusters bear on
+        # the midpoint).
+        - {type: e3, owner: enemy, position: [60, 14], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 15], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 16], stance: 3}
+        - {type: 1tnk, owner: enemy, position: [60, 15], stance: 3}
+        # CLUSTER B — SOUTH at y=24/26.
+        - {type: e3, owner: enemy, position: [60, 24], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 25], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 26], stance: 3}
+        - {type: 1tnk, owner: enemy, position: [60, 25], stance: 3}
+        # Persistent far-east enemy sentinel — see easy note.
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 8}
+        - {own_units_gte: 3}
+        - {has_building: fact}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+        - {not: {has_building: fact}}
+    max_turns: 51
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +1 more controlled variable vs medium: TWO agent spawn_point groups
+  # (NORTH staging y=12 vs SOUTH staging y=28) round-robined by seed.
+  # The enemy clusters are SYMMETRIC across y=20 (A at y=15, B at y=25
+  # — unchanged from medium) so each spawn faces the same divide-and-
+  # conquer decision, but the FIRST flank target flips per seed:
+  # NORTH-staging seeds engage A first (closer), SOUTH-staging seeds
+  # engage B first. A memorised "always flank north first" opening
+  # cannot generalise across seeds. Per CLAUDE.md, "if ANY agent actor
+  # declares spawn_point, every agent actor WITHOUT spawn_point is
+  # filtered out", so the fact HQ is duplicated under BOTH spawn
+  # groups at identical coords (it's the shared base across spawns).
+  # The survival cap also tightens to own_units_gte:3 (only 1 tank
+  # may be lost across the whole campaign on hard).
+  hard:
+    description: >
+      You command 4 medium tanks (2tnk) staging at ONE of two west-
+      edge corridors (NORTH y=10..13 or SOUTH y=27..30, chosen by
+      seed). Two HEAVY enemy clusters sit at x=60: a NORTH cluster
+      at y=15 (3× e3 anti-tank rocketeers + 1× 1tnk) and a SOUTH
+      cluster at y=25 (same). The clusters are 10 cells apart —
+      engaging on the y=20 midpoint puts you inside weapon range of
+      BOTH clusters at once (8 enemies firing on the lead). The
+      winning play is divide-and-conquer: flank well NORTH (y=5) or
+      SOUTH (y=35) so only ONE cluster is in range, eliminate it,
+      then pivot to the OTHER side and engage the second cluster
+      in isolation. Your construction yard (fact) at (4,20) must
+      survive. Win when 8 enemies are killed, at least 3 of your
+      tanks remain, your fact still stands, before tick 4500.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging corridor y=10..13. Closer
+        # to Cluster A (y=15) so a naive flanker engages A first.
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 13], stance: 1, spawn_point: 0}
+        - {type: fact, owner: agent, position: [4, 20], spawn_point: 0}
+        # spawn_point 1 — SOUTH staging corridor y=27..30. Closer
+        # to Cluster B (y=25) so a naive flanker engages B first.
+        - {type: 2tnk, owner: agent, position: [6, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, spawn_point: 1}
+        # fact duplicated under spawn_point 1 at identical coords
+        # (CLAUDE.md: agent actors without spawn_point are filtered
+        # out when any agent actor declares one; both spawn groups
+        # need the HQ).
+        - {type: fact, owner: agent, position: [4, 20], spawn_point: 1}
+        # Enemy clusters — symmetric across y=20, place every seed
+        # (per CLAUDE.md, enemy actors don't honour spawn_point).
+        # The divide-and-conquer decision is the SAME for either
+        # spawn; only the first-flank-target flips per seed.
+        - {type: e3, owner: enemy, position: [60, 14], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 15], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 16], stance: 3}
+        - {type: 1tnk, owner: enemy, position: [60, 15], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 24], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 25], stance: 3}
+        - {type: e3, owner: enemy, position: [60, 26], stance: 3}
+        - {type: 1tnk, owner: enemy, position: [60, 25], stance: 3}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 8}
+        - {own_units_gte: 3}
+        - {has_building: fact}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+        - {not: {has_building: fact}}
+    max_turns: 51
