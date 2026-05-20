@@ -1,0 +1,341 @@
+# Validate: python -m openra_bench.scenarios.validate packs/econ-silo-vs-spend.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ECON-SILO-VS-SPEND (Wave-7 — capital-allocation decision under
+# storage-cap pressure: either SPEND immediately on units / defenses
+# that "use" the working capital, OR BUILD A SILO to enlarge the
+# storage cap, but DO NOT HOARD).
+#
+# Real-world anchor: SC2 silo management; working-capital allocation;
+# inventory cap; FIFO perishable inventory cap (capped storage means
+# each new unit of income MUST be acted on or it spoils on deposit).
+#
+# Pack frame: the agent starts with a minimum revenue kit (1× fact,
+# 1× proc, 1× powr, 1× harv, near a patch) and a starting cash buffer
+# NEAR the storage cap. The storage cap on stored ore is set by
+# buildings: proc adds 2000, silo adds 3000 (OpenRA-Rust/openra-sim/
+# src/world.rs:3380-3392 `player_storage_capacity`). With proc only,
+# cap = 2000; starting cash 1800 leaves only $200 of cash headroom
+# before stored-ore overflow on deposit starts losing income.
+#
+# The model's decision each turn: act on the accumulating capital. The
+# any_of clause has THREE legitimate paths (and one inadmissible play):
+#   * SILO: build('silo') (cost 150, prereq proc, no powr needed) →
+#     has_building:silo latches. The cheap conservative hedge —
+#     enlarges the storage cap so harvested ore doesn't spoil.
+#   * KILLS: build tent (400, prereq powr — already pre-placed!) +
+#     e1×K (100 each), engage the pre-placed enemy garrison at the
+#     central latitude → units_killed_gte:K latches. The aggressive
+#     deployment of capital into productive combat assets.
+#   * PBOX-LINE: build tent (400, prereq powr) + 2× pbox (600 each =
+#     1200) → building_count_gte:{type:pbox,n:2} latches. The
+#     defensive-fixed-asset path: turn the working capital into
+#     fortifications. Same total spend (~1600) as the kills path.
+#   * HOARD = none of the above: only observe / only harvest leaves
+#     cash piling up; stored-ore saturates the proc cap and overflows;
+#     the any_of clause never latches → LOSS on the clock.
+#
+# The capability under test (REASONING): recognise that idle capital
+# spoils at the cap — DO SOMETHING with it — and pick a path (silo OR
+# spend on kills OR spend on pbox). All three paths are legitimate;
+# the wrong answer is to hoard.
+#
+# ENGINE FACTS verified (CLAUDE.md):
+#  1. `silo` cost 150, prereq `proc` (vendor/OpenRA/mods/ra/rules/
+#     structures.yaml SILO). Loaded into the ruleset at sim init by
+#     gamerules.rs::from_ruleset — buildable via Command.build("silo")
+#     + Command.place_building("silo", x, y) once `proc` is pre-placed.
+#  2. Storage cap (`resources` cap; harvested ore beyond cap is LOST on
+#     deposit — world.rs:1706-1710 `(r + value).min(cap)`):
+#         proc = +2000
+#         silo = +3000
+#     Pre-placed proc → cap 2000. Adding silo → cap 5000.
+#  3. Drain: 10 stored-ore units → cash per tick (world.rs:2937
+#     RESOURCE_DRAIN_PER_TICK). A single harv during unload deposits
+#     25 ore/tick (resource_value Ore=25, world.rs:4122-4128, with
+#     BaleUnloadDelay=1). With ONE harv the `resources` pool oscillates
+#     0..~300; with TWO harvs the pool climbs faster and approaches the
+#     2000 proc cap under sustained throughput — at which point
+#     overflow loses income; the silo (cap +3000) is the cheap fix.
+#  4. `units_killed_gte` increments when an enemy unit dies to an
+#     agent-owned weapon. The agent has NO weapons pre-placed (proc +
+#     harv + fact + powr are all unarmed) so killing requires building
+#     tent (400, prereq powr — pre-placed) + e1 (100, prereq tent)
+#     and engaging the placed enemy garrison.
+#  5. `pbox` cost 600, prereq `tent` (CLAUDE.md — pbox cost 600 not
+#     400). Two pbox = 1200 cash on top of tent 400 = 1600 total spend
+#     to latch the building_count_gte clause. Same order of magnitude
+#     as the kills path (the silo path is the cheap floor at 150).
+#  6. Pre-placed enemy garrison is `stance: 0` (HoldFire) so the
+#     enemies DO NOT attack the agent's fact (no fail-by-fact-loss for
+#     the hoarder); but they CAN be killed by agent-built attackers
+#     for the KILLS path. The far inert enemy `fact` marker prevents
+#     engine auto-`done` via the "all enemies eliminated" path
+#     (CLAUDE.md auto-done footgun) so a non-finisher LOSES on the
+#     deadline (never DRAWS).
+#  7. `has_building:silo` is safe as a non-key landmark predicate (we
+#     only key it as a WIN clause, not a destruction objective — the
+#     CLAUDE.md "silo is NOT MustBeDestroyed" footgun is about using
+#     silo as an *enemy* destruction landmark, not about owning one).
+#  8. Tick alignment: engine advances ~90 ticks per decision turn so
+#     within_ticks ≤ 93 + 90·(max_turns − 1) (CLAUDE.md). fail uses
+#     after_ticks = within_ticks + 1 so a non-finisher LOSES.
+#  9. spawn_point filter on agent actors only (CLAUDE.md) — neutral
+#     `mine` actors and enemy garrison `e1` actors always place; we
+#     duplicate them where needed for spawn-symmetric throughput on
+#     hard tier.
+# 10. Fail clause includes `not has_building:proc` (per spec) — losing
+#     the refinery collapses both income AND storage cap to 0 (cap
+#     becomes the small per-player base), so a play that lets proc die
+#     loses regardless of cash on hand.
+
+meta:
+  id: econ-silo-vs-spend
+  title: 'Silo vs Spend — Storage-Cap Working-Capital Allocation'
+  capability: reasoning
+  real_world_meaning: >
+    Capital-allocation under a perishable storage cap. The agent runs
+    a revenue kit (fact + proc + powr + harv on an ore patch) whose
+    income flows into a CAPPED storage pool (the refinery store):
+    once full, new harvested ore is lost on deposit. The decision
+    every turn is what to do with the working capital that's
+    accumulating: either SPEND it on productive combat assets (build
+    infantry, kill the enemy garrison), SPEND it on fixed defensive
+    assets (build a pbox line), OR BUILD A SILO so the storage cap
+    grows and ore keeps banking. All three paths legitimately resolve
+    the cap pressure; the only failure mode is HOARDING — observing
+    without building or killing, which leaves capacity to spoil and
+    never satisfies the "use the capital" mandate (the any_of clause).
+  robotics_analogue: >
+    Working-capital management for a robotic operations stack with a
+    FIFO inventory cap: a collector pipeline deposits perishable goods
+    into a fixed-capacity warehouse, and a continuous spend channel
+    converts warehouse stock into bank capital. The operator must
+    EITHER deploy the bank capital on productive assets (extra
+    collectors, defenders), build fixed infrastructure (fortified
+    pickets), OR expand the warehouse (build storage so each new
+    collection still has somewhere to go). Letting capital sit idle
+    while the warehouse fills loses goods at the cap — the
+    perishable-inventory / cash-conversion-cycle discipline.
+  author: wave7-econ-silo-seed
+  benchmark_anchor:
+    - SC2 silo management
+    - working-capital allocation
+    - inventory cap
+    - financial cap management
+    - "FIFO perishable inventory cap"
+
+base_map: rush-hour-arena
+starting_cash: 1800
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Spec-required toolset for the silo-or-spend decision: observe (read
+  # cash + resources + own_buildings), build + place_building (queue
+  # silo OR tent+e1 OR tent+pbox), harvest + move_units (sustain
+  # income + commit attackers), attack_unit / attack_move (drive
+  # infantry into the garrison for the KILLS path), stop.
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Loose clock + low income (1 harv on 1 patch) + low bars. The
+  # decision is the bare skill: realise that doing NOTHING with the
+  # capital fails the any_of clause. The cheap silo (cost 150) is the
+  # canonical floor and is solvable with the starting buffer alone.
+  # KILLS and PBOX-LINE are also possible (build tent + e1×1, or tent
+  # + 2× pbox) but slower; the SILO path is the easy floor.
+  # max_turns 20 → ceiling 93 + 90·19 = 1803 > 1800 ✓.
+  easy:
+    description: >
+      You own a Construction Yard ('fact'), an Ore Refinery ('proc'),
+      a Power Plant ('powr'), and one Ore Truck ('harv') on an ore
+      patch. Starting cash is $1800 (near the storage cap) and income
+      flows from the harvester. Your STORAGE CAP for harvested ore is
+      2000 (the proc alone); a SILO ('silo', cost 150, prereq proc)
+      adds another 3000 cap and is the cheap fix. Win = ALL OF
+      (((you own a 'silo') OR (you have killed ≥1 enemy unit) OR
+      (you own ≥2 'pbox')) AND (economy_value ≥ 1800 — cash + stored
+      ore) AND (you still own a 'fact') AND (current tick ≤ 1800)).
+      The decision is capital-allocation: build('silo') + place; OR
+      build tent (prereq powr — pre-placed!) then e1 and attack the
+      garrison at (40,18); OR build tent + 2× pbox. Doing NONE of
+      these (only `observe`, or only `harvest`) leaves you with cash
+      but no silo, no kills, no pbox → the any_of clause never
+      latches → LOSS on the clock.
+    starting_cash: 1800
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [10, 20]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        # Killable enemy garrison (HoldFire so they don't aggro the
+        # fact — the hoarder cannot lose by base destruction, the only
+        # fail vector is the clock). The agent must build attackers
+        # and engage to score kills for the KILLS path.
+        - {type: e1, owner: enemy, position: [40, 18], stance: 0}
+        - {type: e1, owner: enemy, position: [40, 19], stance: 0}
+        # Persistent far enemy marker prevents engine auto-`done` via
+        # the all-enemies-eliminated path (the garrison alone is a
+        # MustBeDestroyed enemy and a KILLS policy that wipes it could
+        # otherwise auto-end before the win/fail predicate evaluates).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            - has_building: silo
+            - units_killed_gte: 1
+            - building_count_gte: {type: pbox, n: 2}
+        - economy_value_gte: 1800
+        - has_building: fact
+        - within_ticks: 1800
+    fail_condition:
+      any_of:
+        - after_ticks: 1801
+        - not: {has_building: fact}
+        - not: {has_building: proc}
+    max_turns: 20
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVY income (2 harvs on 2 patches) so
+  # the storage-cap pressure is real — sustained throughput pushes
+  # the `resources` pool toward the proc cap of 2000 and overflow
+  # starts losing income. The any_of bar bumps to K=2 kills (and
+  # pbox count stays at 2 — pbox is the steady defensive lane). The
+  # economy_value bar rises to 2200 so a hoarder cannot quietly
+  # satisfy it via cash alone within the tightened clock; either
+  # spend or silo is structurally required to CLEAR the any_of
+  # clause. max_turns 14 → ceiling 93 + 90·13 = 1263 > 1260 ✓.
+  medium:
+    description: >
+      Same kit as easy (fact + proc + powr + harv) but with TWO
+      harvesters on TWO ore patches — heavy throughput. Storage cap
+      is still 2000 (proc only); under sustained two-harv income the
+      stored-ore pool saturates the cap, at which point new harvested
+      ore is LOST on deposit. Decision: build a 'silo' (cost 150,
+      prereq proc) to raise the cap to 5000, OR build tent + ≥2 e1
+      and assault the garrison at (40,18) for ≥2 kills, OR build
+      tent + 2× pbox to latch the building_count_gte:pbox=2 clause.
+      Win = ALL OF (((silo) OR (≥2 kills) OR (≥2 pbox)) AND
+      economy_value ≥ 2200 AND own fact AND tick ≤ 1260). Stalling /
+      harvest-only never satisfies the any_of clause → LOSS on the
+      clock. After the silo build (150), $1800 starting cash + ~190
+      cr/turn from two harvs × 14 turns ≈ $4400 leaves ample
+      headroom above the 2200 EV bar; the KILLS chain (tent 400 +
+      2× e1 100 = 600) and the PBOX-LINE chain (tent 400 + 2× pbox
+      600 = 1600) likewise clear the bar from sustained income.
+    starting_cash: 1800
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [10, 20]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # Three e1s now (K=2 kills required); HoldFire so no base
+        # threat. KILLS path: ≥2 of these must die to agent attackers.
+        - {type: e1, owner: enemy, position: [40, 18], stance: 0}
+        - {type: e1, owner: enemy, position: [40, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [40, 20], stance: 0}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            - has_building: silo
+            - units_killed_gte: 2
+            - building_count_gte: {type: pbox, n: 2}
+        - economy_value_gte: 2200
+        - has_building: fact
+        - within_ticks: 1260
+    fail_condition:
+      any_of:
+        - after_ticks: 1261
+        - not: {has_building: fact}
+        - not: {has_building: proc}
+    max_turns: 14
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO agent spawn_point
+  # groups (NORTH base y=14 / SOUTH base y=26) round-robined by seed.
+  # Heavy income preserved (2 harvs / 2 patches per spawn); cap bar
+  # held at 2200 EV; the same any_of clause (silo OR ≥2 kills OR ≥2
+  # pbox). A memorised "place silo at (14,18)" opening cannot
+  # generalise — the placement cell must be near the *actual* fact
+  # each seed. Enemy e1 garrison + neutral mines duplicated at both
+  # spawn rows because neutral / enemy actors don't honour
+  # spawn_point filter (CLAUDE.md engine footgun). max_turns 14 →
+  # ceiling 1263 > 1260 ✓.
+  hard:
+    description: >
+      Same any_of decision (silo OR ≥2 kills OR ≥2 pbox) and the
+      same heavy income (2 harvs / 2 patches), but your base
+      orientation varies by seed: NORTH base (y=14) or SOUTH base
+      (y=26). Each spawn has its own near-patch pair on its row. The
+      silo (or pbox, or tent staging cell) must be placed near your
+      *actual* fact (a memorised cell from the other spawn misses on
+      the wrong seed). The garrison sits on the central latitude
+      (y≈19..21) so attackers travel a similar distance from either
+      spawn. Hoard (no silo, no army, no pbox, only observe /
+      harvest) loses on the any_of clause; intended silo or spend
+      WIN.
+    starting_cash: 1800
+    overrides:
+      actors:
+        # ── spawn_point 0: NORTH base (y=14) ───────────────────────
+        - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 16], spawn_point: 0}
+        # ── spawn_point 1: SOUTH base (y=26) ───────────────────────
+        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 24], spawn_point: 1}
+        # Neutral mines and enemy actors always place regardless of
+        # the spawn_point filter (CLAUDE.md). Duplicate the patch
+        # pair at each spawn row so per-spawn throughput is symmetric.
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 16]}
+        - {type: mine, owner: neutral, position: [22, 26]}
+        - {type: mine, owner: neutral, position: [22, 24]}
+        # Killable enemy garrison on the centre latitude (y≈20) so
+        # the KILLS path's attack distance is symmetric per spawn.
+        # HoldFire so they don't aggro either base.
+        - {type: e1, owner: enemy, position: [40, 20], stance: 0}
+        - {type: e1, owner: enemy, position: [40, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [40, 19], stance: 0}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            - has_building: silo
+            - units_killed_gte: 2
+            - building_count_gte: {type: pbox, n: 2}
+        - economy_value_gte: 2200
+        - has_building: fact
+        - within_ticks: 1260
+    fail_condition:
+      any_of:
+        - after_ticks: 1261
+        - not: {has_building: fact}
+        - not: {has_building: proc}
+    max_turns: 14

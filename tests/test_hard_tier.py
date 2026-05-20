@@ -419,6 +419,21 @@ UPGRADED = [
     # y=20 so either spawn faces the same flank-vs-frontal decision
     # from a flipped bearing, and no memorised opening generalises.
     "combat-flanking-attack",
+    # Wave-7 REASONING seed: military divide-and-conquer / defeat-in-
+    # detail / SMAC squad-isolation / CICERO splitting anchor. The
+    # agent commands 4× 2tnk vs TWO enemy clusters (N at y=15 / S at
+    # y=25, each 3× e3 + 1× 1tnk, stance:3). Engaging at the y=20
+    # midpoint puts the lead tank in range of BOTH clusters; the
+    # winning play is to flank well off-axis, isolate one cluster,
+    # destroy it, then pivot to the other. Hard tier defines two
+    # agent spawn_point groups (NORTH staging y=10..13 / SOUTH
+    # staging y=27..30) round-robined by seed; the two clusters are
+    # symmetric across y=20 so each spawn faces the same divide-and-
+    # conquer decision but the first-flank-target flips per seed
+    # (N spawn engages Cluster A first; S spawn engages Cluster B
+    # first) — a memorised "always flank Cluster A first" opening
+    # cannot generalise across seeds.
+    "combat-divide-and-conquer",
     # Wave-7 combat-formation pack: military tank-wedge doctrine /
     # SC2 formation micro / combined-arms anchor. The agent commands
     # 5× 2tnk and must arrange them in a WEDGE (apex + 2 flankers
@@ -543,6 +558,19 @@ UPGRADED = [
     # (14,22)" opening cannot generalise — placement must be computed
     # relative to the actual fact each seed.
     "build-sequence-tech-fastest",
+    # Wave-7 REASONING econ pack — SC2 silo management / working-capital
+    # allocation / FIFO perishable inventory cap anchor. Cash starts NEAR
+    # the proc-only storage cap (1800 vs 2000); income accrues; the
+    # any_of clause is silo OR ≥K kills OR ≥2 pbox — three legitimate
+    # spend-or-build paths, none of which is "hoard". Hard tier defines
+    # two agent spawn_point groups (NORTH base y=14 / SOUTH base y=26)
+    # round-robined by seed; ore patches are duplicated at both
+    # latitudes so per-spawn throughput is symmetric (neutral / enemy
+    # actors don't honour spawn_point — CLAUDE.md). The garrison sits
+    # at y=19..21 so attack distance from either spawn is comparable,
+    # and a memorised "place silo at (14,18)" opening cannot generalise
+    # across seeds.
+    "econ-silo-vs-spend",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
