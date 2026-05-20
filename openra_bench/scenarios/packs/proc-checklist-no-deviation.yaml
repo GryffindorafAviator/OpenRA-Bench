@@ -1,0 +1,228 @@
+# Validate: python -m openra_bench.scenarios.validate packs/proc-checklist-no-deviation.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ACTION focus — PROCEDURAL CHECKLIST, NO DEVIATION: the procedure is
+# GIVEN as an ORDERED named checklist of waypoints; the model must
+# visit them in the EXACT prescribed order with a restricted action API
+# (`move_units, observe, stop`). Order is enforced by the stateful,
+# latched `waypoint_sequence` predicate (n:1): Wk+1 only counts AFTER
+# Wk was tagged, so a beeline-to-final, an out-of-order visit, a
+# skipped step, or an idle can NEVER satisfy it. Only the exact
+# in-order execution of EVERY step on the checklist wins. This is the
+# bench's literal SOP / pre-flight-checklist analogue (no skip / no
+# reorder / no improvisation) — the IFBench step-order axis isolated.
+#
+# No enemy on this map (rush-hour-arena, 128x40) — nothing can destroy
+# the force, so the ONLY real failure is the timeout: a reachable
+# `fail after_ticks` strictly past the within_ticks deadline. Stalling,
+# skipping, or reordering all run out the clock ⇒ a real LOSS, never
+# a draw. The `not own_units_gte:1` clause in fail is kept as belt-
+# and-suspenders (the agent starts with 3 jeeps, so it never mis-fires
+# on turn 1, and a degenerate engine event that wipes the force would
+# still LOSE rather than draw). Keeps the _NO_ENEMY classification
+# valid: no FORCE-LOSS-by-combat clause.
+#
+# Tick budget: the engine advances ~90 ticks per decision turn
+# (tick ≈ 93 + 90·(turn-1)). Every within_ticks / after_ticks here is
+# strictly ≤ 93 + 90·(max_turns-1) so the deadline (and therefore the
+# timeout LOSS) is genuinely reachable inside max_turns — never inert.
+# An idle jeep at the far edge does NOT trigger engine auto-done on
+# this map (verified for the sibling strict-sequence pack: 50-turn
+# idle stays alive), so the timeout LOSS is the sole reliable fail.
+#
+# Geometry note: the 3 jeeps start in a tight column at y≈20 (mid-y),
+# and the checklist waypoints alternate NORTH / SOUTH / EAST-CENTER so
+# a beeline to a later step cannot coincidentally cross an earlier
+# step's radius — the latch genuinely tests literal in-order visit
+# discipline rather than path coincidence.
+
+meta:
+  id: proc-checklist-no-deviation
+  title: 'Procedural Checklist — No Deviation, No Skip, No Reorder'
+  capability: action
+  real_world_meaning: >
+    Follow an explicit ordered checklist with zero deviation: every
+    named step must be performed in the exact prescribed order. The
+    decision is literal ORDER compliance under a restricted action API
+    — not where to go or how, but WHEN each step is performed relative
+    to the others. Skipping a step, reordering steps, rushing straight
+    to the final step, or idling all fail the procedure. The bench
+    analogue of an aviation pre-flight checklist (where the order of
+    checks is a flight-safety property, not a stylistic preference)
+    and SOP compliance generally (no skip / no reorder).
+  robotics_analogue: >
+    Procedural compliance: a robot must satisfy a named ordered
+    checklist (visit checkpoint A, then B, then C, then D) within a
+    cycle-time budget where step ORDER is graded, not just the end
+    state — an out-of-order visit, a skipped step, or an idle all
+    fail the procedure inspection.
+  benchmark_anchor:
+    - IFBench step-order compliance
+    - PlanBench strict ordering
+    - aviation pre-flight checklist
+    - SOP no-skip / no-reorder
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    bot_type: ''
+  tools:
+    - move_units
+    - observe
+    - stop
+  # Three jeeps in a tight column at the WEST edge, mid-y. Waypoints
+  # are placed so that the canonical engine pathfinder (east-then-
+  # turn) on a beeline-to-later move cannot coincidentally cross an
+  # earlier waypoint's radius — the latch genuinely tests literal
+  # in-order visit discipline.
+  actors:
+    - type: jeep
+      owner: agent
+      position: [6, 18]
+      stance: 0
+      health: 100
+      facing: -1
+      count: 1
+    - type: jeep
+      owner: agent
+      position: [6, 20]
+      stance: 0
+      health: 100
+      facing: -1
+      count: 1
+    - type: jeep
+      owner: agent
+      position: [6, 22]
+      stance: 0
+      health: 100
+      facing: -1
+      count: 1
+
+levels:
+  # ── EASY ── bare skill. THREE-step checklist alternating N / S /
+  # E-CENTER. The geometry deliberately makes a beeline-to-final
+  # impossible to satisfy the latch (W3 at mid-y, W1 north, W2 south
+  # — a straight east-bound move from the start column does NOT pass
+  # within radius 5 of W1 or W2). max_turns 34 → reachable tick
+  # 93+90·33 = 3063. Generous within_ticks (2900) so the in-order
+  # play has comfortable headroom while a staller / skipper LOSES.
+  easy:
+    description: >
+      Follow the GIVEN ordered checklist using ONLY move_units /
+      observe / stop. Visit the THREE named checkpoints STRICTLY IN
+      ORDER:
+        Step 1: S1 ≈ (40, 4)     [NORTH edge]
+        Step 2: S2 ≈ (75, 36)    [SOUTH edge]
+        Step 3: S3 ≈ (118, 20)   [EAST-CENTER]
+      Reaching a later checkpoint before its predecessor does NOT
+      count and does NOT skip ahead — the checklist is latched.
+      Complete every step in order before the deadline or you lose.
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: CL-E
+            n: 1
+            radius: 5
+            points:
+              - {x: 40,  y: 4}
+              - {x: 75,  y: 36}
+              - {x: 118, y: 20}
+        - {within_ticks: 2900}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2901}
+        - {not: {own_units_gte: 1}}
+    max_turns: 34
+
+  # ── MEDIUM ── +1 controlled variable vs easy: ONE MORE checklist
+  # step (4 named checkpoints, longer serpentine). Same strict-order
+  # latch, tighter clock. max_turns 44 → reachable tick 93+90·43 = 3963.
+  medium:
+    description: >
+      Follow the GIVEN ordered checklist using ONLY move_units /
+      observe / stop. Visit the FOUR named checkpoints STRICTLY IN
+      ORDER:
+        Step 1: S1 ≈ (40, 4)     [NORTH edge]
+        Step 2: S2 ≈ (75, 36)    [SOUTH edge]
+        Step 3: S3 ≈ (95, 4)     [NORTH-east]
+        Step 4: S4 ≈ (118, 36)   [SOUTH-east corner]
+      A later checkpoint reached early does NOT count and does NOT
+      advance the checklist; a skipped step can never be recovered.
+      Run the full checklist in order before the deadline or you lose.
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: CL-M
+            n: 1
+            radius: 5
+            points:
+              - {x: 40,  y: 4}
+              - {x: 75,  y: 36}
+              - {x: 95,  y: 4}
+              - {x: 118, y: 36}
+        - {within_ticks: 3800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3801}
+        - {not: {own_units_gte: 1}}
+    max_turns: 44
+
+  # ── HARD ── +1 controlled variable vs medium: ONE MORE checklist
+  # step (5 named checkpoints, longer serpentine) AND a seed-chosen
+  # staging COLUMN (two spawn_point groups: FAR-WEST cluster at x=6
+  # or NEAR-WEST cluster at x=20, both at mid-y) so the exact timed
+  # ordered execution cannot be replayed from memory — the same
+  # ordered checklist must be re-run from whichever start the seed
+  # picks. Both staging columns are at mid-y so the canonical east-
+  # then-turn engine pathfinder doesn't accidentally clip the
+  # northern (y=4) or southern (y=36) waypoints en route. Tight
+  # clock; timeout is the only reachable LOSS (no enemy ⇒ no other
+  # combat fail). max_turns 52 → reachable tick 93+90·51 = 4683.
+  hard:
+    description: >
+      Follow the GIVEN ordered checklist (ONLY move_units / observe /
+      stop) from a seed-chosen staging column. Visit the FIVE named
+      checkpoints STRICTLY IN ORDER:
+        Step 1: S1 ≈ (40, 4)     [NORTH edge]
+        Step 2: S2 ≈ (75, 36)    [SOUTH edge]
+        Step 3: S3 ≈ (95, 4)     [NORTH-east]
+        Step 4: S4 ≈ (118, 36)   [SOUTH-east corner]
+        Step 5: S5 ≈ (118, 20)   [EAST-CENTER]
+      The checklist is latched: a later checkpoint reached early does
+      not count or skip ahead, a skipped step is unrecoverable.
+      Complete every step in order within the tight deadline.
+    overrides:
+      actors:
+        # spawn_point 0 — FAR-WEST staging column (seed may pick).
+        - {type: jeep, owner: agent, position: [6, 18], stance: 0, health: 100, facing: -1, count: 1, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [6, 20], stance: 0, health: 100, facing: -1, count: 1, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [6, 22], stance: 0, health: 100, facing: -1, count: 1, spawn_point: 0}
+        # spawn_point 1 — NEAR-WEST staging column (same checklist).
+        - {type: jeep, owner: agent, position: [20, 18], stance: 0, health: 100, facing: -1, count: 1, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [20, 20], stance: 0, health: 100, facing: -1, count: 1, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [20, 22], stance: 0, health: 100, facing: -1, count: 1, spawn_point: 1}
+    win_condition:
+      all_of:
+        - waypoint_sequence:
+            id: CL-H
+            n: 1
+            radius: 5
+            points:
+              - {x: 40,  y: 4}
+              - {x: 75,  y: 36}
+              - {x: 95,  y: 4}
+              - {x: 118, y: 36}
+              - {x: 118, y: 20}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52

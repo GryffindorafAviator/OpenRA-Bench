@@ -400,6 +400,14 @@ UPGRADED = [
     # bands (y=12 / y=28) punishes the near-edge shortcut so a
     # memorised single-detour-band opening cannot generalise.
     "scout-and-report",
+    # Wave-6 proc-checklist-no-deviation: strict ordered visit-
+    # checklist (IFBench step-order / PlanBench strict ordering /
+    # aviation pre-flight / SOP no-skip-no-reorder anchor). Hard
+    # tier defines 2 spawn_point groups (FAR-WEST x=6 vs NEAR-WEST
+    # x=20, both at mid-y so the canonical east-then-turn pathfinder
+    # cannot accidentally clip the northern (y=4) or southern (y=36)
+    # waypoints en route). _NO_ENEMY pack — only fail is the timeout.
+    "proc-checklist-no-deviation",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
@@ -467,7 +475,7 @@ NOT_APPLICABLE = {
 
 # No-adversary maps: spawn variation applies but a force-loss
 # fail_condition is impossible (nothing can destroy the force).
-_NO_ENEMY = {"strict-sequence", "custom-map-no-enemy"}
+_NO_ENEMY = {"strict-sequence", "custom-map-no-enemy", "proc-checklist-no-deviation"}
 
 
 def _agent_spawn_points(pack_id: str, level: str) -> set:
