@@ -783,18 +783,6 @@ UPGRADED = [
     # frontier matching its OWN base latitude (an off-axis cross-
     # diagonal commit blows the budget).
     "scout-far-frontier",
-    # Wave-8 PERCEPTION pack — exact-count force sizing (POMDP exact-
-    # count / ScienceWorld census / SC2 scout-count anchor). 2 jeep
-    # scouts must count the K hidden defenders at the far-east enemy
-    # fact, then queue EXACTLY K medium tanks (2tnk) — under-build
-    # loses the attrition trade, over-build (queue 7) misses the
-    # tight clock. Hard tier defines two agent spawn_point groups
-    # (NORTH base y=14 / SOUTH base y=26) round-robined by seed; the
-    # K=5 defender cloud + enemy fact always place at mid-y (enemies
-    # don't honour spawn_point — CLAUDE.md), so the scout-then-build
-    # discipline generalises across spawns but a memorised "scout at
-    # y=20" opening cannot.
-    "scout-count-defenders",
     # Wave-8 REASONING pack — PlanBench replanning under exogenous loss /
     # disaster recovery / SC2 rebuild-after-trade anchor. The agent
     # inherits a complete production base (fact + proc + powr + weap +
@@ -914,6 +902,19 @@ UPGRADED = [
     # and the on-latitude band converges on the active proc, so a
     # memorised opening cannot generalise across seeds.
     "def-engineer-repair-under-fire",
+    # Wave-8 PERCEPTION pack — exact-count force sizing (POMDP exact-
+    # count / ScienceWorld census / SC2 scout-count anchor). 2 jeep
+    # scouts must count the K medium-tank (2tnk) defenders + 2 pbox
+    # at the far-east enemy fact, then queue EXACTLY K medium tanks
+    # (2tnk) — under-build (always 2) is wiped on K≥3 levels; over-
+    # build (queue all 6) misses the deadline on every level. Hard
+    # tier defines two agent spawn_point groups (NORTH base y=14 /
+    # SOUTH base y=26) round-robined by seed; the K=4 defender
+    # cluster + pillboxes + enemy fact always place at mid-y
+    # (enemies don't honour spawn_point — CLAUDE.md), so the
+    # scout-then-build discipline generalises across spawns but a
+    # memorised "scout at y=20" opening cannot.
+    "scout-count-defenders",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

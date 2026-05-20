@@ -1,0 +1,333 @@
+# scout-count-defenders.yaml
+#
+# PERCEPTION capability — EXACT-COUNT force sizing via scout. Sibling
+# of perception-count-the-threat / -small-k along the "what you do
+# WITH the count" axis: those packs measure whether the agent can
+# discover ≥K enemies; this pack measures whether the agent can SCOUT
+# the EXACT count, then BUILD a force sized to defeat THAT count
+# (under-build ⇒ overwhelmed; over-build ⇒ queue lockout wastes the
+# clock). The capability is COUNT-AWARE PRODUCTION SIZING, not bare
+# perception.
+#
+# Real-world anchor (POMDP exact-count / ScienceWorld census /
+# SC2 scout-count): a binding allocation decision requires the exact
+# census, not a safe upper bound — over-allocating wastes finite
+# capacity, under-allocating loses the engagement. The scout BOM
+# decision is the prototypical SC2 micro: see N defenders, build N
+# attackers, no more.
+#
+# Design (per Wave-8 spec, tuned to engine reality):
+#   • Pre-placed agent base: fact + proc + powr + weap (+ fix for
+#     2tnk tech prereq) + 2× jeep scouts.
+#   • Pre-placed enemy defenders at the far-east `fact` landmark:
+#     K medium tanks (2tnk, stance:3) PLUS two pillboxes (pbox) for
+#     extra defensive firepower. The pillboxes don't count toward
+#     `enemies_discovered_gte:K` (they're buildings) or
+#     `units_killed_gte:K` (also buildings) — they are pure
+#     attrition-multiplier that prevents the under-build (2 tanks)
+#     from rushing through. Without the pillboxes a 2-medium-tank
+#     attacker can beat 3-4 medium-tank defenders cleanly; with the
+#     pillboxes' extra ~30 dps each, 2 attackers are wiped before
+#     scoring kills.
+#   • Cash: $5100 — funds up to 6× 2tnk ($850 each). Tuned so the
+#     intended K-tanks build fits, and the over-build (queue all 6
+#     before sending) bleeds the production clock past the deadline.
+#
+# Engine facts used (CLAUDE.md / prompt_v2 codex):
+#   • 2tnk cost $850, prereqs weap + fix (allies' service depot).
+#     Empirically each 2tnk takes ~540 ticks (≈6 turns) of build
+#     time on the standard weap queue; production is SEQUENTIAL on
+#     a single weap.
+#   • 2tnk speed empirically ~15 ticks/cell on rush-hour-arena
+#     (NOT the 4.5 some old comments assumed) ⇒ a 90-cell transit
+#     east costs ~1350 ticks; combat resolves in ~300 ticks.
+#   • pbox is a MustBeDestroyed structure with anti-vehicle MG fire;
+#     750 HP and ~30 dps vs vehicles. Pillboxes ARE buildings
+#     (counted in `enemy_buildings_*` not `enemy_positions`), so
+#     they DO NOT count toward `enemies_discovered_gte` or
+#     `units_killed_gte`. They are pure attrition multiplier for
+#     the under-build discrimination tooth.
+#   • stance:3 (AttackAnything) on the 2tnk defenders auto-fires
+#     on any agent unit in range; combined with the pillboxes the
+#     defender side has enough sustained DPS to wipe a 2-tank
+#     attack but not enough to repel a K-tank attack (the kill
+#     rate of K attackers outpaces the defender DPS once they
+#     close).
+#   • Enemy fact (unarmed, neutral company) is MustBeDestroyed and
+#     keeps the episode alive past the last defender death,
+#     preventing the engine's enemy-elimination auto-done from
+#     masking the win/fail evaluation.
+#   • `enemies_discovered_gte:K` latches when distinct enemy UNITS
+#     are seen by any agent unit (jeep sight ≈ 7); pillboxes don't
+#     count (they're buildings, not units).
+#   • Hard tier uses 2 agent spawn_point groups; the enemy roster
+#     is SHARED across both spawns (enemies don't honour
+#     spawn_point — CLAUDE.md oramap.rs footgun) but the agent's
+#     scout / base corner flips so a memorised "scout at y=20"
+#     opening cannot generalise.
+#
+# DISCRIMINATIONS (CLAUDE.md bar — no defect, no cheat, no draw):
+#
+#   • stall (only observe): LOSS — no scouting ⇒ `enemies_discovered_gte:K`
+#     never latches AND no attack ⇒ `units_killed_gte:K` fails; the
+#     after_ticks fail clause bites at tick T+1.
+#   • build-min-force (queue exactly 2 medium tanks regardless of
+#     actual count, send): LOSS on medium (K=3) and hard (K=4) —
+#     the 2-tank wave is wiped by the K-defender + 2-pillbox
+#     combination before scoring kills (empirically 0 kills, 2
+#     tanks lost). On easy (K=2) the under-build IS the intended
+#     amount and wins, so the under-build LOSS is anchored on
+#     K≥3 levels.
+#   • build-max-force (queue all 6 medium tanks before sending):
+#     LOSS on every level — the 6-tank sequential queue takes
+#     ~3240 ticks plus ~1350 transit + 300 combat = ~4890 ticks,
+#     beyond every level's within_ticks deadline (max 4200 on
+#     hard). The over-build is a clean LOSS on every (level, seed).
+#   • intended count-then-build (scout to count K, queue exactly K
+#     tanks, attack-move east after all built): WINS on every
+#     (level, seed).
+#
+# Tick-budget calibration (rush-hour-arena, 128x40; empirically
+# verified by scripted policy runs in test_scout_count_defenders.py):
+#   • 2tnk build ~540 ticks each (sequential weap queue).
+#   • 2tnk transit ~15 ticks/cell × ~90 cells = ~1350 ticks.
+#   • Combat resolution against K defenders ≈ 300 ticks.
+#   • Intended K=2 finishes ≈ tick 2883 (2×540+1350+300 ≈ 2730);
+#     within_ticks 3300 accepts with slack.
+#   • Intended K=3 finishes ≈ tick 3333; within_ticks 3700 accepts.
+#   • Intended K=4 finishes ≈ tick 3783; within_ticks 4200 accepts.
+#   • Over-build 6 finishes ≈ tick 4890 (6×540+1350+300 = 4890),
+#     beyond ALL within_ticks deadlines ⇒ LOSS on every level.
+#
+# Real LOSS, not DRAW: every level carries
+#   `not building_count_gte:{type:fact,n:1}` (own fact destroyed)
+# AND a tick-aligned `after_ticks` clause inside max_turns (engine
+# ~90 ticks per decision turn under cadence; max_turns sized so
+# reachable > within_ticks+1 — see test_tick_budget_aligned).
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_scout_count_defenders.py -q
+
+meta:
+  id: scout-count-defenders
+  title: 'Scout Count Defenders — Build Force EXACTLY Matched to Counted Threat'
+  capability: perception
+  real_world_meaning: >
+    Exact-count perception coupled to a binding force-sizing
+    decision. The agent must drive a scout into the fog to read
+    EXACTLY how many enemy defenders are at the objective, then
+    commission an attack force sized to defeat THAT count — no more
+    (over-build wastes the production queue past the deadline), no
+    less (under-build loses the attrition trade). The capability
+    under test is COUNT-AWARE PRODUCTION SIZING, not bare scouting
+    and not bare construction.
+  robotics_analogue: >
+    Inventory-driven dispatch under a binding deadline: an autonomous
+    fleet manager must observe how many obstacles block a corridor
+    before allocating the right number of clearing robots — sending
+    too few robots fails the corridor opening, sending the whole
+    fleet wastes the dispatch window on already-cleared sectors.
+    The advertised capability is count-then-allocate, not
+    over-allocate-to-be-safe.
+  benchmark_anchor:
+    - "POMDP exact-count"
+    - "ScienceWorld census"
+    - "SC2 scout-count"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop_units
+  planning: true
+  termination:
+    max_ticks: 12000
+  # Pre-placed agent mid-game base: fact (loss-critical) + proc
+  # (refinery — weap prereq) + powr (queue power) + weap (war
+  # factory) + fix (service depot — 2tnk tech prereq) + 2 jeep
+  # scouts. The defining decision is whether to USE the scouts
+  # before USING the weap budget.
+  actors:
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: proc, owner: agent, position: [14, 18]}
+    - {type: powr, owner: agent, position: [14, 22]}
+    - {type: weap, owner: agent, position: [18, 20]}
+    - {type: fix,  owner: agent, position: [18, 22]}
+    - {type: jeep, owner: agent, position: [22, 19], stance: 1}
+    - {type: jeep, owner: agent, position: [22, 21], stance: 1}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # K=2 VISIBLE rehearsal. The brief tells the agent EXACTLY K=2 so
+  # the count is trivial — bare skill: build 2× 2tnk from weap,
+  # attack-move east. Stalling LOSES on the clock; building 0 tanks
+  # LOSES on the kill bar. The OVER-build (queue 6 tanks before
+  # sending) LOSES because the 6-tank queue (~4890 ticks total)
+  # busts the 3300-tick deadline whereas the 2-tank send at ~2883
+  # wins comfortably.
+  easy:
+    description: >
+      Exactly K=2 enemy medium tanks (2tnk) plus two reinforcing
+      pillboxes defend the far-east enemy construction yard. Your
+      pre-placed base (fact, proc, powr, weap, fix) plus two jeep
+      scouts and $5100 in cash funds up to 6 medium tanks ($850 each)
+      but you only need 2 — exactly enough to defeat the 2-defender
+      tank cloud and rack up the ≥2 kills (pillboxes don't count
+      toward the kill bar). Build 2× 2tnk from the war factory and
+      attack-move east. Stalling, building 0/1 tank, or queueing
+      the full 6 tanks before sending (the long queue misses the
+      deadline) all LOSE. Win when ≥2 enemy units discovered AND
+      ≥2 killed AND your fact is still standing AND tick ≤ 3300.
+    starting_cash: 5100
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: weap, owner: agent, position: [18, 20]}
+        - {type: fix,  owner: agent, position: [18, 22]}
+        - {type: jeep, owner: agent, position: [22, 19], stance: 1}
+        - {type: jeep, owner: agent, position: [22, 21], stance: 1}
+        # K=2 medium-tank defenders + 2 pillboxes for reinforcing
+        # fire. stance:3 (AttackAnything) on the tanks.
+        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 3, count: 2}
+        - {type: pbox, owner: enemy, position: [108, 19]}
+        - {type: pbox, owner: enemy, position: [108, 21]}
+        # Unarmed enemy `fact` landmark — MustBeDestroyed, keeps
+        # the episode alive past the last defender death.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {enemies_discovered_gte: 2}
+        - {units_killed_gte: 2}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 3300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3301}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 38
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: FOG + larger K. K=3 hidden medium-tank defenders + 2
+  # pillboxes. The brief does NOT name the count. The agent must
+  # SCOUT (drive a jeep east) to read K=3 before committing the
+  # build. Stall LOSES; under-build (assume K=2, field 2 tanks)
+  # loses the attrition trade (kills < 3 ⇒ LOSS); over-build
+  # (queue 6) misses the deadline.
+  medium:
+    description: >
+      An UNKNOWN number of enemy medium tanks (2tnk) plus two
+      reinforcing pillboxes defend the far-east enemy construction
+      yard in the fog. Your pre-placed base (fact, proc, powr,
+      weap, fix) plus two jeep scouts and $5100 in cash funds up to
+      6 medium tanks ($850 each) but you should build EXACTLY
+      enough — no more, no less. Drive a jeep east to count the
+      tank defenders, then queue 2tnks to match the count and
+      attack-move east. Stalling, pre-committing to a fixed-too-
+      small force (e.g. 2 tanks regardless of seen count), or
+      queueing the full 6 tanks before sending all LOSE. Win when
+      ≥3 enemy units discovered AND ≥3 killed AND your fact is
+      still standing AND tick ≤ 3700.
+    starting_cash: 5100
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [14, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: weap, owner: agent, position: [18, 20]}
+        - {type: fix,  owner: agent, position: [18, 22]}
+        - {type: jeep, owner: agent, position: [22, 19], stance: 1}
+        - {type: jeep, owner: agent, position: [22, 21], stance: 1}
+        # K=3 medium-tank defenders + 2 pillboxes.
+        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 3, count: 3}
+        - {type: pbox, owner: enemy, position: [108, 19]}
+        - {type: pbox, owner: enemy, position: [108, 21]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {enemies_discovered_gte: 3}
+        - {units_killed_gte: 3}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 3700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3701}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 43
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: K=4 AND ≥2 agent spawn_point groups (NORTH base y=14 /
+  # SOUTH base y=26) round-robined by seed. The K=4 defender cluster
+  # + 2 pillboxes and the enemy fact ALWAYS place (enemy actors
+  # don't honour spawn_point — CLAUDE.md), so the scout-then-
+  # count-then-build discipline generalises across spawns but a
+  # memorised "scout at y=20" opening cannot. The K=4 cloud is
+  # heavy enough that under-build (2 tanks) is wiped, intended
+  # (queue 4 tanks) wins inside the budget, and over-build (queue
+  # all 6) misses the deadline.
+  hard:
+    description: >
+      An UNKNOWN number of enemy medium tanks (2tnk) plus two
+      reinforcing pillboxes defend the far-east enemy construction
+      yard in the fog (likely a larger force than easy/medium).
+      Your base latitude varies by seed (NORTH or SOUTH); the enemy
+      cloud is always at the eastern construction yard. Use your
+      two jeep scouts to count the tank defenders, then queue
+      EXACTLY enough medium tanks (2tnk, $850 each, cash $5100
+      funds up to 6) and attack-move east. Under-build (e.g. assume
+      K=2) loses the attrition trade and the kill bar; over-build
+      (queue 6) misses the deadline. Win when ≥4 enemy units
+      discovered AND ≥4 killed AND your fact is still standing AND
+      tick ≤ 4200.
+    starting_cash: 5100
+    overrides:
+      actors:
+        # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [14, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: weap, owner: agent, position: [18, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [18, 16], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [22, 13], stance: 1, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [22, 15], stance: 1, spawn_point: 0}
+        # ── AGENT spawn 1 — SOUTH base (y=26) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: weap, owner: agent, position: [18, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [18, 28], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [22, 25], stance: 1, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [22, 27], stance: 1, spawn_point: 1}
+        # K=4 medium-tank defenders centred at mid-y; the cloud
+        # sits at y=20 so either spawn must scout from its actual
+        # base latitude. stance:3 AttackAnything.
+        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 3, count: 4}
+        - {type: pbox, owner: enemy, position: [108, 19]}
+        - {type: pbox, owner: enemy, position: [108, 21]}
+        # Persistent unarmed enemy `fact` marker — MustBeDestroyed,
+        # always places (enemies don't honour spawn_point).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {enemies_discovered_gte: 4}
+        - {units_killed_gte: 4}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 4200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 48
