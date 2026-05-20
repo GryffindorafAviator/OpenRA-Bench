@@ -52,6 +52,10 @@ UPGRADED = [
     # memorised across seeds).
     "economy-harvest-investment",
     "mid-concede-vs-hold",
+    # First pack to USE the Wave-2 MCV deploy fix: hard tier flips the
+    # MCV's start corner (NW vs SW) per seed, so the deploy site and
+    # the patrol's relative defensibility differ across seeds.
+    "mcv-deploy-and-build",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

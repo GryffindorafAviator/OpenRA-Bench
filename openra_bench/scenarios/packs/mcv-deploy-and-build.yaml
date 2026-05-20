@@ -1,0 +1,232 @@
+# Validate: python -m openra_bench.scenarios.validate packs/mcv-deploy-and-build.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# MCV-DEPLOY-AND-BUILD — Group A seed (Opening: MCV→fact site choice +
+# basic base build-out). Real-world anchor: critical-infrastructure
+# siting under a defensibility constraint — pick the site, commit on
+# deploy (deploy is irreversible: the MCV is consumed and replaced by
+# a Construction Yard `fact` at (mcv_x-1, mcv_y-1)), then race the
+# build chain (powr -> tent) before the clock.
+#
+# This is the FIRST pack to USE the Wave-2 MCV deploy fix (commits
+# bdedc55 OpenRA-Rust + b0cb710 OpenRA-Bench). The historical "deploy
+# unimplemented" footgun is REMOVED — `Command.deploy([mcv_id])` now:
+#   1. removes the MCV actor,
+#   2. creates an agent-owned `fact` at offset (mcv_x-1, mcv_y-1),
+#   3. re-enables the Building/Defense production queues.
+# See tests/test_mcv_deploy.py for the live-engine usage pattern.
+#
+# Engine tick/turn budget (CLAUDE.md): ~90 ticks per decision turn, so
+# tick ≈ 93 + 90·(turn-1). Empirical chain timings (smoke @ seed=1):
+#   - deploy(mcv)          fact at tick ≈  93 (turn 1)
+#   - build('powr')        ready at tick ≈ 363 (turn ~3)
+#   - place_building powr  fact tick ≈ 363
+#   - build('tent')        ready at tick ≈ 723 (turn ~7)
+#   - place_building tent  fact+powr+tent by tick ≈ 813 (turn ~9)
+# So a clean intended run completes in ~9 turns / ~813 ticks; the
+# tier deadlines are set to bite the lazy/deploy-only/stall policies.
+#
+# Engine footgun reminders applied here:
+#   - `spawn_mcvs: False` is the eval_core default (eval_core.py:54),
+#     but we declare it on `base` explicitly so the engine does not
+#     auto-spawn a second MCV alongside the scenario-declared one.
+#   - Persistent unarmed enemy `fact` MARKER far away (cell (120,20))
+#     prevents engine auto-`done` via the all-enemies-eliminated path
+#     (CLAUDE.md engine-auto-done footgun) — so a non-winner emits a
+#     real LOSS on the deadline, never a DRAW.
+#   - fail_condition uses BOTH (after_ticks: deadline+1) and
+#     (not has_building:fact) — the second clause catches the
+#     "never deploys" stall on turn 1 BEFORE the deadline fires, and
+#     also matches an MCV destroyed pre-deploy (no fact ever exists).
+#     We avoid `not own_units_gte:1` here because that clause mis-fires
+#     on turn 1 (unit-less start footgun documented in CLAUDE.md).
+
+meta:
+  id: mcv-deploy-and-build
+  title: 'MCV Deploy and Build — Site Choice + Commit + Basic Base'
+  capability: reasoning
+  real_world_meaning: >
+    Critical-infrastructure siting under a commit-on-deploy constraint:
+    the operator chooses a site to maximise defensibility, deploys the
+    mobile asset (irreversibly converting it to a fixed Construction
+    Yard at a known offset from the MCV cell), and then races the
+    basic build chain (power online before the dependent barracks)
+    before the clock. The decision is the SEQUENCE: site → deploy →
+    powr → tent, where each step gates the next (no fact ⇒ cannot
+    build; no powr ⇒ tent never completes) and where the deadline
+    discriminates "deploys then idles" from "deploys then builds".
+  robotics_analogue: >
+    Deployable autonomous factory: a mobile platform navigates to a
+    siting cell and anchors (becomes a stationary production base);
+    once anchored, the site is FIXED — the operator must then bring
+    power online and stand up the first dependent module before the
+    mission deadline. The commit is irreversible (no undeploy in this
+    pack); a poor site is locked in.
+  benchmark_anchor:
+    - "SC2LE BuildOrderTimings"
+    - "MicroRTS site-choice sub-tasks"
+    - "urban planning facility-location"
+    - "critical-infrastructure siting under defensibility"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+starting_cash: 1000
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # NEW Wave-2 deploy fix: `deploy` works for scenario-declared MCVs
+  # (see header note + tests/test_mcv_deploy.py).
+  tools: [observe, deploy, build, place_building, move_units, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  # Every level supplies its own actor list via overrides — but the
+  # persistent unarmed enemy `fact` marker (engine auto-`done`
+  # mitigation) is declared at the per-level layer to keep the actor
+  # list audit-explicit.
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare deploy-then-build skill. NO time pressure (the deadline
+  # still bites a stall, but it's generous), NO enemy threat (just the
+  # unarmed marker), MCV pre-placed at (20,20) — single spawn group.
+  # Win = own fact AND powr AND tent before tick 4500.
+  # max_turns 55 → reachable tick 93 + 90·54 = 4953 > 4500 ✓ (the
+  # deadline bites; non-winner emits LOSS not DRAW).
+  easy:
+    description: >
+      Deploy your MCV (Construction Vehicle) — this consumes the MCV
+      and creates a Construction Yard ('fact') one cell up-and-left
+      of the MCV's position. From the fact, queue a Power Plant
+      ('powr', cost 300) and place it adjacent to the fact, then
+      queue a Barracks ('tent', cost 500) and place it adjacent to
+      the fact. Win = you own a 'fact' AND a 'powr' AND a 'tent'
+      before tick 4500. Never deploying (the fact never appears),
+      or deploying but never building (no powr / no tent), loses on
+      the clock.
+    overrides:
+      actors:
+        - {type: mcv, owner: agent, position: [20, 20]}
+        # Persistent unarmed enemy marker far away — prevents engine
+        # auto-`done` (all-enemies-eliminated) so a non-winner LOSES
+        # on the deadline (never a DRAW). The marker is itself a
+        # MustBeDestroyed building (fact) at (120,20).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - has_building: powr
+        - has_building: tent
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - all_of:
+            - after_ticks: 2000           # well past the 1-turn deploy window
+            - not: {has_building: fact}   # never deployed (or MCV killed pre-deploy)
+    max_turns: 55
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a tighter clock AND a light `patrol`
+  # enemy at distance so a slow deploy-and-build is punished by both
+  # the deadline AND incidental risk to the MCV en route. The MCV is
+  # still pre-placed at (20,20) — single spawn.
+  # max_turns 30 → reachable tick 93 + 90·29 = 2703 > 2500 ✓ (tight
+  # but the intended ~9-turn chain finishes at tick ≈ 813, well under
+  # the 2500 deadline; a one-turn deploy delay or one slow placement
+  # easily blows it).
+  medium:
+    description: >
+      Same chain (deploy → powr → tent), tighter deadline (tick
+      2500) AND a light Soviet patrol nearby. Deploy your MCV
+      promptly — once deployed, queue a Power Plant ('powr', cost
+      300) and place it adjacent to the new Construction Yard
+      ('fact'), then queue a Barracks ('tent', cost 500) and place
+      it adjacent to the fact. Win = you own a 'fact' AND a 'powr'
+      AND a 'tent' before tick 2500. Stalling, deploying-only, or
+      losing the MCV to the patrol before you deploy all lose.
+    overrides:
+      enemy: {faction: soviet, cash: 0, bot_type: patrol}
+      actors:
+        - {type: mcv, owner: agent, position: [20, 20]}
+        # Light Soviet patrol at distance — the patrol bot oscillates
+        # around its own spawn and engages intruders, so it adds
+        # incidental time pressure (a slow deployment risks the MCV)
+        # without making the chain unsolvable. Far enough that the
+        # intended fast path is unthreatened.
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 22], stance: 2}
+        # Persistent far marker keeps the episode alive past
+        # any partial outcome (LOSS-not-DRAW guarantee).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - has_building: powr
+        - has_building: tent
+        - within_ticks: 2500
+    fail_condition:
+      any_of:
+        - after_ticks: 2501
+        - all_of:
+            - after_ticks: 800            # past the 1-turn deploy window
+            - not: {has_building: fact}   # never deployed
+    max_turns: 30
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: TWO spawn_point groups for the MCV (NW
+  # corner vs SW corner — different defensibility tradeoffs vs the
+  # patrol) AND a `building_total_gte: 4` clause requiring an EXTRA
+  # building beyond fact+powr+tent (a second powr is the natural
+  # choice — it extends the build radius and adds resilience). Same
+  # patrol bot. Tighter clock again.
+  # max_turns 36 → reachable tick 93 + 90·35 = 3243 > 3000 ✓.
+  # starting_cash 1500 (per level) — the chain needs 300+500+300=1100
+  # to afford fact+powr+tent+2nd_powr; 1500 leaves headroom.
+  hard:
+    starting_cash: 1500
+    description: >
+      Same chain under tighter pressure AND a richer base.
+      Deploy your MCV (Construction Vehicle) — note your MCV's start
+      cell may be in the NORTH-WEST or the SOUTH-WEST of the map
+      depending on the run, and the Soviet patrol's relative
+      defensibility differs per start. Once deployed, queue a Power
+      Plant ('powr'), place it adjacent to the new Construction
+      Yard ('fact'); then queue a Barracks ('tent') and place it
+      adjacent to the fact; then queue ONE more building (a second
+      Power Plant is fine) and place it. Win = you own a 'fact' AND
+      a 'powr' AND a 'tent' AND ≥4 buildings total before tick
+      3000. Stalling, deploying-only, or stopping at the 3-building
+      base all lose.
+    overrides:
+      enemy: {faction: soviet, cash: 0, bot_type: patrol}
+      actors:
+        # Two MCV spawn groups (round-robin by seed). The agent's
+        # `mcv` lands at NW (12,8) on one set of seeds and SW
+        # (12,32) on the other — the deploy cell, the resulting
+        # fact cell, and the patrol's geometry all flip per seed,
+        # so a single memorised opening cannot generalise.
+        - {type: mcv, owner: agent, position: [12, 8],  spawn_point: 0}
+        - {type: mcv, owner: agent, position: [12, 32], spawn_point: 1}
+        # Patrol mid-map, symmetric vs both spawn corners (y=20 is
+        # equidistant from y=8 and y=32). Stance 2 = return fire.
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 22], stance: 2}
+        # Persistent far marker (LOSS-not-DRAW guarantee).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - has_building: powr
+        - has_building: tent
+        - building_total_gte: 4
+        - within_ticks: 3000
+    fail_condition:
+      any_of:
+        - after_ticks: 3001
+        - all_of:
+            - after_ticks: 800
+            - not: {has_building: fact}
+    max_turns: 36
