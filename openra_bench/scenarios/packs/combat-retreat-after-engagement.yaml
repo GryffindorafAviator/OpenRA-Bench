@@ -1,0 +1,309 @@
+# combat-retreat-after-engagement — disengage when battle goes poorly
+# to PRESERVE the force (Wave-6 reasoning pack).
+#
+# Real-world anchors:
+#   - SC2 retreat micro: when a fight is going poorly, pull units back
+#     to a safe rally point before they die. The decision is timing —
+#     too early and you don't score damage; too late and you lose the
+#     force. "Live to fight another day."
+#   - Military tactical-withdrawal doctrine (skirmish-and-pullback,
+#     covering retreat, preservation of force). A small commitment
+#     trades hits for intel/attrition, then breaks contact before the
+#     enemy can encircle and destroy.
+#
+# Idiom (the four-policy bar — same shape used by combat-kite and
+# combat-focus-fire):
+#   • stall (only observe)                    → LOSS. The kill bar
+#     (units_killed_gte:3) is never met → after_ticks LOSS.
+#   • brute attack-until-death (commit fully) → LOSS. The 2× heavy
+#     3tnk + 5× e3 rocket-infantry mass out-trades 4× 2tnk in a
+#     stand-up fight at the enemy line; tanks die two-by-two and
+#     `own_units_gte:3` flips to fail before the survivors can pull
+#     back.
+#   • never-engage (sit at safe zone)         → LOSS. Three tanks are
+#     in the safe-zone region the whole episode, but the kill bar is
+#     unmet → after_ticks LOSS.
+#   • intended engage-then-retreat            → WIN. March east into
+#     fire range, attack_unit the soft e3 rocket infantry (the kill
+#     bar is units_killed_gte:3, and 5× e3 are the cheap kills), then
+#     the moment the first tank is gone (or the second is hurt) issue
+#     a move_units order WEST back to the safe-zone region (x≈5,
+#     y≈20, r=6). All four tanks need not survive — the bar is
+#     own_units_gte:3 (lose at most ONE tank) AND ≥3 tanks back in
+#     the safe-zone radius. The decision under test is DISENGAGE
+#     TIMING: bail BEFORE attrition busts the force-preservation cap.
+#
+# Why "battle is unwinnable" (verified vs engine combat sheet):
+#   • 4× 2tnk vs 5× e3 + 2× 3tnk: head-on, the two 3tnks alone
+#     (Soviet heavy cannon, ~range 5, high anti-armour DPS) trade
+#     2tnk-for-3tnk roughly 1:1 and the rocket infantry (e3 Dragon
+#     launcher, anti-armour) finishes the surviving 2tnks. A brute
+#     attack_move column dies before clearing the squad — the loss
+#     cap (lose at most 1) flips on tank #2 going down, while only
+#     ~2 e3 have died.
+#   • The "engage 3 e3 → break contact" play kills 3 cheap targets
+#     fast (4-vs-1 focus on each e3 ends it in 1-2 decision turns)
+#     then bails BEFORE the 3tnks have ground enough HP off the
+#     column to crater the survival cap.
+#
+# Engine guardrails:
+#   • Map: rush-hour-arena (128 × 40, playable x in [2..126],
+#     y in [2..38]). Tanks stage at the west edge (x=5..7), enemies
+#     at (60,20). Cells verified placeable per CLAUDE.md (60,28 was
+#     called out as silently-failing — we use (60,20) and adjacent
+#     y=17..23).
+#   • Enemy bot is `guard` (not `hunt`): guard holds post and lunges
+#     within GUARD_AGGRO~16, snaps back past leash 18. This lets the
+#     enemy COMMIT during the engagement but NOT pursue the retreating
+#     tanks all the way home — the retreat is genuinely safe once the
+#     tanks break leash range. Critically, `guard` also means the
+#     never-engage policy is not punished by enemy approach (the
+#     enemies stay east), which is exactly what makes never-engage a
+#     CLEAN kill-bar LOSS rather than a confounded contact loss.
+#   • Persistent unarmed `fact` far east (x=120, y=20) prevents engine
+#     auto-done on enemy-elimination collapsing the run to DRAW — if
+#     the agent accidentally kills everything, the run still evaluates
+#     the in-region predicate at the safe zone (and the agent likely
+#     hasn't retreated → fail clause fires on the clock or attrition).
+#   • after_ticks 4501 ≤ 93 + 90·(51-1) = 4593 → the stall LOSS is
+#     reachable inside max_turns; no draw degeneracy.
+#   • units_lost / units_killed are signal-level integers (combat-
+#     focus-fire idiom); units_in_region_gte is the geometry predicate
+#     established by action-multiunit-coordination / artofwar-lure-
+#     the-tiger.
+
+meta:
+  id: combat-retreat-after-engagement
+  title: 'Combat Retreat — Disengage to Preserve the Force'
+  capability: reasoning
+  real_world_meaning: >
+    Four medium tanks face a numerically superior enemy squad (rocket
+    infantry + heavy tanks) at close range. The fight is unwinnable
+    head-on: the rocket infantry and heavy cannons together out-trade
+    the column inside the loss cap. The only winning play is the
+    SC2 retreat-micro idiom: commit briefly to score the kill bar on
+    the soft anti-tank infantry (e3), then break contact and pull
+    the surviving tanks BACK to the safe rally point in the west
+    before attrition busts the force-preservation cap. The decision
+    under test is disengage TIMING — stalling never engages (kill
+    bar unmet), brute attack-until-death loses the force, and only
+    the engage-then-retreat play wins.
+  robotics_analogue: >
+    Military tactical-withdrawal doctrine and the SC2 retreat-micro
+    pattern — when a battle goes poorly, the policy must IDENTIFY
+    the losing trade and pull back to a safe rally before the unit
+    is destroyed. The skill is reading the engagement state and
+    issuing a withdrawal order at the right moment; over- or
+    under-commitment both fail. Preservation of force is its own
+    objective.
+  benchmark_anchor:
+    - "SC2 retreat micro / disengage timing"
+    - "military tactical withdrawal doctrine"
+    - "preservation of force / live-to-fight-another-day"
+    - "skirmish-and-pullback tactics"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant a tank is destroyed — retreat timing is the
+  # capability under test; without own_unit_destroyed the policy
+  # only learns of the first loss on the next turn boundary and the
+  # second loss lands in the gap. enemy_unit_spotted lets the policy
+  # see the contact frame so it can pick targets before opening fire.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare retreat skill: 4 tanks vs LESS enemy (4× e3 + 1× 3tnk).
+  # Loss cap forgiving (own_units_gte:2 ⇒ lose up to 2 tanks), kill
+  # bar only 2. The engage-then-retreat play is comfortable; the
+  # brute may LOSE on the heavy + rocket attrition trade; stall and
+  # never-engage LOSE on the kill bar.
+  easy:
+    description: >
+      Four medium tanks (2tnk) stage at the safe zone in the west
+      (x=5, y=18..21). A smaller enemy squad of FOUR rocket
+      infantry (e3, anti-tank Dragon launcher) escorting ONE heavy
+      tank (3tnk) holds the centre at (60, 20). The fight is
+      unwinnable head-on — the rocket infantry kill armour fast
+      and the 3tnk cannon out-trades the column at close range.
+      The intended play: march east into engagement range, kill TWO
+      enemy units (the cheap e3s die in 1-2 turns of focused tank
+      fire), then move your tanks WEST BACK to the safe zone before
+      attrition busts the loss cap. Win when ≥2 enemies are killed
+      AND ≥3 of your tanks are within radius 6 of (5,20) AND you
+      have ≥2 tanks alive, before tick 4500. Stall, brute attack
+      until-death, and never-engage all LOSE.
+    overrides:
+      actors:
+        # Strike force — 4 medium tanks at the safe-zone start.
+        - {type: 2tnk, owner: agent, position: [5, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [5, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [5, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [5, 21], stance: 1}
+        # Enemy squad — centre at (60,20). 4× e3 anti-tank rockets
+        # form the kill bar's soft targets; 1× 3tnk provides the
+        # attrition pressure that makes the brute LOSE.
+        - {type: e3,   owner: enemy, position: [60, 18], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 21], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 22], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [60, 20], stance: 3}
+        # Persistent far-east enemy fact — prevents engine auto-done
+        # on enemy-elimination so the safe-zone predicate is
+        # evaluated rather than the run collapsing to DRAW.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 2}
+        - {units_in_region_gte: {x: 5, y: 20, radius: 6, n: 3}}
+        - {own_units_gte: 2}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 2}}
+    max_turns: 51
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: FULL enemy squad (5× e3 + 2× 3tnk)
+  # AND tighter survival bar (own_units_gte:3 ⇒ lose AT MOST ONE
+  # tank). The kill bar tightens to 3. The engage window is shorter:
+  # the second 3tnk doubles the close-range damage and the brute now
+  # loses tanks ~twice as fast. The intended engage-then-retreat
+  # still wins — focus-fire 3 e3s (1-2 turns each) and pull back
+  # before the heavies grind ≥2 tanks down.
+  medium:
+    description: >
+      Four medium tanks (2tnk) stage at the safe zone in the west
+      (x=5, y=18..21). The enemy squad at (60, 20) is FIVE rocket
+      infantry (e3, anti-tank Dragon launcher) escorting TWO heavy
+      tanks (3tnk). The fight is unwinnable head-on — the rockets
+      and heavy cannons together collapse the column at close
+      range. The intended play: march east into engagement range,
+      focus-fire THREE enemy units (the cheap e3s die in 1-2 turns
+      of concentrated tank fire each), then move your tanks WEST
+      BACK to the safe zone before attrition takes a second tank.
+      Win when ≥3 enemies are killed AND ≥3 of your tanks are
+      within radius 6 of (5,20) AND you have ≥3 tanks alive,
+      before tick 4500. Stall, brute attack-until-death, and
+      never-engage all LOSE.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [5, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [5, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [5, 21], stance: 1}
+        # FULL enemy squad — 5× e3 (kill-bar fodder; anti-tank
+        # Dragon launcher) ON THE LINE at x=60, with the 2× 3tnk
+        # heavy escort placed 4 cells back at x=64. The e3 line is
+        # what the attacker must close on to score kills (Dragon
+        # range 5); from the e3 firing line (~x=55) the rear-rank
+        # 3tnks (range ~5) cannot yet engage, so they only weigh in
+        # if the agent commits PAST the e3 line — i.e. the brute
+        # attack_move policy that overshoots. Spread the e3 line
+        # across y=17..23 so all four tanks face fire.
+        - {type: e3,   owner: enemy, position: [60, 17], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 18], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 21], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 22], stance: 3}
+        # Heavy tanks placed 4 cells BEHIND the rocket line —
+        # within engagement leash for the guard bot to pursue when
+        # contact starts (GUARD_AGGRO ~16), but outside their own
+        # ~5-cell weapon range from the e3 firing line. They are
+        # the attrition trigger for the brute attack_move policy
+        # that closes past x=60 into 3tnk cannon range.
+        - {type: 3tnk, owner: enemy, position: [64, 19], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [64, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {units_in_region_gte: {x: 5, y: 20, radius: 6, n: 3}}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 51
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis vs medium: TWO seed-driven agent spawn_point groups
+  # (NORTH safe zone at (5,10) OR SOUTH safe zone at (5,30)). The
+  # safe-zone position FLIPS per seed, so a memorised "always
+  # retreat to (5,20)" play cannot generalise — the policy must
+  # read the obs to find its own start cell and retreat to THAT
+  # safe zone. Win predicate is an any_of over the two safe-zone
+  # regions so either spawn satisfies the geometry. Enemy formation
+  # is symmetric across y=20 mid-latitude so both spawns face the
+  # same engagement geometry.
+  #
+  # Per the CLAUDE.md `spawn_point` contract: ALL agent actors
+  # carry an explicit spawn_point (the filter applies only to AGENT
+  # actors); the enemy actors are unchanged and always place.
+  hard:
+    description: >
+      Four medium tanks (2tnk) stage at ONE of two safe-zone
+      corridors (NORTH at x=5, y=8..11 OR SOUTH at x=5, y=28..31,
+      chosen by seed — anti-memorisation). The enemy squad of FIVE
+      rocket infantry (e3) escorting TWO heavy tanks (3tnk) holds
+      the centre at (60, 20). The fight is unwinnable head-on.
+      The intended play: march east-and-toward-centre into
+      engagement range, focus-fire THREE enemy units (the cheap
+      e3s die fast under concentrated tank fire), then move your
+      tanks BACK to YOUR safe zone (the one you started in — read
+      your start cell from obs) before attrition takes a second
+      tank. Win when ≥3 enemies are killed AND ≥3 of your tanks
+      are within radius 6 of YOUR safe zone (north (5,10) OR south
+      (5,30)) AND you have ≥3 tanks alive, before tick 4500.
+      Stall, brute attack-until-death, never-engage, and retreating
+      to the WRONG safe zone all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH safe zone (y=8..11)
+        - {type: 2tnk, owner: agent, position: [5, 8],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [5, 9],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [5, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [5, 11], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH safe zone (y=28..31)
+        - {type: 2tnk, owner: agent, position: [5, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [5, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [5, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [5, 31], stance: 1, spawn_point: 1}
+        # FULL enemy squad — symmetric across y=20 so both spawns
+        # face the same engagement geometry. e3 line forward at
+        # x=60 (Dragon range 5); 3tnk escort 4 cells back at x=64
+        # (out of weapon range from the e3 firing line so the heavy
+        # only weighs in on a brute overshoot past the rocket line).
+        - {type: e3,   owner: enemy, position: [60, 17], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 18], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 19], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 21], stance: 3}
+        - {type: e3,   owner: enemy, position: [60, 22], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [64, 19], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [64, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - any_of:
+            - {units_in_region_gte: {x: 5, y: 10, radius: 6, n: 3}}
+            - {units_in_region_gte: {x: 5, y: 30, radius: 6, n: 3}}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 51

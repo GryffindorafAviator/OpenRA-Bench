@@ -400,6 +400,8 @@ UPGRADED = [
     # bands (y=12 / y=28) punishes the near-edge shortcut so a
     # memorised single-detour-band opening cannot generalise.
     "scout-and-report",
+    # Wave-6 salvage: agent timeout pre-commit
+    "combat-retreat-after-engagement",
     # Wave-6 proc-checklist-no-deviation: strict ordered visit-
     # checklist (IFBench step-order / PlanBench strict ordering /
     # aviation pre-flight / SOP no-skip-no-reorder anchor). Hard
