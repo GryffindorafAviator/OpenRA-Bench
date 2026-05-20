@@ -926,6 +926,23 @@ UPGRADED = [
     # targets so the agent's infantry strike force racks up kills
     # without being attrited in transit.
     "lh-econ-army-victory",
+    # Wave-8 REASONING capital reallocation pack — SC2 sell mechanic
+    # for refund / financial CAPEX reallocation / business continuity
+    # asset redeployment anchor. Starting cash alone is below the
+    # proc rebuild cost, so the agent MUST sell the exposed central-
+    # lane proc to recoup 50% capital (refund 700) and use the refund
+    # + on-hand cash to build a fresh proc at the safe target region.
+    # Hard tier defines two agent spawn_point groups (NORTH base at
+    # y=4 / SOUTH base at y=36) round-robined by seed; the win
+    # predicate pairs each safe-region clause with the matching
+    # spawn-fact's corner clause, so a memorised "always place at
+    # (16, 8)" opening wins NORTH seeds by coincidence but loses
+    # SOUTH seeds (NORTH-fact-corner clause unmet AND SOUTH-proc-
+    # region clause unmet). The central hunt band is symmetric across
+    # y=20 (enemy actors don't honour spawn_point — CLAUDE.md), so
+    # both spawns face the same sell-then-rebuild discipline from a
+    # flipped base latitude.
+    "build-sell-and-rebuild-elsewhere",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

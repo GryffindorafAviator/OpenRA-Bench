@@ -1,0 +1,353 @@
+# build-sell-and-rebuild-elsewhere.yaml
+#
+# REASONING capability — Wave-8 Group "capital reallocation" pack
+# (SC2 sell mechanic for refund / financial reallocation / business
+# CAPEX redeployment anchor). The agent owns a Construction Yard
+# (`fact`) and a Power Plant (`powr`) at the safe north-west corner
+# and an exposed Refinery (`proc`) at the centre lane. A scripted
+# `hunt` band is incoming on the centre lane and will raze the proc
+# within ~25-30 turns (the proc has no defenders and no inherent
+# weapons). Starting cash alone is NOT enough to build a NEW proc
+# (1400 build cost > starting cash on every tier); the only path
+# to a fresh proc inside the tick budget is:
+#
+#     1. `sell` the EXPOSED proc           ⇒ refunds 50% of cost (700)
+#     2. `build('proc')` + `place_building` ⇒ at the safe target region
+#
+# Without selling, the agent has insufficient cash to build a new
+# proc (build cost 1400 > starting cash on every tier and there is
+# no income source); even if the agent attempts to wait, the proc
+# is razed by the hunt band ⇒ refund forfeit ⇒ still no cash for a
+# new proc. Building-without-selling stalls on insufficient funds
+# (`build('proc')` is rejected until cash ≥ 1400 — production
+# gates on cash > cost). The intended SELL-THEN-REBUILD play wins.
+#
+# Real-world anchors:
+#   - SC2 sell mechanic for refund (the classic mechanic this pack
+#     is named for — partial salvage of a structure for partial
+#     refund to redeploy production elsewhere)
+#   - Financial / CAPEX reallocation (liquidate a deteriorating
+#     asset and redeploy the capital to a safer / forward site)
+#   - PlanBench resource reallocation (the planner must reason that
+#     the partial refund + new build is cheaper than any alternative
+#     under the budget — building from cash alone is impossible)
+#
+# DISCRIMINATIONS (no defect, no cheat):
+#   - stall (observe only): LOSS — proc razed; no new proc placed
+#     anywhere (let alone in the safe region) ⇒ building_in_region
+#     clause unmet AND clock runs out.
+#   - build-without-selling: LOSS — `build('proc')` is rejected
+#     until cash ≥ 1400; the agent has no income source within the
+#     tick budget, so the build never starts ⇒ no proc in safe
+#     region.
+#   - sell-but-place-in-wrong-region: LOSS — refunded cash + cash
+#     covers a new proc, but placed in the central lane (or
+#     anywhere outside the safe region) ⇒ building_in_region
+#     clause unmet (the new proc is in the wrong cell band).
+#   - sell-then-rebuild-at-safe-region (intended): WIN — refund
+#     funds the new proc, placed at the safe far-west target
+#     region ⇒ all win clauses satisfied within tick budget.
+#
+# ENGINE FACTS (CLAUDE.md):
+#   - proc cost 1400 → sell refund = 700 (50% of build cost;
+#     world.rs::order_sell / estimate_building_sell_value).
+#   - PROC has `Prerequisites: anypower` → POWR pre-placed at the
+#     safe corner so the new proc can be built.
+#   - `fact` cost 0 ⇒ NOT buildable via StartProduction (engine
+#     gates on cost > 0). Pre-place the agent fact on the SAFE
+#     corner so `has_building:fact` is satisfied turn 1; the
+#     rebuild target is a `proc`, not a fact.
+#   - `place_building` does NOT enforce build-adjacency — orders
+#     work at arbitrary in-bounds coords (CLAUDE.md), so the safe
+#     target region can be far from the surviving fact.
+#   - `building_in_region` is the present-tense region-and-type
+#     predicate (vs `has_building` which is a one-shot "ever
+#     seen" set; the proc must STAND at the safe region at the
+#     win check).
+#   - `hunt` bot: each enemy unit attacks NEAREST foe (CLAUDE.md
+#     scripted_bot — not centroid like rusher). With proc on the
+#     centre lane (front piece) and fact far in the NW corner,
+#     each hunt unit picks the proc first, then walks west for the
+#     fact only after the proc falls. This gives the agent a
+#     ~25-30 turn proc-razing window during which the sell+build
+#     must complete, and the fact survives long enough to satisfy
+#     the win clause.
+#   - within_ticks paired with after_ticks ⇒ a non-finisher is a
+#     real reachable timeout LOSS (CLAUDE.md rule 2 — deadline
+#     must be reachable below max_turns).
+#   - Inert enemy `fact` far east (anti-DRAW: keeps the episode
+#     alive past hunt-band death so the win/fail check fires;
+#     engine auto-`done`s on enemy-elimination otherwise).
+#
+# Validate (no model / no network):
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m pytest tests/test_build_sell_and_rebuild_elsewhere.py -q
+
+meta:
+  id: build-sell-and-rebuild-elsewhere
+  title: 'Sell and Rebuild Elsewhere — Recoup Capital, Relocate Production'
+  capability: reasoning
+  real_world_meaning: >
+    A forward refinery (proc) sits in the path of an incoming enemy
+    hunt band that will raze it within ~25-30 turns; starting cash
+    alone does not cover building a new proc at the safe target
+    region. The only path to a fresh proc inside the tick budget
+    is to SELL the exposed proc (recouping 50% of its build cost)
+    and use the refund plus starting cash to BUILD a new proc and
+    PLACE it at the safe target region far from the rush. Stalling,
+    building without selling (cash gated), and placing the new
+    proc in the wrong region all lose; only sell-then-rebuild-at-
+    safe-region wins.
+  robotics_analogue: >
+    Liquidate a deteriorating asset to fund a relocation: a forward
+    production node is about to be lost to environmental damage,
+    and the capital reserve alone is insufficient to commission a
+    replacement node elsewhere. The right move is a deliberate
+    salvage of the at-risk node (recovering ~half the build capital
+    in liquid form) which, combined with the on-hand reserve, funds
+    a new node at a safer site BEFORE the original is lost for zero
+    recovery. Letting the asset be destroyed loses 100% of its
+    capital; salvage-and-redeploy preserves 50% + funds the new
+    site.
+  benchmark_anchor:
+    - 'capital reallocation'
+    - 'SC2 sell mechanic'
+    - 'financial reallocation'
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  # `hunt` bot: each enemy unit picks its OWN nearest agent target
+  # (per-unit nearest, not rusher's all-attack-centroid-nearest).
+  # With the proc on the centre lane (front piece) and the fact +
+  # garrison far in the NW corner, every hunt unit picks the proc
+  # first; only after the proc is razed do they walk west toward
+  # the fact. The agent's sell+build cycle must complete in the
+  # proc-razing window (~25-30 turns at this composition); the
+  # fact then survives long enough for the win clause to fire.
+  enemy:
+    faction: soviet
+    bot_type: hunt
+  # Minimal toolset: observe, sell (load-bearing), build +
+  # place_building (rebuild primitive). No deploy / harvest /
+  # repair — those would side-step the decision by enabling other
+  # paths (deploying a spare MCV, training income from a harv
+  # loop, repairing the exposed proc indefinitely).
+  tools:
+    - observe
+    - sell
+    - build
+    - place_building
+  planning: true
+  # Re-decide the instant the hunt band is spotted, so the agent
+  # gets debriefed within seconds of the threat materialising and
+  # has a clean re-plan window.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+
+starting_cash: 800
+
+levels:
+  # ── EASY ──────────────────────────────────────────────────────────
+  # 800 cash + 700 refund from selling the exposed proc = 1500, just
+  # over the 1400 build cost of a new proc. Light hunt band (2× e1)
+  # so the proc has ~25-30 turns before it falls — generous window
+  # to sell + queue + place. max_turns 60 → reachable tick ≈ 4698 in
+  # interrupt mode (event-shortened steps). within_ticks 4500
+  # paired with after_ticks 4501 in fail ⇒ a non-finisher is a real
+  # reachable timeout LOSS (not a draw).
+  easy:
+    description: >
+      You own a Construction Yard (fact) and a Power Plant (powr)
+      at the safe far north-west corner and a forward Refinery
+      (proc) at the centre lane. A small hunt band (2 rifle
+      infantry) is incoming from the east on the centre lane and
+      will raze the refinery within ~25-30 turns. Your starting
+      cash is 800 — not enough to build a new refinery (cost
+      1400). SELL the exposed refinery (refunds 700) and use the
+      recouped cash + starting cash to BUILD a new refinery at
+      the safe target region around (16, 8) — north of the rush
+      lane. Win by having a refinery at the safe region AND the
+      Construction Yard still alive AND before tick 4500. Stall,
+      build-without-selling (cash gated), or placing the new
+      refinery anywhere outside the safe region all lose.
+    starting_cash: 800
+    overrides:
+      actors:
+        # Agent fact + powr at the SAFE far north-west corner (off
+        # the y=20 lane; powr provides the `anypower` prerequisite
+        # that PROC needs).
+        - {type: fact, owner: agent, position: [4, 4]}
+        - {type: powr, owner: agent, position: [4, 9]}
+        # Exposed proc at the centre lane — WILL be razed by the
+        # hunt band ~tick 2400-2800 unless sold.
+        - {type: proc, owner: agent, position: [60, 20]}
+        # Light hunt band — 2× e1 — at x=110 on the centre lane.
+        # Each hunt unit attacks its own nearest foe; the proc on
+        # the centre lane is the front piece, so both rifles
+        # converge on it first. The fact in the NW corner is OFF
+        # the engagement axis (~108 cells away vs the proc's
+        # ~50 cells), so the proc absorbs the initial salvo and
+        # the fact survives well past the win check.
+        - {type: e1, owner: enemy, position: [110, 20], stance: 3, count: 2}
+        # Anti-DRAW marker: unarmed enemy fact far east keeps the
+        # episode alive past hunt-band death so the win/fail
+        # evaluation actually fires (CLAUDE.md: engine auto-
+        # `done`s on enemy-elim once the last MustBeDestroyed
+        # enemy building falls).
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        # New proc at the safe target region (north shoulder
+        # around (16, 8), radius 6 — generous enough to admit
+        # nearby legal cells but tight enough that placing on
+        # the y=20 lane fails the clause).
+        - building_in_region: {type: proc, x: 16, y: 8, radius: 6, count: 1}
+        # Construction Yard still alive (present-tense fact
+        # predicate; `has_building` is one-shot and would stay
+        # true after the fact's destruction — CLAUDE.md footgun).
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4500
+    # Fail bites at tick 4501 — reachable inside 60 turns in
+    # interrupt mode (empirically the stall path reaches ~tick 4698
+    # at turn 60 due to mid-episode event-shortened steps).
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ────────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER cash + LARGER hunt band. Starting
+  # cash 700 = exactly the sell refund — the agent MUST sell to fund
+  # the new proc (cash 700 is half the proc cost). The heavier band
+  # (3× e1) raises the urgency: the proc falls in ~20 turns instead
+  # of ~25-30. Same tick budget so the win window is tighter against
+  # the same after_ticks 5401 fail.
+  medium:
+    description: >
+      You own a Construction Yard and a Power Plant at the safe
+      far north-west corner and a forward Refinery at the centre
+      lane. A heavier hunt band (3 rifle infantry) is incoming
+      and will raze the refinery faster (~20 turns). Your
+      starting cash is 700 — exactly the sell refund of a
+      refinery, half the build cost. You MUST sell the exposed
+      refinery to free the second half of the cash, then build a
+      new refinery at the safe target region around (16, 8). Win
+      by having a refinery at the safe region AND the Construction
+      Yard still alive AND before tick 4500. Stalling, building
+      without selling (cash blocks the build), or placing the new
+      refinery in the central lane all lose.
+    starting_cash: 700
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [4, 4]}
+        - {type: powr, owner: agent, position: [4, 9]}
+        - {type: proc, owner: agent, position: [60, 20]}
+        # Heavier band: 3× e1 (still no e3 — pure-rifle keeps the
+        # band's eastern walk-time consistent with easy; the
+        # extra rifle just shortens the proc-razing window).
+        - {type: e1, owner: enemy, position: [110, 20], stance: 3, count: 3}
+        - {type: fact, owner: enemy, position: [125, 20]}
+    win_condition:
+      all_of:
+        - building_in_region: {type: proc, x: 16, y: 8, radius: 6, count: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ──────────────────────────────────────────────────────────
+  # +1 controlled variable: TWO spawn_point groups (NORTH y=4 vs
+  # SOUTH y=36 base corner) round-robined by seed AND a SECOND hunt
+  # band so each spawn faces an equivalent threat. The safe target
+  # region for each spawn group shifts to the SAME y-band as that
+  # spawn's fact (so the relocate is always "stay on YOUR latitude").
+  # Tight cash 700 still requires the sell. A memorised "build at
+  # (16, 8)" cell loses on the SOUTH spawn (the safe region there
+  # is (16, 36) not (16, 8)).
+  hard:
+    description: >
+      Your base stages from a seed-chosen latitude (NORTH y=4 or
+      SOUTH y=36) — a single memorised target cell cannot
+      generalise. You own a Construction Yard and a Power Plant
+      at the safe corner of your latitude and a forward Refinery
+      at the centre lane. Hunt bands are incoming on the centre
+      lane and will raze the refinery within ~20 turns. Your
+      starting cash is 700 — exactly half the refinery build
+      cost. You MUST sell the exposed refinery and use the
+      recouped cash to build a new refinery at the safe target
+      region of your OWN latitude (around (16, 8) for the NORTH
+      spawn, (16, 36) for the SOUTH spawn). Win by having a
+      refinery at the safe region of your latitude AND the
+      Construction Yard still alive AND before tick 4500.
+    starting_cash: 700
+    overrides:
+      actors:
+        # NORTH spawn (spawn_point 0): fact + powr at the safe
+        # NW corner, proc forward on the central lane.
+        - {type: fact, owner: agent, position: [4, 4], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 9], spawn_point: 0}
+        - {type: proc, owner: agent, position: [60, 20], spawn_point: 0}
+        # Inert HoldFire rifle at the matching safe shoulder so the
+        # spawn variation surfaces in `units_summary` (the hard-tier
+        # contract test asserts that different seeds produce
+        # different agent starts; otherwise this pack is buildings-
+        # only and the spawn round-robin is invisible to the
+        # observation channel).
+        - {type: e1, owner: agent, position: [16, 8], stance: 0, spawn_point: 0}
+        # SOUTH spawn (spawn_point 1): fact + powr at the safe
+        # SW corner, proc forward on the SAME central lane (the
+        # threat axis is symmetric across y=20).
+        - {type: fact, owner: agent, position: [4, 36], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 31], spawn_point: 1}
+        - {type: proc, owner: agent, position: [60, 20], spawn_point: 1}
+        - {type: e1, owner: agent, position: [16, 36], stance: 0, spawn_point: 1}
+        # Hunt band on the centre lane — enemy actors don't honour
+        # spawn_point (CLAUDE.md oramap.rs footgun) so they always
+        # place regardless of seed. Each hunt unit picks its own
+        # nearest foe; the proc on (60,20) is the front piece for
+        # BOTH spawns (the fact in either NW or SW corner is far
+        # off-axis), so the proc absorbs the salvo first and the
+        # active-spawn fact survives well past the win check.
+        - {type: e1, owner: enemy, position: [110, 20], stance: 3, count: 3}
+        # Anti-DRAW marker at the centre lane far east.
+        - {type: fact, owner: enemy, position: [125, 20]}
+    # Spawn-matched win: the proc must land in the SAFE region of the
+    # active spawn's latitude. The `any_of` pairs each NORTH/SOUTH
+    # safe region with a `building_in_region` check on the active
+    # fact's corner — so the NORTH-disc clause only fires when the
+    # NORTH fact is alive (NORTH spawn) and the SOUTH-disc clause
+    # only fires when the SOUTH fact is alive (SOUTH spawn). A
+    # memorised "always place at (16, 8)" cell satisfies the NORTH
+    # clause on NORTH seeds but FAILS on SOUTH seeds (no NORTH fact
+    # ⇒ NORTH-pair fails; no SOUTH proc ⇒ SOUTH-pair fails).
+    win_condition:
+      all_of:
+        - any_of:
+            # NORTH spawn (fact at (4, 4)) ⇒ matching safe region
+            # for the new proc is the NW shoulder around (16, 8).
+            - all_of:
+                - building_in_region: {type: fact, x: 4, y: 4, radius: 4, count: 1}
+                - building_in_region: {type: proc, x: 16, y: 8, radius: 6, count: 1}
+            # SOUTH spawn (fact at (4, 36)) ⇒ matching safe region
+            # for the new proc is the SW shoulder around (16, 36).
+            - all_of:
+                - building_in_region: {type: fact, x: 4, y: 36, radius: 4, count: 1}
+                - building_in_region: {type: proc, x: 16, y: 36, radius: 6, count: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
