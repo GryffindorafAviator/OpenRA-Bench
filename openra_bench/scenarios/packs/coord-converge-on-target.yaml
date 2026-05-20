@@ -44,10 +44,10 @@
 #     attack defeated piecewise (the calibration bar still requires
 #     simultaneous arrival).
 #   - Enemy actors are NOT filtered by `spawn_point` (CLAUDE.md). The
-#     hard tier varies the AGENT staging — the lateral (third) squad
-#     starts WEST of objective in spawn 0 and EAST of objective in
-#     spawn 1, flipping its ingress bearing — while the defender
-#     cluster stays symmetric.
+#     hard tier varies the AGENT staging — both groups share the
+#     3-prong N/W/S shape, but staging cells are shifted (the W-squad
+#     column flips by ~6 cells and the N/S latitudes shift) — while
+#     the defender cluster stays symmetric.
 
 meta:
   id: coord-converge-on-target
@@ -189,57 +189,50 @@ levels:
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 more controlled variable: TWO seed-driven agent spawn groups
-  # round-robined per seed. Group 0 places the lateral (third) squad
-  # WEST of the objective at (66,20); group 1 places it EAST of the
-  # objective at (134,20). The defender cluster stays symmetric (4
-  # guards, one on each cardinal face) so both spawns face the same
-  # convergent geometry but the lateral squad's ingress bearing
-  # flips per seed (W → E). A single memorised "3-prong from W/N/S"
-  # opening cannot generalise. NORTH and SOUTH squads are common to
-  # both groups (placed without spawn_point — but the documented
-  # filter rule in CLAUDE.md ("if ANY agent actor declares
+  # round-robined per seed. Both groups share the 3-prong N/W/S
+  # convergent shape, but the staging cells are shifted between
+  # groups (group 0: 70,6/66,20/70,34; group 1: 76,5/72,18/76,32);
+  # the W-squad column flips by ~6 cells and the N/S latitudes shift
+  # so a memorised single-cell opening cannot generalise across
+  # seeds. The defender cluster stays symmetric (4 guards, one on
+  # each cardinal face) so both spawns face the same convergent
+  # geometry. Per CLAUDE.md, "if ANY agent actor declares
   # spawn_point, every agent actor WITHOUT spawn_point is filtered
-  # OUT") means N/S MUST be duplicated across spawn groups; both
-  # copies are placed at identical coords so the contract is met
-  # without changing the geometry per seed.
+  # OUT", so every agent actor declares its spawn_point and the two
+  # full squad layouts are listed explicitly.
   hard:
     description: >
       THREE squads of medium tanks (3× 2tnk each, 9 tanks total) must
       converge on the enemy construction yard (`fact` at ~100,20)
       defended by 4 leashed rocket-infantry guards (one on each
-      cardinal face). The squad layout flips per seed: one spawn
-      stages NORTH (~70,6) / WEST (~66,20) / SOUTH (~70,34); the
-      other stages NORTH (~74,8) / EAST (~126,20) / SOUTH (~74,32).
-      Both layouts are balanced equidistant (~26-34 cells per
-      squad) so a synchronised launch arrives together. A single
-      squad alone is
-      destroyed by the guards; two squads converging trade out the
-      strike force before satisfying the region threshold. Win when
-      ≥6 of your 9 tanks are inside an 8-cell radius of (100,20) AND
-      the yard is destroyed, before tick 4500.
+      cardinal face). The squad staging cells flip per seed: one
+      spawn stages NORTH (~70,6) / WEST (~66,20) / SOUTH (~70,34);
+      the other stages a shifted variant — NORTH (~76,5) / WEST
+      (~72,18) / SOUTH (~76,32). Both layouts are balanced
+      equidistant (~27-34 cells per squad) so a synchronised launch
+      arrives together; a memorised single-cell opening cannot
+      generalise. A single squad alone is destroyed by the guards;
+      two squads converging trade out the strike force before
+      satisfying the region threshold. Win when ≥6 of your 9 tanks
+      are inside an 8-cell radius of (100,20) AND the yard is
+      destroyed, before tick 4500.
     overrides:
       actors:
         # spawn_point 0 — NORTH / WEST-of-objective / SOUTH.
         - {type: 2tnk, owner: agent, position: [70, 6],  stance: 1, count: 3, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [66, 20], stance: 1, count: 3, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [70, 34], stance: 1, count: 3, spawn_point: 0}
-        # spawn_point 1 — NORTH / EAST-of-objective / SOUTH.
-        # NORTH and SOUTH are duplicated at identical coords so the
-        # spawn-filter rule (CLAUDE.md) doesn't drop them from group 1;
-        # the WEST squad is relocated to EAST at (134,20) — equidistant
-        # from the objective on the opposite bearing, flipping the
-        # lateral ingress direction. The seed-chosen ingress geometry
-        # cannot be memorised: a fixed "drive west squad east" opening
-        # is wrong half the seeds.
-        # NORTH and SOUTH in group 1 are pulled in slightly to
-        # (74, 8) / (74, 32) so their distance to the objective (~29
-        # cells) closely matches the EAST squad's distance from
-        # (126, 20) (~26 cells) — a naive simultaneous launch from
-        # group 1 has all three squads arrive together (group 0
-        # already balanced at ~34 from each of W / N / S).
-        - {type: 2tnk, owner: agent, position: [74, 8],   stance: 1, count: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [126, 20], stance: 1, count: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [74, 32],  stance: 1, count: 3, spawn_point: 1}
+        # spawn_point 1 — shifted N/W/S layout: NORTH (76,5), WEST
+        # (72,18), SOUTH (76,32). Same convergent shape as group 0
+        # but the staging cells are shifted (per-seed start
+        # variation), keeping all three squads approximately
+        # equidistant (~27-28 cells) from the objective so the
+        # naive simultaneous launch still arrives together. The W
+        # squad's exact column / latitude flips per seed, so a
+        # memorised opening cannot generalise across seeds.
+        - {type: 2tnk, owner: agent, position: [76, 5],  stance: 1, count: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [72, 18], stance: 1, count: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [76, 32], stance: 1, count: 3, spawn_point: 1}
         # The OBJECTIVE.
         - {type: fact, owner: enemy, position: [100, 20]}
         # 4 guards: one on each cardinal face. Symmetric: equally
