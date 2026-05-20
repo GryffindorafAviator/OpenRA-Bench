@@ -468,6 +468,24 @@ NOT_APPLICABLE = {
     "variable (route geometry) that competes with that signal for "
     "attribution. Hard tightens the patrol intensity (a second arc) "
     "and the attrition cap (units_lost_lte 1 → 0) instead.",
+    # Wave-6 Group J robustness seed. Hard's controlled variable is
+    # the strike SEVERITY (one more 4tnk + tent added to the rubble
+    # pile). The enemy-bot footgun (CLAUDE.md: enemy actors don't
+    # honour spawn_point) makes a clean per-spawn enemy partition
+    # geometrically infeasible — foreign-latitude `hunt` 4tnks drift
+    # to the active base and over-pressure the defender ring beyond
+    # the tuned proc-but-not-fact kill window, converting clean LOSS
+    # discrimination into noisy across-seed instability. Spawn
+    # variation would compete with the recovery-discipline signal
+    # for attribution.
+    "rob-cash-depletion-recovery": "hard's controlled variable is "
+    "strike severity (proc + tent destroyed vs medium's proc only). "
+    "Enemy `hunt` actors don't honour spawn_point (CLAUDE.md "
+    "oramap.rs footgun) so foreign-latitude 4tnks drift to the "
+    "active spawn and over-pressure the tuned defender ring, "
+    "destroying the fact and converting the recovery test into a "
+    "fact-defence test. Spawn variation would compete with the "
+    "recovery-discipline signal for attribution.",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss
