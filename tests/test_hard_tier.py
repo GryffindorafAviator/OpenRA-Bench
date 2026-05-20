@@ -903,6 +903,17 @@ UPGRADED = [
     # e1 per group surfaces the variation via units_summary (the base
     # is otherwise building-only).
     "build-rally-point-management",
+    # Wave-8 ACTION pack — disaster-recovery triage / repair-order
+    # doctrine (SC2 SCV repair / SRE triage / military combat-engineer
+    # field-repair anchor). Base of fact + proc + pbox + fix with the
+    # proc pushed forward into the threat lane; grenadier-led `rusher`
+    # band attrites the proc cluster. Hard tier defines two agent
+    # spawn_point groups (NORTH base y=8..16 / SOUTH base y=24..32)
+    # round-robined by seed; symmetric north + south attrition bands
+    # always place (enemy actors don't honour spawn_point — CLAUDE.md)
+    # and the on-latitude band converges on the active proc, so a
+    # memorised opening cannot generalise across seeds.
+    "def-engineer-repair-under-fire",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
