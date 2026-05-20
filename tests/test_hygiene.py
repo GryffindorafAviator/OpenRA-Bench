@@ -48,14 +48,19 @@ def test_curated_set_is_small_handauthored_and_meaningful():
             assert m.quarantine_reason, f"{name} quarantined w/o reason"
 
 
-def test_harvest_quarantined_with_engine_reason():
-    # economy-harvest-timebox was un-quarantined after task #14 wired
-    # real harvest income / silo storage end-to-end; the investment
-    # pack still rides the S0/S1 quarantine until storage-capacity work
-    # lands.
-    m = load_pack(PACKS / "economy-harvest-investment.yaml").meta
-    assert m.status == "quarantine"
-    assert "S0/S1" in m.quarantine_reason
+def test_harvest_packs_unquarantined_post_s0s1():
+    # Both harvest packs (economy-harvest-timebox and
+    # economy-harvest-investment) have been rebuilt and un-quarantined
+    # once the engine S0/S1 harvest-income prerequisite landed (Task
+    # #14). The S0/S1 quarantine reason no longer applies to either
+    # pack; the quarantine mechanism is still exercised by the
+    # remaining de-dup / engine-blocked packs (see
+    # test_default_evaluate_excludes_quarantine_keeps_active).
+    for h in ("economy-harvest-investment", "economy-harvest-timebox"):
+        m = load_pack(PACKS / f"{h}.yaml").meta
+        assert m.status == "active", (
+            f"{h} must be active post-S0/S1 (Task #14)"
+        )
 
 
 def test_default_evaluate_excludes_quarantine_keeps_active(monkeypatch):
@@ -78,17 +83,19 @@ def test_default_evaluate_excludes_quarantine_keeps_active(monkeypatch):
     out = run_eval.evaluate(packs=packs, levels=["easy"], seeds=[1])
     sk = " ".join(out["skipped"])
     assert "quarantine:" in sk
-    # economy-harvest-investment is the remaining harvest-family
-    # quarantined pack (timebox was un-quarantined post-#14).
-    assert any("economy-harvest-investment" in s for s in out["skipped"])
-    assert "economy-harvest-investment" not in captured.get("compiled", [])
+    # After both harvest packs were rebuilt (Task #14), the still-
+    # quarantined exemplars are the de-dup'd adversarial-siege /
+    # adversarial-skirmish (consolidated into adversarial-duel) and
+    # economy-time-box (consolidated into economy-force-buildup).
+    assert any("adversarial-siege" in s for s in out["skipped"])
+    assert "adversarial-siege" not in captured.get("compiled", [])
     # a curated active pack reached the (faked) compile step
     assert "rush-hour" in captured.get("compiled", [])
 
 
 def test_quarantined_pack_still_loads_when_named_explicitly():
-    p = load_pack(PACKS / "economy-harvest-investment.yaml")
+    p = load_pack(PACKS / "adversarial-siege.yaml")
     assert (
         p.meta.status == "quarantine"
-        and p.meta.id == "economy-harvest-investment"
+        and p.meta.id == "adversarial-siege"
     )

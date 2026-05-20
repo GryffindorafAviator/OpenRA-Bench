@@ -1,98 +1,192 @@
 meta:
   id: economy-harvest-investment
-  title: Harvest Economy — Investment & Storage
+  title: Harvest Economy — Capital Reinvestment (Wide vs Deep vs Geographic)
   capability: reasoning
-  real_world_meaning: 'Given enough capital to either widen collection (a second refinery / more harvesters)
-    or deepen storage (silos that raise the cap so burst yield is not lost), choose the allocation that
-    maximizes banked economic value before the deadline — the investment decision, plus storage so harvest
-    is not wasted.
-
-    '
-  robotics_analogue: 'Capital allocation for an autonomous resource operation: throughput vs. buffer capacity
-    under a finite budget and mission clock.
-
-    '
+  real_world_meaning: >
+    Early-revenue capital reinvestment under a deadline. A productive
+    operation has just enough starting capital for ONE coherent
+    capacity expansion: deepen the team at the near patch (extra
+    harvester), widen processing (extra refinery), or expand
+    geographically (send a new harvester to a far patch). Hedging
+    (splitting the indivisible budget across two reinvestments) funds
+    neither path completely and yields baseline throughput — the
+    deadline bites. The test is committing the whole budget to ONE
+    reinvestment path early, not dithering.
+  robotics_analogue: >
+    Capacity-expansion budgeting in an autonomous pipeline operation:
+    add a collector (deep), add a processing/staging node (wide), or
+    deploy a collector to an unexploited zone (geographic). The same
+    indivisible budget buys exactly one; a hedged spend yields neither
+    and the mission deadline is missed.
   author: catalog-c13
-  status: quarantine
-  quarantine_reason: blocked on engine S0/S1 ore-income prerequisite (non-discriminating until then)
+  benchmark_anchor:
+    - SC2LE CollectMineralsAndGas
+    - PlanBench cost-optimal under reinvestment
+    - lmgame-Bench resource-streaming
+    - "capital reinvestment: wide vs deep vs geographic"
+
+# ENGINE NOTE (verified 2026-05-19 against installed openra_train wheel
+# at HEAD 17f024b, post-S0/S1 harvest income — Task #14):
+# 1. Harvest income works: a pre-placed harv+proc+mine yields
+#    ~95cr/turn on the NEAR patch (22,18) and ~31cr/turn on a FAR
+#    patch (40,8 or 40,28). A second harv ~doubles income (the
+#    DEEP path), measured ~213cr/turn over 80 turns.
+# 2. A second `proc` (extra refinery) is BLOCKED in the production
+#    queue ("ORDER: StartProduction BLOCKED — missing prerequisites
+#    for proc"), so the literal WIDE path (2nd refinery) is engine-
+#    inaccessible from the pre-placed setup. The build order silently
+#    fails → falls through to baseline throughput → LOSES every tier.
+#    WIDE is therefore a DOCUMENTED DECOY path: a model that
+#    reasonably commits to it (RTS prior: more refineries = more
+#    throughput) loses, mirroring the bench's "intended capability
+#    must win, plausible alternatives must lose" bar.
+# 3. The `harvest` order with a far-target cell is OVERRIDDEN by the
+#    harv's nearest-ore auto-pathing: a 2nd harv built at the base
+#    will go to the NEAR patch even if commanded to far ore. The
+#    GEOGRAPHIC commit-policy must explicitly `move_units` the
+#    new harv to the far patch first, then issue `harvest` once it
+#    has arrived. GEO yields ~+30% over baseline (~11500 ev / 80
+#    turns vs baseline ~8675); it WINS easy (loose bar) but LOSES
+#    medium/hard (tight bar — only DEEP at full intensity clears it).
+# 4. Cost table (openra-rl/openra_env/game_data.py): harv=1100,
+#    proc=1400, powr=300, tent=500, silo=150. The pack's indivisible
+#    budget `starting_cash: 1100` is EXACTLY one harv — funds DEEP
+#    or GEOGRAPHIC fully, leaves nothing for a second commitment.
+#    Spending any of it on a smaller decoy (powr 300 / silo 150)
+#    drops cash below 1100; income must refill before the harv can
+#    queue. The lost ticks are the cost of hedging — measurable as
+#    ~800-1300 ev less than a clean DEEP commit at mt=80-90.
+# 5. Tick budget: engine advances ~90 ticks per decision turn, so
+#    `within_ticks ≤ 93 + 90·(max_turns − 1)` is required for the
+#    clock to actually bite (CLAUDE.md). Easy/medium use max_turns=80
+#    → ceiling 7203 → within_ticks=7200. Hard uses max_turns=90
+#    → ceiling 8103 → within_ticks=8100. fail_condition uses the
+#    same boundary so a non-finisher LOSES (not draws).
 base_map: rush-hour-arena
-starting_cash: 3000
+starting_cash: 1100
+
 base:
   agent:
     faction: allies
   enemy:
     faction: soviet
   tools:
-  - build
-  - place_building
-  - harvest
-  - move_units
-  - deploy
-  - stop
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - deploy
+    - stop
   planning: true
   termination:
     max_ticks: 40000
   actors:
-  - type: fact
-    owner: agent
-    position:
-    - 10
-    - 18
-  - type: powr
-    owner: agent
-    position:
-    - 14
-    - 18
-  - type: proc
-    owner: agent
-    position:
-    - 12
-    - 22
-  - type: harv
-    owner: agent
-    position:
-    - 15
-    - 22
-  - type: mine
-    owner: neutral
-    position:
-    - 40
-    - 22
-  - type: jeep
-    owner: agent
-    position:
-    - 8
-    - 16
+    # Pre-placed: 1× fact + 1× powr + 1× proc + 1× harv + 3× mine
+    # (one near at the centre, two far above and below). The
+    # harvester+refinery already produce baseline income; the
+    # reinvestment decision is the test.
+    - {type: fact, owner: agent, position: [10, 22]}
+    - {type: powr, owner: agent, position: [14, 22]}
+    - {type: proc, owner: agent, position: [12, 18]}
+    - {type: harv, owner: agent, position: [14, 18]}
+    # Near patch (the DEEP-extension target):
+    - {type: mine, owner: neutral, position: [22, 18]}
+    # Two far patches (the GEOGRAPHIC-expansion targets):
+    - {type: mine, owner: neutral, position: [40, 8]}
+    - {type: mine, owner: neutral, position: [40, 28]}
+    # Inert enemy marker keeps the episode from auto-terminating on
+    # "all enemies dead" before the win/fail is evaluated (CLAUDE.md
+    # engine footgun). Placed far from the agent so it can't be killed.
+    - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+
 levels:
   easy:
-    description: 'Budget covers a clear improvement; harvest + reinvest to clear a modest economy-value
-      bar.
-
-      '
+    description: >
+      Loose-bar reinvestment test. Pre-placed 1 harv + 1 refinery +
+      3 mines (one near, two far). Starting cash is EXACTLY one
+      harvester (1100). Stall earns nothing and loses; baseline
+      (harvest with the starting harv only, no reinvestment) clears
+      only the income floor and loses. ANY single committed-path
+      reinvestment — a second harv assigned to the near OR to a far
+      patch — clears the bar. The clock is real (max tick 7200 =
+      within_ticks): a non-finisher LOSES, not draws.
+    starting_cash: 1100
     win_condition:
       all_of:
-      - economy_value_gte: 4000
-      - within_ticks: 12000
-    max_turns: 70
+        - economy_value_gte: 10500
+        - own_units_gte: 1
+        - has_building: proc
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - after_ticks: 7200
+        - not: {own_units_gte: 1}
+        - not: {has_building: proc}
+    max_turns: 80
   medium:
-    description: 'Higher bar — a single refinery/harvester cannot keep up; widen collection (2nd refinery
-      or more harvesters) with the budget.
-
-      '
+    description: >
+      Tighter bar, same indivisible 1100 budget. Only the highest-
+      yield reinvestment (DEEP — a second harv on the near patch)
+      clears it. A hedged spend (cheap decoy first, then try to fund
+      the harv after income refills) loses ~3-7 turns of double-
+      income — the deadline bites by ~800 ev. The lower-yield
+      reinvestments (GEOGRAPHIC — sending the 2nd harv to a far
+      patch with ~1/3 the throughput; or WIDE — a blocked extra
+      refinery order) miss the bar.
+    starting_cash: 1100
     win_condition:
       all_of:
-      - economy_value_gte: 6500
-      - within_ticks: 12000
-    max_turns: 75
+        - economy_value_gte: 17000
+        - own_units_gte: 1
+        - has_building: proc
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - after_ticks: 7200
+        - not: {own_units_gte: 1}
+        - not: {has_building: proc}
+    max_turns: 80
   hard:
-    description: 'High banked-value target with a tight clock: bursts overflow the base storage and are
-      lost — a silo (raising the cap) is required, and the budget must be split between collection and
-      storage.
-
-      '
+    description: >
+      Tightest bar + seed-varied starts. The base spawns NORTH-OF or
+      SOUTH-OF the near patch (round-robin by seed), spaced
+      symmetrically around the mine row so the DEEP commit's
+      throughput is the SAME on both spawns (measured: DEEP=19500 ev
+      on each spawn at mt=90); only the start position varies. A
+      memorised opening cannot generalise — the new harv spawns in a
+      different cell, base layout differs. Same indivisible 1100
+      budget; DEEP wins on both spawns by ~300 ev margin, hedge /
+      GEOGRAPHIC / WIDE / baseline / stall LOSE on both.
+    starting_cash: 1100
+    overrides:
+      actors:
+        # spawn_point 0 — base staged NORTH (y=16) of the near patch
+        # (y=18). Δy=2 — matches spawn 1 for symmetry.
+        - {type: fact, owner: agent, position: [10, 16], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 16], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 16], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 16], spawn_point: 0}
+        # spawn_point 1 — base staged SOUTH (y=20) of the near patch.
+        - {type: fact, owner: agent, position: [10, 20], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 20], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 20], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 20], spawn_point: 1}
+        # Shared ore geography (one near + two far) — identical
+        # across spawns so the reinvestment decision is the same;
+        # only the start position varies.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [40, 8]}
+        - {type: mine, owner: neutral, position: [40, 28]}
+        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
     win_condition:
       all_of:
-      - economy_value_gte: 9000
-      - has_building: silo
-      - within_ticks: 11000
-    max_turns: 85
+        - economy_value_gte: 19000
+        - own_units_gte: 1
+        - has_building: proc
+        - within_ticks: 8100
+    fail_condition:
+      any_of:
+        - after_ticks: 8100
+        - not: {own_units_gte: 1}
+        - not: {has_building: proc}
+    max_turns: 90

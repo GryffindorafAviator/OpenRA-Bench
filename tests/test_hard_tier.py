@@ -45,6 +45,11 @@ UPGRADED = [
     "strategy-trilemma",
     "defense-rush-survive",
     "navigation-confined-hard-only",
+    # Rebuilt post-S0/S1 harvest income (Task #14); hard tier defines
+    # ≥2 symmetric spawn_point groups around the near patch so the
+    # DEEP throughput is equal on each spawn (no opening can be
+    # memorised across seeds).
+    "economy-harvest-investment",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
