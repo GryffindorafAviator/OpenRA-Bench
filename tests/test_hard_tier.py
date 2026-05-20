@@ -137,6 +137,13 @@ UPGRADED = [
     "mfb-tech-base-vs-economy-base",
     "combat-harass-balanced-hit-and-run",
     "tech-aggro-all-in",
+    # Wave-4 Group D combat-micro pack: SC2 focus-fire / MicroRTS
+    # target prioritization / military strike-package doctrine. Hard
+    # tier rotates the strike force between two west-edge corridors
+    # (NORTH y=10..13 / SOUTH y=26..29) round-robined by seed; the
+    # centre enemy squad (2× e3 + 4× e1) is symmetric across y=20 so
+    # either spawn faces an equivalent focus-fire decision.
+    "combat-focus-fire-priority",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

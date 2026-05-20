@@ -1,0 +1,237 @@
+# combat-focus-fire-priority — Focus-fire the highest-DPS target FIRST.
+#
+# Real-world: SC2 focus-fire micro / military strike-package doctrine
+# (hit the AA / anti-tank threat before the soft escort); MicroRTS
+# target prioritization; RPS-counter unit prioritization.
+#
+# Discrimination (the four script-policy bar):
+#   • stall (only observe): tanks idle west, never engage; kill bar
+#     unmet → after_ticks LOSS.
+#   • brute attack_move (attack-anything): all 4 tanks attack-move
+#     east into the cluster; engine auto-targets the NEAREST hostile
+#     (typically the closer e1s) so the e3 survives long enough to
+#     pick off ≥2 tanks → busts units_lost_lte:1 → LOSS.
+#   • spread-attack-e1-first: explicitly attack_unit one e1 at a time
+#     with all tanks; the rocket soldier e3 keeps firing for ≥4
+#     decision turns and kills ≥2 tanks → LOSS.
+#   • intended focus-e3-first: attack_unit ALL 4 tanks onto the e3
+#     FIRST (4-vs-1 concentrates ~400 HP of armour against ~50 HP of
+#     infantry — e3 dies in 1-2 decision ticks before it can land
+#     more than ~1 rocket); then mop up the e1s. ≤1 tank lost, kill
+#     bar met → WIN.
+#
+# Why the spec works (verified against engine combat sheet):
+#   • e3 = anti-tank rocket soldier (Dragon launcher, ~range 5, high
+#     anti-armour DPS). One e3 can kill ≥1 2tnk in <600 ticks if left
+#     alive; two e3 (hard) can kill ≥2 tanks together in the same
+#     window — that is the "attrition cap busted" failure mode.
+#   • e1 = basic rifle infantry. Per-shot damage vs 2tnk armour is
+#     low; 3-4 e1 alone cannot bust units_lost_lte:1 inside the
+#     budget if the e3 dies fast.
+#   • 4× 2tnk concentrated fire on a single e3 kills it in 1-2
+#     decision turns (each 2tnk shell roughly 1-shots an e3); the
+#     same fire spread across 4 separate targets kills the e3 in 3-4
+#     turns, giving it 200-300 ticks of free anti-tank shots.
+#   • The spread vs focus delta is what discriminates the capability.
+#
+# Engine guardrails:
+#   • Map: rush-hour-arena (128 × 40, playable x in [2..126],
+#     y in [2..38]). Tanks stage at x=6, enemies at x=70-72.
+#   • Far enemy `fact` at (120,20) prevents engine auto-done when the
+#     last infantry falls (the kill bar is satisfied on units, not
+#     buildings; the fact survives to keep the episode running until
+#     the win/fail evaluator sees the terminal frame).
+#   • after_ticks fail clauses are reachable within max_turns
+#     (tick ≤ 93 + 90·(max_turns-1)); within_ticks 2700 < 2703 at
+#     max_turns 30; staller hits after_ticks 2701 and LOSES, not draws.
+
+meta:
+  id: combat-focus-fire-priority
+  title: 'Focus-Fire Priority — Kill the Anti-Tank Threat FIRST'
+  capability: action
+  real_world_meaning: >
+    Four medium tanks face a small mixed enemy squad at close range:
+    a single high-DPS rocket soldier (anti-vehicle) escorted by 2-3
+    rifle infantry, all visible in the centre. The decision is target
+    prioritization: concentrate ALL tanks' fire on the rocket soldier
+    FIRST (4-vs-1 kills it in 1-2 decision turns before it can fire
+    more than a couple of rockets), then mop up the infantry. Spreading
+    fire across the squad — via attack_move auto-targeting or by
+    starting on the closer rifle infantry — leaves the rocket soldier
+    alive long enough to kill ≥2 tanks, busting the attrition cap.
+    A brute attack-anything play LOSES; the focus-fire play WINS.
+  robotics_analogue: >
+    Military strike-package doctrine — when engaging a mixed enemy
+    package, the high-value / high-DPS asset (AA battery, anti-armour
+    weapon, command vehicle) is neutralised FIRST, even when it is
+    not the nearest target. The lower-DPS escort is mopped up after.
+    Target prioritization under fire is the controlled capability:
+    nearest-first or auto-target spreads damage and lets the priority
+    threat keep firing.
+  benchmark_anchor:
+    - "SC2 focus-fire micro"
+    - "MicroRTS target prioritization"
+    - "military strike-package: hit AA first"
+    - "RPS-counter unit prioritization"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant contact happens or a tank is lost — combat
+  # micro is reactive; without these interrupts the focus-fire policy
+  # only re-targets on the next turn boundary and the e3 gets free
+  # shots in the gap.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare focus-fire skill: 4 tanks vs 1 e3 + 2 e1, attrition cap 2
+  # (forgiving — even if the e3 lands one good rocket, 2 lost tanks
+  # is within budget). Brute attack-move may squeak by here on luck;
+  # stall still LOSES via after_ticks.
+  easy:
+    description: >
+      Four medium tanks stage at the west edge (x=6, y=18..21).
+      A single rocket soldier (e3, anti-tank, Dragon launcher) is in
+      the centre with two rifle infantry (e1) flanking. Focus-fire
+      doctrine: concentrate ALL FOUR tanks' fire on the rocket
+      soldier FIRST (it is the high-DPS threat to your armour),
+      then mop up the infantry. Spreading fire across the squad
+      lets the rocket soldier live long enough to kill tanks.
+      Win when 3 enemy units are killed AND ≤2 tanks lost,
+      before tick 2700.
+    overrides:
+      actors:
+        # Strike force — 4 medium tanks at the west edge.
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        # Enemy squad — centre. Rocket soldier (priority threat)
+        # flanked by 2 rifle infantry.
+        - {type: e1, owner: enemy, position: [70, 18], stance: 1}
+        - {type: e3, owner: enemy, position: [71, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 1}
+        # Far persistent enemy marker — prevents engine auto-done
+        # when the squad falls so the win/fail evaluator sees the
+        # terminal frame (no DRAW collapse).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {units_lost_lte: 2}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: tighter attrition (cap 1) and one more rifle infantry
+  # (3 e1 + 1 e3, kill bar 4). Now brute attack-move and spread-
+  # attack-e1-first both LOSE consistently (the e3 stays alive long
+  # enough to pick off ≥2 tanks). Intended focus-e3 first WINS.
+  medium:
+    description: >
+      Four medium tanks stage at the west edge (x=6, y=18..21).
+      A rocket soldier (e3, anti-tank) is escorted by three rifle
+      infantry (e1) in the centre. Focus-fire doctrine: concentrate
+      ALL FOUR tanks' fire on the rocket soldier FIRST (4-vs-1 kills
+      it in 1-2 decision turns); then mop up the infantry. Spreading
+      fire — via attack_move auto-targeting the nearest e1, or by
+      attacking e1 first — leaves the e3 alive long enough to kill
+      ≥2 tanks and bust the attrition cap. Win when 4 enemy units
+      are killed AND ≤1 tank lost, before tick 2700.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        # Three rifle infantry + one rocket soldier in the centre.
+        - {type: e1, owner: enemy, position: [70, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [70, 20], stance: 1}
+        - {type: e3, owner: enemy, position: [71, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 1}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {units_lost_lte: 1}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 axes vs medium:
+  #   1. TWO rocket soldiers + 4 rifle infantry (kill bar 6); the
+  #      focus-fire policy must take down ONE e3 at a time (any
+  #      survivor scores tank kills). Attrition cap is 0 — the
+  #      tank line must come through clean.
+  #   2. Strike force stages from TWO seed-driven spawn_point groups
+  #      (north y=10..13 OR south y=26..29 west-edge corridor) so
+  #      the engagement geometry varies per seed. The enemy squad
+  #      is centred on y=20 between the two spawns — both face the
+  #      same priority decision (which e3 first, then the other,
+  #      then the infantry).
+  hard:
+    description: >
+      Four medium tanks stage at ONE of two west-edge corridors
+      (north y=10..13 OR south y=26..29, chosen by seed,
+      anti-memorisation). The enemy squad in the centre is two
+      rocket soldiers (e3, anti-tank, the priority threats) plus
+      four rifle infantry (e1). Focus-fire doctrine: kill ONE e3
+      first with concentrated fire, then the other e3, then mop
+      up the rifle infantry. Splitting fire across both rocket
+      soldiers simultaneously, or starting on rifle infantry, lets
+      the e3s pick off tanks. Win when 6 enemy units are killed
+      AND ZERO tanks lost, before tick 2700.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging corridor (y=10..13)
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 13], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging corridor (y=26..29)
+        - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 29], stance: 1, spawn_point: 1}
+        # Centre squad: 2 rocket soldiers + 4 rifle infantry,
+        # symmetric across y=20 so either spawn faces an equivalent
+        # focus-fire decision.
+        - {type: e1, owner: enemy, position: [70, 17], stance: 1}
+        - {type: e1, owner: enemy, position: [70, 18], stance: 1}
+        - {type: e3, owner: enemy, position: [71, 19], stance: 1}
+        - {type: e3, owner: enemy, position: [71, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [70, 23], stance: 1}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {units_lost_lte: 0}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
