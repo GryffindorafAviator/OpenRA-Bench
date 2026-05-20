@@ -1,0 +1,299 @@
+# combat-pincer-coordination.yaml
+#
+# ACTION capability — synchronised two-prong pincer attack. Two armoured
+# squads start on the SAME west edge but at OPPOSING latitudes
+# (north y≈8 and south y≈32). A central enemy cluster sits at the mid-
+# map. The win predicate requires BOTH squads to engage simultaneously:
+# `units_in_region_gte:{n:4}` cannot be satisfied by a single squad
+# (only 3 tanks per squad — even arriving intact is 1 short of n=4),
+# and `units_lost_lte:2` makes a serialised "Squad A engages first,
+# Squad B follows" attempt fail because A is shredded by the cluster
+# before B arrives.
+#
+# Real-world anchor: military pincer movement / SC2 two-prong attack /
+# envelopment from two directions. The capability is the timing
+# coordination — both prongs must commit at the same moment so the
+# defender cannot focus on either prong in detail.
+#
+# Engine notes (per CLAUDE.md):
+#   - Enemy cluster anchored at (50,19) / (50,21) — CLAUDE.md warns
+#     that (50,20) silently fails to place enemy clusters; the off-by-
+#     one cells are confirmed working. The win region centre at
+#     (50,20) r=8 still covers both halves of the cluster (and both
+#     ingress tanks once they engage the cluster face).
+#   - Far persistent enemy `fact` at (120,4) keeps the episode alive
+#     past full enemy elimination so within_ticks / region predicates
+#     evaluate on the terminal frame (engine auto-`done` would
+#     otherwise collapse to DRAW the instant the last MustBeDestroyed
+#     enemy actor falls).
+#   - `units_killed_gte: 8` matches the central-cluster enemy count
+#     on medium/hard (the far sentinel fact at (120,4) is OUT of all
+#     squad routes so it survives and never counts toward kills);
+#     easy uses a lighter 6-enemy cluster with kill bar 6.
+#   - Enemy stance:3 (AttackAnything) so the cluster fires on any
+#     tank in range from the instant of contact — no bot_type needed.
+#     For the squad-A-then-B-late timing teeth, the enemy 2× 2tnk +
+#     2× e3 anti-armour mass MUST be sufficient to shred a 3-tank
+#     squad arriving alone (~12s to clear with 3 attackers = ~800
+#     damage absorbed = 2+ tanks lost on the lone squad). With both
+#     squads synchronised the same cluster falls in ~6s and the
+#     6-tank force loses ≤1 tank — well inside the
+#     `units_lost_lte: 2` cap and with ≥4 tanks (in fact ≥5) inside
+#     the central region.
+#   - Tick budget: 4500 within / 4501 fail. With max_turns 54 the max
+#     reachable tick is 93 + 90·53 = 4863 → the `after_ticks` clause
+#     fires before the run ends → no DRAW degeneracy.
+#
+# Discrimination (the four-script bar; scripted-policy validation in
+# tests/test_combat_pincer_coordination.py covers all 4 seeds per
+# level on every policy):
+#   • stall (Command.observe only) — agent units never engage → kill
+#     bar unmet → after_ticks LOSS.
+#   • single-squad-A — Squad B held back; A walks alone into the
+#     cluster. Even if A clears the cluster, only 3 tanks (max) can
+#     occupy the objective region while n=4 is required → LOSS. On
+#     medium/hard A is also shredded by the cluster's anti-armour →
+#     units_lost_lte:2 busts as a second teeth.
+#   • sequenced-A-then-B-late — A advances first, takes attrition,
+#     B follows after a long delay. On medium/hard A loses 3 of 3
+#     tanks before B arrives → units_lost_lte:2 busts → LOSS. On
+#     easy with no enemy armour A may clear cleanly and B walks in →
+#     this may squeak by (acceptable per SCENARIO_REVIEW_CHECKLIST
+#     inert-easy-teeth convention — easy is the bare-skill tier).
+#   • intended pincer-sync — both squads attack_move the cluster on
+#     turn 1; their staging latitudes (y=8, y=32) put them
+#     equidistant (~45 cells each) from the cluster so a naive
+#     simultaneous launch arrives together; mass DPS clears the
+#     cluster before either side bleeds → WIN.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/combat-pincer-coordination.yaml
+
+meta:
+  id: combat-pincer-coordination
+  title: 'Pincer Attack — Two Squads Strike Simultaneously From Two Sides'
+  capability: action
+  real_world_meaning: >
+    Two armoured squads start at OPPOSING latitudes on the west edge
+    (one to the north, one to the south) and must converge on a
+    central enemy cluster simultaneously, hitting the defender from
+    two sides at once. Sending a single squad alone fails on two
+    counts: only 3 tanks (not the required 4) can occupy the
+    objective region, and the lone squad is shredded by the cluster's
+    mass anti-armour before clearing it. Sending both squads but not
+    synchronised (one held back, the other commits first) lets the
+    cluster focus on the lead squad and destroy it before the trailing
+    squad arrives, busting the attrition cap. Only a true
+    simultaneous two-prong commit clears the cluster cleanly and
+    leaves the joint force standing on the objective.
+  robotics_analogue: >
+    Synchronous two-team pincer attack on a contested objective: each
+    team approaches on a different bearing and both must arrive within
+    a common window so the defending agents cannot focus on either
+    team in detail. Serialising one team behind the other lets the
+    defender concentrate fire and destroy the lead team before
+    reinforcement; only the joint simultaneous commit overwhelms
+    the defence and preserves the strike force.
+  benchmark_anchor:
+    - "SC2 multi-prong / two-prong attack timing"
+    - "military pincer movement doctrine"
+    - "envelopment from multiple angles"
+    - "synchronisation of dispersed forces"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant contact happens or a tank is lost — pincer
+  # micro is reactive; without these interrupts the sync policy only
+  # re-targets on the next turn boundary and any gap is fatal to the
+  # already-thin attrition cap.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare pincer skill: lighter cluster (4× e1 + 2× e3, no enemy
+  # armour; 6 enemies total, kill bar 6). Stall still LOSES on the
+  # clock; single-squad still LOSES on the region predicate (3 tanks
+  # cannot satisfy n=4). Sequenced may squeak by on this lighter
+  # cluster — that is the SCENARIO_REVIEW_CHECKLIST "inert anti-
+  # cheat teeth acceptable on easy" convention: the bare-skill tier
+  # only enforces stall-loses and intended-wins; the sequence-vs-
+  # sync delta lives on medium and hard.
+  easy:
+    description: >
+      You command TWO squads of medium tanks (3× 2tnk each, 6 tanks
+      total). Squad A stages at the NORTH-WEST corner (5,8); Squad B
+      stages at the SOUTH-WEST corner (5,32). A central enemy cluster
+      sits at the mid-map (around (50,20)): 4 rifle infantry (e1) +
+      2 anti-tank rocket soldiers (e3). Both squads must converge on
+      the cluster SIMULTANEOUSLY from the north and the south
+      (a pincer). Win when you have killed 6 enemies AND at least 4
+      of your 6 tanks are inside an 8-cell radius of (50,20) AND no
+      more than 2 tanks are lost, before tick 4500. Sending only one
+      squad cannot satisfy the 4-in-region clause. A stall loses on
+      the clock.
+    overrides:
+      actors:
+        # Squad A (NORTH-WEST) — 3 medium tanks at (5,8).
+        - {type: 2tnk, owner: agent, position: [5, 8],  stance: 1, count: 3}
+        # Squad B (SOUTH-WEST) — 3 medium tanks at (5,32).
+        - {type: 2tnk, owner: agent, position: [5, 32], stance: 1, count: 3}
+        # Enemy cluster — anchored at (50,19) / (50,21) (CLAUDE.md
+        # notes (50,20) silently fails to place enemy clusters; the
+        # off-by-one cells work). The win region (50,20, r=8) still
+        # covers both halves.
+        - {type: e1, owner: enemy, position: [50, 19], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [50, 21], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [50, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [50, 21], stance: 3}
+        # Far persistent enemy marker (sentinel) — out of every
+        # squad route, keeps the episode alive past full cluster
+        # elimination so within_ticks / region predicates evaluate
+        # on the terminal frame (no DRAW collapse).
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {units_in_region_gte: {x: 50, y: 20, radius: 8, n: 4}}
+        - {units_lost_lte: 2}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 54
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: full enemy cluster — 4× e1 + 2× e3 +
+  # 2× 2tnk (8 enemies total; kill bar = 8). The enemy armour gives
+  # the cluster enough sustained anti-armour DPS to shred a lone
+  # 3-tank squad (~12s to clear, ~800 damage absorbed) → A-only or
+  # A-then-B-late busts units_lost_lte:2. The 6-tank synchronised
+  # commit halves the clear time and the per-tank damage share, so
+  # the sync wins comfortably (validated: 0 losses on every seed).
+  medium:
+    description: >
+      You command TWO squads of medium tanks (3× 2tnk each, 6 tanks
+      total). Squad A stages at the NORTH-WEST corner (5,8); Squad B
+      stages at the SOUTH-WEST corner (5,32). A central enemy cluster
+      sits at the mid-map (around (50,20)): 4 rifle infantry (e1) +
+      2 anti-tank rocket soldiers (e3, Dragon launcher) + 2 medium
+      tanks (2tnk) — the enemy armour gives the cluster enough
+      sustained anti-armour DPS to shred a lone 3-tank squad before
+      it can clear the cluster. Both squads must converge
+      SIMULTANEOUSLY (a pincer): attack-moving with both squads at
+      once on turn 1 doubles the strike force and halves the per-tank
+      damage share, clearing the cluster before either side bleeds
+      out. Sending only one squad cannot satisfy the 4-in-region
+      clause; sending A first and B late lets the cluster shred A
+      before B arrives. Win when you have killed 8 enemies AND at
+      least 4 of your 6 tanks are inside an 8-cell radius of (50,20)
+      AND no more than 2 tanks are lost, before tick 4500.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [5, 8],  stance: 1, count: 3}
+        - {type: 2tnk, owner: agent, position: [5, 32], stance: 1, count: 3}
+        # 4× e1 + 2× e3 + 2× 2tnk = 8 enemies. Avoid the (50,20) cell
+        # (CLAUDE.md silent-no-place footgun); split between (50,19)
+        # and (50,21). The enemy 2tnks are the load-bearing anti-
+        # armour that shreds a lone 3-tank squad arriving alone.
+        - {type: e1, owner: enemy, position: [50, 19], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [50, 21], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [50, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [50, 21], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [50, 19], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [50, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 8}
+        - {units_in_region_gte: {x: 50, y: 20, radius: 8, n: 4}}
+        - {units_lost_lte: 2}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 54
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 more controlled variable: TWO seed-driven agent spawn groups
+  # with DIFFERENT cell coordinates. Group 0 stages Squad A NORTH
+  # (5,8) / Squad B SOUTH (5,32). Group 1 SHIFTS the squads to (8,6)
+  # / (8,34) — same west-edge / opposing-latitude pincer shape but
+  # the exact start cells differ across seeds so a memorised single-
+  # cell opening cannot generalise. Both groups remain approximately
+  # equidistant from the central cluster (~46-47 cells) so the naive
+  # simultaneous launch still arrives together. Per CLAUDE.md, "if
+  # ANY agent actor declares spawn_point, every agent actor WITHOUT
+  # spawn_point is filtered OUT", so the two full squad layouts are
+  # listed explicitly. The defender cluster is symmetric across y=20
+  # so both spawns face the same simultaneous-pincer decision.
+  hard:
+    description: >
+      You command TWO squads of medium tanks (3× 2tnk each, 6 tanks
+      total) staged on the west edge — one squad to the NORTH, one
+      to the SOUTH (the exact staging cells vary by seed; treat the
+      two squads symmetrically). A central enemy cluster
+      sits at the mid-map (around (50,20)): 4 rifle infantry (e1) +
+      2 anti-tank rocket soldiers (e3, Dragon launcher) + 2 medium
+      tanks (2tnk) — the enemy armour gives the cluster enough
+      sustained anti-armour DPS to shred a lone 3-tank squad. Both
+      squads must converge SIMULTANEOUSLY (a pincer): attack-moving
+      with both squads at once on turn 1 clears the cluster before
+      either side bleeds out. Win when you have killed 8 enemies AND
+      at least 4 of your 6 tanks are inside an 8-cell radius of
+      (50,20) AND no more than 2 tanks are lost, before tick 4500.
+    overrides:
+      actors:
+        # spawn_point 0 — Squad A NORTH (5,8), Squad B SOUTH (5,32).
+        - {type: 2tnk, owner: agent, position: [5, 8],  stance: 1, count: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [5, 32], stance: 1, count: 3, spawn_point: 0}
+        # spawn_point 1 — SHIFTED layout: NORTH squad at (3, 5) and
+        # SOUTH squad at (3, 35). Both remain on the west edge and
+        # approximately equidistant (~49-50 cells) from the central
+        # cluster at (50,20); the slight extra distance vs group 0
+        # keeps the synchronised launch viable while ensuring the
+        # squad arriving alone takes ≥ the same attrition (still
+        # loses ≥3 of 3 tanks on the sequenced policy). The exact
+        # start cells DIFFER from group 0, satisfying the hard-tier
+        # invariant (≥2 distinct seed-driven starts) and ensuring a
+        # memorised single-cell opening cannot generalise across
+        # seeds.
+        - {type: 2tnk, owner: agent, position: [3, 5],  stance: 1, count: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [3, 35], stance: 1, count: 3, spawn_point: 1}
+        # Central cluster — 4× e1 + 2× e3 + 2× 2tnk = 8 enemies,
+        # symmetric across y=20 so both spawn groups face the same
+        # pincer decision.
+        - {type: e1, owner: enemy, position: [50, 19], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [50, 21], stance: 3, count: 2}
+        - {type: e3, owner: enemy, position: [50, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [50, 21], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [50, 19], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [50, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 8}
+        - {units_in_region_gte: {x: 50, y: 20, radius: 8, n: 4}}
+        - {units_lost_lte: 2}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 54

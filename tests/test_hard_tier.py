@@ -539,6 +539,20 @@ UPGRADED = [
     # filtered out), so the strike geometry is symmetric but a
     # memorised opening cannot generalise.
     "rob-unit-loss-recovery",
+    # Wave-6 Group N coordination pack — military pincer movement /
+    # SC2 two-prong attack / envelopment from two directions. Two
+    # 3-tank squads start at OPPOSING west-edge latitudes (north y=8 /
+    # south y=32) and must converge on a central enemy cluster
+    # SIMULTANEOUSLY: the win predicate requires ≥4 tanks in the
+    # central region (single squad has only 3 — structurally
+    # impossible) AND ≤2 tanks lost (sequenced A-then-B-late shreds A
+    # before B arrives → cap busted). Hard defines two agent
+    # spawn_point groups round-robined by seed with DIFFERENT cell
+    # coordinates (group 0: (5,8)/(5,32); group 1: (3,5)/(3,35)) so
+    # a memorised single-cell opening cannot generalise; the cluster
+    # is symmetric across y=20 so both spawns face the same pincer
+    # decision.
+    "combat-pincer-coordination",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
