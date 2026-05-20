@@ -492,6 +492,14 @@ UPGRADED = [
     # seed; the centre-line raider tanks and centre-line hunt squad
     # face the seed-chosen latitude with equal pressure.
     "rob-multiple-simultaneous-pressures",
+    # Wave-6 multi-distractor tool-relevance discipline pack (τ²-bench
+    # multi-distractor / BFCL V4 cluttered-API anchor). Hard tier
+    # defines two agent spawn_point groups (NORTH lane y=4..6 / SOUTH
+    # lane y=34..36) round-robined by seed; both lanes route around
+    # the same off-path north garrison (y=8..9) and central sentry
+    # stack (y=18..22), so a memorised "drive east on y=20" opening
+    # cannot generalise across the lane variants.
+    "proc-tool-use-multi-distractor",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

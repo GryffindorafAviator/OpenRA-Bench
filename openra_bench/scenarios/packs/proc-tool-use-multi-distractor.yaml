@@ -1,0 +1,375 @@
+# proc-tool-use-multi-distractor — Wave-6 multi-distractor tool-relevance
+# discipline (τ²-bench multi-distractor / BFCL V4 cluttered-API anchor).
+#
+# CAPABILITY (action): the agent is handed a CLUTTERED tool surface — 9
+# tools, including several that are MAXIMALLY SALIENT (a visible weak
+# enemy that invites attack_unit; cash on hand and a pre-placed base
+# that invite build/place_building; harvesters absent but `harvest` is
+# present; no producers but `set_rally_point` is present; `set_stance`
+# / `attack_move` likewise tempt). Only TWO tools are actually needed
+# to win: `move_units` (drive the column east) and `observe` (read
+# state). The discipline test is whether the model can IGNORE the
+# multiple irrelevant tools and use only the relevant ones.
+#
+# Distinct from sibling `strict-toolban-fidelity-under-pressure` (B3):
+#   B3:   ONE forbidden tool (attack), procedural BINARY signal —
+#         tool_violations_gte:1 instantly fails.
+#   This: NO forbidden tools at all. Every tool is "allowed" in the
+#         allowlist sense — but invoking the irrelevant ones either
+#         (a) interrupts the units' move order so they stop progressing,
+#         (b) lures units off-course into a fight that costs casualties,
+#         or (c) burns the model's turn budget on no-ops while the
+#         within_ticks clock keeps ticking. The bench grades OUTCOME
+#         (reach + no losses + on time), not tool-name compliance —
+#         which IS the τ²-bench multi-distractor / BFCL V4 cluttered-
+#         API setting (the model must select the RELEVANT subset of a
+#         large API on its own; no instruction tells it which to skip).
+#
+# Why this cell exists in the Wave-6 taxonomy:
+#   - Real-world: τ²-bench's multi-distractor handling (a function-
+#     calling agent given a large toolset where most options are
+#     irrelevant to the current task); BFCL V4's cluttered-API
+#     relevance test (cherry-pick the right tool from a long list).
+#   - Robotics: a teleop operator panel exposing dozens of buttons;
+#     only two are on the critical path for THIS mission. A junior
+#     operator who reaches for every salient button wastes the
+#     window or causes collateral.
+#
+# Win  : reach_region(110,20,r=6) AND units_lost_lte:0 AND within_ticks
+# Fail : after_ticks (deadline) OR units_lost (any casualty)
+#
+# Failure modes (all real, reachable LOSSES; no draw degeneracy):
+#   • Stall (only observe): never moves; deadline LOSS via after_ticks.
+#   • Use-multiple-distractors (issue build / set_stance / attack_unit /
+#     attack_move / set_rally_point / harvest commands TO the agent's
+#     units every turn): each non-move command REPLACES the units'
+#     active move order so the column oscillates / stops, AND the
+#     attack_unit / attack_move calls lure the column into the off-
+#     path weak-enemy garrison where the garrison's return fire
+#     ticks a unit down → units_lost LOSS (or deadline LOSS).
+#   • Intended-direct (movement-only east to (110,20), ignore every
+#     other tool): the column arrives before the deadline with all
+#     units intact → WIN.
+#
+# Engine-footgun notes (re-asserted on every level):
+#   • ~90 ticks per decision turn ⇒ tick ≤ 93 + 90·(max_turns-1).
+#     Every `within_ticks` / `after_ticks` below is strictly under
+#     that threshold so the deadline genuinely BITES.
+#   • A persistent unarmed enemy `fact` at (118,20) keeps the
+#     episode alive past any enemy-elimination engine auto-`done`
+#     (CLAUDE.md engine fact #5) — so the win/fail evaluator reads
+#     reach_region + within_ticks instead of degenerating to DRAW.
+#   • Agent jeeps are stance:0 (HoldFire) so `move_units` en-route
+#     auto-fire is suppressed (CLAUDE.md engine fact). The off-path
+#     "weak enemy" garrison only fires when the agent CHOOSES to
+#     send units into its range (attack_unit / attack_move).
+#   • This pack does NOT use `forbidden_tools` — the test is
+#     outcome-graded, not tool-name graded. Every tool the model
+#     might pick is in `tools:`. The bench's tool_violations counter
+#     stays at 0 for every policy; the failure signal is reach /
+#     casualty / clock.
+#
+# Hard-tier curation: this pack IS in
+# tests/test_hard_tier.py::UPGRADED — hard adds two agent spawn_point
+# groups (NORTH lane y=10..12 / SOUTH lane y=28..30) so the route
+# geometry differs per seed and a memorised "drive east on y=20"
+# opening cannot generalise. Hard additionally adds time-pressure
+# (a `patrol` enemy bot oscillating across the central corridor) —
+# the patrol is itself a DISTRACTOR (the model is tempted to
+# attack_unit it) AND a real threat to a y=20 column, reinforcing
+# the spawn-vary controlled axis.
+
+meta:
+  id: proc-tool-use-multi-distractor
+  title: 'Cluttered Tool Surface — Ignore the Distractor Tools and Just Move'
+  capability: action
+  real_world_meaning: >
+    The agent receives a CLUTTERED toolset (9 tools) where only TWO
+    are on the critical path for the current task (move + observe).
+    The other seven are MAXIMALLY SALIENT distractors: a visible
+    weak enemy invites `attack_unit`; cash on hand and a pre-placed
+    base invite `build` / `place_building`; `harvest` / `set_rally_
+    point` / `set_stance` / `attack_move` look generally useful but
+    do nothing for THIS goal. The discipline is to recognise which
+    subset of a large API is actually relevant and ignore the rest —
+    every off-path tool call either interrupts the unit's move
+    order, lures units into a costly engagement, or burns the
+    model's turn budget while the within_ticks clock keeps ticking.
+  robotics_analogue: >
+    A teleoperation panel with dozens of buttons (manipulator,
+    nav, gripper, vision, comms, logging…) but only two are on
+    the critical path for THIS mission. A disciplined operator
+    runs the two-button procedure; a junior operator who reaches
+    for every salient button wastes the window or causes
+    collateral damage. The skill is API/relevance discrimination
+    under no explicit "don't touch X" instruction.
+  benchmark_anchor:
+    - "τ²-bench multi-distractor handling"
+    - "BFCL V4 cluttered-API relevance"
+    - "IFBench distraction resistance"
+    - "junior-operator discipline test"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+# Shared engine fields. The tools allowlist is the FULL 9-tool
+# cluttered API — no forbidden_tools. The agent must self-select
+# the relevant subset (move_units + observe). Generous starting
+# cash and a pre-placed agent base make `build` / `place_building`
+# fully usable distractors (not gated out by tech-tree errors).
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0}
+  # Full 9-tool API surface. Every tool the spec lists is present in
+  # `tools:`; none is in `forbidden_tools`. The discipline test is
+  # outcome-graded — irrelevant tool use shows up as missed deadline
+  # or unit loss, NOT as a tool_violations counter increment.
+  tools:
+    - move_units
+    - attack_unit
+    - attack_move
+    - build
+    - place_building
+    - harvest
+    - set_stance
+    - set_rally_point
+    - observe
+  planning: true
+  termination: {max_ticks: 6000}
+  actors:
+    # 4 jeep scouts at the west edge, tight column on y=20 (overridden
+    # per level / spawn group below). Jeeps are stance:0 (HoldFire)
+    # so the move_units en-route auto-fire engine quirk doesn't
+    # accidentally engage the off-path garrison. The garrison only
+    # fires if the agent chooses to send units into its range.
+    - {type: jeep, owner: agent, position: [8, 19], stance: 0}
+    - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+    - {type: jeep, owner: agent, position: [8, 21], stance: 0}
+    - {type: jeep, owner: agent, position: [9, 20], stance: 0}
+    # Pre-placed agent base on the mid latitude (y=20) — set
+    # away from both hard-spawn lanes so it doesn't collide with
+    # the jeep column on any seed. Makes `build` / `place_building`
+    # fully usable distractor tools (no tech-tree failure to
+    # short-circuit the distraction). Cash is added per-level so
+    # `build` actually queues something.
+    - {type: fact, owner: agent, position: [14, 20]}
+    - {type: tent, owner: agent, position: [18, 20]}
+    - {type: powr, owner: agent, position: [14, 24]}
+    # Off-path "weak enemy" garrison (3 e1 rifles) on the NORTH
+    # shoulder at (45,8). VISIBLE early via the explored area around
+    # the agent base — they show up on the minimap as a salient
+    # attackable target. They sit on y=8, well off the y=20 direct
+    # corridor — going to attack them costs ~5 turns of route
+    # diversion AND the rifles fire back (jeeps that engage at
+    # close range eat hits from a 3-stack of e1). This is the
+    # `attack_unit` / `attack_move` distractor bait.
+    - {type: e1, owner: enemy, position: [45, 8], stance: 0}
+    - {type: e1, owner: enemy, position: [45, 9], stance: 0}
+    - {type: e1, owner: enemy, position: [46, 8], stance: 0}
+    # Persistent unarmed enemy marker at the far east — kept alive
+    # past any enemy auto-done so the win/fail evaluator reads
+    # reach_region + within_ticks instead of degenerating to DRAW
+    # (CLAUDE.md engine fact #5). Unarmed `fact` (cost 0) cannot
+    # damage the column.
+    - {type: fact, owner: enemy, position: [118, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare skill, FEWER distractors. The weak-enemy garrison is reduced
+  # to ONE rifleman (still visible, still a salient attack_unit
+  # target) and there is NO patrol on the corridor. Tick budget is
+  # GENEROUS so the discrimination is purely "did you use the
+  # relevant tools or not?" — a model that move_units east straight
+  # wins comfortably; a model that wastes turns on distractors runs
+  # out the clock.
+  # max_turns 25 ⇒ reachable tick 93+90·24 = 2253; within_ticks 2000
+  # fits (deadline reachable as LOSS). Direct policy: jeeps cover
+  # ~12 cells/turn ⇒ 102 cells in ~9 turns ≈ tick 813, well under
+  # 2000. Distractor-spam policy that re-orders units every turn
+  # never makes monotonic progress ⇒ deadline LOSS.
+  easy:
+    description: >
+      Get a jeep to the observation point at (110,20) within radius
+      6 BEFORE tick 2000, losing none of your 4 jeeps. You have a
+      9-tool API at your disposal — most of it is IRRELEVANT to
+      this task. The only tools you need are `move_units` and
+      `observe`. There is a single weak enemy rifleman dug in off-
+      path to the north at ~(45,8); attacking it is a distraction
+      that will pull your column off course and may cost units.
+      You also have a base and cash — building anything is a
+      distraction. Stalling (no orders) and force-loss both LOSE.
+    starting_cash: 2000
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [8, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 21], stance: 0}
+        - {type: jeep, owner: agent, position: [9, 20], stance: 0}
+        - {type: fact, owner: agent, position: [14, 20]}
+        - {type: tent, owner: agent, position: [18, 20]}
+        - {type: powr, owner: agent, position: [14, 24]}
+        # EASY: one off-path rifle as the attack_unit distractor.
+        # stance:0 (HoldFire) so it sits put and never pursues even
+        # if the agent's `move_units` auto-fire (CLAUDE.md engine
+        # quirk: agents always auto-fire on the move regardless of
+        # the AGENT's stance) tags it; a clean "intended" column
+        # that walks past on an off-line lane is never engaged
+        # back. The distractor is the model's CHOICE to spend turns
+        # ordering attack_unit on it — not a forced kill-zone.
+        - {type: e1, owner: enemy, position: [45, 8], stance: 0}
+        - {type: fact, owner: enemy, position: [118, 20]}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 2000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2001}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 25
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: the FULL distractor palette. The
+  # off-path enemy garrison is back at its base (3 e1) — stronger
+  # attack_unit / attack_move bait. The tick budget tightens (1500)
+  # so a model that wastes a handful of turns on distractor commands
+  # genuinely misses the deadline. Spawn point stays on y=20.
+  # max_turns 22 ⇒ reachable tick 93+90·21 = 1983; within_ticks
+  # 1500 fits (deadline reachable as LOSS). Direct policy: ~9 turns
+  # ≈ tick 813 (well under 1500); a distractor-spam policy that
+  # re-orders units every turn replaces the units' active move with
+  # a no-op / off-course command and never makes monotonic east
+  # progress ⇒ the column runs out the clock.
+  medium:
+    description: >
+      Get a jeep to the observation point at (110,20) within radius
+      6 BEFORE tick 1500, losing none of your 4 jeeps. Your 9-tool
+      API includes `attack_unit`, `attack_move`, `build`, `place_
+      building`, `harvest`, `set_stance`, `set_rally_point` — none
+      of these advance THIS mission. Use `move_units` and `observe`
+      only. A 3-rifleman garrison sits off-path at ~(45,8) — a
+      tempting target whose engagement costs route diversion and
+      likely casualties. The base in the west is a tempting `build`
+      site but building won't get a unit to the observation point.
+      Stalling and force-loss both LOSE.
+    starting_cash: 3000
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [8, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 21], stance: 0}
+        - {type: jeep, owner: agent, position: [9, 20], stance: 0}
+        - {type: fact, owner: agent, position: [14, 20]}
+        - {type: tent, owner: agent, position: [18, 20]}
+        - {type: powr, owner: agent, position: [14, 24]}
+        # MEDIUM: full off-path 3-stack garrison.
+        - {type: e1, owner: enemy, position: [45, 8], stance: 0}
+        - {type: e1, owner: enemy, position: [45, 9], stance: 0}
+        - {type: e1, owner: enemy, position: [46, 8], stance: 0}
+        - {type: fact, owner: enemy, position: [118, 20]}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 1500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 22
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. TIME-PRESSURE / DIRECT-CORRIDOR DENIAL: a stationary
+  #      3-rifleman sentry stack on the central corridor at
+  #      (60,18..22) — bracketing y=18..22 with stance:3 fire arcs.
+  #      Functions as the "time-pressure patrol" (real threat to a
+  #      undisciplined direct-along-y=20 column AND yet another
+  #      attack_unit / attack_move distractor target). The model
+  #      has to navigate around it with move_units only (stay on
+  #      its spawn lane until the final approach) while still
+  #      ignoring the off-path north garrison.
+  #   2. TWO seed-driven spawn_point groups (NORTH y=4..6 /
+  #      SOUTH y=34..36) so the start lane differs per seed; a
+  #      memorised "drive east on y=20" opening cannot generalise.
+  #      Lanes are sited well clear of the off-path north garrison
+  #      (y=8..9) and the central corridor (y=18..22) so a "drive
+  #      east on lane" intended policy never crosses either fire
+  #      arc.
+  # max_turns 20 ⇒ reachable tick 93+90·19 = 1803; within_ticks
+  # 1500 fits (deadline reachable as LOSS).
+  hard:
+    description: >
+      Get a jeep to the observation point at (110,20) within radius
+      6 BEFORE tick 1500, losing none of your 4 jeeps. Your 9-tool
+      API includes seven tools that are IRRELEVANT to this task —
+      use only `move_units` and `observe`. There is a 3-rifleman
+      off-path garrison at ~(45,8) AND a 3-rifleman sentry stack
+      bracketing the central corridor at ~(60,20). Both are
+      visible attackable targets that will pull an undisciplined
+      column off course or into fire. Your jeeps start either on
+      the NORTH lane (y≈5) or the SOUTH lane (y≈35) depending on
+      seed — read the minimap and route along your spawn lane,
+      dropping to (110,20) only at the final approach. Stalling,
+      force-loss, and timeout all LOSE.
+    starting_cash: 3000
+    overrides:
+      actors:
+        # NORTH lane spawn group: jeeps along y=4..6 (well clear
+        # of the y=8..9 off-path garrison row, so a "drive east on
+        # lane" intended policy steers around the garrison without
+        # casualties).
+        - {type: jeep, owner: agent, position: [8, 4], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 5], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 6], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [9, 5], stance: 0, spawn_point: 0}
+        # SOUTH lane spawn group: jeeps along y=34..36 (well clear
+        # of the central y=18..22 sentry fire arc).
+        - {type: jeep, owner: agent, position: [8, 34], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 35], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 36], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [9, 35], stance: 0, spawn_point: 1}
+        # Pre-placed agent base on y=20 — duplicated across BOTH
+        # spawn groups at identical coords (per CLAUDE.md engine
+        # fact: if ANY agent actor declares spawn_point, every
+        # actor without one is FILTERED OUT, so we must duplicate
+        # across groups). Sited away from both lanes so it doesn't
+        # collide with the jeep column on any seed.
+        - {type: fact, owner: agent, position: [14, 20], spawn_point: 0}
+        - {type: tent, owner: agent, position: [18, 20], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 24], spawn_point: 0}
+        - {type: fact, owner: agent, position: [14, 20], spawn_point: 1}
+        - {type: tent, owner: agent, position: [18, 20], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 24], spawn_point: 1}
+        # Off-path north garrison (3 e1 rifles at ~(45,8)) —
+        # visible attack_unit distractor. Enemy actors ALWAYS
+        # place regardless of spawn_point (CLAUDE.md engine fact).
+        - {type: e1, owner: enemy, position: [45, 8], stance: 0}
+        - {type: e1, owner: enemy, position: [45, 9], stance: 0}
+        - {type: e1, owner: enemy, position: [46, 8], stance: 0}
+        # Central corridor sentry stack (3 e1 stance:0 at x=60,
+        # y=18..22) — the lane-denial / attack_unit distractor on
+        # the central corridor. stance:0 keeps them stationary
+        # (no pursuit) but they're a salient attackable target
+        # bracketing y=18..22; a model that uses move_units only
+        # along its spawn lane (y=4..6 NORTH or y=34..36 SOUTH)
+        # never enters the sentry fire arc.
+        - {type: e1, owner: enemy, position: [60, 18], stance: 0}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 0}
+        - {type: e1, owner: enemy, position: [60, 22], stance: 0}
+        # Persistent unarmed marker.
+        - {type: fact, owner: enemy, position: [118, 20]}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 1500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 20
