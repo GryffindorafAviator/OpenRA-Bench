@@ -1,0 +1,290 @@
+meta:
+  id: mcv-deploy-defensible-site
+  title: 'Deploy on Defensible Ground — Site the Conyard Under a Known Threat Axis'
+  capability: reasoning
+  real_world_meaning: >
+    Resilience-first siting under a KNOWN threat axis. The MCV starts
+    mid-map and the rusher band is already committed from a known
+    direction (the NE corner). Two candidate deploy sites exist: a
+    SAFE corner (SW, protected by distance from the threat and the map
+    edge) and an EXPOSED central site (closer to the action but
+    directly in the rusher's lane). Once the MCV deploys, the site is
+    committed — the conyard cannot be re-located. The decision is to
+    pay the travel cost to the defensible corner so the freshly placed
+    fact + power + barracks + the first defender survive long enough
+    to satisfy the build chain; siting at the convenient/exposed cell
+    gets the fact razed inside the deploy + bring-up window.
+  robotics_analogue: >
+    Autonomous facility placement under a known disaster-direction:
+    a single relocatable mobile base must commit to one of two
+    candidate sites with a wildfire / attack vector already advancing
+    from a known compass. The defensible (terrain- and distance-
+    protected) site costs travel time but survives bring-up; the
+    convenient (closer-to-resources, exposed) site is razed before the
+    facility comes online. Mirrors FOB site selection and resilience-
+    first siting in hazard-aware urban planning.
+  benchmark_anchor:
+    - 'MicroRTS terrain-aware build'
+    - 'urban planning hazard-aware siting'
+    - 'military FOB site selection'
+    - 'resilience-first facility siting'
+  author: openra-bench
+
+# rush-hour-arena (128×40). Agent MCV starts mid-west (≈(20,20)). The
+# rusher band is committed from the NE corner of the map — agent reads
+# the threat axis, drives the MCV to the SAFE SW corner (≈(8,34)), and
+# deploys there. The win predicate requires the conyard fact to land
+# inside a tight radius of the SW corner — deploying at the exposed
+# central site fails the spatial check (and the rusher reaches the
+# central site before the bring-up chain finishes anyway, razing the
+# fact). Costs (live engine, verified): powr=300, tent=500, e1=100 →
+# 900cr for the minimum coherent build. Spec called for 800cr; floored
+# at 1000 so the chain fits with a 100cr buffer (no slack for spam).
+base_map: rush-hour-arena
+starting_cash: 1000
+
+base:
+  agent:
+    faction: allies
+  # Concentrated charge at the agent's centroid every ~8 ticks. With
+  # the MCV alive (and later the fresh fact), the centroid is the
+  # deploy site itself; the band drives straight at whatever the agent
+  # commits to.
+  enemy:
+    faction: soviet
+    bot_type: rusher
+  tools:
+    - observe
+    - move_units
+    - deploy
+    - build
+    - place_building
+    - stop
+  planning: true
+  # Re-decide the instant a rusher unit is spotted (so the agent can
+  # confirm the threat axis on the very first turn) or an MCV/own
+  # unit is lost.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+  # The MCV is the only starting agent actor — it has to deploy
+  # somewhere to satisfy any of the build bars. spawn_mcvs defaults
+  # OFF so only this declared MCV is on the field.
+  actors:
+    - {type: mcv, owner: agent, position: [20, 20]}
+
+levels:
+  # ── EASY ── the bare site-choice skill. The enemy is a token NE
+  # detachment with the rusher bot REPLACED by `turtle` (hold spawn /
+  # return-fire only) — the briefing's "threat axis" framing is
+  # consistent (enemies visible in the NE) but they do not actually
+  # advance, so the bring-up chain has unlimited time. The spatial
+  # win-predicate (SAFE region only) is what enforces the site choice
+  # at this tier; threat-timing pressure is introduced at medium.
+  # max_turns 60 → reachable tick ≥ 5400 in interrupt mode, comfortably
+  # past the 4801 fail deadline so a non-finisher is a real timeout
+  # LOSS, never a draw. Intended deploy-safe wins by tick ~3000.
+  easy:
+    description: >
+      An enemy detachment sits in the north-east corner (the
+      established threat axis). Your MCV starts mid-west. Drive the
+      MCV to the safer south-west corner (around cell (8,34)) and
+      deploy there, then stand up the minimum base before the clock:
+      a Construction Yard (fact) inside radius 5 of (8,34), at least
+      one power plant (powr), at least one barracks (tent), and at
+      least one own unit alive, before tick 4800. Deploying mid-map
+      (the exposed convenient site) fails the spatial check; failing
+      to deploy or losing the MCV/fact also fails.
+    overrides:
+      # Easy disables the scripted rusher: the enemy holds spawn
+      # (`turtle`) so they don't actually charge. Threat-timing
+      # pressure starts at medium.
+      enemy:
+        faction: soviet
+        bot_type: turtle
+      actors:
+        # Agent: a single MCV at mid-west, ~(20,20). Equidistant-ish
+        # from both candidate sites so the choice is genuine.
+        - {type: mcv, owner: agent, position: [20, 20]}
+        # Token enemy detachment far NE — establishes the threat AXIS
+        # so the briefing's "north-east" framing is consistent with
+        # what the agent observes — without applying timing pressure
+        # at this tier (turtle bot, stance 1: return fire only).
+        - {type: e1, owner: enemy, position: [110, 8], stance: 1, count: 2}
+        # Unarmed high-HP enemy marker far east: keeps the episode
+        # alive past the last enemy death (otherwise the engine
+        # auto-terminates on enemy-elimination and the win/fail check
+        # never runs — DRAW degeneracy).
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - building_in_region: {x: 8, y: 34, radius: 5, type: fact, count: 1}
+        - has_building: powr
+        - has_building: tent
+        - own_units_gte: 1
+        - within_ticks: 4800
+    # Three fail teeth: (1) the deadline at tick 4801 (reachable in
+    # 60 turns); (2) agent has no fact AND no own units — the only
+    # state that means "the run is dead" (MCV killed before deploy,
+    # OR fact razed AND the last defender dead) — bites immediately
+    # without spuriously firing on the MCV→fact transition (the agent
+    # has the fact at that instant); (3) the grace-gated no-fact
+    # belt-and-suspenders for the stall path where the MCV is alive
+    # forever but never deploys (agent starts with an MCV so the
+    # ungated "no fact" predicate would fire on turn 1 — the
+    # canonical CLAUDE.md idiom for unit-less / fact-less starts).
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - all_of:
+            - not: {building_count_gte: {type: fact, n: 1}}
+            - not: {own_units_gte: 1}
+        - all_of:
+            - after_ticks: 1500
+            - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 controlled variable: the rusher bot now BITES.
+  # A real rusher band committed from the far NE charges the agent's
+  # centroid every ~8 ticks. The MCV starts closer to the SW (so the
+  # intended drive-to-safe + deploy completes inside ~3 turns and the
+  # bring-up chain — powr + tent + 1 e1 — finishes before the rushers
+  # reach the freshly placed fact; the SW corner is ≥80 cells from
+  # the rusher origin). A central deploy (≈40 cells from the rusher)
+  # is razed inside the bring-up window AND fails the spatial check.
+  # The win predicate is unchanged; only the threat-timing pressure
+  # is new.
+  medium:
+    description: >
+      A rusher band is committed from the north-east and will reach a
+      centrally-deployed Construction Yard in roughly three turns of
+      its travel. Your MCV starts in the south-western mid-band:
+      drive it the short distance to the safer south-west corner
+      (around (8,34)) and deploy there. The fact must land within
+      radius 5 of (8,34), with powr + tent built and at least one
+      own unit alive, before tick 4800. Deploying centrally puts the
+      fact directly under the rusher's charge — the spatial-check
+      predicate fails (wrong region) and the fact is razed before
+      bring-up completes anyway. Stalling or losing the fact fails.
+    overrides:
+      actors:
+        # MCV pushed SW (closer to the safe corner) so the drive-to-
+        # safe + deploy chain finishes inside the rusher's travel
+        # budget. The same MCV moving to the central exposed cell
+        # has a LONGER drive — and meets the rushers on the way.
+        - {type: mcv, owner: agent, position: [15, 28]}
+        # Rusher band committed from the FAR NE. ENGINE NOTE:
+        # certain mid-map cells (e.g. (50,12)/(60,12)/(70,12))
+        # silently fail to place enemy clusters and the engine
+        # instead seeds them next to the agent — breaking the
+        # threat-axis design. (95, 8) places correctly. From there,
+        # the rusher reaches the exposed centre (~40 cells) in ~3
+        # turns of its travel while the SAFE SW corner (~85 cells)
+        # is outside reach in the bring-up window. Pure e1 (no
+        # rocket e3) keeps the band defeatable by one e1 defender
+        # at the safe corner; an e3 with rocket range would have
+        # razed the fact through the defender.
+        - {type: e1, owner: enemy, position: [95, 8], stance: 3, count: 5}
+        # Anti-DRAW marker far east.
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - building_in_region: {x: 8, y: 34, radius: 5, type: fact, count: 1}
+        - has_building: powr
+        - has_building: tent
+        - own_units_gte: 1
+        - within_ticks: 4800
+    # Three fail teeth: (1) the deadline at tick 4801 (reachable in
+    # 60 turns); (2) agent has no fact AND no own units — the only
+    # state that means "the run is dead" (MCV killed before deploy,
+    # OR fact razed AND the last defender dead) — bites immediately
+    # without spuriously firing on the MCV→fact transition (the agent
+    # has the fact at that instant); (3) the grace-gated no-fact
+    # belt-and-suspenders for the stall path where the MCV is alive
+    # forever but never deploys.
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - all_of:
+            - not: {building_count_gte: {type: fact, n: 1}}
+            - not: {own_units_gte: 1}
+        - all_of:
+            - after_ticks: 1500
+            - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ── +1 controlled variable: the AGENT MCV's starting
+  # latitude is round-robined between two spawn_point groups, so the
+  # agent must IDENTIFY the safe corner from each start (not just
+  # memorise "drive to (8,34)"). Either start uses the same fixed
+  # safe region anchor (SW, well clear of the NE threat axis on both
+  # latitudes), but the optimal MCV path differs by spawn. The rusher
+  # band is doubled (split across two NE rows) so the exposed-site
+  # inviability is sharp on both spawns. Same clock; same tick-aligned
+  # fail.
+  hard:
+    description: >
+      Same NE threat axis, but your MCV starts at one of two latitudes
+      (the seed picks which). Identify the safe corner from your
+      actual start position and deploy there — the south-west cell
+      (around (8,34)) is the only deploy region the win predicate
+      accepts. Two stacked rusher bands hit any centrally-deployed
+      fact inside the bring-up window; only the SW corner survives.
+      Win: fact inside radius 5 of (8,34) AND powr AND tent AND ≥1
+      own unit, before tick 4800. Stall, deploy at the exposed
+      centre, or lose the fact and you fail.
+    overrides:
+      actors:
+        # spawn_point 0 — MCV starts in the WEST mid-band closer to
+        # the NORTH edge (~(15,22)). The safe SW corner is still
+        # (8,34) — agent must navigate around / past the rusher's
+        # interception line.
+        - {type: mcv, owner: agent, position: [15, 22], spawn_point: 0}
+        # spawn_point 1 — MCV starts in the WEST mid-band closer to
+        # the SOUTH edge (~(15,28)). The safe SW corner is the same;
+        # the optimal MCV path is shorter from this spawn. Same
+        # spatial predicate either way — the agent still has to
+        # IDENTIFY the safe corner given the NE threat axis.
+        - {type: mcv, owner: agent, position: [15, 28], spawn_point: 1}
+        # The rusher mass is split into two bands at distinct y-rows
+        # in the NE (vs medium's single band) so the threat hits any
+        # centrally-deployed fact regardless of which agent spawn
+        # was chosen. Tuned to count: 3 per band (6 total) — empirically
+        # the largest band size at which a single trained e1 defender
+        # at the SAFE corner can still hold the freshly-placed fact
+        # long enough for tent + e1 bring-up to complete. Larger bands
+        # raze the fact through the lone defender; smaller defeats
+        # the spec's "rusher band 2x" intent. All e1 (no rocket e3)
+        # to keep the rocket-range razing-through-defender vector
+        # off — see the medium ENGINE NOTE.
+        - {type: e1, owner: enemy, position: [95, 6], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [95, 12], stance: 3, count: 3}
+        # Anti-DRAW marker far east.
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - building_in_region: {x: 8, y: 34, radius: 5, type: fact, count: 1}
+        - has_building: powr
+        - has_building: tent
+        - own_units_gte: 1
+        - within_ticks: 4800
+    # Three fail teeth: (1) the deadline at tick 4801 (reachable in
+    # 60 turns); (2) agent has no fact AND no own units — the only
+    # state that means "the run is dead" (MCV killed before deploy,
+    # OR fact razed AND the last defender dead) — bites immediately
+    # without spuriously firing on the MCV→fact transition (the agent
+    # has the fact at that instant); (3) the grace-gated no-fact
+    # belt-and-suspenders for the stall path where the MCV is alive
+    # forever but never deploys.
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - all_of:
+            - not: {building_count_gte: {type: fact, n: 1}}
+            - not: {own_units_gte: 1}
+        - all_of:
+            - after_ticks: 1500
+            - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60

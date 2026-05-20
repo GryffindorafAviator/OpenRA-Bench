@@ -61,19 +61,14 @@ UPGRADED = [
     # south-flank (y=18..26) staging, both covering the same patch
     # column against three raider vectors (north/central/south).
     "mid-economy-under-fire",
-    # Other mcv-deploy-* siblings (defensible-site, near-resource,
-    # relocate-under-pressure) register themselves via their own
-    # Wave-3 commits as they land.
     # Group A seed: hard tier stages the spare MCV NE-leaning vs
     # SE-leaning by seed; the win predicate accepts a deploy at
     # either candidate region (NE or SE) so the model must pick the
     # NEAREST one — cross-map diagonal blows the tick budget.
     "mcv-deploy-second-base",
-    # Group A seed (this commit): hard tier seed-varies the FRESH
-    # Group A seed (sibling commit): hard tier seed-varies the FRESH
-    # MCV's start column (40,20 vs 60,20) with the matching safe
-    # shoulders, so a single memorised relocation cell cannot
-    # generalise across seeds.
+    # Group A seed: hard tier seed-varies the FRESH MCV's start
+    # column (40,20 vs 60,20) with the matching safe shoulders, so a
+    # single memorised relocation cell cannot generalise across seeds.
     "mcv-deploy-relocate-under-pressure",
     # Group A econ-first siting seed (Wave 2 MCV deploy fix + post-S0/S1
     # harvest income); hard tier defines 2 symmetric spawn_point groups
@@ -84,6 +79,10 @@ UPGRADED = [
     # hard tier rotates the WHOLE MCV cluster between WEST and EAST
     # starts so the per-MCV nearest-region assignment flips per seed.
     "mcv-deploy-third-base",
+    # Wave-2 MCV deploy + threat-axis site choice: hard tier round-
+    # robins the MCV start latitude (NW vs SW) per seed; agent must
+    # IDENTIFY the safe corner from each start, not memorise a path.
+    "mcv-deploy-defensible-site",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
