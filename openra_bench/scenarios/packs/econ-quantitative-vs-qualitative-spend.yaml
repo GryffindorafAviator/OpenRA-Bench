@@ -1,0 +1,298 @@
+# econ-quantitative-vs-qualitative-spend
+#
+# Quantity vs Quality under a fixed budget — the SC2 "mass cheap" vs
+# "few elite" composition decision; military doctrine "quantity has a
+# quality of its own" tension; OR unit-composition optimisation.
+#
+# Real-world: industrial mass-production vs craftsmanship; SC2 zergling
+# swarm vs carrier doctrine; military mass conscription vs elite
+# professional formations.
+#
+# Pre-placed (per spec): agent fact + barr (infantry trainer) + weap
+# (vehicle trainer) + 2 starter units. The barr+weap pair makes BOTH
+# the mass-cheap (e1 @ $100) and elite (3tnk @ $950) compositions
+# buildable from turn 1 — the decision is *composition*, not tech.
+#
+# Discrimination on EASY / MEDIUM (single garrison, both comps work):
+#   • stall (only observe): never reaches the kill bar → after_ticks
+#     LOSS.
+#   • mixed-composition / brittle spend (1 tank + 4 e1): neither bar is
+#     comfortably met under the loss cap on the medium garrison — the
+#     small mix bleeds units and underdelivers DPS → LOSS.
+#   • intended commit-cheap (8× e1 swarm): swarm DPS overwhelms the
+#     small garrison, infantry are individually expendable under the
+#     loss cap → WIN.
+#   • intended commit-elite (3× 3tnk wedge): 3 heavy tanks ($30 DPS,
+#     $450 HP each) burn through the same garrison with ≤1 loss → WIN.
+#
+# Discrimination on HARD (composition flips per spawn):
+#   • The map carries TWO garrisons placed at fixed (north / south)
+#     positions — one anti-INFANTRY (e1 mass + dog + pbox: punishing
+#     to a swarm), one anti-VEHICLE (e3 anti-tank mass: punishing to
+#     tanks). The agent spawns near ONE of them (spawn_point 0 = north
+#     base, spawn_point 1 = south base, round-robined by seed).
+#   • The within_ticks budget is too tight to cross the map to engage
+#     the OTHER garrison — the agent MUST commit to its local one.
+#   • The right composition flips per seed: north spawn faces the
+#     anti-INFANTRY garrison ⇒ mass e1 LOSES, elite 3tnk WINS.
+#     South spawn faces the anti-VEHICLE garrison ⇒ elite 3tnk
+#     LOSES (rocket soldiers shred tanks), mass e1 WINS (rockets
+#     overkill cheap rifles, the swarm closes range and overwhelms).
+#   • A single memorised "always build tanks" or "always build mass"
+#     opening therefore loses on half the seeds — the agent must read
+#     the local garrison and counter-pick.
+#
+# Engine guardrails:
+#   • Map: rush-hour-arena (128 × 40, playable x in [2..126],
+#     y in [2..38]).
+#   • Far enemy `fact` at (124,20) prevents engine auto-done when a
+#     garrison falls — the kill bar is satisfied on units, not
+#     buildings; the fact keeps the episode running through the
+#     terminal evaluator frame.
+#   • after_ticks fail clauses reachable within max_turns
+#     (tick ≤ 93 + 90·(max_turns-1) ⇒ within_ticks 5400 < 5403 at
+#     max_turns 60); a staller hits after_ticks 5401 and LOSES, never
+#     draws.
+#   • Enemy actors do NOT honour spawn_point (CLAUDE.md), so BOTH
+#     garrisons place on every seed; only the agent's spawn corner
+#     varies. The two garrison cells are far enough apart and the
+#     tick budget is tight enough that committing to the wrong
+#     corner busts the deadline.
+#   • starting_cash funds either composition cleanly with surplus:
+#     elite = 3×$950 = $2850; mass = 8×$100 = $800; budget = $4500.
+#     A mixed-composition spend (e.g. 1 tank + 5 e1) underdelivers on
+#     either axis: not enough DPS to bust the garrison in time, not
+#     enough HP to survive the loss cap.
+#   • Faction = soviet (so 3tnk + barr are both native to the faction;
+#     a barr+weap pair makes both e1 swarm and 3tnk armour buildable
+#     from turn 1 without an extra tech step).
+
+meta:
+  id: econ-quantitative-vs-qualitative-spend
+  title: 'Quantity vs Quality — Pick the Right Composition for the Budget'
+  capability: reasoning
+  real_world_meaning: >
+    A fixed cash budget funds either a SWARM of cheap rifle infantry
+    (8× e1 @ $100) OR a small ELITE armoured fist (3× 3tnk @ $950).
+    Either composition fits the same budget — the decision is which
+    is right for the threat the agent must clear. The kill bar AND
+    the attrition cap jointly bind: a stall never reaches the bar;
+    a mixed mini-spend (1 tank + a handful of rifles) underdelivers
+    on DPS and bleeds units past the loss cap; one of the two pure
+    compositions cleanly wins per tier. Hard flips the right answer
+    per seed — the agent's spawn corner determines which garrison
+    is local, and the local garrison's composition determines whether
+    mass cheap or few elite is the right counter (anti-vehicle
+    garrison ⇒ mass cheap wins, anti-infantry garrison ⇒ elite
+    armour wins).
+  robotics_analogue: >
+    Fleet provisioning under a fixed CAPEX: same budget buys either
+    a swarm of cheap general-purpose drones or a handful of expensive
+    high-capability robots. The mission profile (debris field vs
+    high-value point target; mass surveillance vs precision strike)
+    decides which composition is right — and a half-and-half
+    procurement satisfies neither requirement.
+  benchmark_anchor:
+    - "SC2 mass-vs-elite army composition"
+    - "industrial mass-production vs craftsmanship"
+    - "military doctrine: quantity has a quality of its own"
+    - "OR unit-composition optimization under budget"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 4500
+
+base:
+  agent: {faction: soviet}
+  enemy: {faction: allies}
+  tools: [build, place_building, move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 8000}
+  # Pre-placed: agent fact + barr + weap + 2 starter units. The barr
+  # enables e1 (infantry trainer); the weap enables 3tnk (vehicle
+  # trainer); the two starter e1 give the agent some scouts on turn 1
+  # but cannot meet the kill bar alone — production is required.
+  actors:
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: barr, owner: agent, position: [14, 18]}
+    - {type: weap, owner: agent, position: [14, 22]}
+    - {type: e1,   owner: agent, position: [12, 20]}
+    - {type: e1,   owner: agent, position: [12, 21]}
+    # Far persistent enemy marker — prevents engine auto-done when the
+    # garrison falls so the win/fail evaluator sees the terminal frame.
+    - {type: fact, owner: enemy, position: [124, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare composition skill: ONE small mixed garrison at centre. EITHER
+  # mass-cheap OR elite-armour clears it; the lazy stall LOSES on
+  # after_ticks. Loss cap is forgiving (≤5) so the swarm play doesn't
+  # need to be careful with individual rifles.
+  easy:
+    description: >
+      Fixed budget $4500. A small enemy garrison (4 rifle infantry e1
+      + 2 anti-tank rocket soldiers e3) sits in the centre. Pick a
+      composition that fits the budget — either swarm cheap rifles
+      (8× e1 @ $100 = $800) OR a small elite armoured fist (3× 3tnk
+      @ $950 = $2850). Both compositions can clear this garrison.
+      Win when 6 enemy units are killed AND ≤5 of your units are
+      lost, before tick 5400. Stalling, building neither, or
+      under-producing fails the clock.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: barr, owner: agent, position: [14, 18]}
+        - {type: weap, owner: agent, position: [14, 22]}
+        - {type: e1,   owner: agent, position: [12, 20]}
+        - {type: e1,   owner: agent, position: [12, 21]}
+        # Single centre garrison: 4 e1 + 2 e3, stance:3 (attack
+        # anything in range — fires on contact).
+        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
+        - {type: e3, owner: enemy, position: [72, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [72, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {units_lost_lte: 5}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 5}}
+    max_turns: 60
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # The pack-spec tier: same garrison, the bar AND the composition
+  # jointly bind. Loss cap is 4 — the swarm play can lose half its
+  # rifles and still pass; the tank play can lose 1 and still pass.
+  # Mixed-composition mini-spends (1 tank + 4 e1, etc.) bleed past
+  # the loss cap; pure compositions cleanly clear it. Both pure
+  # compositions WIN on this tier — the model's choice is the
+  # measured variable.
+  medium:
+    description: >
+      Fixed budget $4500. A small enemy garrison (4 rifle infantry e1
+      + 2 anti-tank rocket soldiers e3) sits in the centre. Commit to
+      ONE composition that fits the budget — either swarm cheap
+      rifles (8× e1 @ $100 = $800) OR a small elite armoured fist
+      (3× 3tnk @ $950 = $2850). A mixed mini-spend (one tank plus a
+      few rifles) under-delivers on DPS and bleeds units past the
+      loss cap. Win when 6 enemy units are killed AND ≤4 of your
+      units are lost, before tick 5400. Stalling, mixing, or
+      under-producing fails the bar.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: barr, owner: agent, position: [14, 18]}
+        - {type: weap, owner: agent, position: [14, 22]}
+        - {type: e1,   owner: agent, position: [12, 20]}
+        - {type: e1,   owner: agent, position: [12, 21]}
+        # Single centre garrison, mixed (rifle + rocket); same as easy
+        # but the loss cap is tighter (≤4) so a brittle mini-spend
+        # fails.
+        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
+        - {type: e3, owner: enemy, position: [72, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [72, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {units_lost_lte: 4}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 4}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: enemy composition flips per seed. TWO garrisons place at
+  # fixed (north y=10 / south y=30) positions on every seed (enemy
+  # actors don't honour spawn_point — CLAUDE.md). The agent's BASE
+  # spawn corner is seed-driven via 2 agent spawn_point groups:
+  #   spawn_point 0 = NORTH base (fact at (10,10)) → faces north
+  #     anti-INFANTRY garrison locally → swarm cheap LOSES (the
+  #     anti-infantry mix shreds e1), elite tanks WIN (cheap rifles
+  #     and the dog can't pierce 3tnk armour).
+  #   spawn_point 1 = SOUTH base (fact at (10,30)) → faces south
+  #     anti-VEHICLE garrison locally → elite tanks LOSE (e3 rocket
+  #     soldiers shred armour), mass cheap e1 WINS (e3 anti-tank
+  #     rockets overkill individual rifles, the swarm closes range
+  #     and overwhelms).
+  # The within_ticks budget (5400) is tight enough that crossing the
+  # map to engage the OTHER garrison busts the deadline — the agent
+  # must commit to its local garrison and counter-pick.
+  hard:
+    description: >
+      Fixed budget $4500. TWO enemy garrisons are placed on the map:
+      a NORTH garrison (around y=10) and a SOUTH garrison (around
+      y=30) with DIFFERENT compositions — one is anti-INFANTRY
+      (mass rifles + dog + pillbox: punishing to a cheap swarm);
+      one is anti-VEHICLE (mass anti-tank rocket soldiers e3:
+      punishing to armour). Your base spawns at the NORTH or SOUTH
+      corner (chosen by seed); the tick budget is too tight to
+      cross the map and engage the other garrison. Read the
+      composition of your LOCAL garrison, then commit the budget
+      to the correct counter — swarm cheap rifles (8× e1 = $800)
+      vs an anti-vehicle garrison, OR elite armoured fist
+      (3× 3tnk = $2850) vs an anti-infantry garrison. A single
+      memorised "always tanks" or "always mass" opening loses on
+      half the seeds. Win when 6 enemy units are killed AND ≤4 of
+      your units are lost, before tick 5400.
+    overrides:
+      actors:
+        # ── AGENT spawn 0 — NORTH base (y=10) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: barr, owner: agent, position: [14,  8], spawn_point: 0}
+        - {type: weap, owner: agent, position: [14, 12], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [12, 11], spawn_point: 0}
+        # ── AGENT spawn 1 — SOUTH base (y=30) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: barr, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: weap, owner: agent, position: [14, 32], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 30], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 31], spawn_point: 1}
+        # ── NORTH GARRISON — ANTI-INFANTRY (counters mass cheap) ──
+        # Wide rifle line + an attack dog (instakills infantry, useless
+        # vs armour) + a pillbox (fixed anti-infantry defence). The
+        # rifles + dog give 6 living kill-bar targets; the pbox is a
+        # building (not in units_killed) but soaks up swarm DPS.
+        - {type: e1,  owner: enemy, position: [70,  8], stance: 3}
+        - {type: e1,  owner: enemy, position: [70,  9], stance: 3}
+        - {type: e1,  owner: enemy, position: [70, 10], stance: 3}
+        - {type: e1,  owner: enemy, position: [70, 11], stance: 3}
+        - {type: e1,  owner: enemy, position: [70, 12], stance: 3}
+        - {type: dog, owner: enemy, position: [72, 10], stance: 3}
+        - {type: pbox, owner: enemy, position: [74, 10]}
+        # ── SOUTH GARRISON — ANTI-VEHICLE (counters elite armour) ──
+        # Mass rocket soldiers (e3 anti-tank, dps12 vs armour). Cheap
+        # rifles in front would absorb the rocket overkill; against a
+        # 3-tank fist the rockets stack up DPS and bust the loss cap.
+        # Total enemy unit count = 6 (6× e3).
+        - {type: e3, owner: enemy, position: [70, 28], stance: 3}
+        - {type: e3, owner: enemy, position: [70, 29], stance: 3}
+        - {type: e3, owner: enemy, position: [70, 30], stance: 3}
+        - {type: e3, owner: enemy, position: [70, 31], stance: 3}
+        - {type: e3, owner: enemy, position: [70, 32], stance: 3}
+        - {type: e3, owner: enemy, position: [72, 30], stance: 3}
+        # Far persistent enemy marker — prevents engine auto-done
+        # when the local garrison falls.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {units_lost_lte: 4}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 4}}
+    max_turns: 60
