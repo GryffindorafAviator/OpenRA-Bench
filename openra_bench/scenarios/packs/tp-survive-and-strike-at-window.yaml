@@ -1,0 +1,300 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   openra_bench/scenarios/packs/tp-survive-and-strike-at-window.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# REASONING capability — temporal sequencing under a TIMING WINDOW.
+# The agent must (1) SURVIVE the pre-window: keep its full force alive
+# past tick T1 without engaging (any kill scored before T1 trips the
+# fail tree's premature-engagement clause), then (2) STRIKE inside a
+# narrow follow-up band [T1..T2]: deliver the kill quota before T2
+# elapses. Stalling past T2 loses on the clock; striking immediately
+# trips the premature-engagement fail; only "hold-then-strike-at-
+# window" wins.
+#
+# Engine idiom: the `then:` happened-before composite enforces ORDER.
+# Clause 1 ({after_ticks: T1, own_units_gte: 4}) must latch FIRST —
+# becomes true at tick T1 ONLY IF the agent still has its 4 starting
+# tanks. Clause 2 ({units_killed_gte: K, within_ticks: T2}) only
+# becomes EVALUABLE after clause 1 latches, so a kills-before-T1
+# plan cannot satisfy the chain. (Latches are monotonic per
+# win_conditions._then — once advanced, an earlier clause stays
+# latched even if its body falls back to false, so the agent CAN
+# spend tanks during the strike phase.)
+#
+# Fail tree teeth: the enemy composition is DELIBERATELY weak vs the
+# strike force (1× 2tnk + 6× e1 — pure rifle infantry plus a single
+# medium tank). Per the authoring brief, prior attempts using a
+# stronger enemy (e3 + 3tnk / tsla) one-shotted the agent's 4× 2tnk
+# column in <360 ticks, making the intended strike phase unwinnable.
+# With this weaker composition the strike-immediately rush WOULD
+# actually win the slugfest — so the premature-engagement fail
+# clause (`all_of: [units_killed_gte: 1, within_ticks: T1-1]`) is
+# the structural penalty that makes a tick-0 rush LOSE: any kill
+# before the window opens is the policy's "I engaged early" signal.
+#
+# Enemy `bot_type: turtle` means the cluster holds position and returns
+# fire only — it does NOT chase the agent during the pre-window, so a
+# disciplined hold is genuinely safe (the dominant strategy is to wait
+# at staging and commit at T1). An unarmed `fact` landmark behind the
+# cluster prevents the engine's enemy-elimination auto-`done` from
+# pre-empting the win/fail evaluation.
+#
+# Tick budget: engine advances ~90 ticks per decision turn
+# (tick ≈ 93 + 90·(turn-1)). Every `after_ticks` / `within_ticks` is
+# reachable within `max_turns` so a staller hits a real reachable
+# timeout LOSS (no DRAW degeneracy). Re-verified per level.
+
+meta:
+  id: tp-survive-and-strike-at-window
+  title: 'Timing Push — Survive the Pre-Window, Strike at the Window'
+  capability: reasoning
+  real_world_meaning: >
+    Temporal-sequencing discipline under a narrow action window: a
+    cyber/military operator must HOLD station through a pre-window
+    interval (any attack before the window opens overextends and
+    burns the force) and then DELIVER the strike inside a tight
+    follow-up band before the window closes. Premature commitment
+    squanders the force; late commitment misses the deadline. The
+    capability is recognising the window and committing exactly once
+    when it opens — not raw aggression and not raw patience.
+  robotics_analogue: >
+    Pulsed-mission timing: a UAV strike package must hold at the IP
+    (initial point) through a no-fire interval (deconfliction window,
+    sensor handoff window, regulatory blackout), then execute the
+    sortie inside a hard window. Holding too long or jumping the
+    window both fail the mission.
+  benchmark_anchor:
+    - "SC2 timing push"
+    - "PlanBench temporally-extended"
+    - "cyber attack timing"
+  author: openra-bench
+  # Wave-7 companion to `tempo-strike-window` (single forced lull +
+  # follow-up band, single AND-clause) and `tempo-double-window`
+  # (strike → lull → strike via waypoint latch). This pack tightens
+  # the discipline to a *happened-before* survival-then-strike chain:
+  # the first clause must LATCH BEFORE the second becomes evaluable,
+  # so a kills-before-T1 plan structurally cannot satisfy the chain
+  # (whereas the AND-clause tempo packs can be satisfied by any state
+  # where all clauses happen to be simultaneously true).
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    # turtle: holds spawn position, returns fire only. The enemy
+    # cluster does NOT chase the agent during the pre-window, so a
+    # disciplined hold at the agent's staging is genuinely safe.
+    bot_type: turtle
+  tools: [move_units, attack_unit, attack_move, stop_units]
+  planning: true
+  termination: {max_ticks: 12000}
+  actors:
+    # ── Agent: pre-placed strike force + base (per design sketch).
+    # 4× 2tnk in a tight column at the west staging — `own_units_gte:4`
+    # is exactly met at start; losing ANY tank before tick T1 fails the
+    # survival clause and the then-chain can never latch.
+    - {type: 2tnk, owner: agent, position: [8,  18], stance: 1}
+    - {type: 2tnk, owner: agent, position: [8,  20], stance: 1}
+    - {type: 2tnk, owner: agent, position: [8,  22], stance: 1}
+    - {type: 2tnk, owner: agent, position: [10, 20], stance: 1}
+    # Base landmark (fact loss = instant fail; prevents the "lose
+    # everything BUT keep mobile units" degeneracy and gives the brief
+    # a concrete asset-to-defend handle).
+    - {type: fact, owner: agent, position: [14, 20]}
+    - {type: proc, owner: agent, position: [14, 24]}
+    # ── Enemy: turtle cluster at the central engagement zone. The
+    # mix (1× 2tnk + 6× e1) gives 7 kill-eligible targets — K=3
+    # (easy) / K=4 (medium+hard) is comfortably reachable for an
+    # organised 4-tank attack. The composition is DELIBERATELY
+    # under-DPS'd vs the agent's strike force (prior authoring
+    # found e3 + 3tnk one-shots a 4× 2tnk column in <360 ticks,
+    # breaking the intended strike phase) — what punishes the
+    # strike-immediately rush is NOT the slugfest but the fail
+    # tree's premature-engagement clause (`units_killed_gte:1`
+    # within `T1 - 1`): any kill scored before the window opens
+    # is the policy's signal that it engaged early. The
+    # discrimination is timing discipline, not slugfest survival.
+    # turtle bot keeps the cluster at its spawn so the pre-window
+    # hold is genuinely safe.
+    - {type: 2tnk, owner: enemy, position: [60, 20], stance: 2}
+    - {type: e1,   owner: enemy, position: [58, 18], stance: 2}
+    - {type: e1,   owner: enemy, position: [58, 22], stance: 2}
+    - {type: e1,   owner: enemy, position: [62, 18], stance: 2}
+    - {type: e1,   owner: enemy, position: [62, 22], stance: 2}
+    - {type: e1,   owner: enemy, position: [60, 18], stance: 2}
+    - {type: e1,   owner: enemy, position: [60, 22], stance: 2}
+    # Unarmed landmark behind the cluster: prevents the engine's
+    # enemy-elimination auto-`done` from pre-empting the win/fail
+    # tree evaluation if the agent over-kills.
+    - {type: fact, owner: enemy, position: [100, 20]}
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Wide window. Wait at staging until tick T1=1200, then commit and
+  # land K=3 kills before T2=4200. Premature rush busts the survival
+  # clause (4× 2tnk vs the 3× 3tnk + 3× e3 turtle cluster loses 1+
+  # tank in the slugfest). Stalling past T2 hits the timeout fail.
+  easy:
+    description: >
+      Hold the 4-tank column at the west staging through the
+      pre-window. Do NOT score any kills before tick 1200 — any
+      kill before that fails the premature-engagement clause and
+      ends the run instantly. AFTER tick 1200, commit to the
+      central enemy cluster and destroy at least 3 enemy units
+      before tick 4200. Losing your base (`fact`) or your whole
+      force at any point also fails.
+    win_condition:
+      then:
+        id: survive-then-strike-easy
+        clauses:
+          # Clause 1 (SURVIVAL gate): at tick T1 the full 4-tank
+          # column must still be alive. Once latched, stays latched
+          # (so the agent CAN spend tanks in the strike phase).
+          - all_of:
+              - {after_ticks: 1200}
+              - {own_units_gte: 4}
+          # Clause 2 (STRIKE gate): K kills inside the post-window
+          # band (only evaluable AFTER clause 1 latches).
+          - all_of:
+              - {units_killed_gte: 3}
+              - {within_ticks: 4200}
+    fail_condition:
+      any_of:
+        # Timeout: missed the strike window. Real reachable LOSS.
+        - {after_ticks: 4201}
+        # Base destroyed: lost the strategic asset.
+        - {not: {has_building: fact}}
+        # Whole force wiped (gated with after_ticks to avoid the
+        # turn-1 mis-fire footgun documented in CLAUDE.md).
+        - all_of:
+            - {after_ticks: 200}
+            - {not: {own_units_gte: 1}}
+        # Premature engagement: ANY kill before T1=1200 means the
+        # agent didn't hold the pre-window — instant LOSS. This is
+        # the canonical tempo-strike-window discriminator: the
+        # enemy composition is deliberately weak so a tick-0 rush
+        # WOULD win the slugfest, and the only structural penalty
+        # for ignoring the timing window is this early-kill fail.
+        - all_of:
+            - {units_killed_gte: 1}
+            - {within_ticks: 1199}
+    max_turns: 50   # ceiling 93 + 90·49 = 4503 > 4201 ✓
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: NARROWER WINDOW + higher kill bar.
+  # T1=1500 (longer pre-window hold), T2=3600 (band only 2100 ticks
+  # wide), K=4. The post-window band is just wide enough for an
+  # already-staged column to cross-engage-and-finish; a late-noticing
+  # agent has no slack.
+  medium:
+    description: >
+      Same survival-then-strike discipline, tighter pacing. Do NOT
+      score any kills before tick 1500 (premature-engagement
+      clause). AFTER tick 1500, destroy at least 4 enemy units
+      before tick 3600. The post-window band is narrower than easy
+      — a column that hasn't pre-positioned near the engagement
+      zone may not arrive in time.
+    win_condition:
+      then:
+        id: survive-then-strike-medium
+        clauses:
+          - all_of:
+              - {after_ticks: 1500}
+              - {own_units_gte: 4}
+          - all_of:
+              - {units_killed_gte: 4}
+              - {within_ticks: 3600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {has_building: fact}}
+        - all_of:
+            - {after_ticks: 200}
+            - {not: {own_units_gte: 1}}
+        # Premature-engagement: any kill before T1=1500 = LOSS.
+        - all_of:
+            - {units_killed_gte: 1}
+            - {within_ticks: 1499}
+    max_turns: 45   # ceiling 93 + 90·44 = 4053 > 3601 ✓
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 controlled variable: NARROW WINDOW + 2 seed-driven spawn
+  # groups. T1=1800, T2=3300 (band only 1500 ticks wide), K=4.
+  # The agent column round-robins between a NORTH staging (y=12) and
+  # a SOUTH staging (y=28) per seed; the enemy cluster sits centred
+  # at y=20 so each spawn faces the same survive-then-strike
+  # decision from a flipped approach axis. Per CLAUDE.md, enemy
+  # actors do NOT honour spawn_point, so the central cluster + far
+  # landmark place every seed unconditionally — both staging
+  # latitudes face the same engagement geometry, just from a
+  # different bearing. The base `fact` is duplicated across BOTH
+  # spawn groups (CLAUDE.md: ANY agent actor declaring spawn_point
+  # filters out unspawned agent actors).
+  hard:
+    description: >
+      Same survival-then-strike discipline; the window is narrower
+      still and your column starts from EITHER the NORTH staging
+      (y=12) or the SOUTH staging (y=28) per seed. Do NOT score
+      any kills before tick 1800 (premature-engagement clause).
+      AFTER tick 1800, destroy at least 4 enemy units before tick
+      3300. A pre-T1 push trips the premature-engagement fail; a
+      post-T2 finish loses on the clock.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging (y=12 column).
+        - {type: 2tnk, owner: agent, position: [8,  10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [8,  12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [8,  14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0}
+        - {type: fact, owner: agent, position: [14, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [14, 16], spawn_point: 0}
+        # spawn_point 1 — SOUTH staging (y=28 column).
+        - {type: 2tnk, owner: agent, position: [8,  26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [8,  28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [8,  30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1}
+        - {type: fact, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [14, 24], spawn_point: 1}
+        # Enemy cluster: SAME central position regardless of spawn
+        # (enemy actors don't honour spawn_point per CLAUDE.md). The
+        # 1× 2tnk + 6× e1 mix is symmetric across y=20, so both the
+        # NORTH and the SOUTH staging face equivalent geometry.
+        # Per the easy/medium notes the discriminator is the
+        # premature-engagement fail clause (any kill before T1),
+        # not slugfest survival — this works irrespective of the
+        # approach axis the seed selected.
+        - {type: 2tnk, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e1,   owner: enemy, position: [58, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [58, 22], stance: 2}
+        - {type: e1,   owner: enemy, position: [62, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [62, 22], stance: 2}
+        - {type: e1,   owner: enemy, position: [60, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [60, 22], stance: 2}
+        - {type: fact, owner: enemy, position: [100, 20]}
+    win_condition:
+      then:
+        id: survive-then-strike-hard
+        clauses:
+          - all_of:
+              - {after_ticks: 1800}
+              - {own_units_gte: 4}
+          - all_of:
+              - {units_killed_gte: 4}
+              - {within_ticks: 3300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3301}
+        - {not: {has_building: fact}}
+        - all_of:
+            - {after_ticks: 200}
+            - {not: {own_units_gte: 1}}
+        # Premature-engagement: any kill before T1=1800 = LOSS.
+        - all_of:
+            - {units_killed_gte: 1}
+            - {within_ticks: 1799}
+    max_turns: 42   # ceiling 93 + 90·41 = 3783 > 3301 ✓
