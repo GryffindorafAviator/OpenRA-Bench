@@ -171,6 +171,16 @@ UPGRADED = [
     # flips per seed (an off-axis diagonal busts the tick budget
     # and brushes the wrong-corner patrol).
     "mfb-base-1-defend-base-2-build",
+    # Wave-7 Group B reasoning pack — greedy 3-base macro against a
+    # deadline (SC2 3-base macro / MicroRTS expansion / industrial
+    # site expansion anchor). Hard tier defines two agent spawn_point
+    # groups (NORTH base layout y≈20 / SOUTH base layout y≈50)
+    # round-robined by seed; the win clause accepts EITHER candidate
+    # far-east region ((90,20) or (90,50)) so the agent must place
+    # the 3rd proc in line with their actual base latitude. A
+    # memorised "place at (90,20)" generalises to NORTH but mis-places
+    # on SOUTH.
+    "mfb-third-base-against-clock",
     # Wave-4 TURTLE node of the tech triple (SC2 turtle macro /
     # military fortify-before-research doctrine anchor). Hard defines
     # two agent spawn_point groups (NORTH base / SOUTH base) so the
@@ -409,6 +419,20 @@ UPGRADED = [
     # y=20 so either spawn faces the same flank-vs-frontal decision
     # from a flipped bearing, and no memorised opening generalises.
     "combat-flanking-attack",
+    # Wave-7 combat-formation pack: military tank-wedge doctrine /
+    # SC2 formation micro / combined-arms anchor. The agent commands
+    # 5× 2tnk and must arrange them in a WEDGE (apex + 2 flankers
+    # per side spread across y=18..22) before contacting an eastern
+    # cluster (4-5× e3 + 1-2× 1tnk at x=84..86). A COLUMN (single-
+    # file east on y=20) concentrates incoming Dragon fire on the
+    # lead tank and bleeds the survival bar (own_units_gte:4 fails
+    # when 2+ tanks lost); the WEDGE spreads return fire across the
+    # formation and clears the cluster intact. Hard defines two agent
+    # spawn_point groups (NORTH staging y=12..16 / SOUTH staging
+    # y=24..28) round-robined by seed; the central cluster is
+    # symmetric across y=20 so either spawn faces an equivalent
+    # column-vs-wedge decision and no memorised opening generalises.
+    "combat-formation-tank-wedge",
     # Wave-6 perception pack — early-warning intrusion detection
     # paired with targeted intercept (SC2 early-warn scout /
     # NORAD early-warning / IDS / military reconnaissance-in-force
@@ -420,6 +444,105 @@ UPGRADED = [
     # generalises. A memorised "send scout to (40,10) + tanks to
     # (45,10)" opening cannot generalise across seeds.
     "scout-detect-incoming-army",
+    # Wave-7 ACTION econ-defense pack — convoy / supply-line protection
+    # (SC2 harass defense / military convoy protection / supply-line
+    # doctrine anchor). A single harv commutes proc↔mine on a long
+    # exposed route; raider 2tnks specifically target the harv.
+    # Defenders at base never engage (raider intercepts harv beyond
+    # base sight); intended play is to move escorts east to intercept
+    # on the route. Hard tier defines two agent spawn_point groups
+    # (NORTH route y=14 / SOUTH route y=26) round-robined by seed;
+    # symmetric north + south raider waves always place (enemy actors
+    # don't honour spawn_point — CLAUDE.md), so each spawn defends
+    # its OWN supply lane and a memorised opening cannot generalise.
+    "econ-protect-harvester-route",
+    # Wave-7 Group D reasoning pack — rock-paper-scissors hard-counter
+    # selection (SC2 hard-counter doctrine / military RPS counter /
+    # capability-based defense procurement anchor). Cash $2550 funds
+    # EITHER 3× 2tnk (the right counter to pure-infantry enemy) OR
+    # 8× e3 (wrong counter — anti-tank rockets vs soft targets) OR
+    # 25× e1 (1:1 attrition match). Hard tier defines two agent
+    # spawn_point groups (NORTH base y=12 / SOUTH base y=28) round-
+    # robined by seed; the centre infantry cluster always places at
+    # (70,20) (enemy actors don't honour spawn_point — CLAUDE.md),
+    # so the composition decision is the same per seed but the lane
+    # the agent commits to flips per seed and a memorised opening
+    # cannot generalise.
+    "combat-vehicle-vs-infantry-counter",
+    # Wave-7 REASONING temporal-sequencing pack — SC2 timing-push
+    # window / PlanBench temporally-extended goal / cyber attack
+    # timing-window anchor. The `then:` happened-before composite
+    # enforces a SURVIVAL gate (own_units_gte:4 at T1) latching
+    # BEFORE the STRIKE gate (units_killed_gte:K within T2), so
+    # premature engagement and stalling both lose. Hard tier defines
+    # two agent spawn_point groups (NORTH staging y=12 / SOUTH
+    # staging y=28) round-robined by seed; the central enemy turtle
+    # cluster + tsla place every seed (enemy actors don't honour
+    # spawn_point — CLAUDE.md) and is symmetric across y=20, so
+    # both staging latitudes face the same survive-then-strike
+    # decision from a flipped approach axis.
+    "tp-survive-and-strike-at-window",
+    # Wave-7 REASONING pack: concentrated-defense topology — build a
+    # TIGHT CLUSTER of pillboxes around the high-value building (the
+    # agent fact). Hard tier defines 2 agent spawn_point groups
+    # (NORTH fact at y=14 / SOUTH fact at y=26) round-robined by seed;
+    # the cluster centre flips with the fact, so a memorised "cluster
+    # at (10,20)" plan cannot generalise. Enemies don't honour
+    # spawn_point (CLAUDE.md), so the rush band is staged at BOTH
+    # candidate latitudes — only the on-latitude band converges on
+    # the active fact, but it is heavy enough to overwhelm any
+    # defence that isn't a CLUSTER around the correct fact.
+    "build-defensive-tower-cluster",
+    # Wave-7 REASONING / RPS hard-counter pack (INVERSE of combat-
+    # vehicle-vs-infantry-counter) — SC2 hard-counter / anti-armor
+    # procurement / military RPS anchor. Starting cash ($1800) funds
+    # exactly ONE composition vs a pre-placed band of HEAVY tanks
+    # (3tnk on easy/medium, 4tnk Mammoths on hard); the agent must
+    # build e3 (rocket soldiers, anti-vehicle Dragon launcher) — not
+    # 1tnk (light tanks lose attrition to heavy armour, budget buys
+    # only ~2) and not e1 (no anti-armour weapon, kill bar fails).
+    # Hard tier defines two agent spawn_point groups (NORTH base
+    # y=12 / SOUTH base y=28) round-robined by seed; the heavy band
+    # is centred mid-latitude (y=20) so both spawns face symmetric
+    # pursuit geometry (enemy actors don't honour spawn_point —
+    # CLAUDE.md) and a memorised "build e3 at y=20" opening cannot
+    # generalise across seeds.
+    "combat-rocket-soldier-anti-vehicle",
+    # Wave-7 perimeter/firewall reasoning pack — ERQA spatial commit /
+    # MicroRTS defense placement / military perimeter (firewall rule
+    # placement) anchor. Sibling/inverse of def-tower-line-vs-cluster:
+    # that pack enforces CLUSTER at a single bottleneck cell (graph
+    # min-cut doctrine); this pack enforces a LINE across the corridor
+    # (one pbox per row spanning y=18..22 at x=60, radius 0.5 so only
+    # the exact rung cell counts). Hard tier defines two agent
+    # spawn_point groups (NORTH base y=12 / SOUTH base y=28) round-
+    # robined by seed; the rusher band is centred at y=20 and ALWAYS
+    # places (enemy actors don't honour spawn_point — CLAUDE.md), so
+    # the corridor LINE is identical across seeds but the agent's base
+    # bearing flips per seed and a memorised relative-to-base placement
+    # cannot generalise.
+    "build-defensive-tower-line",
+    # Wave-7 Group I REASONING — opening-phase build-order / power-grid
+    # bring-up sequencing (PlanBench task-ordering / SOP compliance /
+    # electrical-grid bring-up anchor). Hard tier defines two agent
+    # spawn_point groups (NORTH y=12 / SOUTH y=28) round-robined by
+    # seed; the pre-placed `fact` (and therefore the build radius and
+    # the placement coords for powr/proc) flips per seed, so a
+    # memorised "(20,20) opening" cannot generalise. An inert HoldFire
+    # `e1` per group surfaces the variation via units_summary (the
+    # pack would otherwise be building-only); no `move_units`/
+    # `attack_unit` tool is exposed so the e1 is functionally inert
+    # and does not interact with the SOP test.
+    "build-power-online-first",
+    # Wave-7 REASONING pack — cost-optimal build-order (powr → proc →
+    # weap) under a tight deadline (PlanBench cost-optimal / BOM-
+    # manufacturing critical-path anchor). Hard tier defines two agent
+    # spawn_point groups (NORTH base y=14 / SOUTH base y=26) round-
+    # robined by seed; ore patches are duplicated at both latitudes so
+    # harv income is symmetric per spawn. A memorised "place powr at
+    # (14,22)" opening cannot generalise — placement must be computed
+    # relative to the actual fact each seed.
+    "build-sequence-tech-fastest",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

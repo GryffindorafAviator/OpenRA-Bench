@@ -1,0 +1,235 @@
+# build-sequence-tech-fastest.yaml
+#
+# REASONING capability — Wave-7 build-order optimization (cost-OPTIMAL
+# planning). The agent must reach `weap` (war factory) within the
+# tightest possible tick budget by choosing the correct prerequisite
+# path: powr → proc → weap. Any extra structure (a barracks/tent
+# detour, an unneeded second power plant, idle stalling) overruns the
+# deadline.
+#
+# Engine-verified tech tree (vendor/OpenRA/mods/ra/rules/structures.yaml):
+#   - POWR  cost 300, Prerequisites: <none>      (provides anypower)
+#   - PROC  cost 1400, Prerequisites: anypower   (needs powr)
+#   - WEAP  cost 2000, Prerequisites: proc       (needs proc)
+# Total credits on the optimal path = 3700; starting_cash 5000 leaves
+# small slack but does NOT cover a wasted tent (500) AND meet the
+# tightest deadline. The Wave-2 `then:` happened-before composite is
+# the load-bearing teeth — clauses [powr, proc, weap] latch in order;
+# a policy that places weap before proc cannot satisfy the chain
+# (engine refuses too — weap's prereq is proc).
+#
+# Measured optimal timing (rush-hour-arena, fact pre-placed at
+# (10,18), seed 1, scripted intended policy):
+#   - powr completes  ≈ tick  273  (turn  3)
+#   - proc completes  ≈ tick 1263  (turn 14)
+#   - weap completes  ≈ tick 2613  (turn 29)
+# Measured WRONG-PATH timing (powr → tent → proc → weap):
+#   - weap completes  ≈ tick 3063  (turn 34) — 5 turns / 450 ticks
+#     slower than optimal. The deadline must fall INSIDE this gap.
+#
+# Bar (CLAUDE.md):
+#   - stall (observe-only)          ⇒ LOSS on every level + seed
+#   - build-tent-first wrong path   ⇒ LOSS on every level + seed
+#   - intended powr→proc→weap path  ⇒ WIN  on every level + seed
+# Real LOSS not DRAW: fail_condition `after_ticks: T+1` reachable
+# inside max_turns (engine ~90 ticks/turn ⇒ tick ≤ 93+90·(N-1)). The
+# pre-placed enemy `fact` at the far east is a MustBeDestroyed
+# landmark that keeps the episode alive (no premature engine
+# auto-done from eliminating a stray sentry).
+#
+# Real-world anchor:
+#   - PlanBench cost-optimal planning (find the minimum-cost plan
+#     that achieves the goal, not just A plan)
+#   - Manufacturing BOM-optimal ramp / critical-path scheduling
+#     (build only what the next stage requires; do not bloat the
+#     bill of materials)
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m pytest tests/test_build_sequence_tech_fastest.py -q
+
+meta:
+  id: build-sequence-tech-fastest
+  title: 'Fastest War Factory — Cost-Optimal powr → proc → weap Build Order'
+  capability: reasoning
+  real_world_meaning: >
+    Cost-optimal build-order planning under a tight deadline: the agent
+    must reach the war factory (`weap`) on the shortest prerequisite
+    path (powr → proc → weap). Any detour through unneeded structures
+    (a barracks, a second power plant, an early infantry training
+    queue) bloats the bill-of-materials and overruns the budget. Tests
+    that the model can plan the minimum-cost prerequisite chain — not
+    merely SOME plan that eventually arrives — under a deadline that
+    only the optimal plan satisfies.
+  robotics_analogue: >
+    Critical-path planning in autonomous manufacturing: a cell must
+    bring a target machine online by a fixed cycle-time, choosing the
+    minimum set of upstream stations to commission first (power →
+    feedstock → assembly). Adding non-load-bearing stations to the
+    ramp-up plan (a non-required quality station before assembly)
+    blows the deadline; only the cost-optimal precedence chain meets
+    spec.
+  benchmark_anchor:
+    - "PlanBench cost-optimal"
+    - "BOM manufacturing"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare cost-optimal skill. Generous T = 3000 ticks (max_turns 40 →
+  # reachable 3603). Optimal path lands at ~tick 2613 (387-tick / 4-
+  # turn buffer). The wrong-path detour through tent (+500 cost, +5
+  # turns) finishes at ~tick 3063, beyond T ⇒ LOSS. Stall finishes
+  # never ⇒ LOSS on the after_ticks fail clause.
+  easy:
+    description: >
+      Build a war factory (weap) as fast as possible by following the
+      ONLY cost-optimal prerequisite chain: powr → proc → weap. Any
+      detour (a barracks/tent, a redundant power plant, an early
+      infantry training queue) wastes the budget and you LOSE on the
+      clock. The `then:` chain enforces the exact order — placing
+      weap before proc cannot satisfy it (and the engine refuses too:
+      weap's prerequisite is proc). Optimal play finishes by tick
+      ~2613; the deadline is 3000.
+    starting_cash: 5000
+    overrides:
+      actors:
+        # Agent base seed — ONE construction yard. Nothing else
+        # pre-placed (no power, no refinery). The optimal chain MUST
+        # be executed by the agent.
+        - {type: fact, owner: agent, position: [10, 18]}
+        # Two ore patches in the near-base build radius — a built
+        # proc auto-spawns a harvester that needs ore to fund the
+        # weap purchase inside the tick budget.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Far-east enemy `fact` landmark — MustBeDestroyed, unarmed
+        # neutral company. Keeps the episode alive so a stall really
+        # times out (not engine auto-done from a stray sentry kill).
+        - {type: fact, owner: enemy, position: [115, 30]}
+    win_condition:
+      all_of:
+        - then:
+            id: bo-easy
+            clauses:
+              - {has_building: powr}
+              - {has_building: proc}
+              - {has_building: weap}
+        - {within_ticks: 3000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 40
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER deadline. T = 2800 ticks
+  # (max_turns 35 → reachable 3153). Optimal play lands at ~tick
+  # 2613 (187-tick / ~2-turn buffer — feasible). The wrong-path
+  # detour through tent overruns hard (3063 > 2800 by ~5 turns).
+  # No additional pieces — the SAME cost-optimal chain, executed
+  # with less slack.
+  medium:
+    description: >
+      Build a war factory (weap) on the cost-optimal prerequisite
+      chain: powr → proc → weap. Tighter deadline (2800 ticks) — any
+      detour (tent / second powr / infantry queue) makes you miss.
+      The `then:` chain enforces the exact order; weap before proc
+      cannot satisfy it. Optimal play finishes by tick ~2613.
+    starting_cash: 5000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        - {type: fact, owner: enemy, position: [115, 30]}
+    win_condition:
+      all_of:
+        - then:
+            id: bo-medium
+            clauses:
+              - {has_building: powr}
+              - {has_building: proc}
+              - {has_building: weap}
+        - {within_ticks: 2800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 35
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: ≥2 spawn_point groups (NORTH y=14 vs
+  # SOUTH y=26 base). Same cost-optimal chain, same tight T = 2800.
+  # The seed-varied spawn means a memorised "place powr at (14,22)"
+  # opening cannot generalise — the agent must compute placement
+  # relative to its actual fact each seed. Ore patches duplicated
+  # at both latitudes so harv income is symmetric per spawn. Enemy
+  # actors do NOT honour spawn_point (CLAUDE.md), so the lone
+  # enemy `fact` always places.
+  hard:
+    description: >
+      Build a war factory (weap) on the cost-optimal prerequisite
+      chain: powr → proc → weap, from a seed-chosen base (NORTH or
+      SOUTH). Tight 2800-tick deadline — detours (tent / extra
+      powr / infantry queue) lose on the clock. Placement that
+      memorises one spawn's geometry cannot generalise; compute
+      placement relative to your actual fact each run.
+    starting_cash: 5000
+    overrides:
+      actors:
+        # NORTH spawn (spawn_point 0): fact at y=14, with adjacent
+        # ore patches at y=14/y=18.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        # An inert rifleman per spawn group (passive: stance 2 = Defend,
+        # no `move_units` / `attack_unit` exposed so the unit cannot act
+        # — the agent's tool surface is build-only). Establishes a
+        # seed-varying AGENT UNIT in `units_summary` so the hard-tier
+        # spawn-variation contract (tests/test_hard_tier.py::
+        # test_curated_hard_still_compiles_and_runs, which inspects
+        # units not buildings) is satisfied with real per-spawn data.
+        - {type: e1,   owner: agent, position: [12, 14], spawn_point: 0, stance: 2}
+        # SOUTH spawn (spawn_point 1): fact at y=26, with adjacent
+        # ore patches at y=22/y=26.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 26], spawn_point: 1, stance: 2}
+        # Ore patches duplicated at BOTH latitudes so harv income is
+        # symmetric whichever spawn is chosen. (Neutral actors have
+        # no spawn_point and always place — that's fine: the unused
+        # patches are simply ignored.)
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        - {type: mine, owner: neutral, position: [22, 26]}
+        # Far-east enemy fact landmark — keeps the episode alive.
+        - {type: fact, owner: enemy, position: [115, 30]}
+    win_condition:
+      all_of:
+        - then:
+            id: bo-hard
+            clauses:
+              - {has_building: powr}
+              - {has_building: proc}
+              - {has_building: weap}
+        - {within_ticks: 2800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 35
