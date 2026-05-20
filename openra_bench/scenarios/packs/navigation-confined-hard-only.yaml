@@ -1,0 +1,293 @@
+# Validate: python -m openra_bench.scenarios.validate \
+#   packs/navigation-confined-hard-only.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# Confined-space navigation under a TIGHT deadline. The capability
+# stressed is *perception* — the agent must read the obstacle topology
+# (silo walls forming aisles with staggered gaps) and commit to the
+# detour route immediately. Idling, hugging the shortest manhattan
+# line at a wall-blocked target, or wasting fire on the wall itself
+# all fail the deadline. Real-world anchor: warehouse AMR weaving
+# narrow aisles before shift-change; emergency egress through narrow
+# corridors with the clock running.
+#
+# Obstacle approach: OpenRA's arena map generator
+# (`openra_bench.mapgen` arena) only paints CLEAR/WATER tiles inside
+# a water cordon — it has no interior obstacle primitive. Per the
+# SCENARIO_REVIEW_CHECKLIST "use pre-placed unarmed high-HP enemy
+# actors as walls" idiom, hard uses HoldFire-stance `silo` buildings
+# (the engine has no attack on a silo; building HP; marked collidable
+# by the pathfinder) packed into vertical aisle walls with a single
+# 6-cell gap that alternates north/south so the only path is a
+# serpentine detour. The wall layout is STATIC (no `spawn_point` on
+# enemy/neutral actors — the engine's spawn_point filter only applies
+# to AGENT actors, per `openra-data/src/oramap.rs`
+# load_rush_hour_map_with_spawn: "enemy actors do not have
+# spawn_points and are always kept"). Seed-driven variation lives on
+# the agent: two `spawn_point` groups for the staging row (north or
+# south), so a single fixed route from one stage may need adapting
+# for the other (the detour leg lengths differ).
+#
+# Easy and medium share the worked custom-map-no-enemy idiom on an
+# open map (singles-maginot); only hard adds the obstacle axis, so
+# attribution stays clean.
+#
+# Tick budget note: the engine advances ~90 ticks per decision turn
+# (tick ≈ 93 + 90·(turn-1)). Every fail `after_ticks K` is set so K
+# is reachable within max_turns (K ≤ 93 + 90·(max_turns − 1)) —
+# otherwise a staller would draw, not lose.
+
+meta:
+  id: navigation-confined-hard-only
+  title: 'Confined-Aisle Egress Under the Clock — Commit a Detour Through a Silo Maze Before the Deadline'
+  capability: perception
+  real_world_meaning: >
+    Confined-space pathfinding under a hard deadline: the agent must
+    perceive a corridor topology (vertical aisles separated by
+    impassable walls with a single offset gap each) and commit to a
+    detour route IMMEDIATELY. A shortest-line target that ignores the
+    maze parks units against the wall and never reaches the egress
+    zone; an idle agent runs out the clock; recklessly squeezing
+    against the silos wastes the budget. Only a committed,
+    multi-waypoint detour clears the maze in time.
+  robotics_analogue: >
+    Autonomous mobile robot in dense warehouse aisles before a
+    shift-change deadline: read the aisle map, commit to the detour
+    that threads each stagger-gap in turn, and arrive at the
+    rendezvous bay before the takt expires — wandering, hugging the
+    shortest manhattan line, or trying to push through racking all
+    miss the SLA.
+  benchmark_anchor:
+    - "ERQA spatial commit"
+    - "AI2-THOR navigation"
+    - "Habitat 3.0 confined-space"
+    - "AMR in dense aisles under SLA"
+    - "emergency egress under deadline"
+  author: "openra-bench"
+
+# Open custom terrain (no walls) for easy/medium — custom-map-no-enemy
+# idiom on the same base map. Hard switches to a confined arena via
+# overrides + the arena map generator.
+base_map: singles-maginot
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [move_units, stop]
+  planning: true
+  termination: {max_ticks: 20000}
+  actors:
+    - {type: jeep, owner: agent, position: [8, 12]}
+    - {type: e1,   owner: agent, position: [9, 14]}
+    - {type: e1,   owner: agent, position: [9, 15]}
+
+levels:
+  # ── EASY ── bare navigation skill on the OPEN custom map (no walls).
+  # Worked-example custom-map-no-enemy idiom: one fast unit must reach
+  # a far-east goal zone before the tight, reachable deadline.
+  # Idling / stopping short / wandering all miss the clock and LOSE.
+  easy:
+    description: >
+      Move a unit to the egress zone near (55,16) at the far east of
+      the playable area. No walls, no enemy — success is purely
+      reading the terrain and committing the route immediately. Win:
+      a unit reaches the zone before the deadline. You LOSE if no
+      unit is in the zone by the deadline (idling/stalling/wandering
+      loses).
+    win_condition:
+      all_of:
+        - reach_region: {x: 55, y: 16, radius: 5}
+        - within_ticks: 900
+    fail_condition:
+      any_of:
+        - {after_ticks: 901}
+        - {not: {own_units_gte: 1}}
+    max_turns: 14
+  # ── MEDIUM ── +1 controlled variable: RENDEZVOUS the whole squad
+  # (sending only the fast jeep no longer wins) at a farther egress
+  # zone. Stall / wander / jeep-only all miss the deadline and LOSE.
+  medium:
+    description: >
+      Same task, harder: the egress zone is farther at (72,16) and
+      EVERY unit must reach it (not just the fast scout). Plan the
+      longer route and march the whole squad directly. Win: every
+      unit is in the zone before the deadline. You LOSE if the whole
+      squad is not in the zone by the deadline.
+    win_condition:
+      all_of:
+        - all_units_in_region: {x: 72, y: 16, radius: 5}
+        - within_ticks: 1500
+    fail_condition:
+      any_of:
+        - {after_ticks: 1501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 20
+  # ── HARD ── confined arena with silo-wall obstacles. The 64×40
+  # arena (cordon 4 → playable x[4..59], y[4..35]) is partitioned by
+  # three vertical silo walls (x=18, 30, 42) into four aisles; each
+  # wall has a single 6-cell gap that alternates north/south, so the
+  # only path is a serpentine detour (wall A gap y=4..9 top, wall B
+  # gap y=30..35 bottom, wall C gap y=4..9 top). The wall layout is
+  # STATIC across seeds (per the engine's spawn_point semantics —
+  # enemy/neutral actors are always placed regardless of which
+  # agent spawn_point round-robin selected); seed-driven variation
+  # lives on the agent (two `spawn_point` groups: group 0 stages at
+  # the NORTH row y=8..14, group 1 at the SOUTH row y=25..31). The
+  # leg lengths of the detour differ between the two stages so a
+  # single tuned route does NOT generalise.
+  #
+  # Win: every unit in the far-corner egress zone (centred on (55,30),
+  # radius 6), no losses, within the tick budget. Fail: deadline
+  # overrun, or any unit lost (defence-in-depth — the only way to
+  # lose units here is to attack the silo walls and waste the
+  # budget on a reckless squeeze).
+  #
+  # Solvency (verified via openra_bench.eval_core.run_level): 4 e1
+  # + engine pathfinding through the 6-cell-gap serpentine reaches
+  # the egress zone in ~2253 ticks from the NORTH stage and ~2613
+  # ticks from the SOUTH stage — both inside the 2700-tick budget
+  # when the agent commits a direct route. Stalling / wandering /
+  # shortest-line into a wall-blocked cell all miss the deadline
+  # and LOSE (the deadline bites: 2701 ≤ 93 + 90·30 = 2793, inside
+  # max_turns 31).
+  hard:
+    description: >
+      Confined aisle map. Three vertical silo walls (x≈18, 30, 42)
+      split the playable area into four aisles; each wall has ONE
+      6-cell gap that alternates top/bottom/top (wall A gap at
+      y=4..9, wall B at y=30..35, wall C at y=4..9), so the only
+      path is a serpentine detour. The whole squad of 4 infantry
+      must reach the egress zone at the far south-east corner
+      (centred near (55,30), radius 6) before the deadline, with
+      zero losses. You start from a seed-chosen staging row (two
+      spawn_point groups: NORTH y=8..14 or SOUTH y=25..31) so the
+      leg lengths differ between seeds. Win: every unit in the zone
+      before the deadline, none lost. You LOSE on the deadline,
+      OR if any unit is lost (recklessly attacking silos to bash
+      through wastes the budget — commit a clean detour).
+    overrides:
+      base_map:
+        generator: arena
+        name: confined-aisle-64x40
+        width: 64
+        height: 40
+        cordon: 4
+      # `attack_unit` deliberately omitted from tools: with no
+      # adversary the only use of attack_unit would be to recklessly
+      # attack silo walls, which wastes the budget by construction.
+      tools: [move_units, stop]
+      actors:
+        # ──── spawn_point 0: NORTH staging row (y=8..14) ────
+        # stance: 1 (ReturnFire) — agent units do NOT auto-attack
+        # the silo walls when in sight range (per a stance:3
+        # AttackAnything default they would, which wastes ticks
+        # firing on indestructible-by-default high-HP silos and
+        # makes the engine pathfinder serialise on combat queues).
+        - {type: e1, owner: agent, position: [7,  8], stance: 1, spawn_point: 0}
+        - {type: e1, owner: agent, position: [7, 10], stance: 1, spawn_point: 0}
+        - {type: e1, owner: agent, position: [7, 12], stance: 1, spawn_point: 0}
+        - {type: e1, owner: agent, position: [7, 14], stance: 1, spawn_point: 0}
+        # ──── spawn_point 1: SOUTH staging row (y=25..31) ────
+        - {type: e1, owner: agent, position: [7, 25], stance: 1, spawn_point: 1}
+        - {type: e1, owner: agent, position: [7, 27], stance: 1, spawn_point: 1}
+        - {type: e1, owner: agent, position: [7, 29], stance: 1, spawn_point: 1}
+        - {type: e1, owner: agent, position: [7, 31], stance: 1, spawn_point: 1}
+        # ──── STATIC silo walls (always placed; no spawn_point on
+        #      enemy actors — engine semantics, see header note).
+        #      Three walls; gap pattern TOP / BOTTOM / TOP.
+        # Wall A x=18, gap y=4..9 (TOP)
+        - {type: silo, owner: enemy, position: [18, 10], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 11], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 12], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 13], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 14], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 15], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 16], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 17], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 18], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 19], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 20], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 21], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 22], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 23], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 24], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 25], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 26], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 27], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 28], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 29], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 30], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 31], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 32], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 33], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 34], stance: 0}
+        - {type: silo, owner: enemy, position: [18, 35], stance: 0}
+        # Wall B x=30, gap y=30..35 (BOTTOM)
+        - {type: silo, owner: enemy, position: [30, 4], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 5], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 6], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 7], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 8], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 9], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 10], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 11], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 12], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 13], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 14], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 15], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 16], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 17], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 18], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 19], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 20], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 21], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 22], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 23], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 24], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 25], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 26], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 27], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 28], stance: 0}
+        - {type: silo, owner: enemy, position: [30, 29], stance: 0}
+        # Wall C x=42, gap y=4..9 (TOP)
+        - {type: silo, owner: enemy, position: [42, 10], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 11], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 12], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 13], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 14], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 15], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 16], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 17], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 18], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 19], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 20], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 21], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 22], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 23], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 24], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 25], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 26], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 27], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 28], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 29], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 30], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 31], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 32], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 33], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 34], stance: 0}
+        - {type: silo, owner: enemy, position: [42, 35], stance: 0}
+        # Egress marker (always-on): high-HP non-combatant fact at
+        # the far SE corner of the egress zone — gives the model a
+        # visible "where to" landmark on the minimap.
+        - {type: fact, owner: enemy, position: [55, 30], stance: 0, health: 100}
+    win_condition:
+      all_of:
+        - all_units_in_region: {x: 55, y: 30, radius: 6}
+        - within_ticks: 2700
+        - units_lost_lte: 0
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {units_lost_lte: 0}}
+    max_turns: 31

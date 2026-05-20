@@ -44,6 +44,7 @@ UPGRADED = [
     "economy-harvest-timebox",
     "strategy-trilemma",
     "defense-rush-survive",
+    "navigation-confined-hard-only",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
