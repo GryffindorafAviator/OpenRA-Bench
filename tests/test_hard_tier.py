@@ -859,6 +859,20 @@ UPGRADED = [
     # approach vector flips and a memorised "drive east on y=20"
     # opening cannot generalise across seeds.
     "combat-suicide-charge-mission",
+    # Wave-8 Group F REASONING econ pack — sustained cash-rate
+    # discipline (startup financial runway / corporate burn-rate
+    # management / SC2 mineral-bank overflow anchor). Win predicate
+    # encodes a cash BAND [MIN, MAX] via `cash_gte: MIN` +
+    # `not: {cash_gte: MAX+1}` (no `cash_lte` predicate exists), so
+    # stalling / pure-hoarding (cash overflows MAX) and burning every
+    # credit (cash falls below MIN) both LOSE. Hard tier defines two
+    # agent spawn_point groups (NORTH base y=14 / SOUTH base y=26)
+    # round-robined by seed; the central enemy garrison is duplicated
+    # at both latitudes (enemies don't honour spawn_point — CLAUDE.md
+    # oramap.rs footgun), so the spawn-matched garrison is always the
+    # closer/active one and a memorised "send tanks to (40,22)"
+    # opening cannot generalise across seeds.
+    "econ-burn-rate-management",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

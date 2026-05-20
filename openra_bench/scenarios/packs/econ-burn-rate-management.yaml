@@ -1,0 +1,377 @@
+# econ-burn-rate-management — sustained cash discipline (startup runway)
+#
+# REASONING capability. Anchor: startup-runway / corporate burn-rate
+# management. The agent has a productive base (fact + proc + powr +
+# tent + weap + fix + 2 harvs on 2 near mines + 3 pre-placed medium
+# tanks), starting cash 1500, and a pre-placed enemy garrison at x=40.
+# The win predicate requires:
+#
+#   (a) cash IN a target band [MIN, MAX] at the latch moment;
+#   (b) ≥K enemy units killed (cash must be CONVERTED to military
+#       force, not hoarded);
+#   (c) the construction yard (fact) still standing;
+#   (d) within the tick budget.
+#
+# The cash-band upper bound (MAX) is the BURN-RATE TEETH: a pure-save
+# or stall policy sits on too much cash and the upper bound is violated
+# (no `cash_lte` predicate exists, so we use `not: {cash_gte: MAX+1}` —
+# the standard idiom). The cash-band lower bound (MIN) prevents the
+# blow-the-bank "burn it all" policy. The kill bar ensures the spend
+# becomes MILITARY units (not e.g. random buildings) and gives the
+# operating-rate discipline concrete teeth: spend at the rate that
+# converts to combat capability, not too fast (under-reserved), not
+# too slow (overflowing the bank).
+#
+# Real-world anchors:
+#   • Startup financial runway — burn at the rate that buys runway
+#     extensions (capability progress), NOT zero (no progress / runway
+#     ages out) and NOT all-at-once (cash bottom, no slack).
+#   • Corporate burn-rate discipline — quarterly OPEX must hit a band:
+#     under-spending starves the operation; over-spending blows the
+#     reserve.
+#   • SC2 mineral-bank management — sustained max-mineral overflow
+#     means you're under-producing units; bottoming out means you're
+#     over-committing on a single push.
+#
+# Engine facts (CLAUDE.md + measured on installed openra_train wheel):
+#   • `cash_lte` does not exist — encode the upper bound via
+#     `not: {cash_gte: MAX+1}` (the composite engine supports `not`).
+#   • `2tnk` cost $850; prereqs `weap` + `fix` (allied service depot
+#     tech gate — both pre-placed). Build time ≈ 6 decision turns per
+#     tank; queue drains ~150 cr/turn while the tank is in queue
+#     (cost spread across build duration).
+#   • Two pre-placed harvs at (14,18)/(14,20) → mines (22,18)/(22,20)
+#     yield income that arrives in BURSTS (~600 cr per harv per
+#     ~6-turn cycle, i.e. ~95 cr/turn average per harv ⇒ ~190 cr/turn
+#     combined). Bursty income means cash trajectories vary by ±~500
+#     cr around the mean within a few turns — the cash BAND must be
+#     wide enough to accommodate this even for the intended policy.
+#   • `place_building` is INSTANT cash deduction (no build delay) so
+#     dropping `powr` ($300) or `pbox` ($600) is the fast-burn dial.
+#   • The unarmed far enemy `fact` at (124,36) prevents engine auto-
+#     `done` when the centre garrison falls (anti-DRAW idiom, see
+#     CLAUDE.md auto-terminate footgun).
+#   • Hard tier defines 2 agent spawn_point groups (NORTH y=14 /
+#     SOUTH y=26) round-robined by seed; the enemy garrison is
+#     duplicated at both latitudes (enemies don't honour spawn_point
+#     per the oramap.rs footgun) so the kill bar is reachable from
+#     either spawn and the burn-rate decision generalises.
+#   • Pre-placed 3× 2tnk strike force at (20, fact_y±1) makes the
+#     kill bar reachable via tactical use of EXISTING force WITHIN
+#     the tick budget — the decision under test is BURN-RATE on
+#     cash, not tank-build-then-drive timing.
+#
+# Bar (CLAUDE.md "no defect, no cheat, no draw" — verified seeds 1-4
+# across every tier on the installed wheel):
+#   • stall (observe only) — kills=0 ⇒ LOSS every tier / every seed.
+#   • save-all (harvest only, never build, never attack) — kills=0
+#     AND cash drifts well above MAX ⇒ LOSS every tier / every seed.
+#   • burn-all (chain 2tnk + e1 + place pbox/powr until cash hits 0)
+#     ⇒ cash falls below MIN at the latch tick ⇒ LOSS every tier /
+#     every seed.
+#   • tank-only (use the pre-placed tanks WITHOUT building anything;
+#     hoard cash via harvest) ⇒ kills bar met but cash overflows MAX
+#     ⇒ LOSS on medium and hard (and on easy with the band tightened
+#     to ≤2400 so tank-only's ~2500 ending also fails).
+#   • intended LEAN (attack-move pre-placed tanks east + queue 2× 2tnk
+#     on turn 1; harvest both harvs) ⇒ cash settles inside the band,
+#     kills clear the bar ⇒ WIN every tier / every seed.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_econ_burn_rate_management.py -q
+
+meta:
+  id: econ-burn-rate-management
+  title: 'Burn-Rate Management — Spend at the Right Pace (Startup Runway)'
+  capability: reasoning
+  real_world_meaning: >
+    A sustained cash-rate decision: the agent has a productive income
+    engine (two harvesters on two near patches feeding a refinery —
+    steady ~190 cr/turn), a starting balance of $1500, a war factory +
+    barracks for converting cash into military force, 3 pre-placed
+    medium tanks ready to engage, and a pre-placed enemy garrison to
+    defeat. Winning REQUIRES landing cash in a target BAND [MIN, MAX]
+    at the latch tick AND racking up K kills AND keeping the
+    construction yard intact. Stalling or pure-hoarding pushes cash
+    ABOVE the upper bound (the bank overflows, no progress on the
+    combat bar). Burning every credit on units and buildings drops
+    cash BELOW the lower bound (no reserve, no slack against the next
+    shock). Only a SUSTAINED burn at the income-replenishment rate —
+    converting cash to a small but sufficient combat force while
+    using the existing strike force to clear the garrison — hits the
+    band on the kill-bar turn.
+  robotics_analogue: >
+    Operating-rate management in a startup's treasury: burn cash on
+    capability development at the rate that buys ongoing runway, not
+    zero (no capability progress — the deadline arrives with no
+    product) and not all-at-once (the reserve hits zero and the next
+    shock — a key hire, an unexpected legal cost — collapses the
+    company). The discipline being measured is the operations-finance
+    LOOP at sustained pace, not a one-time allocation. The cash band
+    is the operating-reserve discipline; the kill bar is the
+    capability-delivery discipline; the two must be satisfied
+    SIMULTANEOUSLY at the deadline.
+  benchmark_anchor:
+    - startup runway management
+    - corporate burn rate
+    - financial discipline
+    - SC2 mineral-bank overflow (spend down at sustained rate)
+    - operating-rate / cash-conversion-rate discipline
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 1500
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    # Pre-placed production base (fact + proc + powr + tent + weap +
+    # fix) gives the agent EVERY relevant production lever on turn 1:
+    # tent for infantry, weap+fix for 2tnk vehicles, place_building
+    # for fast-burn dials (powr/pbox). 2× harv on 2× near mines
+    # supply the ~190 cr/turn income that sets the burn-rate
+    # baseline. 3× pre-placed 2tnk make the kill bar reachable inside
+    # the tick budget without requiring tank-build-then-drive timing
+    # (the decision under test is BURN-RATE, not opening tempo).
+    - {type: fact, owner: agent, position: [10, 22]}
+    - {type: proc, owner: agent, position: [12, 18]}
+    - {type: powr, owner: agent, position: [14, 22]}
+    - {type: tent, owner: agent, position: [10, 18]}
+    - {type: weap, owner: agent, position: [16, 22]}
+    - {type: fix,  owner: agent, position: [18, 22]}
+    - {type: harv, owner: agent, position: [14, 18]}
+    - {type: harv, owner: agent, position: [14, 20]}
+    - {type: 2tnk, owner: agent, position: [20, 19]}
+    - {type: 2tnk, owner: agent, position: [20, 20]}
+    - {type: 2tnk, owner: agent, position: [20, 21]}
+    - {type: mine, owner: neutral, position: [22, 18]}
+    - {type: mine, owner: neutral, position: [22, 20]}
+    # Inert far enemy marker — anti-DRAW (per CLAUDE.md engine auto-
+    # terminate footgun). The centre garrison is "MustBeDestroyed";
+    # without this far marker the engine would auto-`done` the moment
+    # the last centre defender dies, before the win/fail evaluator
+    # sees the terminal frame.
+    - {type: fact, owner: enemy, position: [124, 36]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Loose cash band [200, 2400], small kill bar (K=2). A single small
+  # garrison (3× e1) sits at x=40 (close enough that the pre-placed
+  # tank trio reaches them in ~3-4 turns). The window is wide enough
+  # to forgive a range of modest spends but tight enough that pure
+  # tank-rush WITHOUT any production spend (cash drifts to ~2500 over
+  # 14 turns of harvest) falls just above the 2400 ceiling.
+  easy:
+    description: >
+      Manage your cash burn rate. You have a productive base (fact,
+      proc, powr, tent, weap, war-factory + service depot), 3 pre-
+      placed medium tanks, 2 harvesters on 2 ore patches, and $1500
+      to start. Your refinery yields about $190/turn of income.
+      Defeat the small enemy garrison at the centre (kill ≥2 enemy
+      units) AND finish with cash IN the band [200, 2400] AND keep
+      your construction yard standing — within tick 1200. Stalling
+      (build nothing, never attack) or pure-hoarding (only harvest)
+      leaves cash ABOVE 2400 with 0 kills → LOSS. Just sending the
+      pre-placed tanks without spending lands cash near 2500 → LOSS.
+      Blowing the bank on every unit and pillbox you can queue drops
+      cash BELOW 200 → LOSS. A balanced commit (engage with the
+      existing tanks AND queue a few more medium tanks to draw down
+      the surplus) settles cash inside the band as kills clear the
+      bar.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: tent, owner: agent, position: [10, 18]}
+        - {type: weap, owner: agent, position: [16, 22]}
+        - {type: fix,  owner: agent, position: [18, 22]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: 2tnk, owner: agent, position: [20, 19]}
+        - {type: 2tnk, owner: agent, position: [20, 20]}
+        - {type: 2tnk, owner: agent, position: [20, 21]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # Small central enemy garrison (3× e1, stance 3 — fires on
+        # contact). Killing ≥2 clears the bar. Sits at x=40 so the
+        # pre-placed strike force at x=20 reaches them in ~3-4 turns,
+        # well inside the 14-turn budget.
+        - {type: e1, owner: enemy, position: [40, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 22], stance: 3}
+        - {type: fact, owner: enemy, position: [124, 36]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 2}
+        - {cash_gte: 200}
+        - {not: {cash_gte: 2401}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 14
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Tighter band [400, 1500], higher kill bar (K=3). A larger
+  # garrison (5× e1) at x=40 — the kill bar requires sustained
+  # engagement, not a one-tank pass. The narrower band (window 1100
+  # vs easy's 2200) makes under-spending visible (pure save → cash
+  # accumulates to ~3500 ≫ 1500) and over-spending punishing (chain
+  # build/place drops cash to ~0).
+  medium:
+    description: >
+      Tighter burn-rate band. Same productive base + 3 pre-placed
+      tanks + 2 harvesters + $1500. Defeat the larger centre
+      garrison (kill ≥3 enemy units) AND finish with cash IN the
+      band [400, 1500] AND keep the construction yard standing —
+      within tick 1080. Stalling and pure-hoarding keep cash WELL
+      above the 1500 ceiling with no kills → LOSS. Tank-only
+      (engage without spending) lands cash above 1500 → LOSS. All-
+      out spending (4+ tanks + extra buildings) drops cash BELOW
+      the 400 floor → LOSS. The narrow band ([400, 1500] = 1100
+      wide vs easy's [200, 2400] = 2200 wide) makes the operating-
+      rate decision load-bearing — only a sustained 2-3 tank
+      commit at the income-replenishment rate hits the band on the
+      kill-bar turn.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: tent, owner: agent, position: [10, 18]}
+        - {type: weap, owner: agent, position: [16, 22]}
+        - {type: fix,  owner: agent, position: [18, 22]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: 2tnk, owner: agent, position: [20, 19]}
+        - {type: 2tnk, owner: agent, position: [20, 20]}
+        - {type: 2tnk, owner: agent, position: [20, 21]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # Larger centre garrison: 5× e1 at x=40. The pre-placed
+        # strike force at x=20 reaches them in ~3-4 turns; kill bar
+        # 3 clears comfortably inside the 12-turn budget.
+        - {type: e1, owner: enemy, position: [40, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 23], stance: 3}
+        - {type: fact, owner: enemy, position: [124, 36]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {cash_gte: 400}
+        - {not: {cash_gte: 1501}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1080}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1081}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 12
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Kill bar K=4, band [300, 1800], AND 2 agent spawn_point groups
+  # (NORTH y=14 / SOUTH y=26) per seed. The garrison is duplicated
+  # at both latitudes (enemies don't honour spawn_point — CLAUDE.md
+  # oramap.rs footgun) so the spawn-matched garrison is always the
+  # closer/active one. A memorised "send tanks to (40,22)" opening
+  # hits one spawn and misses the other; the burn-rate decision
+  # generalises across spawns. The band [300, 1800] is intentionally
+  # wide enough to absorb the ±500 cr bursty-income variability
+  # between NORTH and SOUTH spawns (NORTH ends near 1450, SOUTH near
+  # 950 under the intended LEAN policy) — tighter would force a
+  # spawn-adaptive policy, which dilutes the burn-rate signal with
+  # micro-management.
+  hard:
+    description: >
+      Tight burn-rate band with seed-varied base latitude. Same
+      productive base (with 3 pre-placed medium tanks) + 2
+      harvesters + $1500. Defeat the central garrison (kill ≥4
+      enemy units) AND finish with cash IN the band [300, 1800]
+      AND keep the construction yard standing — within tick 990.
+      Your base is round-robined between NORTH (y=14) and SOUTH
+      (y=26) per seed; the matching garrison latitude is the
+      closer/active one. Tighter clock than easy/medium leaves
+      little slack for over-spending; pure-hoarding still drifts
+      cash above the 1800 ceiling on either spawn.
+    overrides:
+      actors:
+        # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: weap, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [18, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 12], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 13], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 13], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 14], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 15], spawn_point: 0}
+        # ── AGENT spawn 1 — SOUTH base (y=26) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: weap, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [18, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 27], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 25], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 27], spawn_point: 1}
+        # Two mine pairs — one per spawn row. The spawn_point filter
+        # applies only to AGENT actors (CLAUDE.md), so both pairs
+        # always place; the spawn-matched pair feeds the spawn-matched
+        # harvs.
+        - {type: mine, owner: neutral, position: [22, 12]}
+        - {type: mine, owner: neutral, position: [22, 13]}
+        - {type: mine, owner: neutral, position: [22, 27]}
+        - {type: mine, owner: neutral, position: [22, 28]}
+        # NORTH garrison (6× e1) at y=14 — always places at x=40.
+        - {type: e1, owner: enemy, position: [40, 13], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 14], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 15], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 12], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 16], stance: 3}
+        - {type: e1, owner: enemy, position: [42, 14], stance: 3}
+        # SOUTH garrison (6× e1) at y=26 — always places at x=40.
+        - {type: e1, owner: enemy, position: [40, 25], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 26], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 27], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 24], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 28], stance: 3}
+        - {type: e1, owner: enemy, position: [42, 26], stance: 3}
+        # Anti-DRAW far enemy marker (always places).
+        - {type: fact, owner: enemy, position: [124, 36]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {cash_gte: 300}
+        - {not: {cash_gte: 1801}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 990}
+    fail_condition:
+      any_of:
+        - {after_ticks: 991}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 11
