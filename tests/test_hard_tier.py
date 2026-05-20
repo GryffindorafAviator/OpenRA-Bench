@@ -35,6 +35,7 @@ UPGRADED = [
     "coordination-staggered-window",
     "harass-response-preserve",
     "strict-sequence",
+    "perception-count-the-threat",
     "perception-frontier-reading",
     "perception-target-vs-fog",
     "reasoning-frontier-commit",
