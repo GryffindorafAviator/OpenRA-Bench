@@ -1,0 +1,292 @@
+# combat-skirmish-then-disengage — ONE coordinated strike-then-pull-back
+# (Wave-6 combat-micro pack; complement to combat-harass-balanced-hit-
+# and-run which is the CYCLIC pulsed variant).
+#
+# The capability under test is SKIRMISHER DOCTRINE: a single big
+# engagement done well — drive forward, score the kills, then pull the
+# force back to a recovery zone before being overwhelmed. Unlike
+# combat-harass-balanced (a cycle of small pulses with zero attrition),
+# this pack is ONE coordinated engagement: kills are easy to score; the
+# DISCRIMINATING decision is whether the agent stops fighting and
+# disengages before attrition mounts past the survival bar — and gets
+# the force HOME (recovery region around the start) before the clock.
+#
+# Real-world anchors:
+#   - SC2 skirmisher tactics: a controlled "pull back to base" call
+#     after scoring damage, vs the "commit until dead" anti-pattern.
+#   - Military reconnaissance-by-fire / armoured cavalry doctrine:
+#     probe, score, withdraw to friendly lines for re-supply.
+#   - Fire-and-maneuver doctrine in the SINGLE-engagement frame
+#     (the pulsed/cyclic frame is combat-harass-balanced-hit-and-run).
+#
+# Idiom (the four-policy bar — every level):
+#   • stall (only observe)            → LOSS. Kill bar unmet (≥3 kills
+#     required); the jeeps' default stance does not let them rack up
+#     return-fire kills sitting at home — they must drive east to
+#     find foes inside MG range.
+#   • never-engage (park at start)    → LOSS. units_in_region clause
+#     is satisfied (jeeps already at the recovery zone), but the kill
+#     bar (units_killed_gte:3) is unmet → after_ticks LOSS.
+#   • commit-until-overwhelmed (charge east, never retreat)
+#                                     → LOSS. Kill bar IS met (the
+#     enemy infantry trade poorly vs 4× jeep MG), but the jeeps end
+#     the run at the enemy cluster (~x=50), NOT in the recovery
+#     region around the start. units_in_region_gte:{x:5,y:..,r:6,n:3}
+#     is unmet → after_ticks LOSS. On hard tier additionally the
+#     hunt-bot spawn waves grind down the un-retreating force past
+#     own_units_gte:3.
+#   • intended skirmish-then-disengage (drive east, kill ≥3, then
+#     move_units back to the start) → WIN. All three clauses met
+#     inside the 4500-tick budget.
+#
+# Distinct from combat-harass-balanced-hit-and-run: the BALANCED pack
+# enforces zero attrition across a multi-pulse cycle (the "no loss"
+# bar), and the win is "kill workers without losing raiders". HERE the
+# win is "finish the kills BEFORE you get overwhelmed AND get the force
+# back HOME" — a positional/temporal recovery bar, not an attrition
+# bar. units_in_region_gte is the load-bearing clause that makes
+# disengage required.
+#
+# Engine notes (load-bearing for the bar):
+#   - Jeeps start `stance: 0` (HoldFire). With stance:0 they do NOT
+#     auto-return-fire on approaching enemies — sitting idle while
+#     hunt-bot e1 close in DOES NOT score kills (kill bar unmet).
+#     The only way to score is to explicitly `attack_unit` (or
+#     `attack_move`), which makes the agent's strike decision
+#     load-bearing.
+#   - Enemy `e1` at the mid-x cluster are placed at y=19/y=21 cells
+#     (verified-placement rows per CLAUDE.md — `e1` at some mid-x
+#     cells silently fails to surface; (50,19)/(50,21) are confirmed
+#     working).
+#   - Persistent unarmed enemy `fact` at far east (x=124) prevents the
+#     engine from auto-`done`ing on enemy unit wipe (which would
+#     collapse the run to DRAW before the within_ticks + region
+#     predicates evaluate cleanly on the terminal frame).
+
+meta:
+  id: combat-skirmish-then-disengage
+  title: 'Combat Skirmish — Strike, Score the Kills, Pull Back to Recovery'
+  capability: action
+  real_world_meaning: >
+    SKIRMISHER doctrine in the single-engagement frame: four fast
+    raiders (jeeps) must drive east into a slow infantry cluster,
+    score AT LEAST 3 kills, and then PULL BACK to the recovery zone
+    around the western start before the clock expires AND while
+    keeping at least 3 raiders alive. The skill under test is the
+    decision to STOP FIGHTING and disengage — committing until the
+    enemy is wiped or until the strike force is destroyed both LOSE
+    (commit leaves the raiders at the kill site instead of the
+    recovery zone; over-commit on hard loses raiders to the
+    hunt-bot spawn waves). Distinct from the BALANCED pulsed
+    harass-retreat cycle (combat-harass-balanced-hit-and-run, which
+    is many small pulses with zero attrition): this pack is ONE big
+    engagement done well, with a positional recovery bar.
+  robotics_analogue: >
+    Mission-with-egress: a mobile manipulator must complete a
+    threshold of reward-bearing actions in a contested workspace,
+    then return to a safe staging region before a time or attrition
+    budget expires. Knowing WHEN to stop the productive sub-task
+    and start the egress is the decision under test — a
+    productivity-only policy (greedy accumulation) leaves the agent
+    far from the staging region at deadline and fails the egress
+    clause.
+  benchmark_anchor:
+    - "SC2 skirmisher tactics"
+    - "military reconnaissance-by-fire"
+    - "harass-and-disengage doctrine"
+    - "armoured cavalry doctrine"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 6500}
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Bare skirmish-then-disengage skill: 4 jeeps (stance:0, no
+  # auto-fire — kills require explicit attack_unit) vs 4× slow rifle
+  # infantry (e1, stance:0 — no auto-fire either, so a never-engage
+  # policy never scores). The strike force easily scores ≥3 kills
+  # under attack_unit (4× jeep MG vs unanswered rifles); the load-
+  # bearing decision is whether the agent then ORDERS THE RETREAT
+  # back to the recovery zone instead of mopping up the last enemy in
+  # place. stall / never-engage LOSE on the kill bar; commit-until-
+  # wiped LOSES because the jeeps end at x≈50 instead of the
+  # (5,20,r=6) recovery region.
+  easy:
+    description: >
+      Four jeeps stage at the west base (5,20). Four enemy
+      RIFLE INFANTRY (e1, slow) hold a cluster around (50,20). Drive
+      east, kill AT LEAST THREE rifle infantry, then PULL BACK so
+      AT LEAST THREE of your jeeps end inside the recovery zone (a
+      6-cell radius around (5,20) — i.e. your starting region). Keep
+      at least three jeeps alive. Finish before tick 4500. Stalling
+      LOSES (kill bar unmet); never engaging LOSES (kill bar unmet);
+      committing east and staying at the cluster LOSES (your jeeps
+      are at the kill site, not the recovery zone). The discriminator
+      is the DISENGAGE order — stop attacking and move_units back
+      to (5,20) once you have your 3 kills.
+    overrides:
+      actors:
+        # Strike force: 4 jeeps at the western staging point.
+        # stance:0 (HoldFire) — no auto-return-fire, so kills require
+        # an explicit attack_unit / attack_move order (the load-
+        # bearing decision under test).
+        - {type: jeep, owner: agent, position: [5, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [5, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [5, 21], stance: 0}
+        - {type: jeep, owner: agent, position: [6, 20], stance: 0}
+        # Enemy infantry cluster — 4× e1 spread across rows y=19/y=21
+        # (CLAUDE.md confirms y=19/y=21 mid-x cells place reliably).
+        # stance:0 so they sit on post — fair "discoverable cluster"
+        # for the test (a never-engage agent never gets attacked into
+        # an accidental kill).
+        - {type: e1, owner: enemy, position: [48, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [50, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [50, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [52, 21], stance: 0}
+        # Persistent far-east enemy fact — prevents engine auto-done
+        # on enemy wipe collapsing the run to DRAW before the
+        # within_ticks + region predicates evaluate.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {own_units_gte: 3}
+        - {units_in_region_gte: {x: 5, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable: the enemy cluster grows to 6× e1 (vs 4 on
+  # easy). The kill bar (≥3) is unchanged, so the strike is still
+  # easily achievable — but the larger cluster means a commit-until-
+  # wiped policy spends MORE turns mopping up (more enemies = more
+  # rounds at the cluster), which leaves it even further from being
+  # able to RETREAT before the within_ticks deadline. The discriminator
+  # — "stop attacking after 3 kills and order the disengage" — is
+  # sharper.
+  medium:
+    description: >
+      Four jeeps stage at the west base (5,20). SIX enemy rifle
+      infantry hold a cluster around (50,20). Drive east, kill AT
+      LEAST THREE rifle infantry, then PULL BACK so AT LEAST THREE
+      of your jeeps end inside the recovery zone (6-cell radius
+      around (5,20)). Keep at least three jeeps alive. Finish
+      before tick 4500. With six enemies in the cluster a "commit
+      until everything is dead" policy spends most of the budget
+      mopping up — by the deadline your jeeps are still at the
+      kill site, not the recovery zone, and the run fails on the
+      region clause. Order the DISENGAGE after the third kill and
+      drive west to the recovery zone.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [5, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [5, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [5, 21], stance: 0}
+        - {type: jeep, owner: agent, position: [6, 20], stance: 0}
+        # 6× e1 cluster around (50,20). Verified-placement rows
+        # (y=19/y=21 mid-x).
+        - {type: e1, owner: enemy, position: [48, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [48, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [50, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [50, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [52, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [52, 21], stance: 0}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {own_units_gte: 3}
+        - {units_in_region_gte: {x: 5, y: 20, radius: 6, n: 3}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. bot_type: hunt — the e1 cluster actively PURSUES the jeeps
+  #      (jeeps remain stance:0 so they only score on explicit
+  #      attack orders; the hunt bot turns the engagement into a
+  #      tightening window — a slow retreat or commit-and-stay loses
+  #      jeeps past own_units_gte:3). Spec's "hunt-bot pursues".
+  #   2. Two agent spawn_point groups (NORTH y=10 or SOUTH y=30)
+  #      round-robined by seed; the recovery zone is `any_of` over the
+  #      two spawn corners so the agent must return to ITS OWN start
+  #      corner (no "always retreat to (5,20)" memorisation). Spec's
+  #      "2 spawn groups".
+  # Enemy actors do NOT honour spawn_point (CLAUDE.md), so the e1
+  # cluster sits symmetrically at the mid-latitude (y=20) — both
+  # spawn corridors face the same eastern threat geometry. The
+  # cluster size stays at 6 (matching medium); the hunt bot is the
+  # threat-axis upgrade, not raw enemy count — extra waves would
+  # overwhelm 4 jeeps before any disengage could complete (verified
+  # 2026-05-20: +4 extra e1 at x≈90 + hunt drops the intended-policy
+  # win rate to ~0% as the swarm closes inside 5 turns).
+  hard:
+    description: >
+      Four jeeps stage at ONE of two western staging points (NORTH
+      (5,10) or SOUTH (5,30), chosen by seed — anti-memorisation).
+      Six enemy RIFLE INFANTRY (e1) sit at a cluster around
+      (50,20). The enemy side is HUNTING — surviving e1 actively
+      pursue your jeeps. Kill AT LEAST THREE rifle infantry, keep
+      at least three jeeps alive, AND end with at least three
+      jeeps inside the recovery zone (6-cell radius around YOUR
+      spawn corner, either (5,10) or (5,30)). Finish before tick
+      4500. Stalling, never engaging, and commit-and-stay all
+      LOSE; the hunt bot ensures that a slow disengage also fails
+      on the survival or region clause.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging (y=10)
+        - {type: jeep, owner: agent, position: [5,  9], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 10], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [5, 11], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [6, 10], stance: 0, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging (y=30)
+        - {type: jeep, owner: agent, position: [5, 29], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5, 30], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [5, 31], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [6, 30], stance: 0, spawn_point: 1}
+        # 6× e1 cluster at (50,20). Hunt bot gives them stance:3 on
+        # init and issues Attack orders that drive them west toward
+        # the jeeps; the infantry walk to contact takes ~6-8 turns.
+        - {type: e1, owner: enemy, position: [48, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [48, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [50, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [50, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [52, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [52, 21], stance: 0}
+        # Persistent far-east enemy fact.
+        - {type: fact, owner: enemy, position: [124, 20]}
+      enemy: {faction: soviet, cash: 0, bot_type: hunt}
+    # Hard win: recovery zone is `any_of` over the two spawn corners
+    # — the agent must return to ITS OWN start corner. (A wrong-corner
+    # return is geometrically infeasible inside the tick budget, but
+    # encoded for predicate clarity.)
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {own_units_gte: 3}
+        - any_of:
+            - {units_in_region_gte: {x: 5, y: 10, radius: 6, n: 3}}
+            - {units_in_region_gte: {x: 5, y: 30, radius: 6, n: 3}}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 52

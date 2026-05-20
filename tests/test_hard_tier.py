@@ -200,6 +200,19 @@ UPGRADED = [
     # flips per seed and no memorised "retreat west on y=20" opening
     # generalises.
     "combat-kite-jeep-vs-tank",
+    # Wave-6 combat-micro skirmish pack (SC2 skirmisher tactics /
+    # military reconnaissance-by-fire anchor). One coordinated
+    # strike-then-pull-back; the load-bearing decision is "stop
+    # attacking after the kill bar is met and order the disengage
+    # back to the spawn-corner recovery zone before the deadline".
+    # Hard tier defines two agent spawn_point groups (NORTH (5,10)
+    # vs SOUTH (5,30)) round-robined by seed; the recovery clause is
+    # `any_of` over the two spawn-corner regions so the agent must
+    # return to ITS OWN start corner. Hunt-bot pursuit (e1 cluster
+    # attacks-anything) makes a slow-disengage policy also LOSE on
+    # the survival bar — the "stop fighting and pull back" call is
+    # mandatory on every seed.
+    "combat-skirmish-then-disengage",
     # Wave-4 Group B TURTLE node of the expansion triple (SC2 fortress
     # macro / 1-base mass-defence; military fortress doctrine; risk-
     # averse single-market deep-investment anchor). Hard tier defines
