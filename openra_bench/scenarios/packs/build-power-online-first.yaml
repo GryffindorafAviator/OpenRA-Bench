@@ -1,0 +1,243 @@
+# Validate: python -m openra_bench.scenarios.validate packs/build-power-online-first.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# BUILD-POWER-ONLINE-FIRST (Wave-7 Group I REASONING: opening-phase
+# build-order — power-grid bring-up sequencing).
+#
+# Real-world anchor: electrical-grid bring-up sequencing — the grid
+# (powr) must be ONLINE before any powered load (proc/barr/tent/weap)
+# can come up. Benchmark anchor: PlanBench task-ordering / SOP
+# (standard-operating-procedure) compliance.
+#
+# The decision is the OPENING order: from a pre-placed Construction
+# Yard (`fact`) and a tight cash budget, the agent must build the
+# Power Plant (`powr`) FIRST and only THEN the first production /
+# economy building (`proc`). The order is enforced by the `then:[A,B]`
+# composite (Wave-2 stateful happened-before latch) AND by the engine
+# itself: `proc`/`tent`/`barr` all have `powr` as a hard prerequisite
+# (OpenRA-Rust/openra-sim/src/gamerules.rs:340-343), so a
+# StartProduction call for any of them is silently BLOCKED (`ORDER:
+# StartProduction BLOCKED — missing prerequisites for proc`) when
+# powr isn't up yet. A "build proc/barr/weap first" policy therefore
+# never places ANY production building and never satisfies clause B
+# of the `then` latch — and the tick deadline bites as a real LOSS
+# (not a draw).
+#
+# Engine facts used (verified against the installed openra_train wheel):
+#
+# 1. Build costs (gamerules.rs `actor!` macros):
+#       powr = 300  (no prereq, +100 power)
+#       proc = 1400 (prereq powr, −30 power)
+#       tent = 400  (prereq powr)
+#       barr = 300  (prereq powr)
+#       weap = 2000 (prereq proc)
+#    Intended chain spend: 300 (powr) + 1400 (proc) = $1700. The
+#    levels' starting_cash is sized to cover EXACTLY this chain
+#    (easy=1900 slack, medium=1750 tight, hard=1750 tight).
+# 2. `proc` / `tent` / `barr` / `weap` all have `powr` as a
+#    prerequisite (gamerules.rs:340-343, and via proc for weap). A
+#    `Command.build('proc')` before any `powr` is queued is silently
+#    rejected by the engine — the production queue stays empty, the
+#    cash stays in the bank, no building ever appears.
+# 3. The `then:[A,B]` composite has greedy late-credit semantics
+#    (see `tests/test_then_composite.py`); the discrimination here
+#    is provided by the TICK BUDGET, not by the latch alone. A wrong-
+#    order policy that endlessly retries proc-without-powr (or one
+#    that builds an army first and never gets to powr+proc) burns the
+#    clock and times out as a real LOSS.
+# 4. Tick alignment: engine advances ~90 ticks per decision turn,
+#    so within_ticks ≤ 93 + 90·(max_turns − 1) is required (CLAUDE.md).
+#    fail_condition uses `after_ticks = within_ticks + 1` so a non-
+#    finisher LOSES on the very next tick after the window closes.
+# 5. The persistent unarmed enemy `fact` MARKER far away keeps the
+#    engine's auto-`done` (all-enemies-eliminated) path gated, so
+#    non-winners reach the deadline as LOSS (never DRAW). The agent
+#    has no offensive tools, so the enemy `fact` cannot be destroyed.
+# 6. The `not has_building: fact` fail clause guards against the
+#    edge case where the agent's own pre-placed `fact` is destroyed
+#    (here essentially impossible — no enemy aggression — but kept
+#    as a defensive guard and per CLAUDE.md idiom).
+# 7. Hard tier: `spawn_point` filter applies ONLY to AGENT actors,
+#    and ANY agent actor with spawn_point causes agent actors WITHOUT
+#    spawn_point to be filtered out (CLAUDE.md oramap.rs footgun).
+#    So the agent `fact` must be DUPLICATED across both spawn_point
+#    groups at the spawn-matched coords; the enemy `fact` marker
+#    has no spawn_point and always places.
+# 8. Hard tier carries one inert `e1` infantry per spawn group
+#    (HoldFire stance, no `move_units`/`attack_unit` tool exposed,
+#    far from the enemy `fact` and out of any auto-fire range) so
+#    `tests/test_hard_tier.py::test_curated_hard_still_compiles_and_runs`
+#    can observe the seed-driven spawn variation via `units_summary`
+#    (its assertion reads unit cells, not building cells — a
+#    building-only pack would silently produce empty `units_summary`
+#    on every seed and break the contract). The `e1` is functionally
+#    inert: with `move_units`/`attack_unit` absent from `base.tools`
+#    it cannot be ordered, and with HoldFire stance + the enemy
+#    `fact` ~100 cells away it cannot auto-fire either, so it does
+#    not interact with the SOP-compliance decision.
+
+meta:
+  id: build-power-online-first
+  title: 'Build Power Online First — Grid Bring-Up Sequencing'
+  capability: reasoning
+  real_world_meaning: >
+    Standard-operating-procedure (SOP) compliance under a strict
+    happened-before constraint, exemplified by electrical-grid bring-
+    up: the grid (the Power Plant) must be ONLINE before any powered
+    load (the Refinery, Barracks, War Factory) can come up. The
+    opening decision is the entire test — from a pre-placed
+    Construction Yard and a tight budget, the agent must queue the
+    Power Plant FIRST and only THEN the first production / economy
+    building. A model that "just builds the goal building" (the
+    refinery) first finds the order silently blocked (the engine
+    enforces powr as a prerequisite of proc), wastes the budget
+    retrying, and times out. A model that stalls or builds an army
+    instead also misses the bar.
+  robotics_analogue: >
+    Standard operating procedure with a hard happened-before
+    constraint: a robotic operator commissioning a new processing
+    site must energise the substation BEFORE bringing up the
+    refinery (or any other powered load). Attempting the refinery
+    first is rejected by the interlock; reasoning about the order
+    of operations from the spec is the entire decision.
+  author: wave7-groupI-buildorder
+  benchmark_anchor:
+    - "PlanBench"
+    - "SOP compliance"
+    - "electrical-grid bring-up"
+
+base_map: rush-hour-arena
+starting_cash: 1900
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Pure build-order test: no deploy, no harvest, no move/attack tools.
+  # The decision is exclusively the SEQUENCE of build + place_building.
+  tools: [observe, build, place_building, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare SOP compliance: powr THEN proc, generous clock. fact pre-
+  # placed at (20,20). max_turns 40 → reachable tick 93 + 90·39 = 3603
+  # > 3600 ✓. Generous slack ($1900 − $1700 = $200) covers exactly
+  # the chain; the model cannot also blow the budget on a single 400-
+  # cost mis-build (tent) and still complete the chain.
+  easy:
+    description: >
+      You start with a Construction Yard ('fact') at (20,20) and
+      $1900. Build a Power Plant ('powr', cost 300) FIRST, then an
+      Ore Refinery ('proc', cost 1400). Win = own a 'powr' AND own
+      a 'proc' IN THAT ORDER (the powr must appear FIRST), before
+      tick 3600. The Refinery REQUIRES a Power Plant — queuing
+      'proc' first is silently rejected by the engine. Stalling,
+      building infantry/army, or attempting the Refinery before the
+      Power Plant all miss the clock and LOSE.
+    starting_cash: 1900
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [20, 20]}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: build-power-online-first-E
+            clauses:
+              - {has_building: powr}
+              - {building_count_gte: {type: proc, n: 1}}
+        - within_ticks: 3600
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+        - not: {has_building: fact}
+    max_turns: 40
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER CASH ($1750 = $50 slack only) AND
+  # tighter clock. A single mis-build (e.g. a $400 tent attempt that
+  # gets QUEUED with no power and never completes — cash still spent
+  # by StartProduction? actually engine refunds blocked; but a $300
+  # powr that the model rebuilds twice does drain) tightens the
+  # margin. max_turns 32 → reachable tick 93 + 90·31 = 2883 > 2880 ✓.
+  medium:
+    description: >
+      Same opening: 'fact' at (20,20), no power, no economy. Build
+      'powr' FIRST (cost 300), THEN 'proc' (cost 1400). Tighter
+      budget ($1750 — covers the chain with $50 to spare) and
+      tighter clock (tick 2880). The Refinery REQUIRES the Power
+      Plant — queuing 'proc' first is silently rejected. Stalling,
+      army-building, or attempting 'proc' before 'powr' all run out
+      the clock and LOSE.
+    starting_cash: 1750
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [20, 20]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: build-power-online-first-M
+            clauses:
+              - {has_building: powr}
+              - {building_count_gte: {type: proc, n: 1}}
+        - within_ticks: 2880
+    fail_condition:
+      any_of:
+        - after_ticks: 2881
+        - not: {has_building: fact}
+    max_turns: 32
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO `fact` spawn_point
+  # groups (NORTH y=10..14 / SOUTH y=26..30) round-robined by seed.
+  # The agent's pre-placed `fact` (and therefore the build radius and
+  # the placement coords for powr/proc) flips per seed, so a
+  # memorised "(20,20) opening" cannot generalise. Same tight cash
+  # ($1750) and same tight clock as medium; the SOP-compliance
+  # decision is identical, but the placement coordinates must be
+  # read from the actual fact position. max_turns 32 → reachable
+  # tick 2883 > 2880 ✓.
+  hard:
+    description: >
+      Same opening as medium (powr FIRST then proc, tight $1750
+      budget, tick 2880 clock) but your Construction Yard may begin
+      in the NORTH band (y≈12) or the SOUTH band (y≈28) of the map
+      depending on the seed. Read the fact's actual position from
+      the observation and place 'powr' and 'proc' adjacent to it.
+      A memorised "(20,20)" opening will mis-place the buildings
+      out-of-radius on one of the two spawns. The Refinery still
+      REQUIRES the Power Plant; out-of-order builds are silently
+      rejected and the clock runs out as a LOSS.
+    starting_cash: 1750
+    overrides:
+      actors:
+        # Two agent `fact` spawn groups (round-robin by seed).
+        # NORTH band y=10..14; SOUTH band y=26..30.
+        - {type: fact, owner: agent, position: [20, 12], spawn_point: 0}
+        - {type: fact, owner: agent, position: [20, 28], spawn_point: 1}
+        # Inert spawn-witness e1 per group (see engine fact #8 above
+        # — needed for the hard-tier units_summary spawn-variation
+        # check; HoldFire + no tools to command + enemy ~100 cells
+        # away makes this functionally inert for the SOP test).
+        - {type: e1, owner: agent, position: [22, 12], spawn_point: 0, stance: 0}
+        - {type: e1, owner: agent, position: [22, 28], spawn_point: 1, stance: 0}
+        # Persistent enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: build-power-online-first-H
+            clauses:
+              - {has_building: powr}
+              - {building_count_gte: {type: proc, n: 1}}
+        - within_ticks: 2880
+    fail_condition:
+      any_of:
+        - after_ticks: 2881
+        - not: {has_building: fact}
+    max_turns: 32
