@@ -437,6 +437,20 @@ UPGRADED = [
     # corner is the SHORTER reach but EITHER hidden-base discovery
     # satisfies the win.
     "scout-discover-hidden-base",
+    # Wave-6 robustness reasoning pack — PlanBench replanning / goal-
+    # conditional adaptation / SC2 reactive macro pivot / military
+    # objective change during ops anchor. The win is `any_of` over
+    # TWO destruction paths (fact A at (60,20) heavily defended, fact
+    # B at (100,30) lightly defended); commit-A-pure busts the
+    # attrition cap, commit-B-pure-on-medium+ runs through A's e3
+    # sight envelope and dies, only the recognise-and-pivot policy
+    # converges inside cap + clock. Hard defines two agent
+    # spawn_point groups (NORTH staging y=12..16 / SOUTH staging
+    # y=24..28) round-robined by seed; the two enemy bases always
+    # place (enemies don't honour spawn_point — CLAUDE.md) plus a
+    # central intercept picket (75,25) bites the pure-B beeline
+    # so a memorised opening cannot generalise across seeds.
+    "rob-objective-shift-with-or-clause",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

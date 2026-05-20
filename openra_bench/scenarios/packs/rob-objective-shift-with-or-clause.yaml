@@ -1,0 +1,343 @@
+# rob-objective-shift-with-or-clause.yaml
+#
+# REASONING capability — Wave-6 Group "robustness" pack.
+# OBJECTIVE WIN BAR HAS TWO ACCEPTABLE PATHS (`any_of`): destroy the
+# enemy `fact` at A=(60,20) OR destroy the enemy `fact` at B=(100,30).
+# Both razes count equally. The capability under test is RECOGNISING
+# THE INFEASIBLE PATH AND PIVOTING to the other one inside one budget
+# — PlanBench replanning / goal-conditional adaptation; SC2 reactive
+# macro pivot; product launch pivot on market signal; military
+# objective change during ops.
+#
+# The cell:
+#   - A is the CLOSE-but-HEAVILY-DEFENDED objective (6× e3 rocket
+#     infantry sit on top of fact A). e3 vs 2tnk is the engine's
+#     anti-vehicle counter; a 5-tank brute-force commit to A bleeds
+#     out and trips `units_lost_lte: 3`.
+#   - B is the FAR-but-LIGHTLY-DEFENDED objective (2× e1 riflemen on
+#     fact B). 2tnk eats e1 alive; the only cost of B is the longer
+#     drive (∼90 cells from the west base).
+#   - The agent has 5× 2tnk at the west. Tools are the full set so a
+#     scout-step / partial pull-back / re-target is expressible.
+#
+# Four canonical policies (the no-cheat bar):
+#   1. STALL                       → LOSS on after_ticks every tier.
+#   2. COMMIT-A-PURE               → LOSS via attrition every tier
+#      (the 6 e3 wreck the 5 2tnk well before A falls — units_lost
+#      blows past the cap; even if a single tank lands the kill, the
+#      `units_lost_lte:3` clause is already violated).
+#   3. COMMIT-B-PURE (skip A)      → WIN on easy/medium (a direct
+#      drive to B inside the deadline crushes 2 e1 and razes B with
+#      ≤2 losses), LOSS on hard (the tighter `units_lost_lte:2`
+#      cap + lateral spawn variation makes a clean pure-B unreliable;
+#      the intended scout-A-pivot-B converges on B from a safer
+#      angle).
+#   4. INTENDED scout-A-pivot-B    → WIN every tier. Send the squad
+#      partway toward A, register the heavy defence, pivot south-east
+#      to B, raze B in time inside the attrition cap.
+#
+# Real-world anchor (spec):
+#   - PlanBench replanning / goal-conditional adaptation
+#   - SC2 reactive macro pivot (commit-A → pivot-B when A is too hot)
+#   - product pivot under market signal (the original target market
+#     is too contested; pivot to the lighter adjacent market inside
+#     the runway)
+#   - military operational planning: objective change during ops
+#     (the original objective is too hardened; the OR-objective is
+#     the secondary, still-acceptable goal)
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - The predicate is `enemy_key_buildings_destroyed_in_region`
+#     (the `_in_region` variant takes `{x, y, radius, types}`; we
+#     pass `radius: 6` per spec `r:6`).
+#   - The fact at A is MustBeDestroyed. To prevent the engine's
+#     auto-`done` from collapsing the run to DRAW the moment one of
+#     the two objective fact falls, a SENTINEL unarmed fact sits at
+#     the far NE corner — always alive, never targeted, keeps the
+#     conquest-victory check from firing before the win/fail predicate
+#     evaluates.
+#   - Tick math: within_ticks 5400 needs max_turns ≥ 60 (tick at turn
+#     60 = 93 + 90·59 = 5403 ≥ 5400). We set max_turns: 65 (max tick
+#     5853) so the deadline bites comfortably inside the turn budget.
+#   - Enemy actors don't honour spawn_point (per CLAUDE.md /
+#     expand_scenario_actors): both A and B always place; only the
+#     AGENT spawn round-robins (hard tier).
+#   - Cell footgun list (CLAUDE.md): (60,20) is NOT in the failing
+#     set ((50,20) and (60,28) and (90,30) are). (100,30) is on the
+#     known-working list. We place defenders OFFSET by ±1 from the
+#     fact cells so even if a single specific (x,y) hiccups the
+#     cluster still surfaces.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/rob-objective-shift-with-or-clause.yaml
+
+meta:
+  id: rob-objective-shift-with-or-clause
+  title: 'Objective Shift with OR-Clause — Pivot to the Feasible Path'
+  capability: reasoning
+  real_world_meaning: >
+    Two acceptable objectives are on the table; mid-episode it becomes
+    clear the originally-natural one is infeasible inside the budget;
+    the agent must abandon that path and re-target the second
+    (still-acceptable) objective without exhausting its means. The
+    win is the `any_of` over the two paths AND a hard attrition cap
+    AND a deadline — a brute-force commit to the heavy path overruns
+    the cap; stalling overruns the deadline; only the recognise-and-
+    pivot policy converges inside both teeth.
+  robotics_analogue: >
+    Mid-mission objective change: a robotic survey platform sent to
+    sample Site A finds Site A inaccessible (unexpected obstacle /
+    hazard exceeds the platform's risk envelope); the science plan
+    accepted EITHER Site A or Site B as the day's sample, so the
+    platform must re-plan to Site B inside the same energy /
+    daylight budget instead of returning empty-handed.
+  benchmark_anchor:
+    - "PlanBench replanning / goal-conditional adaptation"
+    - "SC2 reactive macro pivot"
+    - "product pivot under market signal"
+    - "military objective change during ops"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop_units
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Plan-and-execute rehearsal. The `any_of` is genuinely satisfiable
+  # by EITHER path on easy: A is defended but the lighter e3 count
+  # gives a determined commit-A a chance; B is even lighter on easy
+  # (1× e1) so even a pure-B beeline wins. The intended scout-A-
+  # pivot-B also wins. Stall loses on the clock; over-commit-A still
+  # loses on the cap because e3 vs 2tnk is the anti-vehicle counter
+  # regardless. The teaching point is the OR-objective predicate
+  # shape (two acceptable paths) and that BOTH are valid here.
+  easy:
+    description: >
+      Five medium tanks (2tnk) sit at the western edge. Two enemy
+      construction yards stand to the east: fact A at (60,20)
+      guarded by 4 rocket-infantry (e3), and fact B at (100,30)
+      guarded by 1 rifleman (e1). EITHER raze satisfies the win.
+      You must finish inside 5400 ticks and lose no more than 3
+      tanks. Stalling loses on the clock. A pure brute-force into
+      A's e3 cluster bleeds the tank squad past the attrition cap;
+      a direct drive to B easily razes the lone e1 defender; the
+      intended play scouts A's defence then pivots to B if A looks
+      infeasible.
+    starting_cash: 500
+    overrides:
+      actors:
+        # Agent: 5× 2tnk at the west, stance:1 (ReturnFire) so they
+        # don't path-find on their own — the agent has to commit.
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        # Objective A — fact + 6 e3 rocket infantry (lighter on
+        # easy: no heavy tank, no tower). Defenders stance:2
+        # (Defend): shoot back if engaged but don't path-find west.
+        # Cells offset ±1 from fact so the cluster survives any
+        # single-cell placement hiccup (CLAUDE.md footgun list).
+        - {type: fact, owner: enemy, position: [60, 19]}
+        - {type: e3,   owner: enemy, position: [58, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [58, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [59, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [61, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [59, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [61, 21], stance: 2}
+        # Objective B — fact + 1 e1 (extra light on easy).
+        - {type: fact, owner: enemy, position: [100, 30]}
+        - {type: e1,   owner: enemy, position: [98, 30], stance: 2}
+        # SENTINEL: persistent unarmed enemy fact at the far north
+        # corner — if BOTH objective fact fall the engine would
+        # auto-`done` before the OR-predicate evaluates (CLAUDE.md
+        # ConquestVictoryConditions footgun). The sentinel sits well
+        # outside any plausible intended-play tank path.
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 60, y: 20, radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 100, y: 30, radius: 6, types: [fact]}
+        - {within_ticks: 5400}
+        - {units_lost_lte: 3}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 3}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 65
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: A is now AT FULL SPEC (6 e3) — a brute-
+  # force commit to A definitively LOSES on the cap (5 tanks vs 6
+  # e3 rocket infantry on top of the fact is not survivable inside
+  # `units_lost_lte:3`). B keeps the spec's 2× e1 defenders. The
+  # intended scout-A-pivot-B wins; a pure-B beeline also still wins
+  # on medium (the spec keeps it valid on "lower diff"). The pivot
+  # is the SAFER play because the agent learns A is too hot from
+  # a brief approach rather than over-committing to either default.
+  medium:
+    description: >
+      Five medium tanks (2tnk) sit at the western edge. Two enemy
+      construction yards stand to the east: fact A at (60,20)
+      heavily guarded by 6 rocket-infantry (e3), and fact B at
+      (100,30) lightly guarded by 2 riflemen (e1). EITHER raze
+      satisfies the win — you must finish inside 5400 ticks and
+      lose no more than 3 tanks. A pure-A commit bleeds the squad
+      past the cap (the 6 e3 are the anti-vehicle counter); a
+      direct drive to B reaches it in time and razes the light
+      picket; the intended play scouts A briefly, recognises it
+      is infeasible, and pivots south-east to B inside the cap.
+    starting_cash: 500
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        # A: full-spec defence — fact + 1× 3tnk heavy + 8× e3
+        # rocket infantry stacked tightly around the fact (the
+        # engine's anti-vehicle stack with NO tsla so commit-B-
+        # pure can still detour around without being one-shot
+        # by chained tower fire). 5 2tnk head-on commit loses
+        # 4-5 before A falls ⇒ `units_lost_lte:3` busted.
+        - {type: fact, owner: enemy, position: [60, 19]}
+        - {type: 3tnk, owner: enemy, position: [58, 19], stance: 2}
+        - {type: e3,   owner: enemy, position: [57, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [57, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [59, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [61, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [59, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [61, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [62, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [62, 20], stance: 2}
+        # B: 2 e1 at full spec.
+        - {type: fact, owner: enemy, position: [100, 30]}
+        - {type: e1,   owner: enemy, position: [98, 30], stance: 2}
+        - {type: e1,   owner: enemy, position: [99, 31], stance: 2}
+        # Sentinel.
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 60, y: 20, radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 100, y: 30, radius: 6, types: [fact]}
+        - {within_ticks: 5400}
+        - {units_lost_lte: 3}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 3}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 65
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 axis: TWO agent spawn_point groups (NORTH staging y=14 vs
+  # SOUTH staging y=26) so seed flips the agent's lateral approach,
+  # AND a TIGHTER attrition cap (`units_lost_lte:2`). The pivot
+  # becomes load-bearing: a pure-B beeline now risks the cap (the
+  # cap of 2 leaves no slack for being chipped by A's rockets en
+  # route, since the natural path from EITHER staging y-band toward
+  # B at (100,30) brushes A's e3 sight envelope), and pure-A is even
+  # less feasible. The intended scout-A-pivot-B avoids A's sight
+  # envelope on the return leg and approaches B from a safe angle.
+  # Satisfies `tests/test_hard_tier.py::UPGRADED` (≥2 spawn groups).
+  hard:
+    description: >
+      Five medium tanks (2tnk) sit at the western edge — round-
+      robined between a NORTH staging row and a SOUTH staging row
+      by seed. Two enemy construction yards stand to the east:
+      fact A at (60,20) heavily guarded by 6 rocket-infantry (e3),
+      and fact B at (100,30) lightly guarded by 2 riflemen (e1).
+      EITHER raze satisfies the win — finish inside 5400 ticks and
+      lose no more than TWO tanks. A pure-A commit is unsurvivable;
+      a pure-B beeline brushes A's rocket sight envelope and risks
+      the tightened cap; the intended play scouts A from a safe
+      offset, recognises it is infeasible, and pivots to B from
+      an angle that stays out of A's rocket sight.
+    starting_cash: 500
+    overrides:
+      actors:
+        # NORTH staging spawn (spawn_point 0) — y=14 row.
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 13], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 15], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1, spawn_point: 0}
+        # SOUTH staging spawn (spawn_point 1) — y=26 row.
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 25], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1}
+        # Enemy actors place unconditionally (CLAUDE.md: enemies
+        # don't honour spawn_point). Both A and B always on the map.
+        # A: full-spec defence + 2nd 3tnk for hard. Still infantry-
+        # heavy (no tsla) so detour paths past A aren't one-shot
+        # — the +1 axis on hard is the attrition cap + agent spawn
+        # variation, not enemy A power-creep.
+        - {type: fact, owner: enemy, position: [60, 19]}
+        - {type: 3tnk, owner: enemy, position: [58, 19], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [62, 19], stance: 2}
+        - {type: e3,   owner: enemy, position: [57, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [57, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [59, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [61, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [59, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [61, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [63, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [63, 20], stance: 2}
+        # B: 2 e1 at full spec.
+        - {type: fact, owner: enemy, position: [100, 30]}
+        - {type: e1,   owner: enemy, position: [98, 30], stance: 2}
+        - {type: e1,   owner: enemy, position: [99, 31], stance: 2}
+        # INTERCEPT PICKET on the CENTRAL east-bound corridor at
+        # (75, 25) — 2 e3 stance:2 that chip a beelining pure-B
+        # squad on the y=20..27 central band but don't reach the
+        # deep-south staging band (y=36) the intended pivot uses.
+        # Hard-tier-only addition: keeps pure-B unviable on hard
+        # while leaving the SOUTH-detour intended play untouched.
+        - {type: e3,   owner: enemy, position: [75, 25], stance: 2}
+        - {type: e3,   owner: enemy, position: [76, 26], stance: 2}
+        # Sentinel.
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 60, y: 20, radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 100, y: 30, radius: 6, types: [fact]}
+        - {within_ticks: 5400}
+        - {units_lost_lte: 2}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {units_lost_lte: 2}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 65
