@@ -410,6 +410,20 @@ UPGRADED = [
     # cannot accidentally clip the northern (y=4) or southern (y=36)
     # waypoints en route). _NO_ENEMY pack — only fail is the timeout.
     "proc-checklist-no-deviation",
+    # Wave-6 Group I procedural-compliance seed — τ²-bench distractor
+    # handling / IFBench irrelevant-tool ignoring / BFCL V4 relevance
+    # (refuse to call a tool that isn't needed) / operator discipline
+    # (don't use the kitchen-sink palette). FULL tool palette
+    # (move/attack/build/place_building/observe) is exposed but
+    # forbidden_tools is NOT used — the test is whether the model
+    # REASONS about which tools matter, not whether it can follow an
+    # explicit allowlist (those are the other procedural packs). Hard
+    # defines two agent spawn_point groups (NORTH y=8 / SOUTH y=32)
+    # round-robined by seed; both staging latitudes face symmetric
+    # flank patrols (central + matching flank band), so a memorised
+    # "ignore build, drive y=20 east" opening from one spawn does not
+    # generalise — every seed picks the correct spawn-matched lane.
+    "proc-tool-use-with-distractor",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

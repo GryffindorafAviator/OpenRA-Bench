@@ -1,0 +1,338 @@
+# proc-tool-use-with-distractor — IGNORE THE TEMPTING IRRELEVANT TOOL
+#
+# τ²-bench distractor handling / BFCL V4 relevance / IFBench "don't-call-
+# tools-you-don't-need" / kitchen-sink-API operator discipline. The
+# pack's whole point is: the tool palette is BIG, but the WIN PATH is
+# narrow. Only one tool (move_units) is needed. The tempting irrelevant
+# tools (build / place_building) are AVAILABLE — they are not in
+# `forbidden_tools:` — but they are useless to the win and a policy that
+# spends turns calling them instead of moving runs out the tick clock
+# and LOSES. The model must RECOGNISE the irrelevance by reasoning about
+# the task, not be told via an allowlist.
+#
+# Crucially distinct from B3 (strict-toolban-fidelity-under-pressure)
+# and proc-only-build-no-combat:
+#
+#   strict-toolban-fidelity-under-pressure: the irrelevant tool is
+#     HARD-BANNED (`forbidden_tools: [attack_unit, attack_move]` +
+#     `tool_violations_gte:1` fail clause). The bench enforces; the
+#     model is graded on a binary rule-following signal.
+#   proc-only-build-no-combat: same hard-ban shape — `attack_*` are
+#     forbidden, build is the role.
+#   proc-tool-use-with-distractor (THIS PACK): NO `forbidden_tools`.
+#     The test is whether the model REASONS about which tools are
+#     relevant. Calling `build` is permitted (won't trip a violation
+#     counter), but spending the turn budget on it instead of
+#     movement causes a NATURAL failure on the deadline. Same shape
+#     as τ²-bench's distractor cells and BFCL V4's "don't call a
+#     tool that isn't needed" / OAuth-style overshare rejection.
+#
+# Why the discrimination still binds without `forbidden_tools`:
+#
+#   • The deadline (`within_ticks:4500`) is reachable inside max_turns
+#     55 (93 + 90·54 = 4953) so a timeout is a real LOSS, not a draw.
+#   • The intended movement-only policy reaches the far egress region
+#     comfortably within the budget (jeeps at ≈12 cells/turn cross
+#     the 100+ cell distance in ~10 turns + path overhead).
+#   • A "build-distractor" policy that spends each turn queuing /
+#     placing buildings instead of moving never advances and LOSES
+#     on the deadline. The intended-movement policy WINS. The exact
+#     ratio of "turns wasted on build" to "turns spent moving" sets
+#     the discrimination: a model that calls build a handful of times
+#     in addition to moving can still win (BFCL-V4-style "extra tool
+#     call" is not catastrophic), but a model that fixates on the
+#     build palette as if it were the task LOSES.
+#   • The agent has a starter `fact` (so `build` orders are
+#     well-formed and the irrelevance is observable — calling build
+#     actually queues the structure, eating cash, instead of
+#     no-op-ing silently). No `proc` (refinery), so the cash budget
+#     is FINITE and the "build everything" trap is concrete:
+#     starting_cash funds maybe two structures, after which build
+#     orders fail for lack of funds while the deadline keeps
+#     ticking. The build palette is a literal kitchen sink that
+#     burns time and cash for zero benefit to the win.
+#
+# Win condition (exactly as specified):
+#   - reach_region {x:110, y:20, radius:6}    a jeep at the far point
+#   - units_lost_lte: 0                       all jeeps survive
+#   - within_ticks: 4500                      under the deadline
+#
+# Fail condition (real LOSSES, no draw):
+#   - after_ticks: 4501                       deadline → timeout LOSS
+#   - not units_lost_lte: 0                   any unit lost → LOSS
+#   - not own_units_gte: 1                    force wiped → LOSS
+#
+# Difficulty axis (one controlled variable per tier):
+#   easy   light/no enemy (one passive sentry far off the lane)
+#   medium light patrol (a single oscillating rifleman on the
+#          central corridor — same "patrol" bot as B3 — visible
+#          temptation to reach for attack_unit, which is permitted
+#          but irrelevant; the safe play is to detour OR drive
+#          straight through; the discrimination is whether the
+#          model wastes turns on build)
+#   hard   patrol + TWO spawn groups (NORTH y=8 start vs SOUTH y=32
+#          start) + a second patrol band so the central corridor
+#          isn't a free ride. Tightest deadline pressure: any
+#          turn spent on a build distractor likely runs the clock
+#          out.
+#
+# Hard tier: this pack IS in tests/test_hard_tier.py::UPGRADED. The
+# spawn_point round-robin (NORTH / SOUTH) makes a memorised "ignore
+# build, drive y=20 east" opening unable to generalise — each seed
+# starts the column at a different latitude, and the matching safe
+# bypass band flips with the spawn.
+#
+# Benchmark anchor:
+#   • τ²-bench distractor handling
+#   • IFBench irrelevant-tool ignoring
+#   • BFCL V4 relevance / no-call-when-not-needed
+#   • operator discipline: don't use kitchen-sink (the API/CLI
+#     ergonomics literature on tool-overload — kubectl --all etc.)
+#
+# Engine-footgun notes:
+#   • Per CLAUDE.md, `move_units` opportunistically auto-fires en
+#     route. Jeeps are stance:1 so they will auto-defend if engaged
+#     mid-transit; the engine-side animation is NOT a tool call (the
+#     bench only counts the COMMAND NAME the agent emitted), so an
+#     auto-fire during transit isn't a violation of anything. There
+#     are no `forbidden_tools` on this pack anyway — the rule is
+#     purely turn-budget-based.
+#   • `attack_unit` is on the `tools:` allowlist (per the spec —
+#     the model SEES it as available). A model that picks attack_unit
+#     to clear the patrol with `move_units`-only-style discipline
+#     does NOT lose on a tool-violation counter (none is set);
+#     whether it wins or loses comes down to time spent in combat
+#     vs the deadline.
+#   • Persistent enemy `fact` marker at (120,20) keeps the episode
+#     alive past the moment any patrol or sentry dies (engine
+#     auto-done-on-enemy-wipe would otherwise collapse a deadline-
+#     bound reach to DRAW, per CLAUDE.md engine fact #5).
+#   • Tick budget: `after_ticks: 4501` with `max_turns: 55` ⇒
+#     4501 ≤ 93 + 90·54 = 4953 ✓ (deadline bites; non-win = real LOSS).
+#   • `proc` (refinery) is intentionally OMITTED — without a proc,
+#     the agent's cash channel never grows; build orders draw down
+#     the finite starter cash. The "tool kitchen sink" trap is
+#     literal: every build burns cash AND a turn (because the
+#     build-distractor failure mode is a policy that issues build
+#     EVERY turn instead of also moving).
+
+meta:
+  id: proc-tool-use-with-distractor
+  title: 'Distractor Tool Discipline — Ignore the Tempting Irrelevant Build Palette'
+  capability: action
+  real_world_meaning: >
+    Tool-palette discipline under distraction. The operator has a
+    large API surface — movement, attack, build, place_building,
+    observe — but only ONE of those tools is needed to complete the
+    mission. The remaining tools are visible, available, and
+    tempting (the build palette in particular looks like "real work"
+    and feels productive), but they are irrelevant to the win and
+    spending turns on them runs out the deadline. Unlike a strict
+    allowlist scenario (where forbidden tools trip a violation
+    counter and the bench grades you on rule-following), this cell
+    has NO forbidden tools — the test is whether the agent REASONS
+    about which tools are RELEVANT to the task and ignores the
+    others, the way a senior operator ignores the eighteen flags
+    `kubectl apply` exposes and uses only the two they actually need.
+  robotics_analogue: >
+    Mobile robot with a rich actuator palette (manipulator, weld,
+    cut, drill, inspect, navigate) is assigned a pure navigate-to-
+    waypoint mission. The other actuators are available and many of
+    them produce visible feedback if invoked, but invoking them
+    wastes the energy / time budget. The disciplined policy ignores
+    the irrelevant actuators and just navigates; the kitchen-sink
+    policy exhausts itself running every actuator it can see.
+  benchmark_anchor:
+    - "τ²-bench distractor handling (irrelevant tool in palette)"
+    - "IFBench irrelevant-tool ignoring (no-call-when-not-needed)"
+    - "BFCL V4 relevance / refusing to call an unnecessary tool"
+    - "operator discipline: kitchen-sink API ergonomics (kubectl --all etc.)"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+# Pack-default starting cash funds 1-2 buildings then runs dry — the
+# build-distractor trap is FINITE, so a model can probe "does build
+# do anything useful?" a couple of times and then has to switch to
+# moving anyway. The cash budget is INTENTIONALLY enough to let the
+# model TRY the distractor (the temptation must be operational, not
+# theoretical); it is NOT enough to let a build-only policy succeed
+# at anything.
+starting_cash: 1200
+
+base:
+  agent: {faction: allies, cash: 1200}
+  enemy: {faction: soviet, cash: 0}
+  # FULL tool palette — including build / place_building (the
+  # distractors) AND attack_unit (also a distractor — patrol bait on
+  # medium/hard). The spec is explicit that `forbidden_tools` is NOT
+  # used: the test is whether the model can recognise from REASONING
+  # which tools matter for THIS task, not whether it can follow an
+  # explicit allowlist rule (those are the other procedural packs).
+  tools: [move_units, attack_unit, build, place_building, observe]
+  planning: true
+  termination: {max_ticks: 6000}
+  actors:
+    # Agent starter `fact` (conyard). Required so the `build` tool is
+    # WELL-FORMED — a model that probes "does build do anything?"
+    # actually queues the structure, observes the cash drop, and the
+    # distractor is observable rather than a silent no-op. Without
+    # this the distractor wouldn't even be a temptation.
+    - {type: fact, owner: agent, position: [4, 20]}
+    # 3 fast jeeps at the lane mouth — stance:1 so they will auto-
+    # return-fire if attacked en route (move_units auto-fire is
+    # engine-side, NOT a tool call). The intended policy moves them
+    # east; nothing else is required.
+    - {type: jeep, owner: agent, position: [8, 19]}
+    - {type: jeep, owner: agent, position: [8, 20]}
+    - {type: jeep, owner: agent, position: [8, 21]}
+    # Persistent enemy `fact` marker at the egress — keeps the
+    # episode alive past any patrol death (engine auto-done-on-
+    # enemy-wipe would collapse a deadline-bound reach to DRAW
+    # per CLAUDE.md engine fact #5).
+    - {type: fact, owner: enemy, position: [120, 20]}
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Bare skill: ignore the irrelevant build palette and just MOVE.
+  # No combat pressure (a single sentry sits well off the lane at
+  # y=32 — passive stance:0, can't reach the jeep column on y=20).
+  # The deadline is reachable inside max_turns; a build-only policy
+  # never reaches and LOSES; the intended movement-only policy WINS.
+  easy:
+    description: >
+      You have 3 jeeps at the west lane mouth (~8, 20). Your tools
+      include move_units, attack_unit, build, place_building, and
+      observe — but the mission is PURELY a movement task. Drive
+      ANY jeep to the observation region around (110, 20) within
+      radius 6, with zero losses, before tick 4500. There is one
+      passive enemy sentry well off the lane (y=32) and a far-
+      eastern enemy fact marker — neither requires combat. The
+      build palette and the attack tool are AVAILABLE but
+      IRRELEVANT to this task; spending turns invoking them
+      instead of moving runs out the clock and LOSES.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [4, 20]}
+        - {type: jeep, owner: agent, position: [8, 19]}
+        - {type: jeep, owner: agent, position: [8, 20]}
+        - {type: jeep, owner: agent, position: [8, 21]}
+        # Single passive sentry far off the lane — visible on the
+        # minimap but cannot engage the jeep column on y=20.
+        - {type: e1, owner: enemy, position: [40, 32], stance: 0}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 55
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: a LIGHT PATROL is now active on
+  # the central corridor (a `patrol` bot with one rifleman at
+  # anchor (60, 20)) — visible salient temptation to reach for
+  # attack_unit AND for build (e.g. "I should build defenders").
+  # Both are irrelevant: the patrol is light enough that jeeps
+  # stance:1 either out-pace it (drive past) or auto-defend
+  # without losing a unit. The intended policy still WINS; a
+  # build-distractor policy still LOSES on the clock.
+  medium:
+    description: >
+      Same task and budget — 3 jeeps from the west to the
+      observation region around (110, 20) within radius 6, zero
+      losses, before tick 4500. A single enemy rifleman is now on
+      PATROL across the central corridor (anchor ~60, 20). The
+      attack and build tools are AVAILABLE but neither is required
+      — engaging the patrol or queuing buildings instead of moving
+      runs out the clock and LOSES.
+    overrides:
+      enemy: {faction: soviet, cash: 0, bot_type: patrol}
+      actors:
+        - {type: fact, owner: agent, position: [4, 20]}
+        - {type: jeep, owner: agent, position: [8, 19]}
+        - {type: jeep, owner: agent, position: [8, 20]}
+        - {type: jeep, owner: agent, position: [8, 21]}
+        # Light patrol probe on the central corridor — single
+        # rifleman, the `patrol` bot oscillates it ±8 along x.
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 55
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 more controlled variable: TWO seed-driven spawn groups
+  # (NORTH start at y=8 vs SOUTH start at y=32) AND a second patrol
+  # band — the central corridor (anchor 60,20) AND a SECONDARY band
+  # on the spawn-matched latitude so EITHER start faces a patrol
+  # nuisance. The matching safe bypass band flips with the spawn,
+  # so a memorised "drive y=20 east" opening cannot generalise.
+  # `proc-tool-use-with-distractor` IS in
+  # tests/test_hard_tier.py::UPGRADED — this is where the spawn
+  # variation lives. The build-distractor trap remains: ANY turn
+  # spent queuing buildings instead of moving + dodging is a turn
+  # closer to the deadline.
+  hard:
+    description: >
+      Same task — 3 jeeps to the observation region around (110, 20)
+      within radius 6, zero losses, before tick 4500 — but now your
+      column starts at either the NORTH lane (y≈8) or the SOUTH lane
+      (y≈32), seed-varied per run. TWO patrol probes are active: one
+      on the central corridor (anchor ~60, 20) and a second on a
+      flank band, so even the bypass lane isn't a free ride. The
+      attack and build tools remain AVAILABLE but IRRELEVANT — the
+      ONLY win path is movement-only across whichever lane your
+      spawn occupies. Building or fighting instead of moving runs
+      out the clock and LOSES.
+    overrides:
+      enemy: {faction: soviet, cash: 0, bot_type: patrol}
+      actors:
+        # Shared agent fact (no spawn_point — CLAUDE.md: a spawn
+        # group filter on ONE agent actor would drop unfiltered
+        # actors; we duplicate the fact across BOTH groups instead).
+        - {type: fact, owner: agent, position: [4, 8],  spawn_point: 0}
+        - {type: fact, owner: agent, position: [4, 32], spawn_point: 1}
+        # NORTH staging (spawn_point 0): jeeps at y=7..9 on x=8..9.
+        - {type: jeep, owner: agent, position: [8, 7],  spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 8],  spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 9],  spawn_point: 0}
+        # SOUTH staging (spawn_point 1): jeeps at y=31..33 on x=8..9.
+        - {type: jeep, owner: agent, position: [8, 31], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 32], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 33], spawn_point: 1}
+        # Central patrol probe (anchor 60,20) — always present.
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2}
+        # Flank patrol probes — one at y=12 (covers north detour
+        # mid-band), one at y=28 (covers south detour mid-band).
+        # Either spawn faces a patrol nuisance in addition to the
+        # central one; both are LIGHT (single rifleman each) so the
+        # intended move-only policy at stance:1 can still cross the
+        # arena clean if it doesn't waste turns building.
+        - {type: e1, owner: enemy, position: [60, 12], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 28], stance: 2}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {reach_region: {x: 110, y: 20, radius: 6}}
+        - {units_lost_lte: 0}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {units_lost_lte: 0}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 55
