@@ -241,6 +241,16 @@ UPGRADED = [
     # bait/strike vector flips per seed.
     "coord-diversionary-attack",
     "def-in-depth",
+    # Wave-7 reasoning pack — distributed defence across three
+    # concurrent attack lanes (graph min-cut / military multi-front /
+    # distributed-systems load-balancing anchor). Hard tier defines
+    # two agent spawn_point groups (NORTH base y=14 / SOUTH base y=26)
+    # round-robined by seed; the base latitude (and thus the matching
+    # three-zone defensive layout) flips per seed, so a single
+    # memorised "send to (25,8)/(25,20)/(25,32)" plan wins one seed
+    # and loses the other — the 2/2/2 doctrine must be matched to
+    # the actual base latitude.
+    "def-multi-direction",
     "def-surprise-flank-react",
     # Wave-5 Group F cash-reserve / treasury management pack (SC2 cash
     # overflow / financial runway / operational reserve anchor). Hard
