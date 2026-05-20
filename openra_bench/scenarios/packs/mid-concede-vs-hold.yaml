@@ -163,11 +163,20 @@ levels:
           - within_ticks: 5400
     # Timeout is a real reachable LOSS: max_turns 65 → tick reach 5853
     # ≥ 5401 (after_ticks fail). Losing both `fact` (both bases razed
-    # before timeout) LOSES immediately.
+    # before timeout) LOSES immediately. The `not own_units_gte:1`
+    # clause closes the DRAW degeneracy where a misplay wipes the
+    # mobile force while one fact partially survives without its proc:
+    # the engine's `agent_units_killed` termination fires `done=True`
+    # before tick 5401, the building_count fail is unmet (one fact
+    # alive), the win is unmet (saved base needs both fact AND proc)
+    # — without the units-wiped clause the run silently DRAWS. With
+    # it, the post-step win/fail check converts the same state into a
+    # real reachable LOSS.
     fail_condition:
       any_of:
         - after_ticks: 5401
         - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {own_units_gte: 1}
     max_turns: 65
 
   # ── MEDIUM ───────────────────────────────────────────────────────
@@ -225,10 +234,12 @@ levels:
           - building_in_region: {x: 78, y: 20, radius: 8, type: proc, count: 1}
           - after_ticks: 3000
           - within_ticks: 5400
+    # Same DRAW-closing units-wiped fail as easy (see easy notes).
     fail_condition:
       any_of:
         - after_ticks: 5401
         - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {own_units_gte: 1}
     max_turns: 60
 
   # ── HARD ─────────────────────────────────────────────────────────
@@ -342,9 +353,12 @@ levels:
           - after_ticks: 3000
           - within_ticks: 5400
           - units_lost_lte: 8
+    # Same DRAW-closing units-wiped fail as easy/medium (see easy notes)
+    # plus the hard-tier attrition cap.
     fail_condition:
       any_of:
         - after_ticks: 5401
         - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {own_units_gte: 1}
         - not: {units_lost_lte: 8}
     max_turns: 60
