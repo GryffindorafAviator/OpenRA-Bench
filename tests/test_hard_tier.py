@@ -873,6 +873,21 @@ UPGRADED = [
     # closer/active one and a memorised "send tanks to (40,22)"
     # opening cannot generalise across seeds.
     "econ-burn-rate-management",
+    # Wave-8 PERCEPTION pack — scout-detect-base-direction (ERQA
+    # direction-reading / military intelligence triage / SC2 scout
+    # direction anchor). 4× 2tnk attackers + 2× jeep scouts at a
+    # WEST staging; two candidate enemy bases at far east corners
+    # NE (110, 8) and SE (110, 32). Hard tier defines two agent
+    # spawn_point groups (NORTH staging y=8 / SOUTH staging y=32)
+    # round-robined by seed; both corner facts always place (enemy
+    # actors don't honour spawn_point — CLAUDE.md), and a mid-lane
+    # e3 picket curtain at x=85, y=14..26 makes cross-axis commits
+    # attritionally infeasible. A memorised "always strike NE"
+    # opening loses on the SOUTH-spawn seeds (cross-axis through
+    # the curtain busts units_lost_lte:1); the intended scout-
+    # then-commit on the latitude-matching corner wins on every
+    # seed.
+    "scout-detect-base-direction",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

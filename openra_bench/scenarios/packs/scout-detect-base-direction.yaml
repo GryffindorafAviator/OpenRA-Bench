@@ -1,0 +1,449 @@
+# scout-detect-base-direction.yaml
+#
+# PERCEPTION capability — Wave-8 scout-for-direction / military
+# intelligence triage. An enemy construction yard sits at ONE OF TWO
+# candidate CORNERS — far NE (≈110, 8) and far SE (≈110, 32). The
+# agent has a small strike force (4× 2tnk attackers + 2× jeep scouts +
+# base fact at the WEST) and must (a) SCOUT BOTH CORNERS to confirm
+# which corner is the actionable target, then (b) COMMIT the
+# attackers to the CORRECT corner. Picking the wrong corner — or
+# skipping the scout step and beelining one corner blind — burns the
+# deadline on the round trip and LOSES.
+#
+# ENGINE FACT that shapes the design (CLAUDE.md / oramap.rs::
+# expand_scenario_actors): enemy actors with no `spawn_point`
+# ALWAYS place regardless of any agent spawn group. We cannot
+# seed-vary which corner holds the fact via `spawn_point`. So we
+# place a FACT at BOTH corners every seed and use the engine's
+# `enemy_key_buildings_destroyed_in_region` `any_of` predicate to
+# accept EITHER raze; the "wrong corner" tooth becomes the
+# CLOCK / DISTANCE / ATTRITION penalty — on hard the agent's
+# spawn flips between a NORTH-leaning and a SOUTH-leaning stage
+# so the CLOSE corner alternates by seed; a mid-lane e3 picket
+# curtain at x=85, y=14..26 makes cross-axis commits attritionally
+# infeasible (the column traverses the rocket envelope and bleeds
+# past the units_lost_lte:1 cap).
+#
+# Real-world / benchmark anchors:
+#   - ERQA direction-reading: "which way is the target" is the
+#     canonical ERQA spatial-reading task — the agent must READ
+#     the map (corner candidates), perform a deliberate
+#     observation step on each, and commit a direction.
+#   - Military intelligence triage: a battalion has two reported
+#     enemy locations and limited reconnaissance hours; the
+#     commander dispatches scouts to BOTH candidate sites,
+#     identifies which is actionable, and commits the main force
+#     only after the intel is back. Committing without the scout
+#     trip half-the-time wins by luck and half-the-time strikes
+#     an empty / decoy / fortified site.
+#   - SC2 scout direction: pre-attack overlord / probe scout to
+#     each candidate base location BEFORE the main timing push,
+#     so the army arrives at the live opponent rather than an
+#     expansion that has long since moved on.
+#
+# Discrimination bar (every level + every hard seed):
+#   * STALL                  → LOSS — after_ticks bites; no fact
+#                              destroyed.
+#   * SCOUT-BUT-DON'T-COMMIT → LOSS — scouts confirm both corners
+#                              but tanks never push; clock LOSS.
+#   * BLIND-ATTACK ONE CORNER
+#                            → On hard, a memorised "always strike
+#                              NE" LOSES on the SOUTH-spawn seeds
+#                              (cross-axis through the curtain
+#                              bleeds 2+ tanks → busts the cap),
+#                              and the mirror "always strike SE"
+#                              LOSES on the NORTH-spawn seeds.
+#                              On easy/medium (single spawn) the
+#                              blind beeline can WIN — those tiers
+#                              teach the SCOUT discipline, hard is
+#                              where the spawn-aware direction-pick
+#                              becomes load-bearing.
+#   * INTENDED scout-both-then-strike-correct
+#                            → WIN every (level, seed) — jeeps
+#                              push to each corner (or already see
+#                              them on easy), tanks commit on the
+#                              LATITUDE-MATCHING corner from THIS
+#                              spawn (the on-axis route never
+#                              engages the curtain), fact razed
+#                              inside the deadline.
+#
+# Distinct from siblings:
+#   - scout-discover-hidden-base — perception of an OFF-AXIS base
+#     hidden BEHIND the obvious eastward decoy axis. THIS pack's
+#     candidates are on the SAME (eastern) axis; the question is
+#     WHICH OF TWO eastern corners holds the actionable target.
+#   - scout-detect-incoming-army — early-warning + intercept on a
+#     defensive footing (the THREAT comes to you). THIS pack is
+#     offensive (you strike the enemy).
+#   - rob-objective-shift-with-or-clause — TWO valid `any_of`
+#     destruction paths AND one is heavily defended (pivot when
+#     the natural one is infeasible by ATTRITION). THIS pack also
+#     uses `any_of` but the infeasibility is GEOMETRIC + spawn-
+#     coupled (which corner is REACHABLE inside the clock / past
+#     the curtain from THIS spawn) and the load-bearing capability
+#     is the PERCEPTION scout step on both candidates rather than
+#     the pivot decision.
+#   - def-position-revealed-direction — defender's intel-driven
+#     fortification. THIS pack is the attacker-side mirror: scout
+#     to find WHICH of two enemy locations to strike.
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - rush-hour-arena: 128×40 playable x∈[2..126], y∈[2..38]. Both
+#     corner cells (110, 8) and (110, 32) are well inside playable.
+#   - `fact` is MustBeDestroyed and unarmed; destroying one corner
+#     fact would auto-`done` the engine IF it were the last enemy
+#     building. We keep an unarmed SENTINEL `fact` far CENTRE-east
+#     (124, 20) so razing one corner cannot collapse the run to
+#     DRAW before the win/fail predicate evaluates.
+#   - Decoy infantry at each corner are stance:0 (HoldFire) so a
+#     passing jeep at corner-vision range is not auto-killed; the
+#     scout step is a clean PERCEPTION task, not a combat task.
+#     The hard-tier curtain at x=85 is stance:3 (AttackAnything)
+#     — that picket IS the attrition tooth, not a decoy.
+#   - The `then:` happened-before composite is NOT used here per
+#     the spec — `any_of(corner_destroy_A, corner_destroy_B) +
+#     within_ticks + units_lost_lte` is the predicate idiom and
+#     it cleanly enforces the strike step; the SCOUT discipline
+#     is enforced on hard by the deadline + spawn-flip geometry
+#     + curtain attrition.
+#   - `enemy_building_spotted` interrupt: re-decide the instant a
+#     jeep enters corner vision range and the fact surfaces in
+#     `enemy_buildings` — lets the model commit the attackers on
+#     the discovered corner without waiting for the next 90-tick
+#     decision boundary.
+#   - Tick budget: ~90 ticks/turn. Easy/medium max_turns 50 →
+#     reachable tick 93+90·49=4503; after_ticks 2501 bites at
+#     turn ≈28 (well inside the 50-turn budget). Hard max_turns
+#     45 → reachable tick 93+90·44=4053; after_ticks 2701 bites
+#     at turn ≈30 (well inside the 45-turn budget). Every
+#     after_ticks fail bites BEFORE max_turns elapses (real
+#     reachable LOSS, never a draw degeneracy).
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/scout-detect-base-direction.yaml
+
+meta:
+  id: scout-detect-base-direction
+  title: 'Scout the Two Corners — Find the Enemy Base Direction Before Striking'
+  capability: perception
+  real_world_meaning: >
+    Direction-of-target perception with two candidate locations and a
+    finite reconnaissance budget. The enemy base could be at ONE OF
+    TWO far corners; the agent must dispatch scouts to confirm each
+    candidate, then commit the main strike force to the correct
+    corner. Picking a corner blind half-wins and half-busts the
+    clock on the round trip; only the deliberate scout-both-then-
+    commit play converges every time. The capability under test is
+    the model's discipline to PERFORM AND READ the perception step
+    before committing the main resource.
+  robotics_analogue: >
+    Military intelligence triage: a battalion commander has two
+    reported enemy locations and a small reconnaissance asset; the
+    commander dispatches scouts to BOTH candidate sites, identifies
+    which holds the actionable target, and commits the main force
+    only after the intel is back. Pre-committing the main force
+    without the scout trip strikes the wrong site half the time
+    and burns the operational window. The doctrine under test is
+    scout-then-strike, not commit-on-faith.
+  benchmark_anchor:
+    - "ERQA direction-reading"
+    - "military intelligence triage"
+    - "SC2 scout direction"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  # No scripted bot — the enemy is STATIC (corner garrisons + the
+  # hard-tier curtain), the question is which corner to STRIKE. A
+  # hunt bot would drift the corner defenders out of position and
+  # contaminate the perception signal.
+  enemy:
+    faction: soviet
+    cash: 0
+    bot_type: ''
+  # Offensive toolset: scout + strike. No build / no place — the
+  # capability is PERCEPTION + COMMITMENT, not production.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Re-decide the moment a corner fact surfaces (jeep enters
+  # vision) so the tank commit fires on the same decision step as
+  # the discovery — keeps the perception→action latency tight.
+  interrupts:
+    enemy_building_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 8000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare skill: BOTH corner facts are VISIBLE from turn 1 (the
+  # jeeps are pre-staged near each corner so the facts are inside
+  # jeep vision (~7 cells) from t=0). The agent only needs to read
+  # the observation, pick a corner, and commit the tanks. Stall
+  # still LOSES on the clock; the scout step is "passive" but the
+  # COMMIT step is what wins.
+  # max_turns 50 → reachable tick 4503 ≥ 2501 (after_ticks fail
+  # bites at turn ≈28, real reachable LOSS not a draw).
+  easy:
+    description: >
+      Two candidate enemy bases sit at the far east corners — NE
+      (110, 8) and SE (110, 32). Your 2 jeep scouts are PRE-STAGED
+      near each corner with both enemy bases already in line of
+      sight; your 4 medium tanks (2tnk) are pre-positioned at the
+      WEST staging (10, 20). EITHER fact you raze satisfies the
+      win — destroy whichever you reach first, before tick 2500,
+      losing at most 1 tank. Stalling at the staging point loses
+      on the clock; pure-scout (no tank commit) loses on the same
+      clock.
+    overrides:
+      actors:
+        # ── Agent: WEST staging at (10, 20). 4 medium tanks
+        # (stance:1 ReturnFire) sit at the staging cell; 2 jeep
+        # scouts are PRE-STAGED forward-near each corner so the
+        # corner facts are inside jeep vision from t=0 (jeep
+        # vision ~7 cells; jeep at (104, 8) sees fact at (110, 8)
+        # distance 6; jeep at (104, 32) sees fact at (110, 32)
+        # distance 6). Jeeps are stance:0 (HoldFire) — pure
+        # perception role; they don't auto-pull aggro from the
+        # corner pickets.
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        - {type: fact, owner: agent, position: [6, 20]}
+        - {type: jeep, owner: agent, position: [104, 8], stance: 0}
+        - {type: jeep, owner: agent, position: [104, 32], stance: 0}
+        # ── Enemy: a fact at EACH corner. Both place every seed
+        # (enemy actors don't honour spawn_point per CLAUDE.md);
+        # destroying EITHER satisfies the `any_of` win. Light e1
+        # picket (1× per corner) stance:0 — present as a "base"
+        # garrison so the corner reads as an objective without
+        # one-shot-killing the scout that confirms it.
+        - {type: fact, owner: enemy, position: [110, 8]}
+        - {type: e1,   owner: enemy, position: [108, 9], stance: 0}
+        - {type: fact, owner: enemy, position: [110, 32]}
+        - {type: e1,   owner: enemy, position: [108, 31], stance: 0}
+        # ── SENTINEL: persistent unarmed enemy fact at the far
+        # CENTRE-east edge so razing one corner fact cannot
+        # collapse the run to DRAW via engine auto-`done` before
+        # the win/fail predicate evaluates (CLAUDE.md
+        # ConquestVictoryConditions footgun).
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 110, y: 8, radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 110, y: 32, radius: 6, types: [fact]}
+        - {within_ticks: 2500}
+        - {units_lost_lte: 1}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2501}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: BOTH CORNERS ARE FOGGED. Jeeps now start
+  # AT the agent base (10, 20) instead of pre-staged forward — the
+  # corner facts are well outside the agents' starting vision (jeep
+  # vision ~7; distance from (10, 20) to (110, 8) is ~100). The
+  # intended play is to push ONE jeep NE (toward 110, 8) and ONE
+  # jeep SE (toward 110, 32) to confirm both corners; the model
+  # commits the tanks on the closer / first-confirmed corner.
+  # max_turns 50 → reachable tick 4503 ≥ 2501.
+  medium:
+    description: >
+      Two candidate enemy bases sit at the far east corners — NE
+      (110, 8) and SE (110, 32) — both FOGGED at start. You have 4
+      medium tanks (2tnk) and 2 jeep scouts at your WEST base
+      (10, 20). Push the jeeps toward BOTH candidate corners to
+      confirm where the enemy actually is, then commit the tanks
+      on a corner with an enemy construction yard. EITHER fact you
+      raze satisfies the win — finish before tick 2500, losing at
+      most 1 tank. Stalling at the base loses on the clock;
+      scouting without committing the tanks loses on the clock;
+      pre-committing the tanks blindly without scout confirmation
+      wastes the deadline if the chosen corner is the wrong one.
+    overrides:
+      actors:
+        # ── Agent: ALL units at the WEST base — must scout to see
+        # the corners (distance ~100 cells well outside jeep
+        # vision ~7).
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        - {type: fact, owner: agent, position: [6, 20]}
+        # Jeeps at the base — pre-positioned at the same staging
+        # latitude; the model must drive them to the corners to
+        # confirm the bases.
+        - {type: jeep, owner: agent, position: [12, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [12, 22], stance: 0}
+        # ── Enemy: corner facts + light pickets (same as easy).
+        # Both facts always place per engine semantics; either
+        # raze wins. Pickets stance:0 — non-aggressive, so the
+        # scout step is pure perception.
+        - {type: fact, owner: enemy, position: [110, 8]}
+        - {type: e1,   owner: enemy, position: [108, 9], stance: 0}
+        - {type: fact, owner: enemy, position: [110, 32]}
+        - {type: e1,   owner: enemy, position: [108, 31], stance: 0}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 110, y: 8, radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 110, y: 32, radius: 6, types: [fact]}
+        - {within_ticks: 2500}
+        - {units_lost_lte: 1}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2501}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven agent
+  # `spawn_point` groups round-robin the AGENT STAGE LATITUDE
+  # between NORTH (y=8 row) and SOUTH (y=32 row). The corner facts
+  # are unchanged (both always place per engine semantics), but the
+  # CLOSE corner alternates per seed AND a mid-lane e3 picket
+  # CURTAIN at x=85, y=14..26 makes cross-axis commits
+  # attritionally infeasible:
+  #   - NORTH spawn (y=8): on-axis to NE (110, 8) keeps the tank
+  #     column at y=8 (≥6 cells north of the curtain's northern
+  #     end at y=14), safe ON-AXIS commit.
+  #   - SOUTH spawn (y=32): on-axis to SE (110, 32) keeps the
+  #     column at y=32 (≥6 cells south of curtain's southern end
+  #     at y=26), safe ON-AXIS commit.
+  #   - Cross-axis (NORTH → SE or SOUTH → NE): the diagonal path
+  #     crosses x=85 inside the y=14..26 curtain envelope,
+  #     engages 2+ e3 at rocket range, and bleeds past the
+  #     units_lost_lte:1 cap → LOSS.
+  # The deadline is loosened slightly to 2700 ticks (vs 2500 on
+  # easy/medium) to admit the intended ON-axis commit; the
+  # geometric / attritional discrimination, not the clock, is the
+  # hard-tier tooth (a blind cross-axis commit busts the cap well
+  # before the deadline).
+  # Per CLAUDE.md every agent actor must declare a spawn_point or
+  # it is filtered out when ANY agent actor declares one; both
+  # spawn groups carry the same 4 tanks + 2 jeeps + fact at the
+  # matching latitude.
+  # max_turns 45 → reachable tick 4053 ≥ 2701.
+  hard:
+    description: >
+      Two candidate enemy bases sit at the far east corners — NE
+      (110, 8) and SE (110, 32) — both FOGGED at start. Your 4
+      medium tanks (2tnk), 2 jeep scouts, and base fact are
+      pre-positioned at your WEST staging — the staging LATITUDE
+      varies per seed (NORTH-leaning y=8 vs SOUTH-leaning y=32).
+      From a NORTH spawn the NE corner is the on-axis (safe)
+      reach; from a SOUTH spawn the SE corner is the on-axis
+      reach. Push BOTH jeeps to confirm BOTH corners, then commit
+      the tanks on the corner that is ON the same latitude band
+      as your own staging. A row of enemy rocket infantry holds
+      the middle (x≈85, y≈14..26) — the on-axis route bypasses
+      them, but a cross-axis commit (NORTH spawn → SE corner,
+      SOUTH spawn → NE corner) drives the tank column through
+      the rocket envelope and bleeds past the attrition cap.
+      EITHER fact you raze satisfies the win — finish before
+      tick 2700, losing at most 1 tank. Stalling loses on the
+      clock; a memorised "always strike one corner" loses on
+      the seed where that corner is the cross-axis target.
+    overrides:
+      actors:
+        # ── spawn_point 0: NORTH-LEANING staging at y=8. NE
+        # corner (110, 8) is the ON-AXIS reach (tank column
+        # travels along y=6..10, never enters the x=85 e3 curtain
+        # envelope at y=14..26). SE corner (110, 32) is the
+        # CROSS-AXIS reach (must descend through curtain or route
+        # around at heavy time/attrition cost).
+        - {type: 2tnk, owner: agent, position: [10, 6], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 7], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 9], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 10], stance: 1, spawn_point: 0}
+        - {type: fact, owner: agent, position: [6, 8], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [12, 7], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [12, 9], stance: 0, spawn_point: 0}
+        # ── spawn_point 1: SOUTH-LEANING staging at y=32. SE
+        # corner (110, 32) is the ON-AXIS reach; NE is CROSS-AXIS.
+        - {type: 2tnk, owner: agent, position: [10, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 31], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 33], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 34], stance: 1, spawn_point: 1}
+        - {type: fact, owner: agent, position: [6, 32], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [12, 31], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [12, 33], stance: 0, spawn_point: 1}
+        # ── Enemy: corner facts + light pickets (same composition
+        # as easy/medium — enemy layout is symmetric, only the
+        # agent's spawn latitude varies). Both facts always place
+        # per engine semantics (enemy actors don't honour
+        # spawn_point); the `any_of` win accepts either raze.
+        - {type: fact, owner: enemy, position: [110, 8]}
+        - {type: e1,   owner: enemy, position: [108, 9], stance: 0}
+        - {type: fact, owner: enemy, position: [110, 32]}
+        - {type: e1,   owner: enemy, position: [108, 31], stance: 0}
+        - {type: fact, owner: enemy, position: [124, 20]}
+        # ── MID-LANE INTERCEPTOR CURTAIN — hard-tier-only.
+        # A VERTICAL line of 7× e3 rocket infantry at x=85
+        # spanning y=14..26 stance:3 (AttackAnything). This is
+        # the GEOMETRIC tooth that makes the seed-driven near-
+        # corner choice load-bearing on hard:
+        #   - NORTH spawn → NE corner: tanks travel along y=8,
+        #     pass x=85 at y=8 (≥6 cells north of the curtain's
+        #     northern end at y=14), never inside the e3 rocket
+        #     envelope (~5 cells). Safe ON-AXIS commit.
+        #   - SOUTH spawn → SE corner: tanks travel along y=32,
+        #     pass x=85 at y=32 (≥6 cells south of curtain's
+        #     southern end at y=26). Safe ON-AXIS commit.
+        #   - NORTH spawn → SE corner OR SOUTH spawn → NE corner
+        #     (the CROSS-AXIS commit): the diagonal path crosses
+        #     x=85 inside the y=14..26 curtain or attempts to
+        #     route around — engages 2+ e3 at close rocket range
+        #     and busts the `units_lost_lte:1` cap. Without this
+        #     curtain both corners are reachable from either
+        #     spawn with no attrition cost and a memorised
+        #     "always strike NE" wins half the seeds without a
+        #     real direction read. WITH the curtain the agent
+        #     must IDENTIFY its OWN spawn latitude (from
+        #     observation) and commit to the LATITUDE-MATCHING
+        #     corner.
+        - {type: e3, owner: enemy, position: [85, 14], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 16], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 18], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 20], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 22], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 24], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 26], stance: 3}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 110, y: 8, radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 110, y: 32, radius: 6, types: [fact]}
+        - {within_ticks: 2700}
+        - {units_lost_lte: 1}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {units_lost_lte: 1}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 45
