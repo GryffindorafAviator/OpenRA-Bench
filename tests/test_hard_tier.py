@@ -152,6 +152,15 @@ UPGRADED = [
     # centre enemy squad (2× e3 + 4× e1) is symmetric across y=20 so
     # either spawn faces an equivalent focus-fire decision.
     "combat-focus-fire-priority",
+    # Wave-4 Group B secure-expand pack: defend base #1 (under a
+    # 2-grenadier `rusher` raid) WHILE deploying a fresh MCV at the
+    # eastern target region. Hard tier round-robins the fresh MCV's
+    # start latitude (NORTH (30,15) vs SOUTH (30,45)) per seed and
+    # the win clause accepts EITHER candidate target region (NE
+    # (130,15) or SE (130,45)), so the nearest-corner assignment
+    # flips per seed (an off-axis diagonal busts the tick budget
+    # and brushes the wrong-corner patrol).
+    "mfb-base-1-defend-base-2-build",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

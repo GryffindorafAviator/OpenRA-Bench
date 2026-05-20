@@ -1,0 +1,326 @@
+# mfb-base-1-defend-base-2-build — secure-expand under harass
+#
+# Group B Wave-4 pack. The agent already runs base #1 in the west
+# (fact + proc + tent + 3 HoldFire defenders) and a small Soviet
+# `rusher`-bot raiding force (2 grenadiers) is bearing down on base
+# #1. A fresh MCV is parked between base #1 and the east. The agent
+# must do BOTH IN PARALLEL:
+#   (a) hold base #1 — engage the grenadiers with the defenders so
+#       the `fact` survives;
+#   (b) drive the fresh MCV east and deploy it INSIDE the briefed
+#       target region so the second site lands where it adds capacity.
+#
+# Real-world anchor: secure-expand timing — defend the natural while
+# the new expansion stands up. Business-continuity capacity ramp: a
+# new site must come online WHILE the existing site remains under
+# operational disruption.
+#
+# Discrimination axes (the bar) — validated scripted at seed 1 (and
+# seeds 1..4 on hard):
+#   • STALL (only observe): the grenadier raid razes every base #1
+#     building inside ~20 turns → fail by `not has_building:fact`.
+#   • MCV-ONLY-EAST (only push the MCV east; ignore the raid): the
+#     MCV deploys east at ~turn 18 BUT the raid still razes base #1
+#     before/around the same window (defenders are HoldFire, can't
+#     auto-engage) → `not has_building:fact` AND/OR
+#     `not own_units_gte:1` fires → LOSS at ~turn 20.
+#   • ALL-DEFEND (engage the raid but never deploy): base #1
+#     survives intact but the second `fact` never appears → the win
+#     clause is unsatisfiable → clock kills the run → fail by
+#     `after_ticks`. LOSS.
+#   • INTENDED SPLIT (defenders engage the raiders; MCV drives east
+#     and deploys inside the target region): both clauses fire
+#     before the deadline → WIN at ~turn 20.
+#
+# Why `rusher` + `e3` (grenadier) and MCV at x=30:
+#   - `patrol` bot units oscillate around their spawn and rarely
+#     actually close on the agent's building — base #1 stays alive
+#     even on stall, collapsing the no-cheat seal (mcv-only-east
+#     would still satisfy the win predicate at turn ~10 while base
+#     #1 is intact).
+#   - `rusher` bot units commit toward the agent's nearest mass; the
+#     2 grenadiers walk straight into base #1.
+#   - `e3` (grenadier) has high anti-building damage so the fact
+#     dies in ~17-20 turns of unopposed chip, faster than any
+#     mcv-only-east deploy can both arrive and end the episode.
+#   - The fresh MCV starts at (30,30) (close to base #1 but with
+#     ~100 cells of east travel) so the MCV-only-east speedrun takes
+#     ~18 turns — by which time the raid has razed base #1. An MCV
+#     parked at the map center (x=80) would deploy in ~10 turns
+#     before the raid completes, breaking the discrimination.
+#
+# Engine footguns applied here (CLAUDE.md):
+#   • Map is the generator-spec `{generator: arena, width:160,
+#     height:60, cordon:4}` so the playable rectangle is (4..155,
+#     4..55). Every actor cell sits inside.
+#   • Defenders are stance:0 (HoldFire). An `attack_unit` order from
+#     the agent is required to engage the raiders; the stall policy
+#     therefore cannot accidentally win.
+#   • The fresh MCV uses the Wave-2 `deploy` fix
+#     (openra_bench/tests/test_mcv_deploy.py): scenario actor
+#     `{type: mcv}` + `Command.deploy([mcv_id])` removes the MCV and
+#     creates an agent-owned `fact` at offset (mcv_x-1, mcv_y-1).
+#     The win predicate `building_in_region: {type:fact}` covers the
+#     deployed `fact` (no need to also build other structures).
+#   • A persistent UNARMED enemy `fact` marker is placed in the far
+#     SE corner so the engine does not auto-`done` when the raid
+#     finishes — guarantees LOSS-not-DRAW on a deadline timeout
+#     (CLAUDE.md auto-done footgun).
+#   • Hard tier uses two agent `spawn_point` groups for the FRESH MCV
+#     (NE-leaning vs SE-leaning); per the spawn-filter rule, every
+#     OTHER agent actor (base #1's fact/proc/tent + the 3 defenders)
+#     is DUPLICATED across both spawn groups at identical coords so
+#     it is not filtered out.
+#   • `within_ticks: 6300` is reachable: max tick at
+#     `max_turns = 72` is `93 + 90·71 = 6483 > 6300` ✓.
+#     Medium tightens to 4500 (max_turns=56 → 4983 > 4500 ✓).
+#     Hard tightens to 5400 (max_turns=64 → 5763 > 5400 ✓).
+
+meta:
+  id: mfb-base-1-defend-base-2-build
+  title: 'Secure-Expand — Defend Base #1 While Base #2 Stands Up'
+  capability: reasoning
+  real_world_meaning: >
+    Multi-front operations under disruption: a live production site is
+    being probed while a second site has to come online elsewhere. The
+    decision is not "defend OR expand" but "do BOTH IN PARALLEL" —
+    keep the live site's key building alive (engage the probe with
+    the on-site defenders) AND get the spare base-builder to the
+    briefed expansion region and stand the new site up there. A
+    single-track policy (only defend / only expand) loses either the
+    base or the deadline.
+  robotics_analogue: >
+    Operations continuity during a fleet expansion: an autonomous
+    site is under low-grade attack while a mobile platform is en
+    route to anchor a second forward base at a designated region.
+    Two crews working in parallel — site security on the live FOB,
+    transit-and-anchor on the new one — beats either crew solo.
+  benchmark_anchor:
+    - "SC2 secure-expand timing"
+    - "MicroRTS expand-vs-defend tradeoff"
+    - "BCP capacity ramp during operational disruption"
+    - "site-B build while site-A operational"
+  author: openra-bench
+
+# Pack-level base_map is the sentinel `rush-hour-arena` so the loader
+# can map-resolve before per-level overrides materialise the actual
+# generator-spec arena .oramap (same pattern as mcv-deploy-third-base,
+# mid-concede-vs-hold, etc.).
+base_map: rush-hour-arena
+
+starting_cash: 0
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: rusher}
+  tools: [observe, deploy, move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 8000}
+  # Every level supplies its own actor list via overrides so the
+  # per-tier patrol density + spawn variation is audit-explicit.
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare skill: a 2-grenadier `rusher`-bot raid on base #1 + a
+  # generous clock. The intended split (defenders engage; MCV drives
+  # east and deploys at (130,30)) wins. Stall (no defender orders)
+  # loses because the grenadiers raze the fact. MCV-only-east loses
+  # because the raid completes around the same time the MCV deploys
+  # (the fact is razed). All-defend wins base #1 but never spawns a
+  # 2nd fact → clock kills it.
+  # max_turns 72 → reachable tick 93 + 90·71 = 6483 > 6300 ✓.
+  easy:
+    description: >
+      You hold base #1 in the WEST: a Construction Yard `fact` at
+      (15,30), a refinery `proc` at (18,30), a barracks `tent` at
+      (15,33), and 3 riflemen defenders nearby on HOLD-FIRE. Two
+      Soviet grenadiers are bearing down on base #1 from the east
+      (they spawn at ~(22,30) and the `rusher` enemy bot commits
+      them at your nearest mass). A fresh MCV is parked partway
+      east of base #1 at (30,30). Your job is BOTH: (a) hold base
+      #1 — order your defenders (HoldFire — they will NOT engage on
+      their own) to attack the grenadiers; (b) drive the fresh MCV
+      east and DEPLOY it inside the target region centered at
+      (130,30), radius 8. WIN when you own a `fact`, own ≥2 `fact`s
+      in total, ≥1 of them sits inside the eastern target region,
+      and you still have at least one unit alive — before tick
+      6300. Stalling, only-expanding (the raid razes base #1), and
+      only-defending (the 2nd fact never appears) all LOSE.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-base-1-defend-base-2-build-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # Base #1 (WEST).
+        - {type: fact, owner: agent, position: [15, 30]}
+        - {type: proc, owner: agent, position: [18, 30]}
+        - {type: tent, owner: agent, position: [15, 33]}
+        # 3 rifleman defenders, HOLD-FIRE (stance:0). The agent must
+        # order them onto the raiders — they will not auto-engage.
+        - {type: e1, owner: agent, position: [13, 28], stance: 0}
+        - {type: e1, owner: agent, position: [13, 30], stance: 0}
+        - {type: e1, owner: agent, position: [13, 32], stance: 0}
+        # Fresh MCV staged partway east of base #1 (~100 cells from
+        # the east target region), so an mcv-only-east speedrun
+        # takes long enough for the raid to raze base #1.
+        - {type: mcv, owner: agent, position: [30, 30]}
+        # Two grenadier raiders. `rusher` bot (declared on
+        # `base.enemy`) commits them at the agent's nearest mass —
+        # they walk straight into base #1.
+        - {type: e3, owner: enemy, position: [22, 30], stance: 3, count: 2}
+        # Persistent unarmed enemy marker (anti auto-done) — far SE
+        # of every agent predicate so it never satisfies anything.
+        - {type: fact, owner: enemy, position: [154, 54]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - building_count_gte: {type: fact, n: 2}
+        - building_in_region:
+            {x: 130, y: 30, radius: 8, type: fact, count: 1}
+        - own_units_gte: 1
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {has_building: fact}
+        - not: {own_units_gte: 1}
+    max_turns: 72
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: tighter clock (4500 ticks). The raid
+  # composition stays the same — 2 grenadier raiders on the `rusher`
+  # bot — so the same intended split wins, but the failure modes
+  # lose faster (no slack for indirection / replan).
+  # max_turns 56 → reachable tick 93 + 90·55 = 5043 > 4500 ✓.
+  medium:
+    description: >
+      Same secure-expand setup, tighter clock. Two Soviet grenadiers
+      raid base #1 from ~(22,30); the `rusher` enemy bot commits
+      them at base #1. The fresh MCV is staged at (30,30). Same
+      target region (130,30) radius 8. WIN when you own a fact,
+      own ≥2 facts, ≥1 of them is inside the eastern target region,
+      and you have ≥1 unit alive — before tick 4500. Stall, MCV-
+      only-east, and all-defend all LOSE.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-base-1-defend-base-2-build-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        - {type: fact, owner: agent, position: [15, 30]}
+        - {type: proc, owner: agent, position: [18, 30]}
+        - {type: tent, owner: agent, position: [15, 33]}
+        - {type: e1, owner: agent, position: [13, 28], stance: 0}
+        - {type: e1, owner: agent, position: [13, 30], stance: 0}
+        - {type: e1, owner: agent, position: [13, 32], stance: 0}
+        - {type: mcv, owner: agent, position: [30, 30]}
+        # Same 2 grenadier raid as easy.
+        - {type: e3, owner: enemy, position: [22, 30], stance: 3, count: 2}
+        - {type: fact, owner: enemy, position: [154, 54]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - building_count_gte: {type: fact, n: 2}
+        - building_in_region:
+            {x: 130, y: 30, radius: 8, type: fact, count: 1}
+        - own_units_gte: 1
+        - within_ticks: 4500
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {has_building: fact}
+        - not: {own_units_gte: 1}
+    max_turns: 56
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. TWO seed-driven spawn_point groups for the FRESH MCV
+  #      (NORTH-staging (30,15) → target NE (130,15), vs
+  #      SOUTH-staging (30,45) → target SE (130,45)). The win
+  #      clause is an `any_of` over the two candidate regions so
+  #      EITHER landing counts — but cross-map diagonal blows the
+  #      tick budget AND walks the MCV through the off-axis east
+  #      patrol.
+  #   2. A SECOND patrol on each east lane (one NE probe at
+  #      (110,15) and one SE probe at (110,45)). With the home-side
+  #      raid also unchanged (2 grenadiers), there are 4 total
+  #      enemy units on the map and the discrimination is finer.
+  # max_turns 64 → reachable tick 93 + 90·63 = 5763 > 5400 ✓.
+  hard:
+    description: >
+      Same secure-expand task under richer pressure. The home-side
+      raid is 2 grenadiers at ~(22,30) on the `rusher` bot. Your
+      base #1 garrison (fact at (15,30), proc, tent, 3 HoldFire
+      riflemen) is FIXED across seeds. The FRESH MCV's start
+      latitude varies by seed — it stages at the NORTH (30,15) on
+      one set of seeds and at the SOUTH (30,45) on the other.
+      There are TWO candidate eastern target regions (NE at
+      (130,15) and SE at (130,45), each radius 8) — either landing
+      wins, but you should pick the one NEAREST your MCV (the
+      wrong-corner diagonal busts the deadline AND brushes the
+      off-axis east patrol). WIN when you own a fact, own ≥2
+      facts, ≥1 of them sits inside EITHER eastern target region,
+      and you have ≥1 unit alive — before tick 5400. Stall, MCV-
+      only-east, and all-defend all LOSE.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-base-1-defend-base-2-build-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # Base #1 is fixed for both seed groups: every garrison
+        # actor is duplicated across spawn_point 0 AND 1 at the
+        # SAME coords (per the spawn-filter rule in CLAUDE.md —
+        # once any agent actor declares spawn_point, anything
+        # without one is filtered out).
+        - {type: fact, owner: agent, position: [15, 30], spawn_point: 0}
+        - {type: proc, owner: agent, position: [18, 30], spawn_point: 0}
+        - {type: tent, owner: agent, position: [15, 33], spawn_point: 0}
+        - {type: e1, owner: agent, position: [13, 28], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [13, 30], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [13, 32], stance: 0, spawn_point: 0}
+        - {type: fact, owner: agent, position: [15, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [18, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [15, 33], spawn_point: 1}
+        - {type: e1, owner: agent, position: [13, 28], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [13, 30], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [13, 32], stance: 0, spawn_point: 1}
+        # FRESH MCV staging varies by seed (NORTH vs SOUTH).
+        - {type: mcv, owner: agent, position: [30, 15], spawn_point: 0}
+        - {type: mcv, owner: agent, position: [30, 45], spawn_point: 1}
+        # Home-side raid (the rusher bot commits these on the agent
+        # mass) — 2 grenadiers, same as easy/medium.
+        - {type: e3, owner: enemy, position: [22, 30], stance: 3, count: 2}
+        # Two east-lane patrols, one at each candidate region. They
+        # are LIGHT (single rifleman each) so the NEAREST-corner
+        # play still completes — but a wrong-corner diagonal walks
+        # the MCV right through the off-axis east patrol.
+        - {type: e1, owner: enemy, position: [110, 15], stance: 2}
+        - {type: e1, owner: enemy, position: [110, 45], stance: 2}
+        # Persistent unarmed enemy marker (anti auto-done).
+        - {type: fact, owner: enemy, position: [154, 54]}
+    win_condition:
+      all_of:
+        - has_building: fact
+        - building_count_gte: {type: fact, n: 2}
+        - any_of:
+            - building_in_region:
+                {x: 130, y: 15, radius: 8, type: fact, count: 1}
+            - building_in_region:
+                {x: 130, y: 45, radius: 8, type: fact, count: 1}
+        - own_units_gte: 1
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {has_building: fact}
+        - not: {own_units_gte: 1}
+    max_turns: 64
