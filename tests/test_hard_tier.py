@@ -324,13 +324,6 @@ UPGRADED = [
     # relative-to-base placement that lands in the same world cell on
     # every seed cannot generalise.
     "def-tower-line-vs-cluster",
-    # Wave-5 Group F cash-reserve / treasury management pack (SC2 cash
-    # overflow / financial runway / operational reserve anchor). Hard
-    # tier defines two agent spawn_point groups (NORTH base y=14 /
-    # SOUTH base y=28) round-robined by seed; the two near patches
-    # sit on the spawn-matched row so throughput is symmetric per
-    # spawn, but a memorised opening cannot generalise across seeds.
-    "econ-cash-reserve-management",
     # Wave-5 Group F cash-bar-by-deadline pack (SC2 econ-by-tick /
     # budget-by-date / fundraising milestone / OR throughput-with-
     # deadline anchor). Hard tier defines two agent spawn_point groups
@@ -359,6 +352,13 @@ UPGRADED = [
     "coord-diversionary-attack",
     "def-in-depth",
     "def-surprise-flank-react",
+    # Wave-5 Group F cash-reserve / treasury management pack (SC2 cash
+    # overflow / financial runway / operational reserve anchor). Hard
+    # tier defines two agent spawn_point groups (NORTH base y=14 /
+    # SOUTH base y=28) round-robined by seed; the two near patches
+    # sit on the spawn-matched row so throughput is symmetric per
+    # spawn, but a memorised opening cannot generalise across seeds.
+    "econ-cash-reserve-management",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
