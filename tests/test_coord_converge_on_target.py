@@ -1,12 +1,15 @@
 """coord-converge-on-target — triple-prong convergent attack.
 
 The bar: intended THREE-PRONG converge (all three squads driven onto
-the objective fact at ~100,20 simultaneously) WINS on every level and
-every hard seed (1..4). STALL (only observe), SINGLE-SQUAD-N (only the
-north squad attacks while the other two stand still), and TWO-SQUADS
-(north + south only — the west / east third squad stands still) all
-LOSE on every level and every hard seed. Non-win is a real reachable
-timeout LOSS via the `after_ticks` fail clause (force-wipe also fails).
+the objective fact at ~100,20) WINS on every level and every hard seed
+(1..4). STALL (only observe), SINGLE-SQUAD-N (only the north squad
+attacks while the other two stand still), and TWO-SQUADS (north +
+south only — the west / east third squad stands still) all LOSE on
+every level and every hard seed: the win predicate requires all 9
+tanks inside the objective region (n=9), so a stall delivers 0, a
+single squad 3, a two-squad attempt 6 — none reaches the threshold.
+Non-win is a real reachable timeout LOSS via the `after_ticks` fail
+clause (force-wipe also fails).
 
 Validation is scripted (no model / network).
 """
@@ -86,12 +89,12 @@ def test_predicates_easy_medium_hard():
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
-        # WIN: ≥6 tanks inside (100,20,r=8) AND fact destroyed AND in budget.
-        win_units = _tanks_at(100, 20, 6) + _tanks_at(10, 20, 3, base_id=2000)
+        # WIN: all 9 tanks inside (100,20,r=8) AND fact destroyed AND in budget.
+        win_units = _tanks_at(100, 20, 9)
         assert evaluate(
             c.win_condition,
             _ctx(units=win_units, tick=4000, fact_destroyed=True),
-        ), f"{lvl}: 6-in-region + fact destroyed must WIN"
+        ), f"{lvl}: 9-in-region + fact destroyed must WIN"
 
         # Fact NOT destroyed → not a win even with tanks in region.
         assert not evaluate(
@@ -99,12 +102,12 @@ def test_predicates_easy_medium_hard():
             _ctx(units=win_units, tick=4000, fact_destroyed=False),
         )
 
-        # Only 5 tanks in region (one short of n=6) → not a win.
-        five_in = _tanks_at(100, 20, 5) + _tanks_at(10, 20, 4, base_id=2000)
+        # Only 6 tanks in region (a two-squad converge) → not a win.
+        six_in = _tanks_at(100, 20, 6) + _tanks_at(10, 20, 3, base_id=2000)
         assert not evaluate(
             c.win_condition,
-            _ctx(units=five_in, tick=4000, fact_destroyed=True),
-        ), f"{lvl}: 5-in-region must not WIN (n=6 threshold)"
+            _ctx(units=six_in, tick=4000, fact_destroyed=True),
+        ), f"{lvl}: 6-in-region must not WIN (n=9 threshold)"
 
         # Past deadline → not a win.
         assert not evaluate(
@@ -153,11 +156,13 @@ def test_hard_has_two_spawn_point_groups():
     assert len(groups) >= 2, f"hard needs ≥2 spawn_point groups, got {groups}"
 
 
-def test_guard_bot_and_e3_cluster():
+def test_guard_bot_and_garrison_cluster():
     """The enemy must be the `guard` scripted bot (leashed defender)
-    and the cluster must be e3 rocket-infantry (anti-tank Dragon) —
-    these together make any single squad's frontal commit costly,
-    so a 3-prong convergence is required to win the trade."""
+    and the objective must carry a rifle-infantry (e1) garrison — the
+    thematic defended construction yard. The n=9 region threshold,
+    not attrition, is what makes a 3-prong convergence load-bearing
+    (a single or two-squad attempt cannot field 9 tanks at the
+    objective)."""
     pack = load_pack(PACK_PATH)
     enemy = pack.base.get("enemy") if isinstance(pack.base, dict) else None
     assert enemy is not None
@@ -166,7 +171,7 @@ def test_guard_bot_and_e3_cluster():
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
         types = [a.type for a in c.scenario.actors if a.owner == "enemy"]
-        assert "e3" in types, f"{lvl}: cluster must be e3 rocket infantry"
+        assert "e1" in types, f"{lvl}: garrison must be e1 rifle infantry"
         assert "fact" in types, f"{lvl}: objective must include enemy fact"
 
 
@@ -198,25 +203,23 @@ def test_objective_fact_and_sentinel_present():
 def test_guard_count_per_level():
     """Difficulty axis: easy 3 guards (distributed), medium 4 (one
     per cardinal face), hard 4 + seed-driven agent spawn variation.
-    The discrimination on medium / hard is tighter than on easy: a
-    single squad alone is destroyed in every tier; a two-squad
-    converge destroys the fact but trades the strike force out on
-    medium / hard (cardinal cover); only the three-prong meets the
-    n=6 region threshold."""
+    Across every tier the n=9 region threshold is what discriminates:
+    a stall delivers 0 tanks, a single squad 3, a two-squad attempt
+    6 — only a full three-prong convergence delivers all 9."""
     pack = load_pack(PACK_PATH)
     expected = {"easy": 3, "medium": 4, "hard": 4}
     for lvl, want in expected.items():
         c = compile_level(pack, lvl)
-        n_e3 = sum(
-            1 for a in c.scenario.actors if a.owner == "enemy" and a.type == "e3"
+        n_e1 = sum(
+            1 for a in c.scenario.actors if a.owner == "enemy" and a.type == "e1"
         )
-        assert n_e3 == want, f"{lvl}: expected {want} guards, got {n_e3}"
+        assert n_e1 == want, f"{lvl}: expected {want} guards, got {n_e1}"
 
 
 def test_three_agent_squads_per_spawn():
     """Every spawn group must place 3 squads of 3× 2tnk each (9 tanks
-    total) so the n=6 region clause requires a true 3-prong converge
-    (a 2-prong with full attrition cannot reach 6 inside the region)."""
+    total) so the n=9 region clause requires a true 3-prong converge
+    (a 2-prong delivers only 6 tanks, short of the threshold)."""
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
@@ -273,9 +276,9 @@ def _by_squad(rs):
 
 def _single_squad_n(rs, Command):
     """Only the NORTH squad attack-moves onto the objective; the other
-    two squads stand still. Three tanks vs the guard cluster (3 / 6 /
-    8 by tier) lose the trade — fact never falls and/or the attacking
-    squad is wiped (≤3 of 9 in region < n=6). LOSS."""
+    two squads stand still. Three tanks reach the objective region
+    but 3 of 9 < n=9, so the convergence threshold is never met.
+    LOSS (real timeout)."""
     north, _south, _flank = _by_squad(rs)
     cmds = []
     for t in north:
@@ -285,10 +288,9 @@ def _single_squad_n(rs, Command):
 
 def _two_squads(rs, Command):
     """NORTH + SOUTH squads attack-move onto the objective; the
-    lateral (WEST or EAST) squad stands still. 6 tanks vs the cluster
-    are still defeated under heavier defender density (medium 6
-    guards, hard 8) and the surviving in-region count drops below
-    n=6. LOSS."""
+    lateral (WEST or EAST) squad stands still. 6 tanks reach the
+    objective region but 6 of 9 < n=9, so the convergence threshold
+    is never met. LOSS (real timeout)."""
     north, south, _flank = _by_squad(rs)
     cmds = []
     for t in north + south:
@@ -298,10 +300,9 @@ def _two_squads(rs, Command):
 
 def _intended_three_prong(rs, Command):
     """All three squads attack-move directly onto the objective fact at
-    (100,20). 9 tanks converging on the guard cluster (3 / 6 / 8 e3
-    defenders) overwhelm by mass: at least 6 of the 9 tanks survive
-    inside the (100,20,r=8) region while the cluster + fact fall.
-    WIN on every tier and every seed."""
+    (100,20). All 9 tanks converge inside the (100,20,r=8) region and
+    raze the fact; the n=9 region threshold is met. WIN on every tier
+    and every seed."""
     cmds = []
     for t in _of_type(rs, {"2tnk"}):
         cmds.append(Command.attack_move([str(t["id"])], 100, 20))
@@ -338,13 +339,12 @@ def test_stall_loses(level, seed):
     )
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_single_squad_north_loses(level, seed):
-    """Single north squad alone vs the guard cluster must LOSE on
-    medium (6 guards) and hard (8 guards). Easy with only 3 guards
-    may occasionally let a single squad squeak through; the
-    discrimination tier is medium+."""
+    """Single north squad (3 tanks) must LOSE on every tier: 3 of 9
+    in the objective region is short of the n=9 convergence
+    threshold, so the episode times out as a real LOSS."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
@@ -352,27 +352,27 @@ def test_single_squad_north_loses(level, seed):
     r = run_level(c, _single_squad_n, seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed={seed}: single-squad north must LOSE "
-        f"(3 tanks vs guard cluster), got {r.outcome} "
+        f"(3 of 9 tanks in region < n=9), got {r.outcome} "
         f"(lost={r.signals.units_lost}, "
         f"bldgs={r.signals.enemy_buildings_destroyed_types})"
     )
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_two_squads_loses(level, seed):
     """Two squads (north + south) without the third must LOSE on
-    medium (6 guards) and hard (8 guards) — 6 tanks vs the cluster
-    trade out and the surviving in-region count drops below n=6 (or
-    the fact never falls)."""
+    every tier — 6 of 9 tanks in the objective region is short of
+    the n=9 convergence threshold, so the episode times out as a
+    real LOSS."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
     r = run_level(c, _two_squads, seed=seed)
     assert r.outcome == "loss", (
-        f"{level} seed={seed}: two-squad converge must LOSE on "
-        f"medium/hard (defender density overwhelms 6 tanks), "
-        f"got {r.outcome} (lost={r.signals.units_lost}, "
+        f"{level} seed={seed}: two-squad converge must LOSE "
+        f"(6 of 9 tanks in region < n=9), got {r.outcome} "
+        f"(lost={r.signals.units_lost}, "
         f"bldgs={r.signals.enemy_buildings_destroyed_types})"
     )
