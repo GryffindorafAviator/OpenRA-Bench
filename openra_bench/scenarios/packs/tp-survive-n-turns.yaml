@@ -72,8 +72,9 @@
 #     y=28) so a single memorised hold cell cannot generalise; the
 #     base fact/powr are duplicated across both groups (any agent
 #     actor declaring spawn_point filters out unspawned agent
-#     actors). Enemy actors do NOT honour spawn_point, so the rush
-#     bands at both latitudes place every seed.
+#     actors). The rusher band sits on the CENTRAL lane (y≈20),
+#     equidistant from both base spawn latitudes, so the
+#     stall-vs-hold discrimination is seed-symmetric.
 
 meta:
   id: tp-survive-n-turns
@@ -144,8 +145,8 @@ levels:
       You hold a fixed force — 6 medium tanks (2tnk), a construction
       yard (fact) and a power plant (powr) at your west base. Enemy
       rifle infantry charge your base in waves: one at the start and
-      a second around turn 10. There is NO objective to attack —
-      just SURVIVE. To WIN you must, once tick 2700 has elapsed,
+      two reinforcement waves across the game. There is NO objective
+      to attack — just SURVIVE. To WIN you must, once tick 2700 has elapsed,
       STILL have your construction yard standing AND at least 4 of
       your own units alive (survive until tick 3600). Keep your
       tanks clustered on the construction yard and focus-fire each
@@ -174,16 +175,31 @@ levels:
         # episode alive past the last rusher death so the survival
         # gate is evaluated.
         - {type: fact, owner: enemy, position: [124, 20]}
-    # ONE scheduled reinforcement wave — the pressure is SUSTAINED,
-    # not one-shot. Spawned actors get fresh ids and charge the
-    # agent mass like the opening wave.
-    scheduled_events:
-      - tick: 900
-        type: spawn_actors
-        actors:
-          - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
+      # TWO scheduled reinforcement waves — the pressure is
+      # SUSTAINED, not one-shot. Spawned actors get fresh ids and
+      # charge the agent mass like the opening wave. NOTE: the
+      # scheduled_events block MUST sit inside `overrides:` — at the
+      # level root the loader silently drops it (this was a latent
+      # defect: the waves never fired). With the waves now firing,
+      # two of them restore the cumulative pressure the engine
+      # balance fixes drained: a single wave let the unmanaged
+      # Defend-stance cluster clear everything and a stall WON for
+      # free. Spread (stall) fire now falls behind and the fact is
+      # razed before the survival gate, while focused fire (the
+      # intended hold) clears each wave in time.
+      scheduled_events:
+        - tick: 600
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
     win_condition:
       all_of:
         - {building_count_gte: {type: fact, n: 1}}
@@ -202,17 +218,17 @@ levels:
     max_turns: 45
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 controlled variable: HEAVIER sustained pressure (rifle+rocket
-  # mix, TWO scheduled waves) and a longer hold (T=3600, ~turn 41).
-  # N stays at 4 of 6. max_turns 55 → reachable tick 93 + 90·54 =
-  # 4953 > the within_ticks 4500 band and the after_ticks 4501 fail.
+  # +1 controlled variable: HEAVIER sustained pressure (TWO scheduled
+  # rifle waves) and a longer hold (T=3600, ~turn 41). N stays at 4
+  # of 6. max_turns 55 → reachable tick 93 + 90·54 = 4953 > the
+  # within_ticks 4500 band and the after_ticks 4501 fail.
   medium:
     description: >
       Same fixed force — 6 medium tanks (2tnk), a construction yard
       (fact) and a power plant (powr). The waves are heavier now:
-      rifle infantry AND rocket soldiers charge in three pulses —
-      one at the start and two more across the game. There is NO
-      objective to attack — just SURVIVE. To WIN you must, once tick
+      rifle infantry charge in three pulses — one at the start and
+      two more across the game. There is NO objective to attack —
+      just SURVIVE. To WIN you must, once tick
       3600 has elapsed, STILL have your construction yard standing
       AND at least 4 of your own units alive (survive until tick
       4500). Hold the tank cluster on the construction yard and
@@ -228,29 +244,34 @@ levels:
         - {type: 2tnk, owner: agent, position: [16, 18], stance: 2}
         - {type: 2tnk, owner: agent, position: [16, 20], stance: 2}
         - {type: 2tnk, owner: agent, position: [16, 22], stance: 2}
-        # Opening wave — rifle + rocket mix.
+        # Opening wave — rifle infantry. The e3 rocket soldiers were
+        # removed after the engine balance fixes: rockets carry a
+        # building-damage bonus and razed the fact even under
+        # focused fire, so the intended hold could not WIN. Pure e1
+        # rifle pressure preserves the discrimination — spread
+        # (stall) fire loses the fact, focused (hold) fire holds it.
         - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
         - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
         - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
-        - {type: e3, owner: enemy, position: [66, 20], stance: 3, count: 2}
         - {type: fact, owner: enemy, position: [124, 20]}
-    # TWO scheduled reinforcement waves — sustained pressure across
-    # the whole window.
-    scheduled_events:
-      - tick: 1000
-        type: spawn_actors
-        actors:
-          - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
-          - {type: e3, owner: enemy, position: [66, 20], stance: 3, count: 2}
-      - tick: 2200
-        type: spawn_actors
-        actors:
-          - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
-          - {type: e3, owner: enemy, position: [66, 20], stance: 3, count: 2}
+      # TWO scheduled reinforcement waves — sustained pressure
+      # across the whole window. Block sits inside `overrides:` (the
+      # loader drops it at the level root). Pure e1 (no e3) for the
+      # same reason as the opening wave: rocket soldiers raze the
+      # fact even under focused fire and collapse the bar.
+      scheduled_events:
+        - tick: 1000
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
+        - tick: 2200
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
     win_condition:
       all_of:
         - {building_count_gte: {type: fact, n: 1}}
@@ -267,23 +288,25 @@ levels:
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 controlled variable: 2 seed-driven spawn_point groups (NORTH
   # y=12 / SOUTH y=28) so a single memorised hold cell cannot
-  # generalise, plus the longest hold (T=4500, ~turn 51) and three
+  # generalise, plus the longest hold (T=4500, ~turn 51) and five
   # scheduled reinforcement waves. N stays 4 of 6. The base fact +
   # powr are duplicated across BOTH spawn groups (any agent actor
   # declaring spawn_point filters out unspawned agent actors). The
-  # rusher bands at both latitudes place every seed (enemy actors
-  # do not honour spawn_point); the rusher bot charges the agent
-  # mass so whichever latitude the base occupies catches the
-  # converging bands. max_turns 65 → reachable tick 93 + 90·64 =
-  # 5853 > the within_ticks 5400 band and the after_ticks 5401 fail.
+  # rusher band sits on the CENTRAL lane (y≈20) — equidistant from
+  # both base spawn latitudes so the discrimination is seed-
+  # symmetric (the rusher bot charges the agent mass regardless of
+  # which latitude the base occupies). max_turns 65 → reachable
+  # tick 93 + 90·64 = 5853 > the within_ticks 5400 band and the
+  # after_ticks 5401 fail.
   hard:
     description: >
       Same fixed force — 6 medium tanks (2tnk), a construction yard
       (fact) and a power plant (powr) — but your base stages from a
       seed-chosen latitude (NORTH or SOUTH); a single memorised hold
-      cell cannot generalise. Rifle and rocket waves charge in from
-      both latitudes throughout the game. There is NO objective to
-      attack — just SURVIVE. To WIN you must, once tick 4500 has
+      cell cannot generalise. Rifle waves charge in from the central
+      lane throughout the game — one opening wave and five
+      reinforcement waves. There is NO objective to attack — just
+      SURVIVE. To WIN you must, once tick 4500 has
       elapsed, STILL have your construction yard standing AND at
       least 4 of your own units alive (survive until tick 5400).
       Hold the tank cluster on the construction yard and focus each
@@ -308,50 +331,60 @@ levels:
         - {type: 2tnk, owner: agent, position: [16, 26], stance: 2, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [16, 28], stance: 2, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [16, 30], stance: 2, spawn_point: 1}
-        # ── Opening rusher bands at BOTH latitudes (enemy actors do
-        # not honour spawn_point — both place every seed). The rusher
-        # bot charges the agent mass, so whichever latitude the base
-        # occupies catches the converging bands.
-        - {type: e1, owner: enemy, position: [64, 12], stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [64, 11], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [64, 13], stance: 3, count: 3}
-        - {type: e3, owner: enemy, position: [66, 12], stance: 3, count: 2}
-        - {type: e1, owner: enemy, position: [64, 28], stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [64, 27], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [64, 29], stance: 3, count: 3}
-        - {type: e3, owner: enemy, position: [66, 28], stance: 3, count: 2}
+        # ── Opening rusher band on the CENTRAL lane (y=19..21), the
+        # map mid-latitude — equidistant from BOTH the north (y=12)
+        # and south (y=28) base spawns so the discrimination is
+        # seed-symmetric. After the engine balance fixes, two
+        # converging bands (the old north+south layout) scaled the
+        # pressure non-linearly and seed-asymmetrically: the
+        # intended hold won on one spawn and lost on the other.
+        # A single central band charges whichever base latitude is
+        # chosen at an equal reach. Pure e1 rifle (no e3 rockets —
+        # rockets raze the fact even under focused fire).
+        - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 3}
         # Inert enemy `fact` marker far east (anti-DRAW).
         - {type: fact, owner: enemy, position: [124, 20]}
-    # THREE scheduled reinforcement waves at BOTH latitudes —
-    # sustained pressure across the whole 4500-tick hold.
-    scheduled_events:
-      - tick: 1100
-        type: spawn_actors
-        actors:
-          - {type: e1, owner: enemy, position: [64, 12], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 13], stance: 3, count: 3}
-          - {type: e3, owner: enemy, position: [66, 12], stance: 3, count: 2}
-          - {type: e1, owner: enemy, position: [64, 28], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 29], stance: 3, count: 3}
-          - {type: e3, owner: enemy, position: [66, 28], stance: 3, count: 2}
-      - tick: 2300
-        type: spawn_actors
-        actors:
-          - {type: e1, owner: enemy, position: [64, 12], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 13], stance: 3, count: 3}
-          - {type: e3, owner: enemy, position: [66, 12], stance: 3, count: 2}
-          - {type: e1, owner: enemy, position: [64, 28], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 29], stance: 3, count: 3}
-          - {type: e3, owner: enemy, position: [66, 28], stance: 3, count: 2}
-      - tick: 3500
-        type: spawn_actors
-        actors:
-          - {type: e1, owner: enemy, position: [64, 12], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 13], stance: 3, count: 3}
-          - {type: e3, owner: enemy, position: [66, 12], stance: 3, count: 2}
-          - {type: e1, owner: enemy, position: [64, 28], stance: 3, count: 4}
-          - {type: e1, owner: enemy, position: [64, 29], stance: 3, count: 3}
-          - {type: e3, owner: enemy, position: [66, 28], stance: 3, count: 2}
+      # FIVE scheduled reinforcement waves on the central lane —
+      # sustained pressure across the whole 4500-tick hold. Block
+      # sits inside `overrides:` (the loader drops it at the level
+      # root). Each wave is light (6 rifle) so focused fire clears
+      # it in time; the CUMULATIVE pressure of five waves is what an
+      # unmanaged spread (stall) falls behind on, losing the fact
+      # before the survival gate. Pure e1 (no e3) — see the
+      # opening-wave note.
+      scheduled_events:
+        - tick: 1000
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
+        - tick: 1660
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
+        - tick: 2320
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
+        - tick: 2980
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
+        - tick: 3640
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
     win_condition:
       all_of:
         - {building_count_gte: {type: fact, n: 1}}
