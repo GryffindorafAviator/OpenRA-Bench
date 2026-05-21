@@ -19,6 +19,16 @@ clause (within_ticks 2400 + after_ticks 2401 on easy/medium with
 max_turns 30; within_ticks 1200 + after_ticks 1201 on hard with
 max_turns 15).
 
+Recalibrated after the engine balance pass (stance-semantics fix):
+the post-fix stance:3 AttackAnything enemy tanks HUNT the agent
+column and BUNCH together, which degenerated the spread-fire
+wrong-play into focus-fire and collapsed the spread-vs-focus
+discrimination (spread won on medium with 0 losses). The enemy
+tanks were switched to stance:2 Defend — they auto-fire in range
+but stay STATIONARY on their three latitudes, so the spread-fire
+policy genuinely fans the agent tanks into 1-vs-1 flank duels and
+busts the medium survival cap (own_units_gte:2) again.
+
 Validation is scripted (no model / network).
 """
 from __future__ import annotations
