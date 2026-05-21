@@ -22,7 +22,11 @@ PACKS_DIR = Path(__file__).parent / "packs"
 # Dirs scanned for `<base_map>.oramap` terrain files. The Rust engine
 # parses real .oramap terrain (map.bin) when handed an absolute path, so
 # any map present here is a usable custom map — not a 2-entry allowlist.
+# `data/maps` (first) bundles the canonical terrain in-repo so the bench
+# is self-contained — no external OpenRA-RL-Training checkout needed;
+# the home-dir paths remain as fallbacks for dev setups.
 _MAP_DIRS = [
+    Path(__file__).resolve().parents[2] / "data" / "maps",
     Path.home() / "Projects/OpenRA-RL-Training/scenarios/maps",
     Path.home() / "Projects/openra-rl/maps",
 ]
@@ -61,7 +65,7 @@ def discover_packs(directory: str | Path | None = None) -> list[ScenarioPack]:
     """
     directory = Path(directory) if directory else PACKS_DIR
     packs: list[ScenarioPack] = []
-    for p in sorted(directory.glob("*.yaml")):
+    for p in sorted(directory.rglob("*.yaml")):
         if p.name.startswith(("_", "TEMPLATE")):
             continue
         packs.append(load_pack(p))
