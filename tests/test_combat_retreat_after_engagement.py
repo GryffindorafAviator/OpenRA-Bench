@@ -166,8 +166,11 @@ def _stall_policy(rs, Command):
 
 def _brute_attack_until_death_policy(rs, Command):
     """Brute: attack_move toward the enemy centre and never retreat.
-    The 2× 3tnk + 5× e3 mass alpha out-trades 4× 2tnk in melee; the
-    column dies before clearing the squad → own_units_gte:N fails."""
+    The column overshoots the e3 firing line into the set-back 3tnk
+    heavy escort (x=64 on every tier — easy 1× 3tnk, medium/hard
+    2× 3tnk); the heavy + rocket mass alpha out-trades 4× 2tnk and
+    the column dies before clearing the squad → own_units_gte:N
+    fails on every level."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
