@@ -82,23 +82,31 @@ levels:
   # ── EASY ── the bare rush-defense skill. ONE smaller wave (4× e1)
   # rushes the fact; respond with at least one pbox covering the lane
   # mouth AND three trained defenders, kill 4 of the rushers before the
-  # deadline. Stall loses (fact razed in ~18 turns / tick ~1600);
-  # all-defense (3 pbox, 0 units) loses on own_units_gte:3 (or fact
-  # razed when pbox alone doesn't blunt the rush); all-economy (no
-  # pbox) loses to the rush; brute-army (e1 only) loses on
-  # building_count_gte:pbox at the deadline. max_turns 60 → reachable
-  # tick ≥4848 in interrupt mode (each step ≤90 ticks; some shorter
-  # due to enemy-spotted/own-destroyed events), comfortably past the
-  # 4801 `after_ticks` fail so a non-winner is a real reachable
+  # deadline. Stall loses (fact razed); all-defense (3 pbox, 0 units)
+  # loses on own_units_gte:3 — the static defence survives so the
+  # `after_ticks` deadline is the catch-all that converts it to a
+  # real LOSS; all-economy (no pbox) loses to the rush / the
+  # deadline; brute-army (e1 only) loses on building_count_gte:pbox
+  # at the deadline.
+  #
+  # Engine recalibration note (movement fixes): with the engine
+  # combat rebalance an undefended fact survives long enough that a
+  # full 60-turn no-win episode reaches only ~t3768 in interrupt
+  # mode (each step is cut short by enemy-spotted / own-destroyed
+  # events). The old `after_ticks: 4801` was therefore INERT —
+  # never reached inside max_turns — so all-defense / all-economy
+  # ended as a DRAW. The deadline is realigned to `after_ticks:
+  # 3200` (within_ticks 3199), reliably reached by every 60-turn
+  # episode, so a survive-but-not-win policy is a real reachable
   # timeout LOSS, never a draw. The intended pbox+e1 parallel-queue
-  # play wins by tick ≤528 (every seed), well inside.
+  # play wins by tick ≤1923 (every level + seed), well inside.
   easy:
     description: >
       A single concentrated wave of 4 rifle infantry charges your base
       (fact+tent+powr already standing). Win by holding the line and
       sustaining production: build at least one pillbox (pbox) covering
       the lane mouth AND have ≥3 of your own units alive AND destroy
-      ≥4 of the rushers before tick 4800. Stalling, building only
+      ≥4 of the rushers before tick 3199. Stalling, building only
       pillboxes (no units), building no pillbox, or spending only on
       defenders without a pillbox all fail.
     overrides:
@@ -121,13 +129,13 @@ levels:
         - building_count_gte: {type: pbox, n: 1}
         - own_units_gte: 3
         - units_killed_gte: 4
-        - within_ticks: 4800
+        - within_ticks: 3199
     # No `not own_units_gte:1` fail clause: the agent starts unit-less
     # and the throughput bar is enforced by the WIN condition
     # (own_units_gte:3). Loss is by clock or by losing the fact.
     fail_condition:
       any_of:
-        - after_ticks: 4801
+        - after_ticks: 3200
         - not: {building_count_gte: {type: fact, n: 1}}
     max_turns: 60
 
@@ -142,7 +150,7 @@ levels:
       keep producing: at least one pillbox at the lane mouth AND ≥3
       own units AND ≥6 enemy kills AND ≥4 own buildings (the
       pre-placed fact+tent+powr plus at least one more — the pillbox
-      counts) before tick 4800. The same lazy/single-axis policies that
+      counts) before tick 3199. The same lazy/single-axis policies that
       fail easy fail here.
     overrides:
       actors:
@@ -163,10 +171,10 @@ levels:
         - own_units_gte: 3
         - units_killed_gte: 6
         - building_total_gte: 4
-        - within_ticks: 4800
+        - within_ticks: 3199
     fail_condition:
       any_of:
-        - after_ticks: 4801
+        - after_ticks: 3200
         - not: {building_count_gte: {type: fact, n: 1}}
     max_turns: 60
 
@@ -232,10 +240,10 @@ levels:
         - units_killed_gte: 8
         - building_total_gte: 4
         - units_lost_lte: 3
-        - within_ticks: 4800
+        - within_ticks: 3199
     fail_condition:
       any_of:
-        - after_ticks: 4801
+        - after_ticks: 3200
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {units_lost_lte: 3}
     max_turns: 60
