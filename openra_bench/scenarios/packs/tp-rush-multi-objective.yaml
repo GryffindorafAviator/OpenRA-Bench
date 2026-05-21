@@ -1,0 +1,304 @@
+# tp-rush-multi-objective.yaml
+#
+# ACTION capability — SPEEDRUN TWO objectives IN PARALLEL. A strike
+# force of 4× 2tnk + 2× jeep is staged at the far WEST as TWO aligned
+# sub-groups (a NORTH group and a SOUTH group). There are TWO enemy
+# construction yards (`fact`) to raze — one at the NORTH-EAST corner
+# (115,8), one at the SOUTH-EAST corner (115,32). Both must fall
+# inside one tight shared tick budget.
+#
+# The discrimination is PARALLEL SCHEDULING. The intended play
+# dispatches BOTH prongs in the SAME decision turn — north group →
+# (115,8), south group → (115,32) — so the two ~109-cell west→east
+# rushes run CONCURRENTLY and the make-span is a single rush. Any
+# play that SERIALISES the two objectives loses the clock:
+#   - serial-in-time: command one prong, wait for it to raze its
+#     fact, only THEN command the other prong — the second rush
+#     stacks AFTER the first, doubling the make-span;
+#   - serial-in-space: drive the whole force to one corner, raze it,
+#     then trek the survivors to the other corner — the second
+#     prong's group is dragged the wrong way first.
+# Both serial patterns blow the tight deadline ⇒ real LOSS.
+#
+# Why 4× 2tnk + 2× jeep (the design composition): a 2-tank + 1-jeep
+# prong per objective. 2tnk (medium tank, cannon) is the canonical
+# building-cracker; the jeep adds speed and soaks the light garrison
+# rifleman so the tanks reach the fact un-delayed. Each prong is
+# self-sufficient: 2× 2tnk crack one low-HP `fact` in ~2 volleys
+# (smoke-measured), and the lone garrison e1 cannot stop a 2-tank
+# prong. The force is pre-staged as two y-aligned sub-groups (NORTH
+# at y≈11, SOUTH at y≈29) so each prong has a clean straight-east
+# lane to its own objective — the agent's job is to DISPATCH BOTH
+# AT ONCE, not to invent the split.
+#
+# Engine idiom (per CLAUDE.md + win_conditions.py:116): win =
+# TWO `enemy_key_buildings_destroyed_in_region` clauses, one per
+# objective `fact`, scoped {x,y,radius,types:[fact]}. The region
+# scoping is load-bearing — the type-only `enemy_key_buildings_
+# destroyed` is satisfied by razing a SINGLE fact, so it cannot
+# enforce "both far-apart bases fell"; the two region clauses do.
+# `within_ticks: T` is the timing teeth on the win; `after_ticks:
+# T+1` in the fail tree makes a missed deadline a REAL reachable
+# LOSS (not a DRAW). `not building_count_gte:{type:fact,n:1}` in
+# the fail tree is the secondary "lost your base" fail.
+#
+# Engine notes (per CLAUDE.md):
+#   - `fact` IS a MustBeDestroyed building. With TWO enemy `fact`s
+#     the engine auto-`done`s only when BOTH fall (all enemy
+#     MustBeDestroyed buildings gone) — the same tick the second
+#     region clause becomes true, so the win is recorded before
+#     termination (verified in smoke). The light garrison e1s are
+#     not buildings, so they do not gate auto-done.
+#   - Low-HP `fact` (health: 24): a 2-tank prong cracks it in ~2
+#     volleys. Concentrating more tanks on one fact gives no razing
+#     speedup (DPS-saturated), so a serial play buys back nothing to
+#     offset its doubled traverse — the clock gap is structural.
+#   - Light garrison (1× e1 at each objective fact) bleeds a prong
+#     by 0–1 units but cannot stop a 2-tank + 1-jeep prong; the
+#     discrimination stays TIMING, not slugfest survival.
+#   - `bot_type: turtle` keeps each garrison at its objective; it
+#     does NOT chase the agent or harass the agent base, so a stall
+#     fails ONLY on the clock — the timing teeth are the unambiguous
+#     discriminator.
+#   - The agent base `fact` at the west is the persistent agent
+#     landmark protected by the secondary fail clause.
+#
+# Tick math (CLAUDE.md: tick ≈ 93 + 90·(turn-1), ~90 ticks/turn):
+#   Smoke-measured the intended PARALLEL dispatch (both prongs
+#   commanded in the SAME turn 1) — both facts down by tick
+#   ~1083..1173 across all tiers + all hard seeds. A SERIAL play
+#   (raze the first objective, and only AFTER it falls dispatch the
+#   second prong to the other objective) stacks the two ~1100-tick
+#   rushes back-to-back and finishes ~2253..2343 — a clean ~2×
+#   make-span. The discrimination is whether the agent dispatches
+#   both prongs concurrently or waits out the first objective.
+#
+# Tier budgets (T = `within_ticks`; fail `after_ticks` = T+1; the
+# tick ceiling per max_turns must ≥ T+1 or the fail is inert ⇒ DRAW):
+#   - EASY:   T=2000  parallel wins ~1100 (margin ~900); a serial
+#                     play (~2300) LOSES; stall LOSES.
+#                     max_turns=26  ceiling 93+90·25=2343 ≥ 2001 ✓
+#   - MEDIUM: T=1700  tighter clock; parallel wins ~1100 (margin
+#                     ~600); a serial play (~2300) LOSES; stall
+#                     LOSES.   max_turns=23 ceiling 93+90·22=2073 ✓
+#   - HARD:   T=1700 + 2 seed-driven `spawn_point` groups (NORTH-
+#                     shifted vs SOUTH-shifted staging, round-robined
+#                     by seed). Both enemy `fact`s + garrison place
+#                     every seed at the fixed corners. The agent must
+#                     compute both prong bearings from its actual
+#                     spawn; a memorised dispatch mis-targets.
+#                     max_turns=23  ceiling 2073 ≥ 1701 ✓
+#
+# Bar (binding):
+#   - intended PARALLEL dispatch (both prongs commanded in the SAME
+#     decision turn — north group → (115,8), south group → (115,32))
+#     WINS on every level + every hard seed (1..4);
+#   - stall (`observe()`) LOSES on every level + seed (timeout, real
+#     reachable LOSS — no DRAW degeneracy);
+#   - a SERIAL play (raze one objective, then dispatch the other
+#     prong only after the first fact has fallen) LOSES on every
+#     level + every seed — the stacked back-to-back rushes bust the
+#     clock; that gap IS the parallel-scheduling discrimination;
+#   - hard ships ≥2 `spawn_point` groups (seed-driven start).
+
+meta:
+  id: tp-rush-multi-objective
+  title: 'Rush — Speedrun Two Objectives in Parallel'
+  capability: action
+  real_world_meaning: >
+    A strike force is staged at the far west of a long arena as two
+    aligned sub-groups; there are TWO enemy construction yards to
+    raze — one at the north-east corner, one at the south-east
+    corner — and one tight shared clock for both. The capability is
+    PARALLEL SCHEDULING: dispatch both prongs in the same decision
+    so the two long west→east rushes run concurrently and the
+    make-span is a single rush. Serialising the objectives — sending
+    one prong and waiting for it before dispatching the other, or
+    dragging the whole force to one corner then the other — stacks
+    the two rushes back-to-back and blows the deadline.
+  robotics_analogue: >
+    Concurrent multi-target task dispatch under a hard real-time
+    deadline: one fleet split into two teams, two spatially
+    separated objectives, one delivery window. Dispatching the teams
+    one-at-a-time (finish team A's objective, then start team B)
+    doubles the make-span and blows the global schedule; the
+    controller must launch both legs in parallel.
+  benchmark_anchor:
+    - "speedrun parallel"
+    - "parallel scheduling"
+    - "SC2 multi-prong"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy:
+    faction: soviet
+    cash: 0
+    # turtle: each garrison holds its objective; it does NOT chase
+    # the agent or harass the agent base, so the timing teeth
+    # (within_ticks / after_ticks) are the unambiguous discriminator.
+    bot_type: turtle
+  tools: [move_units, attack_unit, attack_move, stop_units]
+  planning: true
+  termination:
+    max_ticks: 12000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare parallel-dispatch skill: dispatch both prongs at once and
+  # win; serialise the two objectives or stall and lose the clock.
+  easy:
+    description: >
+      A strike force of 4 medium tanks + 2 jeeps starts at the far
+      west as TWO aligned sub-groups — a NORTH group (around y=11)
+      and a SOUTH group (around y=29) — with your base `fact` at
+      (10,20). There are TWO enemy construction yards (`fact`) to
+      raze: one at the NORTH-EAST corner (115,8), one at the
+      SOUTH-EAST corner (115,32), each with a single rifleman
+      garrison. Both must fall before tick 2000. Dispatch BOTH
+      prongs in the same turn — north group straight to (115,8),
+      south group straight to (115,32) — so the two rushes run at
+      once. Razing one objective and only THEN sending the other
+      prong stacks the two rushes back-to-back and busts the clock.
+      Stalling also loses. Losing your own base (`fact`) fails.
+    overrides:
+      actors:
+        # ── AGENT — NORTH sub-group (2× 2tnk + 1 jeep) ──
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 11], stance: 1}
+        # ── AGENT — SOUTH sub-group (2× 2tnk + 1 jeep) ──
+        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 29], stance: 1}
+        # ── AGENT — base fact (persistent landmark) ──
+        - {type: fact, owner: agent, position: [10, 20]}
+        # ── ENEMY — NE objective fact + garrison ──
+        - {type: fact, owner: enemy, position: [115, 8], health: 24}
+        - {type: e1,   owner: enemy, position: [112, 8], stance: 2}
+        # ── ENEMY — SE objective fact + garrison ──
+        - {type: fact, owner: enemy, position: [115, 32], health: 24}
+        - {type: e1,   owner: enemy, position: [112, 32], stance: 2}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 8, radius: 6, types: [fact]}
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 32, radius: 6, types: [fact]}
+        - within_ticks: 2000
+    fail_condition:
+      any_of:
+        # Timeout: missed the speedrun clock — real reachable LOSS.
+        - after_ticks: 2001
+        # Base destroyed: the agent fact must persist.
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 26   # ceiling 93 + 90·25 = 2343 ≥ 2001 ✓
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a TIGHTER clock (T=1700 vs easy's 2000).
+  # The intended parallel dispatch still wins ~1100 with ~600 ticks
+  # margin; a serial play (~2300) loses by a wider margin.
+  medium:
+    description: >
+      Same staging: a NORTH sub-group (around y=11) and a SOUTH
+      sub-group (around y=29) of 4 tanks + 2 jeeps at the far west,
+      base `fact` at (10,20). Same two objectives: raze the enemy
+      construction yards at the NORTH-EAST corner (115,8) AND the
+      SOUTH-EAST corner (115,32). The clock is TIGHTER — both facts
+      must fall before tick 1700. Dispatch both prongs in the same
+      turn — north group to (115,8), south group to (115,32) — so
+      the two rushes overlap. Razing one objective then sending the
+      other prong stacks the rushes and busts the clock; losing your
+      base also fails.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 11], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 29], stance: 1}
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: fact, owner: enemy, position: [115, 8], health: 24}
+        - {type: e1,   owner: enemy, position: [112, 8], stance: 2}
+        - {type: fact, owner: enemy, position: [115, 32], health: 24}
+        - {type: e1,   owner: enemy, position: [112, 32], stance: 2}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 8, radius: 6, types: [fact]}
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 32, radius: 6, types: [fact]}
+        - within_ticks: 1700
+    fail_condition:
+      any_of:
+        - after_ticks: 1701
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 23   # ceiling 93 + 90·22 = 2073 ≥ 1701 ✓
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: 2 seed-driven `spawn_point` groups round-
+  # robined by seed. The whole strike force (both sub-groups + base)
+  # starts at EITHER a NORTH-shifted staging OR a SOUTH-shifted
+  # staging. Both enemy `fact`s + garrison stay at the fixed corners
+  # (115,8) / (115,32) every seed. From either staging the two
+  # objectives lie in different relative bearings, so a memorised
+  # dispatch mis-targets — the agent must compute both prong bearings
+  # from its actual spawn. Per CLAUDE.md, the per-owner spawn_point
+  # filter activates the AGENT side only (agent actors declare
+  # spawn_point); the enemy actors do NOT declare spawn_point so the
+  # enemy-side filter stays inactive and the objectives place every
+  # seed (the standard agent-side-axis idiom — see
+  # tp-rush-objective-very-fast hard).
+  hard:
+    description: >
+      Same parallel-dispatch discipline, with seed-driven start
+      latitude. Your strike force (two sub-groups of 4 tanks + 2
+      jeeps) + base `fact` start at EITHER a NORTH-shifted staging
+      OR a SOUTH-shifted staging — the seed picks. The two enemy
+      construction yards (`fact`) are the OBJECTIVES at the
+      NORTH-EAST corner (115,8) and the SOUTH-EAST corner (115,32),
+      each with a rifleman garrison, regardless of spawn. Dispatch
+      both prongs in the same turn to their corners and raze both
+      facts before tick 1700. A memorised dispatch mis-targets from
+      the other spawn; serialising the objectives busts the clock.
+      Losing your base also fails.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH-shifted staging.
+        - {type: 2tnk, owner: agent, position: [6,  6], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6,  8], stance: 1, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8,  7], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 24], stance: 1, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 23], stance: 1, spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 15], spawn_point: 0}
+        # spawn_point 1 — SOUTH-shifted staging.
+        - {type: 2tnk, owner: agent, position: [6, 14], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 16], stance: 1, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 15], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 32], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 34], stance: 1, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 33], stance: 1, spawn_point: 1}
+        - {type: fact, owner: agent, position: [10, 25], spawn_point: 1}
+        # ── ENEMY — NO spawn_point declared, so the enemy-side
+        #    filter stays inactive and these place every seed at the
+        #    fixed objective corners regardless of the agent spawn ──
+        - {type: fact, owner: enemy, position: [115,  8], health: 24}
+        - {type: e1,   owner: enemy, position: [112,  8], stance: 2}
+        - {type: fact, owner: enemy, position: [115, 32], health: 24}
+        - {type: e1,   owner: enemy, position: [112, 32], stance: 2}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 8, radius: 6, types: [fact]}
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 115, y: 32, radius: 6, types: [fact]}
+        - within_ticks: 1700
+    fail_condition:
+      any_of:
+        - after_ticks: 1701
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 23   # ceiling 93 + 90·22 = 2073 ≥ 1701 ✓
