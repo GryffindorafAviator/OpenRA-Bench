@@ -27,13 +27,14 @@
 # DISCRIMINATIONS (the bar — every lazy / wrong-commit play LOSES,
 # the intended centre-then-react play WINS):
 #
-#   • stall (observe only): the stance:3 reserve auto-engages the
-#     rush when it closes to cannon range and racks up some kills,
-#     but the reserve NEVER MOVES OUT of its starting cluster. The
-#     FORWARD-zone clause (`units_in_region_gte` at the lane-mouth
-#     intercept point) is therefore never satisfied → LOSS on the
-#     position clause even when the kill count is met. The
-#     `after_ticks: 2401` fail bites at max_turns either way.
+#   • stall (observe only): the stance:2 reserve auto-fires only on
+#     whatever closes into the static cluster, but NEVER MOVES OUT
+#     of its starting cell. The FORWARD-zone clause
+#     (`units_in_region_gte` at the lane-mouth intercept point) is
+#     therefore never satisfied → LOSS on the position clause; the
+#     concurrent `hunt` bands also overwhelm the un-forward reserve
+#     (units lost busts the cap / the `after_ticks: 2401` fail
+#     bites at max_turns either way).
 #
 #   • commit-NORTH (whole reserve sent north on turn 1): on easy
 #     (rush IS from NORTH) this matches the lane and satisfies the
@@ -55,9 +56,20 @@
 #     and S (60,28) r=10 forward zones. WIN on every seed.
 #
 # ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
-#   - `rusher` bot concentrates the band on the agent CENTROID every
-#     ~8 ticks (openra-sim/src/scripted_bot.rs::Rusher) — band drives
-#     straight at the nearest agent mass.
+#   - `hunt` bot — each enemy unit attacks the NEAREST agent unit,
+#     so a band placed in lane Y engages whichever reserve
+#     detachment the agent committed to lane Y; the flanks are
+#     genuinely independent. (`rusher` pooled all bands onto the
+#     agent centroid; under the corrected post-engine-balance
+#     stance semantics that collapses the multi-flank test into a
+#     single fight, so the pack uses `hunt`.)
+#   - Agent tanks are `stance:2` (Defend): they auto-fire on an
+#     in-range enemy but NEVER advance — so a stall reserve cannot
+#     self-deliver across the map, and the agent must actively
+#     order the forward intercept. (`stance:3` AttackAnything was
+#     used pre-fix; under the corrected stance semantics it
+#     auto-hunts the whole map, letting a stall policy clear every
+#     band for free — the no-cheat bar broke.)
 #   - Enemy actors with NO spawn_point ALWAYS place regardless of
 #     agent spawn group (CLAUDE.md). On medium/hard we DECLARE
 #     multiple bands and they BOTH/ALL place every seed. The
@@ -75,9 +87,12 @@
 #     auto-defend at the centre).
 #   - 2tnk vs e1: tanks dominate per-shot (1-shot e1); e1 vs 2tnk has
 #     low damage (CLAUDE.md / combat-focus-fire-priority). So a
-#     stance:3 reserve auto-wipes an e1-only rush without losing
-#     tanks. The discriminator is POSITION, not kill economy — the
-#     stall reserve passes the kill bar but FAILS the position bar.
+#     reserve that actively `attack_unit`s the bands clears the
+#     kill bar without losing tanks; a stance:2 reserve that stays
+#     clustered at the centre is overrun by the concurrent `hunt`
+#     bands. The discriminator is POSITION + active commitment —
+#     the intended forward-intercept play satisfies the forward
+#     zones; a stall stays out of every zone and bleeds out.
 #   - Tick budget: ~90 ticks/turn fixed-step, ~60 ticks/turn in
 #     interrupt mode (every fired interrupt cuts the step short).
 #     max_turns 50 → reachable tick ≈ 3000 in interrupt mode;
@@ -134,7 +149,14 @@ base:
   enemy:
     faction: soviet
     cash: 0
-    bot_type: rusher
+    # `hunt`: each enemy unit attacks the NEAREST agent unit, so a
+    # band placed in lane Y engages whatever reserve detachment the
+    # agent committed to lane Y — each flank is an independent
+    # threat. (`rusher` pooled every band onto the agent centroid;
+    # it was retired in the post-engine-balance recalibration —
+    # under the corrected stance semantics a `rusher` funnel
+    # collapses the multi-flank test into a single fight.)
+    bot_type: hunt
   # Combat-only toolset (NO build / NO harvest): the test is reserve
   # POSITIONING + COMMITMENT, not production.
   tools:
@@ -158,9 +180,9 @@ levels:
   # ── EASY ─────────────────────────────────────────────────────────
   # Bare reserve-MOVE skill: ONE rush band, FIXED direction (NORTH
   # y=10 every seed). The capability is "move the reserve OUT to
-  # intercept the rush at its lane mouth". stance:3 tanks auto-engage
-  # when the band arrives at the centre (stall racks up kills via
-  # auto-defence), but the FORWARD-zone clause (units_in_region_gte
+  # intercept the rush at its lane mouth". stance:2 tanks auto-fire
+  # only on whatever closes into the static cluster, but the
+  # FORWARD-zone clause (units_in_region_gte
   # at the NORTH-flank intercept point) is the load-bearing
   # discriminator: stall keeps tanks at (40,20) → outside the
   # (60,12) r=10 zone → LOSS.
@@ -185,16 +207,15 @@ levels:
         # Agent construction yard — WEST edge, the rusher target.
         - {type: fact, owner: agent, position: [10, 20]}
         # Mobile reserve — 4 medium tanks at CENTRE (40,20).
-        # stance:3 (AttackAnything) — auto-engages enemies in vision
-        # range. The discriminator is NOT auto-engagement (engine
-        # handles that) but the FORWARD-ZONE clause: a passive
-        # reserve at (40,20) never reaches (60,12) r=10, so stall
-        # fails the position clause even when auto-defence wins on
-        # kill count.
-        - {type: 2tnk, owner: agent, position: [40, 19], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 20], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 21], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 20], stance: 3}
+        # stance:2 (Defend) — auto-fires on an in-range enemy but
+        # never advances, so the agent must actively order the
+        # forward intercept. The discriminator is the FORWARD-ZONE
+        # clause: a passive reserve at (40,20) never reaches
+        # (60,12) r=10, so stall fails the position clause.
+        - {type: 2tnk, owner: agent, position: [40, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 21], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 20], stance: 2}
         # NORTH rush band — 6× e1. e1-only so 4 tanks dominate the
         # engagement (per CLAUDE.md / combat-focus-fire-priority:
         # e1 vs 2tnk has very low damage). 6 enemies makes the
@@ -256,13 +277,13 @@ levels:
         # 6× 2tnk mobile reserve at CENTRE — two extra tanks over
         # easy to make the 2-way split tractable (3 to each flank
         # is the canonical split; 2 to each flank if pursuing centre
-        # micro). stance:3 as on easy.
-        - {type: 2tnk, owner: agent, position: [40, 19], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 20], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 21], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 19], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 20], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 21], stance: 3}
+        # micro). stance:2 as on easy.
+        - {type: 2tnk, owner: agent, position: [40, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 21], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 21], stance: 2}
         # NORTH rush band — 5× e1.
         - {type: e1, owner: enemy, position: [80, 10], stance: 3, count: 5}
         # SOUTH rush band — 5× e1. Total 10 e1 across both bands.
@@ -332,22 +353,22 @@ levels:
         - {type: fact, owner: agent, position: [10, 20], spawn_point: 0}
         - {type: fact, owner: agent, position: [10, 20], spawn_point: 1}
         # spawn_point 0 — reserve at centre column x=40.
-        - {type: 2tnk, owner: agent, position: [40, 19], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [40, 20], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [40, 21], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [41, 19], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [41, 20], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [41, 21], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [40, 19], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [40, 20], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [40, 21], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [41, 19], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [41, 20], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [41, 21], stance: 2, spawn_point: 0}
         # spawn_point 1 — reserve at centre column x=50 (alternate
         # central staging; equidistant from N/S flanks and between
         # fact and rush spawn). A memorised "stage at (40,20)" cell
         # cannot generalise; the doctrine (centre, react) does.
-        - {type: 2tnk, owner: agent, position: [50, 19], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [50, 20], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [50, 21], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [51, 19], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [51, 20], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [51, 21], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [50, 19], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [50, 20], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [50, 21], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [51, 19], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [51, 20], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [51, 21], stance: 2, spawn_point: 1}
         # THREE rush bands — N (y=10), S (y=30), E (y=20 head-on).
         # All ALWAYS placed (enemy actors don't honour spawn_point).
         # Total 12 e1 — kill bar 6 is achievable with active forward

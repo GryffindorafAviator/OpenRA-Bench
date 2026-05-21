@@ -59,18 +59,21 @@ SEEDS = (1, 2, 3, 4)
 
 
 def stall(rs, C):
-    """Observe-only. The stance:3 reserve auto-engages the rush when
-    it reaches the centre, racking up kills via the engine, but the
-    tanks NEVER MOVE OUT of the starting cluster → forward-zone
-    clauses never satisfied → LOSS."""
+    """Observe-only. The stance:2 reserve auto-fires only on what
+    closes into the static cluster, but NEVER MOVES OUT of the
+    starting cell → the forward-zone clauses are never satisfied and
+    the concurrent `hunt` bands overrun the un-forward reserve →
+    real LOSS (position clause empty + units lost / clock)."""
     return [C.observe()]
 
 
 def commit_north(rs, C):
-    """Move the WHOLE reserve to the NORTH intercept zone on turn 1.
-    On easy (rush IS from NORTH) this WINS. On medium/hard the S
+    """`attack_move` the WHOLE reserve at the NORTH intercept zone on
+    turn 1 — a single-flank pre-commitment. On medium/hard the S
     (and E) forward zones stay empty → LOSS on the position
-    clause(s)."""
+    clause(s); this policy is only asserted on the multi-flank
+    levels (easy single-direction is covered by the intended-WIN
+    test, which uses the active lane-aware intercept)."""
     units = [
         u for u in rs.get("units_summary", []) if u.get("type") == "2tnk"
     ]
@@ -93,15 +96,23 @@ def commit_south(rs, C):
     return [C.attack_move(ids, target_x=60, target_y=28)]
 
 
-def make_intended():
-    """Stable per-tank assignment so each tank's destination doesn't
-    flip frame-to-frame (re-pathing scrambles the split). On the
-    FIRST call, sort tank ids and read enemy positions to detect
-    which lanes are active; assign tanks to the active lanes
-    (NORTH-only on easy, NORTH+SOUTH on medium, NORTH+CENTRE+SOUTH
-    on hard)."""
+# Forward-intercept zone centres per lane label (x, y).
+_ZONE_XY = {"N": (60, 12), "C": (65, 20), "S": (60, 28)}
 
-    state = {"assignments": None, "level": None}
+
+def make_intended():
+    """Stable per-tank assignment so each tank's lane doesn't flip
+    frame-to-frame. On the FIRST call, sort tank ids and read enemy
+    positions to detect which lanes are active; assign tanks to the
+    active lanes (NORTH-only on easy, NORTH+SOUTH on medium,
+    NORTH+CENTRE+SOUTH on hard). Each turn, every lane's detachment
+    actively `attack_unit`s the nearest `hunt` band member in its
+    own latitude band — because the tanks are `stance:2` (Defend,
+    never advance) the agent must issue the forward engagement
+    orders itself; if no enemy is in the lane it falls back to
+    `attack_move` onto the lane's forward intercept zone."""
+
+    state = {"assignments": None}
 
     def policy(rs, C):
         own = [
@@ -116,7 +127,7 @@ def make_intended():
             # enemy_unit_spotted quickly), then detect active lanes.
             enem = [
                 e for e in (rs.get("enemy_summary") or [])
-                if e.get("type") != "fact"
+                if e.get("type") == "e1"
             ]
             if not enem:
                 # Enemies not yet visible — hold at centre (observe)
@@ -145,7 +156,7 @@ def make_intended():
                 state["assignments"] = {
                     active[0]: ids[:half], active[1]: ids[half:]
                 }
-            elif len(active) == 3:
+            else:
                 third = max(1, n // 3)
                 state["assignments"] = {
                     active[0]: ids[:third],
@@ -154,24 +165,29 @@ def make_intended():
                 }
         a = state["assignments"]
         alive = set(ids)
+        enemies = [
+            e for e in (rs.get("enemy_summary") or [])
+            if e.get("type") == "e1"
+        ]
         cmds = []
-        if "N" in a:
-            nids = [i for i in a["N"] if i in alive]
-            if nids:
-                cmds.append(
-                    C.attack_move(nids, target_x=60, target_y=12)
+        for lane, tids in a.items():
+            live = [i for i in tids if i in alive]
+            if not live:
+                continue
+            zx, zy = _ZONE_XY[lane]
+            lane_enemies = [
+                e for e in enemies if abs(e["cell_y"] - zy) <= 10
+            ]
+            if lane_enemies:
+                tgt = min(
+                    lane_enemies,
+                    key=lambda e: abs(e["cell_x"] - zx)
+                    + abs(e["cell_y"] - zy),
                 )
-        if "C" in a:
-            cids = [i for i in a["C"] if i in alive]
-            if cids:
+                cmds.append(C.attack_unit(live, str(tgt["id"])))
+            else:
                 cmds.append(
-                    C.attack_move(cids, target_x=65, target_y=20)
-                )
-        if "S" in a:
-            sids = [i for i in a["S"] if i in alive]
-            if sids:
-                cmds.append(
-                    C.attack_move(sids, target_x=60, target_y=28)
+                    C.attack_move(live, target_x=zx, target_y=zy)
                 )
         return cmds or [C.observe()]
 
@@ -191,13 +207,24 @@ def test_pack_loads_and_metadata_is_complete():
     assert any(
         "chess" in a.lower() or "central" in a.lower() for a in anchors
     ), anchors
-    # Rusher bot wired through to the engine for every level.
+    # `hunt` bot wired through to the engine for every level: each
+    # band attacks the nearest agent unit, so a band in lane Y
+    # engages the reserve detachment the agent committed to lane Y.
+    # (`rusher` pooled all bands onto the centroid; it was retired
+    # in the post-engine-balance recalibration — see pack docstring.)
     for lvl in LEVELS:
         c = compile_level(pack, lvl)
         assert c.map_supported
         enemy = c.scenario.enemy
         bot = getattr(enemy, "bot_type", None) or getattr(enemy, "bot", None)
-        assert str(bot).lower() == "rusher", (lvl, bot)
+        assert str(bot).lower() == "hunt", (lvl, bot)
+        # Agent tanks must be stance:2 (Defend) — never auto-advance,
+        # so a stall reserve cannot self-deliver across the map.
+        tank_stances = {
+            a.stance for a in c.scenario.actors
+            if a.type == "2tnk" and a.owner == "agent"
+        }
+        assert tank_stances == {2}, (lvl, tank_stances)
 
 
 @pytest.mark.parametrize("level", LEVELS)
