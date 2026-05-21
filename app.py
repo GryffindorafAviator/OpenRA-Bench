@@ -1065,15 +1065,43 @@ def _md_escape(text: str) -> str:
     return text
 
 
-def _play_minimap(render_state: dict):
-    """The Play-tab minimap — the shared `render_tactical_minimap`:
-    per-type shapes, overlap-count badges, coordinate grid + labels,
-    and a legend. The same renderer is reusable for the model's view."""
+def _play_minimap(render_state: dict, sel=None, queue=None):
+    """The Play-tab minimap — `render_tactical_minimap` plus a white
+    boundary on the selected units and movement arrows. An arrow points
+    to a unit's queued destination this turn; if it has no queued order
+    but is already moving, the arrow points to its in-engine target."""
     try:
         from openra_bench.minimap import render_tactical_minimap
 
+        sel_ids = {str(s) for s in (sel or [])}
+        # A queued move/attack this turn overrides the in-flight target.
+        queued_dest: dict = {}
+        for a in queue or []:
+            if getattr(a, "mode", "") in (
+                "move", "attack", "attack_move"
+            ) and getattr(a, "target", None):
+                for uid in a.units:
+                    queued_dest[str(uid)] = (a.target[0], a.target[1])
+        arrows = []
+        for u in render_state.get("units_summary", []) or []:
+            if not isinstance(u, dict):
+                continue
+            uid = str(u.get("id", ""))
+            fx, fy = u.get("cell_x"), u.get("cell_y")
+            if fx is None or fy is None:
+                continue
+            if uid in queued_dest:
+                tx, ty = queued_dest[uid]
+                arrows.append((fx, fy, tx, ty, "queued"))
+            elif u.get("activity") == "moving" and (
+                u.get("target_x") is not None
+            ):
+                arrows.append(
+                    (fx, fy, u["target_x"], u["target_y"], "enroute")
+                )
         return render_tactical_minimap(
-            render_state, scale=_PLAY_UPSCALE, grid=True, legend=True
+            render_state, scale=_PLAY_UPSCALE, grid=True, legend=True,
+            selected=sel_ids, arrows=arrows,
         )
     except Exception:  # noqa: BLE001
         return None
@@ -1166,7 +1194,10 @@ def _play_briefing_md(sess, sel, queue, note: str = "") -> str:
 
 
 def _play_render(sess, sel, queue):
-    img = _play_minimap(sess.render_state()) if sess is not None else None
+    img = (
+        _play_minimap(sess.render_state(), sel, queue)
+        if sess is not None else None
+    )
     return (
         img,
         _play_briefing_md(sess, sel, queue),
@@ -1274,9 +1305,15 @@ def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
     except Exception as e:  # noqa: BLE001
         logger.warning("play click failed: %s", e)
         note = ""
+    # Re-render the minimap so the selection boundary + move arrows
+    # update live as the player clicks.
+    img = (
+        _play_minimap(sess.render_state(), sel, queue)
+        if sess is not None else None
+    )
     return (
         sel, queue, _play_briefing_md(sess, sel, queue, note),
-        _play_units_df(sess, sel),
+        _play_units_df(sess, sel), img,
     )
 
 
@@ -1290,8 +1327,28 @@ def _play_end_turn(sess, sel, queue):
     return sess, [], [], img, brief, status, units
 
 
-def _play_clear(sess):
-    return [], [], _play_briefing_md(sess, [], []), _play_units_df(sess, [])
+def _play_clear_queue(sess, sel):
+    """Cancel queued orders this turn (keeps the unit selection)."""
+    img = (
+        _play_minimap(sess.render_state(), sel, [])
+        if sess is not None else None
+    )
+    return (
+        [], _play_briefing_md(sess, sel, []),
+        _play_units_df(sess, sel), img,
+    )
+
+
+def _play_clear_selection(sess, queue):
+    """Cancel the current unit selection (keeps queued orders)."""
+    img = (
+        _play_minimap(sess.render_state(), [], queue)
+        if sess is not None else None
+    )
+    return (
+        [], _play_briefing_md(sess, [], queue),
+        _play_units_df(sess, []), img,
+    )
 
 
 def build_app() -> gr.Blocks:
@@ -1533,6 +1590,9 @@ def build_app() -> gr.Blocks:
                         ],
                         value="Select units", label="Click mode", scale=3,
                     )
+                    play_clearsel_btn = gr.Button(
+                        "✖ Clear selection", scale=1
+                    )
                     play_clear_btn = gr.Button("Clear queued", scale=1)
                     play_end_btn = gr.Button(
                         "End Turn ▶", variant="primary", scale=1,
@@ -1551,6 +1611,7 @@ def build_app() -> gr.Blocks:
                     inputs=[play_sess, play_sel, play_queue, play_mode],
                     outputs=[
                         play_sel, play_queue, play_brief, play_units,
+                        play_img,
                     ],
                 )
                 play_end_btn.click(
@@ -1561,11 +1622,18 @@ def build_app() -> gr.Blocks:
                         play_img, play_brief, play_status, play_units,
                     ],
                 )
-                play_clear_btn.click(
-                    _play_clear,
-                    inputs=[play_sess],
+                play_clearsel_btn.click(
+                    _play_clear_selection,
+                    inputs=[play_sess, play_queue],
                     outputs=[
-                        play_sel, play_queue, play_brief, play_units,
+                        play_sel, play_brief, play_units, play_img,
+                    ],
+                )
+                play_clear_btn.click(
+                    _play_clear_queue,
+                    inputs=[play_sess, play_sel],
+                    outputs=[
+                        play_queue, play_brief, play_units, play_img,
                     ],
                 )
 

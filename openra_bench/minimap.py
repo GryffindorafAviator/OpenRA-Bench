@@ -199,11 +199,33 @@ def _draw_unit_shape(draw, cx, cy, cp, category, color):
         draw.rectangle([x0, y0, x1, y1], fill=color, outline=outline)
 
 
+def _draw_move_arrow(draw, fx, fy, tx, ty, cp, color):
+    """Arrow from cell (fx,fy) centre to cell (tx,ty) centre — a unit's
+    move/attack destination link."""
+    import math
+
+    x0, y0 = (fx + 0.5) * cp, (fy + 0.5) * cp
+    x1, y1 = (tx + 0.5) * cp, (ty + 0.5) * cp
+    width = max(2, cp // 8)
+    draw.line([(x0, y0), (x1, y1)], fill=color, width=width)
+    # Arrowhead at the destination.
+    ang = math.atan2(y1 - y0, x1 - x0)
+    head = cp * 0.7
+    spread = math.radians(26)
+    p1 = (x1 - head * math.cos(ang - spread),
+          y1 - head * math.sin(ang - spread))
+    p2 = (x1 - head * math.cos(ang + spread),
+          y1 - head * math.sin(ang + spread))
+    draw.polygon([(x1, y1), p1, p2], fill=color)
+
+
 def render_tactical_minimap(
     render_state: dict,
     scale: int = 4,
     grid: bool = True,
     legend: bool = True,
+    selected=None,
+    arrows=None,
 ):
     """A legible tactical minimap as a PIL RGB image:
 
@@ -287,6 +309,35 @@ def render_tactical_minimap(
                 font=badge_font, stroke_width=max(2, cp // 12),
                 stroke_fill=(0, 0, 0),
             )
+
+    # Movement arrows — drawn under the selection boxes so a selected
+    # unit's boundary stays on top. queued = yellow, en-route = cyan.
+    for ar in (arrows or []):
+        try:
+            fx, fy, tx, ty, kind = ar
+        except (ValueError, TypeError):
+            continue
+        col = (255, 230, 90) if kind == "queued" else (90, 220, 245)
+        _draw_move_arrow(draw, fx, fy, tx, ty, cp, col)
+
+    # Selection boundary — a bright white box around each selected
+    # unit's cell.
+    if selected:
+        sel_ids = {str(s) for s in selected}
+        for u in render_state.get("units_summary", []) or []:
+            if not isinstance(u, dict):
+                continue
+            if str(u.get("id", "")) not in sel_ids:
+                continue
+            cx = int(u.get("cell_x", -99))
+            cy = int(u.get("cell_y", -99))
+            if 0 <= cx < w and 0 <= cy < h:
+                inset = max(1, cp // 14)
+                draw.rectangle(
+                    [cx * cp + inset, cy * cp + inset,
+                     (cx + 1) * cp - inset, (cy + 1) * cp - inset],
+                    outline=(255, 255, 255), width=max(2, cp // 8),
+                )
 
     # Coordinate grid + axis labels.
     if grid:

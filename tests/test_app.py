@@ -1319,13 +1319,21 @@ class TestPlayTab:
         assert sel == [] and queue == []
         assert "scenario" in status.lower()
 
-    def test_play_clear_resets_selection_and_queue(self):
-        from app import _play_clear
+    def test_play_clear_queue_empties_queue(self):
+        from app import _play_clear_queue
 
-        out = _play_clear(None)
-        assert len(out) == 4  # (sel, queue, brief, units_df)
-        sel, queue, _brief, _units = out
-        assert sel == [] and queue == []
+        out = _play_clear_queue(None, ["1001"])
+        assert len(out) == 4  # (queue, brief, units_df, img)
+        queue = out[0]
+        assert queue == []
+
+    def test_play_clear_selection_empties_selection(self):
+        from app import _play_clear_selection
+
+        out = _play_clear_selection(None, [])
+        assert len(out) == 4  # (sel, brief, units_df, img)
+        sel = out[0]
+        assert sel == []
 
     def test_play_objective_md_empty_without_session(self):
         from app import _play_objective_md
