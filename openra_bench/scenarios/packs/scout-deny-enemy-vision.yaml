@@ -1,0 +1,239 @@
+# scout-deny-enemy-vision — REASONING, counter-reconnaissance:
+# intercept and kill the enemy scout(s) before they report
+# (Wave-12).
+#
+# The capability under test is COUNTER-RECON — denying the enemy
+# vision of your base. An enemy scout has taken up an observation
+# post overlooking the agent's base; left alone it completes its
+# report (it "survives N ticks in sight"). The agent must locate and
+# DESTROY every enemy scout before the report window closes. Sitting
+# still lets the report complete; covering only ONE recon vector
+# leaves the other scout's report intact.
+#
+# Real-world anchors:
+#   • Military counter-reconnaissance: the counter-recon screen
+#     hunts and destroys the enemy's scouts/observation posts before
+#     they can report the main body's disposition.
+#   • SC2 scout denial: killing the opponent's scouting worker /
+#     overlord before it sees your build — deny the information.
+#   • Intrusion prevention: detect and TERMINATE the reconnaissance
+#     probe before it exfiltrates a map of the defended network;
+#     a passive posture that merely watches the probe loses the
+#     information war.
+#
+# Mechanism (the load-bearing design):
+#   • The enemy scouts are `e3` actors at `stance:0` (HoldFire) —
+#     they hold an observation post and do NOT fight or advance, so
+#     the agent must DRIVE every engagement (a stall cannot bait a
+#     free kill, and the scouts cannot self-deliver into the
+#     agent's force).
+#   • The agent's strike force is `stance:0` (HoldFire) too — it
+#     never auto-hunts the map, so a stall / observe-only policy
+#     can NOT clear the scouts for free; the agent must issue the
+#     explicit attack_move + attack_unit interception orders.
+#   • The win is `units_killed_gte:N` (kill EVERY scout) AND
+#     `within_ticks:K` — K is the report window: a scout still
+#     alive at K has "survived N ticks in sight" and completed its
+#     report ⇒ the agent loses.
+#   • On medium/hard there are TWO scouts on TWO separate recon
+#     vectors (a north lane and a south lane). Committing the whole
+#     force to ONE lane kills only one scout — the other completes
+#     its report ⇒ the kill bar (N=2) is unmet ⇒ LOSS. The
+#     counter-recon skill is to cover EVERY vector.
+#
+# Discrimination (four-policy bar — scripted, no model needed):
+#   • stall (observe-only): the HoldFire strike force never engages;
+#     0 kills; every scout survives to K ⇒ the `after_ticks`
+#     deadline bites as a real reachable timeout LOSS.
+#   • one-lane (commit the whole force to a single recon vector):
+#     kills only the scout on that lane; the other scout completes
+#     its report ⇒ the kill bar is unmet ⇒ LOSS (medium/hard).
+#   • wrong-path (sweep the wrong lane / chase the far enemy
+#     marker): never reaches a real scout ⇒ 0 (or too few) kills
+#     ⇒ LOSS.
+#   • intended counter-recon (split the force to cover EVERY recon
+#     vector; attack_move to each scout's post and attack_unit it
+#     to death): every scout killed before K ⇒ WIN.
+#
+# Engine facts used (CLAUDE.md / prompt_v2 codex / verified against
+# the installed openra_train wheel, 2026-05-20):
+#   • `e3` rocket soldiers surface reliably in `enemy_positions` /
+#     `enemy_summary` once in vision (CLAUDE.md notes some `e1`
+#     cells do not surface — `e3` does).
+#   • `stance:0` HoldFire — a unit never auto-engages, even when
+#     attacked. The scouts hold their post; the agent strike force
+#     does not self-deliver. Explicit `attack_unit` / `attack_move`
+#     orders override stance (CLAUDE.md stance semantics).
+#   • Tick alignment (~90 ticks/turn): within_ticks ≤ 93+90·
+#     (max_turns−1); fail after_ticks = within_ticks+1 ⇒ a
+#     non-finisher is a real reachable LOSS, never a DRAW.
+#   • A far inert enemy `fact` marker keeps the engine from
+#     auto-`done`ing on enemy-elimination before the win/fail
+#     evaluator runs (CLAUDE.md auto-done footgun).
+#   • Hard tier: two agent spawn_point groups (NORTH base y=10..14
+#     / SOUTH base y=26..30); the agent's strike force is
+#     duplicated across both groups at the matching latitude. The
+#     two scouts (no spawn_point) place every seed, so a memorised
+#     "sweep these two cells from (20,20)" opening cannot
+#     generalise — the interception geometry flips per seed.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_scout_deny_enemy_vision.py -q
+
+meta:
+  id: scout-deny-enemy-vision
+  title: 'Counter-Recon — Deny Enemy Vision: Kill the Scouts Before They Report'
+  capability: reasoning
+  real_world_meaning: >
+    An enemy scout has taken up an observation post overlooking your
+    base; left alone it completes its report and the enemy gains a
+    full picture of your disposition. The agent must locate and
+    DESTROY every enemy scout before the report window closes.
+    Sitting still lets the report complete; covering only ONE recon
+    vector leaves the other scout's report intact. The pack tests
+    counter-reconnaissance: actively denying the adversary vision by
+    hunting down EVERY scout, not merely defending one approach.
+  robotics_analogue: >
+    Counter-surveillance / intrusion prevention: an adversary's
+    reconnaissance probes are mapping the defended site, and each
+    probe exfiltrates its findings once it has observed long enough.
+    The defender must detect and neutralise EVERY probe before its
+    report window elapses — a passive posture that merely watches
+    the probes loses the information war, and neutralising one probe
+    while ignoring another still leaks the map.
+  benchmark_anchor:
+    - "military counter-reconnaissance"
+    - "SC2 scout denial"
+    - "intrusion prevention"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0}
+  tools: [observe, move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 9000}
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # The bare counter-recon skill: ONE enemy scout on an observation
+  # post forward of the base. The agent's HoldFire strike force must
+  # drive out and kill it before the report window (within_ticks)
+  # closes. Stall LOSES (HoldFire force never engages; the scout
+  # survives to K). A decisive intercept WINS.
+  easy:
+    description: >
+      An enemy scout (rocket soldier) holds an observation post
+      forward of your base at (55, 20), watching your disposition.
+      Your strike force (2 medium tanks) holds fire — it will not
+      engage on its own. Drive the force out and KILL the scout
+      before tick 1100 (the report window). If the scout is still
+      alive at the deadline it has completed its report and you
+      LOSE. Stalling (observe only) LOSES — the scout survives the
+      window. Sweeping the wrong direction LOSES — you never reach
+      the scout in time.
+    overrides:
+      actors:
+        # Agent strike force — HoldFire so it never auto-hunts; the
+        # agent must issue the interception orders.
+        - {type: 2tnk, owner: agent, position: [20, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 21], stance: 0}
+        # Enemy scout — e3 on a HoldFire observation post.
+        - {type: e3, owner: enemy, position: [55, 20], stance: 0}
+        # Far inert enemy marker — anti-DRAW.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {within_ticks: 1100}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1101}
+    max_turns: 25
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: TWO enemy scouts on TWO separate recon
+  # vectors (a north lane y=12 and a south lane y=28). The kill bar
+  # rises to 2 — the agent must cover BOTH vectors. Committing the
+  # whole force to one lane kills one scout; the other completes its
+  # report ⇒ LOSS. The strike force is sized so a SPLIT (one
+  # detachment per lane) clears both scouts inside the window.
+  medium:
+    description: >
+      TWO enemy scouts (rocket soldiers) hold observation posts on
+      two separate recon vectors — one on the NORTH lane at
+      (55, 12) and one on the SOUTH lane at (55, 28). Your strike
+      force (4 medium tanks) holds fire. SPLIT the force to cover
+      BOTH vectors and KILL BOTH scouts before tick 1300. Any
+      scout still alive at the deadline has completed its report
+      and you LOSE. Committing the whole force to one lane kills
+      only one scout — the other reports ⇒ LOSS. Stalling LOSES.
+    overrides:
+      actors:
+        # Agent strike force — two detachments, one per lane.
+        - {type: 2tnk, owner: agent, position: [20, 11], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 13], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 27], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 29], stance: 0}
+        # Two enemy scouts on two recon vectors.
+        - {type: e3, owner: enemy, position: [55, 12], stance: 0}
+        - {type: e3, owner: enemy, position: [55, 28], stance: 0}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 2}
+        - {within_ticks: 1300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1301}
+    max_turns: 25
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. Tighter report window (~1100 ticks instead of ~1300) — the
+  #      counter-recon response must be efficient; a dawdling split
+  #      misses the clock.
+  #   2. TWO agent spawn_point groups (NORTH base y=10..14 / SOUTH
+  #      base y=26..30) round-robined by seed. The two scouts
+  #      (no spawn_point) place every seed at fixed posts, so the
+  #      interception geometry — which detachment is nearer which
+  #      scout — flips per seed; a memorised "north detachment
+  #      takes the north scout" opening cannot generalise.
+  hard:
+    description: >
+      TWO enemy scouts (rocket soldiers) hold observation posts at
+      (55, 12) and (55, 28). Your strike force (4 medium tanks)
+      starts at ONE of two base latitudes (NORTH or SOUTH, chosen
+      by seed) and holds fire. SPLIT the force to cover BOTH recon
+      vectors and KILL BOTH scouts before tick 1100 — a tight
+      report window. Any scout still alive at the deadline has
+      completed its report and you LOSE. Committing the whole force
+      to one lane LOSES; stalling LOSES. The base latitude varies
+      by seed so a memorised interception plan cannot generalise.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base (y=9..15)
+        - {type: 2tnk, owner: agent, position: [20,  9], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [22, 11], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [22, 15], stance: 0, spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=25..31)
+        - {type: 2tnk, owner: agent, position: [20, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [22, 27], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 29], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [22, 31], stance: 0, spawn_point: 1}
+        # Two enemy scouts — fixed posts, place every seed.
+        - {type: e3, owner: enemy, position: [55, 12], stance: 0}
+        - {type: e3, owner: enemy, position: [55, 28], stance: 0}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 2}
+        - {within_ticks: 1100}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1101}
+    max_turns: 25
