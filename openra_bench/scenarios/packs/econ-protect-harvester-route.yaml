@@ -8,7 +8,7 @@
 # The proc is at the west base; the ore patch is FAR east on the
 # same y-band (~50 cells away). The raider scripted bot (worker-
 # priority — see openra-sim/src/scripted_bot.rs / botgen.py) drives
-# a LIGHT tank (1tnk) straight at the harv from the east — it
+# a HEAVY tank (2tnk) straight at the harv from the east — it
 # intercepts the harv MID-ROUTE, far from base sight, while the
 # harv is on its way to refine. Two pre-placed 2tnk defenders sit
 # at the base on stance:2 (Defend) — they auto-fire on any enemy
@@ -40,12 +40,12 @@
 #     the kill zone at x=40..50; the raider kills the commuting
 #     harv on the route around tick ~900 (turn ~11) → harv count
 #     drops to 0 → `not unit_type_count_gte:{harv,1}` fires → LOSS.
-#   • intended intercept-on-route: defenders attack_move east
-#     along the harv's commute axis (the y-band of the agent's
-#     own harv) — they meet the raider mid-route (around x=45..50),
-#     engage (2× 2tnk vs 1tnk — the defender pair out-damages the
-#     light-tank raider and destroys it before it reaches the harv).
-#     The harv
+#   • intended intercept-on-route: defenders attack_unit / attack_move
+#     east along the harv's commute axis (the y-band of the agent's
+#     own harv) — they close at real Mobile speed and meet the raider
+#     mid-route (around x=45..50), engage (2× 2tnk vs 1× 2tnk — the
+#     defender pair out-damages the lone raider and destroys it
+#     before it reaches the harv). The harv
 #     continues to commute; throughput accumulates at ~500 cr per
 #     round trip (~20 turns); the economy bar clears before the
 #     deadline → WIN.
@@ -65,15 +65,21 @@
 #     east onto the route.
 #
 # Engine notes (verified 2026-05-20 with scripted run_level):
-#   • The raider is a 1tnk (light tank, hp 230, dps14, rng 4c)
-#     rather than a 2tnk (hp 400). A 2tnk raider proves uncatchable
-#     by 2× 2tnk defenders racing along the same y-band: the harv
-#     dies in ~90 ticks (~1 decision turn) of solo raider fire,
-#     and the defenders cannot kill a hp 400 target inside that
-#     window even at point-blank. With a 1tnk raider, the 2tnk
-#     defender pair (dps44 combined) kills the 230-hp raider in
-#     ~5 ticks once in range — leaving the harv intact.
-#   • Hard tier uses ONE central 1tnk raider at y=20 (between the
+#   • The raider is a 2tnk (heavy tank, hp 400). Recalibrated
+#     2026-05 after the engine movement fixes — (A) attack_unit on
+#     out-of-sight targets paths at the unit's real Mobile speed
+#     (no per-tick teleport), (B) moving units fire & take fire en
+#     route. Under the OLD engine a 1tnk raider chasing the
+#     undefended commuting harv only chipped it to ~34% HP and the
+#     raider — pursuing the harv all the way home — delivered
+#     itself into the base defender pair, so the "stand-at-base"
+#     turtle inversion won for FREE. The 2tnk raider genuinely
+#     KILLS the undefended harv on the route (~turn 18). The
+#     intended intercept still WINS: the defenders attack_unit the
+#     raider, closing at real Mobile speed, and 2× 2tnk
+#     out-damages the lone 2tnk raider, destroying it before it
+#     reaches the harv.
+#   • Hard tier uses ONE central 2tnk raider at y=20 (between the
 #     two spawn latitudes) rather than two on-latitude raiders.
 #     With two raiders both bee-lining on the single active harv,
 #     the harv dies at ~turn 6 even with perfect intercept —
@@ -162,7 +168,7 @@ base:
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
   # Bare skill: ONE harvester commutes proc↔mine across ~50 cells
-  # of exposed route. ONE 1tnk raider drives at it from the east.
+  # of exposed route. ONE 2tnk raider drives at it from the east.
   # Two 2tnk defenders start at the base on stance:2 (auto-fire
   # ANYTHING in sight). The agent must move the defenders east
   # onto the route to intercept the raider before it reaches the
@@ -171,7 +177,7 @@ levels:
     description: >
       A single ore harvester at your base (8,20) must commute east
       to the FAR ore patch (mine at (60,20)) and refine back to
-      the refinery (proc at (12,20)). An enemy light tank (raider
+      the refinery (proc at (12,20)). An enemy heavy tank (raider
       bot, worker-priority — drives straight at your harvester) is
       staged at (90,20). Two 2tnk defenders are pre-placed at your
       base on Defend stance (auto-fire in range, no advance), but
@@ -215,14 +221,22 @@ levels:
         # long (~50 cells one-way) and the kill zone is well
         # beyond base sight.
         - {type: mine, owner: neutral, position: [60, 20]}
-        # Raider 1tnk staged east of the patch. The `raider` bot
+        # Raider 2tnk staged east of the patch. The `raider` bot
         # (botgen.py) targets the nearest harv; this tank drives
         # west at the commuting harv and intercepts around
-        # x=45..50. 1tnk (hp 230, dps 14) is the right weight
-        # class — a 2tnk raider (hp 400) defeats the 2× 2tnk
-        # defender pair in the inevitable mid-route brawl (the
-        # harv dies before the defenders kill the heavier raider).
-        - {type: 1tnk, owner: enemy, position: [90, 20]}
+        # x=45..50. Recalibrated 2026-05 after the engine movement
+        # fixes — (A) attack_unit on out-of-sight targets paths at
+        # the unit's real speed (no teleport), (B) moving units fire
+        # & take fire en route. With the old 1tnk raider, an
+        # undefended commuting harv merely got chipped to ~34% HP
+        # and the raider — chasing it all the way home — delivered
+        # itself into the base defenders, so "stand-at-base" won for
+        # free. The 2tnk raider (hp 400) now genuinely KILLS the
+        # undefended harv on the route at turn ~18, while the
+        # intended intercept (defenders attack_unit it, closing at
+        # real Mobile speed) still destroys it before it reaches the
+        # harv — both halves of the bar hold.
+        - {type: 2tnk, owner: enemy, position: [90, 20]}
         # Persistent far enemy fact — engine auto-done mitigation
         # (the raider being destroyed must not collapse the run
         # to DRAW before the economy bar evaluates).
@@ -253,7 +267,7 @@ levels:
     description: >
       Same setup as easy — one harvester commuting between proc
       (12,20) and the far ore patch (mine at (60,20)), one
-      raider light tank driving at the harvester from the east
+      raider heavy tank driving at the harvester from the east
       (90,20), two pre-placed 2tnk defenders at the base on
       Defend stance (auto-fire in range, no advance). Bar
       tightened to economy value 1500
@@ -273,7 +287,7 @@ levels:
         - {type: 2tnk, owner: agent, position: [15, 19], stance: 2}
         - {type: 2tnk, owner: agent, position: [15, 21], stance: 2}
         - {type: mine, owner: neutral, position: [60, 20]}
-        - {type: 1tnk, owner: enemy, position: [90, 20]}
+        - {type: 2tnk, owner: enemy, position: [90, 20]}
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
@@ -299,7 +313,7 @@ levels:
   # does NOT match either hard spawn (the active harv is on y=14
   # or y=26).
   #
-  # The raider is a SINGLE central 1tnk at y=20 (between the two
+  # The raider is a SINGLE central 2tnk at y=20 (between the two
   # spawn latitudes). It places every seed (enemy actors do NOT
   # honour spawn_point — CLAUDE.md oramap.rs footgun) and
   # beelines toward whichever harv exists (on the seed-chosen
@@ -316,7 +330,7 @@ levels:
       y=26), chosen by seed for anti-memorisation. Each
       orientation has its OWN harvester commuting between its
       OWN refinery and its OWN ore patch (mine at (60,14) for
-      NORTH; mine at (60,26) for SOUTH). One enemy raider light
+      NORTH; mine at (60,26) for SOUTH). One enemy raider heavy
       tank is staged at (90,20) on the central y=20 corridor; it
       beelines toward whichever harvester exists on the seed-
       chosen y-band. Two 2tnk defenders are pre-placed at YOUR
@@ -356,13 +370,13 @@ levels:
         # actors).
         - {type: mine, owner: neutral, position: [60, 14]}
         - {type: mine, owner: neutral, position: [60, 26]}
-        # Single central raider 1tnk at y=20 (between the two
+        # Single central raider 2tnk at y=20 (between the two
         # spawn latitudes). It places every seed and beelines on
         # whichever harv exists (on y=14 or y=26 per seed); the
         # defender pair must move east on the harv's OWN y-band
         # to intercept (not the central y=20 where the raider
         # starts).
-        - {type: 1tnk, owner: enemy, position: [90, 20]}
+        - {type: 2tnk, owner: enemy, position: [90, 20]}
         # Persistent far enemy fact — engine auto-done mitigation.
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:

@@ -3,11 +3,19 @@
 The pack stages a long-distance harvester commute (proc at the west
 base; mine at the far east on the same y-band) with a worker-priority
 `raider` heavy tank driving at the harv from the far end. Two 2tnk
-defenders pre-placed at the base on stance:3 (AttackAnything) DO NOT
-have line of sight to the mid-route kill zone — the agent must MOVE
+defenders pre-placed at the base on stance:2 (Defend) DO NOT have
+line of sight to the mid-route kill zone — the agent must MOVE
 them east along the harv's commute axis to intercept the raider on
 the road. Standing the defenders idle at base lets the raider kill
 the commuting harv → `not unit_type_count_gte:{harv,1}` fires → LOSS.
+
+Recalibrated 2026-05 after the engine movement fixes ((A) attack_unit
+on out-of-sight targets paths at real Mobile speed, (B) moving units
+fire & take fire en route): under the old engine a 1tnk raider only
+chipped the undefended commuting harv to ~34% HP and then chased it
+home into the base defenders, so the "stand-at-base" turtle inversion
+won for free. The raider is now a 2tnk that genuinely kills the
+undefended harv on the route while the intended intercept still wins.
 
 Real-world anchor: military convoy protection on the road / SC2
 harass defense / supply-line doctrine.
@@ -392,10 +400,10 @@ def _defenders_stand_at_base(rs, Command):
 
 
 def _raider(rs):
-    """The inbound enemy 1tnk raider, once it enters the agent's
+    """The inbound enemy 2tnk raider, once it enters the agent's
     vision (surfaced in `enemy_summary`)."""
     for e in (rs.get("enemy_summary") or []):
-        if str(e.get("type", "")).lower() == "1tnk":
+        if str(e.get("type", "")).lower() == "2tnk":
             return e
     return None
 
