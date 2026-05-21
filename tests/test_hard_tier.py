@@ -1377,6 +1377,18 @@ UPGRADED = [
     # (enemy actors don't honour spawn_point — CLAUDE.md), so a
     # memorised base-latitude opening cannot generalise.
     "build-tech-skip-decision",
+    # Wave-11 ACTION pack — threat-weighted target prioritization
+    # (SC2 focus-fire target priority / military target prioritization
+    # anchor). A 4-tank squad faces a mixed enemy cluster of cheap e1
+    # chaff + 3 high-threat e3 rocket soldiers; the squad must focus
+    # the rocket soldiers FIRST or they whittle it below the survival
+    # floor. Hard tier defines two agent spawn_point groups (NORTH
+    # corridor y=10..13 / SOUTH corridor y=27..30) round-robined by
+    # seed; the strike force AND its construction yard are duplicated
+    # under each spawn_point, and the chaff+rocket cluster is
+    # symmetric across y=20 so either spawn faces an equivalent
+    # priority decision.
+    "combat-target-priority-highvalue",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
