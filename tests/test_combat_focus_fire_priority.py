@@ -2,11 +2,11 @@
 
 The bar: intended focus-e3-first WINS on every level and every hard
 seed (1-4); STALL, BRUTE attack_move, and SPREAD-attack-e1-first all
-LOSE on every level and every hard seed — with one documented
-exception: EASY allows brute attack_move and e1-first to squeak by
-(forgiving bare-skill tier with 4 tanks vs 1 e3 + 2 e1 and a loose
-attrition cap of 2). Non-win is a real reachable timeout LOSS via the
-`after_ticks` fail clause.
+LOSE on every level and every hard seed. Every enemy squad is a STATIC
+stance:2 (Defend) shield-wall-plus-rocket-rear formation, so the
+focus-fire priority is a real decision rather than a melee. Non-win is
+a real LOSS: stall via the `after_ticks` timeout fail clause, brute /
+spread via the `units_lost_lte` attrition cap.
 
 Validation is scripted (no model / network).
 """
@@ -78,16 +78,16 @@ def _alive(n):
 
 def test_easy_predicates():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    # Intended: kills 3, 2 tanks alive, in time → WIN
-    assert evaluate(c.win_condition, _ctx(units=_alive(2), tick=2000, kills=3, lost=2))
-    # Kill bar unmet (only 2 kills) → not a win
-    assert not evaluate(c.win_condition, _ctx(units=_alive(3), tick=2000, kills=2, lost=1))
-    # Attrition cap busted (3 lost > 2) → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(1), tick=2000, kills=3, lost=3))
+    # Intended: kills 7 (whole squad), ≤1 tank lost, in time → WIN
+    assert evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=7, lost=1))
+    # Kill bar unmet (only 6 kills) → not a win
+    assert not evaluate(c.win_condition, _ctx(units=_alive(3), tick=2000, kills=6, lost=0))
+    # Attrition cap busted (2 lost > 1) → fail
+    assert evaluate(c.fail_condition, _ctx(units=_alive(2), tick=2000, kills=3, lost=2))
     # All tanks dead → fail (own_units_gte:1 trips via fail clause)
     assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=3, lost=4))
     # Timeout with bar unmet → fail (after_ticks 2701)
-    assert evaluate(c.fail_condition, _ctx(units=_alive(2), tick=2702, kills=2, lost=2))
+    assert evaluate(c.fail_condition, _ctx(units=_alive(4), tick=2702, kills=6, lost=0))
 
 
 def test_medium_predicates():
@@ -180,8 +180,9 @@ def _enemies_of_type(rs, want_types):
 
 
 def _stall(rs, Command):
-    """Pure observe — enemies hold position (stance:1 ReturnFire), tanks
-    never engage → kill bar unmet → after_ticks LOSS."""
+    """Pure observe — the enemy squad is static (stance:2 Defend, never
+    advances), the tanks never engage → kill bar unmet → after_ticks
+    LOSS."""
     return [Command.observe()]
 
 
@@ -280,16 +281,13 @@ def test_stall_loses(level, seed):
     )
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_brute_attack_move_loses(level, seed):
     """Brute attack_move (auto-target the nearest hostile) must LOSE
-    on medium and hard — the engine spreads fire across the e1
-    front line and the e3 picks off tanks. Easy is excluded as the
-    bare-skill tier (4 tanks vs 1 e3 + 2 e1, attrition cap 2 is
-    forgiving enough for this brute play to squeak by; documented in
-    the pack's design comment, matches SCENARIO_REVIEW_CHECKLIST.md
-    note that inert anti-cheat teeth are acceptable on easy)."""
+    on every level — the engine spreads fire across the e1 shield
+    line and the static rocket rear-rank picks off enough tanks to
+    bust the attrition cap before the kill bar is met."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
@@ -302,21 +300,13 @@ def test_brute_attack_move_loses(level, seed):
     )
 
 
-@pytest.mark.parametrize("level", ["medium"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_spread_attack_e1_first_loses(level, seed):
     """Spread / priority-inverted: attack the rifle infantry first
-    (the close, soft targets). The e3s keep firing through the e1
-    mop-up and kill enough tanks to bust the attrition cap → LOSS
-    on medium. Easy is excluded (loose attrition cap). Hard is
-    excluded: a deeper double-column shield wall + 6 rear rockets
-    means the e1-first march reaches the rocket back-rank cleanly
-    before they accumulate ≥1 tank kill of damage; the brute and
-    stall policies (which DO lose on hard, see test below) carry
-    the loss-bar there, and the intended focus-e3 policy still
-    wins. This matches the documented "inert anti-cheat teeth are
-    acceptable on easy" pattern from SCENARIO_REVIEW_CHECKLIST.md,
-    extended to one of several wrong policies on hard."""
+    (the close, soft targets). The static rocket soldiers keep firing
+    through the entire e1 mop-up and kill enough tanks to bust the
+    attrition cap before the kill bar is met → LOSS on every level."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 

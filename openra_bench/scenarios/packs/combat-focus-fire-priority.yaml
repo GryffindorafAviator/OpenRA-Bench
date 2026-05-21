@@ -95,21 +95,33 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Bare focus-fire skill: 4 tanks vs 1 e3 + 2 e1, attrition cap 2
-  # (forgiving — even if the e3 lands one good rocket, 2 lost tanks
-  # is within budget). Brute attack-move may squeak by here on luck;
-  # stall still LOSES via after_ticks.
+  # Bare focus-fire skill: 4 tanks vs a STATIC squad of 4 e1 shield +
+  # 3 e3 rocket soldiers, kill bar 7 (the whole squad), attrition
+  # cap 1. The enemy squad is stance:2 (Defend — auto-fires on the
+  # closest in-range tank but never advances), so the formation
+  # holds as a static shield wall and the focus-fire priority is a
+  # meaningful decision. The intended focus-e3-first play kills all
+  # three rocket soldiers in the first 1-2 decision turns (4-vs-1
+  # concentrated cannon fire one-shots an e3) and clears the squad
+  # losing zero tanks → WIN. A brute attack_move spreads fire on the
+  # nearer e1 shield-line and a spread/e1-first play kills the soft
+  # infantry first; either way the three e3s fire through the whole
+  # engagement and score ≥2 tank kills, busting the cap → LOSS.
+  # Stall never engages → kill bar unmet → after_ticks LOSS.
   easy:
     description: >
       Four medium tanks stage at the west edge (x=6, y=18..21).
-      A single rocket soldier (e3, anti-tank, Dragon launcher) is in
-      the centre with two rifle infantry (e1) flanking. Focus-fire
-      doctrine: concentrate ALL FOUR tanks' fire on the rocket
-      soldier FIRST (it is the high-DPS threat to your armour),
-      then mop up the infantry. Spreading fire across the squad
-      lets the rocket soldier live long enough to kill tanks.
-      Win when 3 enemy units are killed AND ≤2 tanks lost,
-      before tick 2700.
+      The centre enemy squad is a shield wall of FOUR rifle infantry
+      (e1) at x=70 backed by THREE rocket soldiers (e3, anti-tank,
+      Dragon launcher) in the rear at x=71. Focus-fire doctrine:
+      concentrate ALL FOUR tanks' fire on ONE rocket soldier first
+      (kill it in 1-2 decision turns), then the next, then the
+      third, then mop up the rifle infantry. Spreading fire across
+      the squad — via attack_move auto-targeting the nearer e1
+      shield-line, or by attacking rifle infantry first — leaves
+      the rocket soldiers firing through the whole engagement and
+      they score tank kills. Win when 7 enemy units are killed AND
+      ≤1 tank lost, before tick 2700.
     overrides:
       actors:
         # Strike force — 4 medium tanks at the west edge.
@@ -117,42 +129,48 @@ levels:
         - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
-        # Enemy squad — centre. Rocket soldier (priority threat)
-        # POSTED BEHIND a shield of rifle infantry — the e1 wall is
-        # the nearer target so attack_move auto-targets the e1s
-        # first, leaving the e3 firing unopposed from x=75.
-        # All enemies stance:3 (AttackAnything in range) so the e3
-        # fires as soon as a tank enters its 5-cell Dragon range,
-        # not only on being shot.
-        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 20], stance: 3}
-        - {type: e3, owner: enemy, position: [75, 20], stance: 3}
+        # Enemy squad — centre. Shield wall of FOUR rifle infantry
+        # along x=70 (the nearer target ⇒ engine auto-target picks
+        # them under attack_move) backed by THREE rocket soldiers in
+        # the rear at x=71 (still inside Dragon range 5 of the front
+        # line). All enemies stance:2 (Defend — auto-fire on the
+        # closest in-range tank but never advance) so the formation
+        # holds as a static shield wall: the focus-fire priority is
+        # a real decision, not a melee.
+        - {type: e1, owner: enemy, position: [70, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 23], stance: 2}
+        - {type: e3, owner: enemy, position: [71, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [71, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [71, 22], stance: 2}
         # Far persistent enemy marker — prevents engine auto-done
         # when the squad falls so the win/fail evaluator sees the
         # terminal frame (no DRAW collapse).
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
-        - {units_killed_gte: 3}
-        - {units_lost_lte: 2}
+        - {units_killed_gte: 7}
+        - {units_lost_lte: 1}
         - {within_ticks: 2700}
     fail_condition:
       any_of:
         - {after_ticks: 2701}
-        - {not: {units_lost_lte: 2}}
+        - {not: {units_lost_lte: 1}}
         - {not: {own_units_gte: 1}}
     max_turns: 30
 
   # ── MEDIUM ───────────────────────────────────────────────────────
   # +1 axis: ZERO attrition cap (any tank loss = fail), bigger
-  # squad (8 e1 shield + 3 e3 in the rear, kill bar 11) and stance:3
-  # enemies that fire on contact. Now brute attack-move and spread-
-  # attack-e1-first both LOSE: the engine auto-targets the e1
-  # shield-line and the three e3s fire through the mop-up, scoring
-  # ≥1 tank kill via rocket fire. Intended focus-e3-first WINS —
-  # concentrating all four tanks on each rocket soldier in turn
-  # ends it in 1-2 decision ticks before it can land more than ~1
-  # rocket, keeping all four tanks alive.
+  # squad (8 e1 shield + 3 e3 in the rear, kill bar 11) — a STATIC
+  # stance:2 (Defend) formation that holds its shield wall and
+  # auto-fires on in-range tanks without advancing. Now brute
+  # attack-move and spread-attack-e1-first both LOSE: the engine
+  # auto-targets the e1 shield-line and the three e3s fire through
+  # the mop-up, scoring ≥1 tank kill via rocket fire. Intended
+  # focus-e3-first WINS — concentrating all four tanks on each
+  # rocket soldier in turn ends it in 1-2 decision ticks before it
+  # can land more than ~1 rocket, keeping all four tanks alive.
   medium:
     description: >
       Four medium tanks stage at the west edge (x=6, y=18..21).
@@ -173,38 +191,34 @@ levels:
         - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
-        # Shield wall of rifle infantry (nearest hostiles ⇒ engine
-        # auto-target picks them under attack_move) backed by TWO
-        # rocket soldiers in the rear ranks (still inside Dragon
-        # range 5 of the front line; they fire as tanks engage the
-        # shield). Spreading fire on the e1 line lets BOTH e3s land
-        # rockets through the entire e1 mop-up; focusing the e3s
-        # one-by-one with all four tanks ends each in 1-2 turns.
-        # Shield wall of EIGHT rifle infantry along x=70 (y=15..23)
+        # Shield wall of EIGHT rifle infantry along x=70 (y=15..25)
         # — the engine auto-target picks the nearest hostile under
         # attack_move; this wide e1 line is what each of the four
         # tanks engages, soaking ~3-4 decision turns of cannon fire
-        # before the brute reaches the rear ranks.
-        - {type: e1, owner: enemy, position: [70, 15], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 23], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 25], stance: 3}
+        # before the brute reaches the rear ranks. All enemies
+        # stance:2 (Defend — auto-fire on the closest in-range tank
+        # but never advance) so the formation holds as a static
+        # shield wall and the focus-fire priority is a real choice.
+        - {type: e1, owner: enemy, position: [70, 15], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 23], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 25], stance: 2}
         # THREE rocket soldiers tucked tightly behind the shield wall
         # (x=71): close enough that tanks engaging the wall are also
-        # inside Dragon range 5 of the e3s, so the rockets fire from
-        # the moment contact starts; not so close that they're the
+        # inside Dragon range 5 of the e3s, so the rockets fire as
+        # soon as a tank closes; not so close that they're the
         # nearest target (e1s at x=70 are 1 cell closer ⇒ engine
         # auto-target picks them under attack_move). With 3 e3s
         # firing through 3-4 decision turns of e1-mop-up, the brute
-        # policy takes ≥2 tank kills via rocket fire and busts the
-        # attrition cap (units_lost_lte: 1).
-        - {type: e3, owner: enemy, position: [71, 18], stance: 3}
-        - {type: e3, owner: enemy, position: [71, 20], stance: 3}
-        - {type: e3, owner: enemy, position: [71, 22], stance: 3}
+        # policy takes ≥1 tank kill via rocket fire and busts the
+        # attrition cap (units_lost_lte: 0).
+        - {type: e3, owner: enemy, position: [71, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [71, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [71, 22], stance: 2}
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
@@ -256,12 +270,6 @@ levels:
         - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [6, 29], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, spawn_point: 1}
-        # Centre squad: e1 shield wall in front (7 rifle infantry on
-        # x=70 spanning y=15..21 + (70,23..25)) backed by THREE
-        # rocket soldiers in the rear (x=74). Symmetric across y=20
-        # so either spawn (north y=10 or south y=29) faces an
-        # equivalent focus-fire decision. All enemies stance:3 so
-        # rockets fire as soon as a tank is in the 5-cell range.
         # Deep TWO-COLUMN shield wall of TWELVE rifle infantry
         # spanning y=14..26 (engine auto-target picks the nearest
         # hostile under attack_move ⇒ each of the 4 tanks chews
@@ -269,30 +277,35 @@ levels:
         # before reaching the rear ranks). The depth is what makes
         # the spread / e1-first policy run long enough that the
         # rear-rank rockets accumulate ≥1 tank kill of damage.
-        - {type: e1, owner: enemy, position: [70, 14], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 23], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 26], stance: 3}
-        - {type: e1, owner: enemy, position: [71, 14], stance: 3}
-        - {type: e1, owner: enemy, position: [71, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [71, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [71, 23], stance: 3}
-        - {type: e1, owner: enemy, position: [71, 26], stance: 3}
-        - {type: e1, owner: enemy, position: [72, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [72, 23], stance: 3}
+        # All enemies stance:2 (Defend — auto-fire on the closest
+        # in-range tank but never advance) so the formation holds
+        # as a static shield wall and the focus-fire priority is a
+        # real decision. Symmetric across y=20 so either spawn
+        # (north y=10 or south y=29) faces an equivalent decision.
+        - {type: e1, owner: enemy, position: [70, 14], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 23], stance: 2}
+        - {type: e1, owner: enemy, position: [70, 26], stance: 2}
+        - {type: e1, owner: enemy, position: [71, 14], stance: 2}
+        - {type: e1, owner: enemy, position: [71, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [71, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [71, 23], stance: 2}
+        - {type: e1, owner: enemy, position: [71, 26], stance: 2}
+        - {type: e1, owner: enemy, position: [72, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [72, 23], stance: 2}
         # SIX rocket soldiers in the back rank (x=73): inside Dragon
         # range 5 of any tank at x=68 or further east; the deeper
         # e1 wall keeps tanks at the western edge of the formation
         # for 5+ turns, during which all 6 e3s fire rockets.
         # Symmetric across y=20 so either spawn faces an equivalent
         # focus-fire decision.
-        - {type: e3, owner: enemy, position: [73, 15], stance: 3}
-        - {type: e3, owner: enemy, position: [73, 18], stance: 3}
-        - {type: e3, owner: enemy, position: [73, 19], stance: 3}
-        - {type: e3, owner: enemy, position: [73, 21], stance: 3}
-        - {type: e3, owner: enemy, position: [73, 22], stance: 3}
-        - {type: e3, owner: enemy, position: [73, 25], stance: 3}
+        - {type: e3, owner: enemy, position: [73, 15], stance: 2}
+        - {type: e3, owner: enemy, position: [73, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [73, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [73, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [73, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [73, 25], stance: 2}
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
