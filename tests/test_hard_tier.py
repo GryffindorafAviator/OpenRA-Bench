@@ -1401,6 +1401,20 @@ UPGRADED = [
     # symmetric across y=20 so either spawn faces an equivalent
     # priority decision.
     "combat-target-priority-highvalue",
+    # Wave-11 REASONING threat-prioritisation pack — counter-battery
+    # doctrine (military counter-battery / threat prioritization /
+    # SC2 siege-tank counter anchor). A frontline e1 screen masks a
+    # rear battery of long-range `arty` that out-ranges the base
+    # `pbox` and razes the agent `fact`; the mobile tank force must
+    # strike the artillery FIRST. Hard tier defines two agent
+    # spawn_point groups (NORTH base y=14 / SOUTH base y=28) round-
+    # robined by seed; the base AND the matching enemy screen+battery
+    # both declare spawn_point so the per-owner filter instantiates
+    # one self-consistent base+battery pair per seed (the persistent
+    # far anti-DRAW fact is the only un-tagged enemy actor). A
+    # memorised "drive to (27,21)" plan strikes empty ground on the
+    # off-latitude seed.
+    "def-counter-battery",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
