@@ -14,35 +14,52 @@
 # and EAST (78,20), each with a small tank garrison; a 5-unit flex
 # squad parks at the centre (51,20). A scripted `hunt` enemy pushes
 # BOTH bases simultaneously, asymmetrically — one push is light
-# (WEST, 16 rifles), one is heavy (EAST, 34-42 rifles). The HEAVY
+# (WEST, 20 rifles), one is heavy (EAST, 72 rifles). The HEAVY
 # push fully razes the east base even against a wrong-side
 # consolidation; the LIGHT push overruns a bare WEST garrison but
-# the WEST garrison + FULL flex holds it past the survival floor.
-# The win is keeping fact+proc alive at AT LEAST ONE base in the
-# [after_ticks, within_ticks] band; the loss is the timeout (5401)
-# OR no complete base left (no fact OR no proc — both bases razed).
+# the WEST garrison + FULL flex, ordered to attack-move into the
+# push, holds it past the survival floor. The win is keeping
+# fact+proc alive at AT LEAST ONE base in the [after_ticks,
+# within_ticks] band; the loss is the timeout (5401) OR no complete
+# base left (no fact OR no proc — both bases razed).
 #
-# RECALIBRATION (engine combat rebalance): the rebalance hugely
-# strengthened stationary defenders, so the original light/heavy
-# pushes (4 / 8-12 rifles) no longer threatened the garrisons and
-# the bar inverted. Re-tuned: pushes scaled up (WEST 16, EAST
-# 36 easy / 42 medium / 34 hard); `enemy_units_killed` termination
-# dropped (it auto-`done`d the episode the instant the agent cleared
-# a push, often before the survival floor → DRAW); a `not proc:1`
-# fail clause added; a persistent unarmed enemy `fact` marker added
-# (anti auto-DRAW); the hard survival floor moved to tick 2400.
+# RECALIBRATION (engine MOVEMENT fixes): two engine fixes shifted
+# combat bench-wide — (A) `attack_unit` on an out-of-sight target
+# now paths normally instead of teleporting; (B) a unit executing a
+# move both FIRES and TAKES FIRE en route (no sprint-invincibility),
+# respecting stance. The net effect here: a fully-consolidated force
+# that ATTACK-MOVES into a push is far more effective than before,
+# and — critically — agent units left at `stance:3` AttackAnything
+# now auto-advance to intercept any visible enemy, so a STALL policy
+# self-played the scenario (the flex + garrisons hunted the pushes
+# unaided) and won for free. Re-tuned:
+#   * every agent mobile unit set to `stance:1` ReturnFire — it
+#     fires back when shot but never advances/initiates on its own,
+#     so the capability (explicitly committing the flex) is
+#     load-bearing again; the intended policy must ATTACK-MOVE.
+#   * WEST light push 16→20, EAST heavy push 36/42/34→72 (uniform).
+#     The buffed consolidated attack-move force could hold the EAST
+#     base against the old 34-42 e1 heavy push (wrong-side
+#     consolidate WON); 72 e1 razes the conceded base before the
+#     force clears it, on every level and seed.
+# (Earlier recalibration, still in effect: `enemy_units_killed`
+# termination dropped — the win is a survival-band check; a
+# `not proc:1` fail clause; a persistent unarmed enemy `fact`
+# marker (anti auto-DRAW); the hard survival floor at tick 2400.)
 #
-#   * Stall ⇒ west garrison alone is overrun by the light push;
-#     east garrison falls to the heavy push ⇒ both razed ⇒ LOSS.
+#   * Stall ⇒ stance:1 units only return fire, never advance: the
+#     bare west garrison is overrun by the light push, the east
+#     garrison falls to the heavy push ⇒ both razed ⇒ LOSS.
 #   * Split-defend (half flex to each side) ⇒ each base gets too few
 #     reinforcements; both fall ⇒ LOSS.
 #   * Reinforce-both-back-and-forth ⇒ flex never lands long enough
 #     anywhere to make the trade; both fall ⇒ LOSS.
 #   * Consolidate flex on the WRONG (heavy EAST) side ⇒ the heavy
-#     push razes the east base anyway AND the un-garrisoned west
-#     base falls ⇒ every refinery lost ⇒ LOSS.
-#   * Consolidate flex on the WEST (light) side ⇒ west holds, east
-#     base falls (conceded by design) ⇒ ONE base saved ⇒ WIN.
+#     72-e1 push razes the east base anyway AND the un-garrisoned
+#     west base falls ⇒ every refinery lost ⇒ LOSS.
+#   * Consolidate flex on the WEST (light) side and ATTACK-MOVE into
+#     the push ⇒ west holds, east base falls (conceded by design)
+#     ⇒ ONE base saved ⇒ WIN.
 #
 # Map: arena 160x60, cordon 4 (generated on demand via mapgen). The
 # rush-hour-arena top-level base_map is only the support-flag sentinel
@@ -137,39 +154,49 @@ levels:
       actors:
         # ── WEST agent base ──
         # fact/proc/powr at stance:2 so they don't trigger any
-        # spurious movement; the agent's mobile garrison nearby is
-        # stance:3 to auto-engage anything in range.
+        # spurious movement; the agent's mobile garrison and the
+        # flex squad are stance:1 ReturnFire — they fire back when
+        # shot but never advance/initiate, so the agent must
+        # explicitly ATTACK-MOVE the consolidated force into the
+        # push for the concede-vs-hold capability to be load-bearing
+        # (a stall policy cannot self-play the defence).
         - {type: fact, owner: agent, position: [24, 20], stance: 2, health: 100}
         - {type: proc, owner: agent, position: [24, 23], stance: 2, health: 100}
         - {type: powr, owner: agent, position: [22, 20], stance: 2, health: 100}
-        - {type: 2tnk, owner: agent, position: [27, 19], stance: 3, count: 2, health: 100}
-        - {type: 1tnk, owner: agent, position: [27, 21], stance: 3, count: 2, health: 100}
-        - {type: e3,   owner: agent, position: [26, 20], stance: 3, count: 2, health: 100}
+        - {type: 2tnk, owner: agent, position: [27, 19], stance: 1, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [27, 21], stance: 1, count: 2, health: 100}
+        - {type: e3,   owner: agent, position: [26, 20], stance: 1, count: 2, health: 100}
         # ── EAST agent base — symmetric layout ──
         - {type: fact, owner: agent, position: [78, 20], stance: 2, health: 100}
         - {type: proc, owner: agent, position: [78, 23], stance: 2, health: 100}
         - {type: powr, owner: agent, position: [80, 20], stance: 2, health: 100}
-        - {type: 2tnk, owner: agent, position: [75, 19], stance: 3, count: 2, health: 100}
-        - {type: 1tnk, owner: agent, position: [75, 21], stance: 3, count: 2, health: 100}
-        - {type: e3,   owner: agent, position: [76, 20], stance: 3, count: 2, health: 100}
+        - {type: 2tnk, owner: agent, position: [75, 19], stance: 1, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [75, 21], stance: 1, count: 2, health: 100}
+        - {type: e3,   owner: agent, position: [76, 20], stance: 1, count: 2, health: 100}
         # ── Flex squad — parked centre, must be committed to ONE side
-        - {type: 2tnk, owner: agent, position: [51, 20], stance: 3, count: 2, health: 100}
-        - {type: 1tnk, owner: agent, position: [51, 22], stance: 3, count: 2, health: 100}
-        - {type: jeep, owner: agent, position: [51, 18], stance: 3, health: 100}
-        # ── WEST enemy push (LIGHT) — far west edge. Sized (16 e1)
-        # so the WEST garrison ALONE is overrun (a staller loses the
-        # west base) but the WEST garrison + consolidated flex holds
-        # it past the survival floor. Re-tuned UP from 4 after the
-        # engine combat rebalance hugely strengthened stationary
-        # defenders — a 4-rifle push no longer threatens even a bare
-        # garrison.
-        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 16, health: 100}
-        # ── EAST enemy push (HEAVY) — far east edge. Sized (36 e1)
+        - {type: 2tnk, owner: agent, position: [51, 20], stance: 1, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [51, 22], stance: 1, count: 2, health: 100}
+        - {type: jeep, owner: agent, position: [51, 18], stance: 1, health: 100}
+        # ── WEST enemy push (LIGHT) — far west edge. Sized (20 e1)
+        # so the bare WEST garrison (return-fire only — see the
+        # stance note) is overrun, but the WEST garrison + the
+        # consolidated flex, ordered to ATTACK-MOVE into the push,
+        # clears it and holds the base past the survival floor.
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 20, health: 100}
+        # ── EAST enemy push (HEAVY) — far east edge. Sized (72 e1)
         # so it FULLY razes the east base (fact + proc) even against
-        # a wrong-side consolidation: the heavy side is genuinely
-        # unsavable. Re-tuned UP from 8 for the same combat-rebalance
-        # reason — 8 rifles were beatable by the consolidated force.
+        # a wrong-side full consolidation: the heavy side is genuinely
+        # unsavable. Re-tuned UP after the engine MOVEMENT fixes
+        # (attack_unit no longer teleports; a moving unit both fires
+        # and takes fire en route) made a consolidated stance:1
+        # attack-move force strong enough to hold the EAST base
+        # against the old 34-42 e1 push — at that size a wrong-side
+        # consolidate WON, collapsing the concede-vs-hold bar. 72 e1
+        # razes the EAST base before the force can clear it.
+        # EAST push split into two stacked actor entries (36+36=72)
+        # because the scenario schema caps a single actor count at 50.
         - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 36, health: 100}
+        - {type: e1, owner: enemy, position: [155, 24], stance: 3, count: 36, health: 100}
         # Persistent unarmed enemy `fact` marker far off-map (anti
         # auto-DRAW): keeps the episode alive past the survival floor
         # so the building-survival win/fail evaluates instead of the
@@ -234,27 +261,30 @@ levels:
         - {type: fact, owner: agent, position: [24, 20], stance: 2, health: 100}
         - {type: proc, owner: agent, position: [24, 23], stance: 2, health: 100}
         - {type: powr, owner: agent, position: [22, 20], stance: 2, health: 100}
-        - {type: 2tnk, owner: agent, position: [27, 19], stance: 3, count: 2, health: 100}
-        - {type: 1tnk, owner: agent, position: [27, 21], stance: 3, count: 2, health: 100}
-        - {type: e3,   owner: agent, position: [26, 20], stance: 3, count: 2, health: 100}
+        - {type: 2tnk, owner: agent, position: [27, 19], stance: 1, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [27, 21], stance: 1, count: 2, health: 100}
+        - {type: e3,   owner: agent, position: [26, 20], stance: 1, count: 2, health: 100}
         # ── EAST agent base ──
         - {type: fact, owner: agent, position: [78, 20], stance: 2, health: 100}
         - {type: proc, owner: agent, position: [78, 23], stance: 2, health: 100}
         - {type: powr, owner: agent, position: [80, 20], stance: 2, health: 100}
-        - {type: 2tnk, owner: agent, position: [75, 19], stance: 3, count: 2, health: 100}
-        - {type: 1tnk, owner: agent, position: [75, 21], stance: 3, count: 2, health: 100}
-        - {type: e3,   owner: agent, position: [76, 20], stance: 3, count: 2, health: 100}
+        - {type: 2tnk, owner: agent, position: [75, 19], stance: 1, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [75, 21], stance: 1, count: 2, health: 100}
+        - {type: e3,   owner: agent, position: [76, 20], stance: 1, count: 2, health: 100}
         # ── Flex squad ──
-        - {type: 2tnk, owner: agent, position: [51, 20], stance: 3, count: 2, health: 100}
-        - {type: 1tnk, owner: agent, position: [51, 22], stance: 3, count: 2, health: 100}
-        - {type: jeep, owner: agent, position: [51, 18], stance: 3, health: 100}
-        # ── WEST enemy push (LIGHT) — same 16-rifle band as easy:
-        # overruns a bare garrison, held by the consolidated force.
-        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 16, health: 100}
-        # ── EAST enemy push (HEAVY) — heavier than easy (42 vs 36):
-        # the heavy-side trade is even more clearly unsavable, so a
-        # mis-commit is punished harder.
-        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 42, health: 100}
+        - {type: 2tnk, owner: agent, position: [51, 20], stance: 1, count: 2, health: 100}
+        - {type: 1tnk, owner: agent, position: [51, 22], stance: 1, count: 2, health: 100}
+        - {type: jeep, owner: agent, position: [51, 18], stance: 1, health: 100}
+        # ── WEST enemy push (LIGHT) — same 20-rifle band as easy:
+        # overruns the bare garrison, held by the consolidated force.
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 20, health: 100}
+        # ── EAST enemy push (HEAVY) — same 72-rifle unsavable band
+        # as easy: a wrong-side full consolidation still loses the
+        # EAST base (and the un-garrisoned WEST base falls too).
+        # EAST push split into two stacked actor entries (36+36=72)
+        # because the scenario schema caps a single actor count at 50.
+        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 36, health: 100}
+        - {type: e1, owner: enemy, position: [155, 24], stance: 3, count: 36, health: 100}
         # Persistent unarmed enemy `fact` marker (anti auto-DRAW).
         - {type: fact, owner: enemy, position: [150, 5]}
     # Same survival band as easy; max_turns 60 → tick reach 5403 ≥ 5401.
@@ -333,36 +363,36 @@ levels:
         - {type: fact, owner: agent, position: [24, 20], stance: 2, health: 100, spawn_point: 0}
         - {type: proc, owner: agent, position: [24, 23], stance: 2, health: 100, spawn_point: 0}
         - {type: powr, owner: agent, position: [22, 20], stance: 2, health: 100, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [27, 19], stance: 3, count: 2, health: 100, spawn_point: 0}
-        - {type: 1tnk, owner: agent, position: [27, 21], stance: 3, count: 2, health: 100, spawn_point: 0}
-        - {type: e3,   owner: agent, position: [26, 20], stance: 3, count: 2, health: 100, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [27, 19], stance: 1, count: 2, health: 100, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [27, 21], stance: 1, count: 2, health: 100, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [26, 20], stance: 1, count: 2, health: 100, spawn_point: 0}
         # ── WEST agent base — spawn_point 1 copy ──
         - {type: fact, owner: agent, position: [24, 20], stance: 2, health: 100, spawn_point: 1}
         - {type: proc, owner: agent, position: [24, 23], stance: 2, health: 100, spawn_point: 1}
         - {type: powr, owner: agent, position: [22, 20], stance: 2, health: 100, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [27, 19], stance: 3, count: 2, health: 100, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [27, 21], stance: 3, count: 2, health: 100, spawn_point: 1}
-        - {type: e3,   owner: agent, position: [26, 20], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [27, 19], stance: 1, count: 2, health: 100, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [27, 21], stance: 1, count: 2, health: 100, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [26, 20], stance: 1, count: 2, health: 100, spawn_point: 1}
         # ── EAST agent base — spawn_point 0 copy ──
         - {type: fact, owner: agent, position: [78, 20], stance: 2, health: 100, spawn_point: 0}
         - {type: proc, owner: agent, position: [78, 23], stance: 2, health: 100, spawn_point: 0}
         - {type: powr, owner: agent, position: [80, 20], stance: 2, health: 100, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [75, 19], stance: 3, count: 2, health: 100, spawn_point: 0}
-        - {type: 1tnk, owner: agent, position: [75, 21], stance: 3, count: 2, health: 100, spawn_point: 0}
-        - {type: e3,   owner: agent, position: [76, 20], stance: 3, count: 2, health: 100, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [75, 19], stance: 1, count: 2, health: 100, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [75, 21], stance: 1, count: 2, health: 100, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [76, 20], stance: 1, count: 2, health: 100, spawn_point: 0}
         # ── EAST agent base — spawn_point 1 copy ──
         - {type: fact, owner: agent, position: [78, 20], stance: 2, health: 100, spawn_point: 1}
         - {type: proc, owner: agent, position: [78, 23], stance: 2, health: 100, spawn_point: 1}
         - {type: powr, owner: agent, position: [80, 20], stance: 2, health: 100, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [75, 19], stance: 3, count: 2, health: 100, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [75, 21], stance: 3, count: 2, health: 100, spawn_point: 1}
-        - {type: e3,   owner: agent, position: [76, 20], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [75, 19], stance: 1, count: 2, health: 100, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [75, 21], stance: 1, count: 2, health: 100, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [76, 20], stance: 1, count: 2, health: 100, spawn_point: 1}
         # ── Flex squad, spawn_point 0 — pre-positioned WEST of centre
         # (closer to the weak-side base). The model still has to scout
         # and decide; the start nudges the right policy.
-        - {type: 2tnk, owner: agent, position: [48, 20], stance: 3, count: 2, health: 100, spawn_point: 0}
-        - {type: 1tnk, owner: agent, position: [48, 22], stance: 3, count: 2, health: 100, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [48, 18], stance: 3, health: 100, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [48, 20], stance: 1, count: 2, health: 100, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [48, 22], stance: 1, count: 2, health: 100, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [48, 18], stance: 1, health: 100, spawn_point: 0}
         # ── Flex squad, spawn_point 1 — pre-positioned EAST of centre
         # (x=54), on the far side of the centre line from the weak
         # WEST base: a "wrong-side" start that punishes a memorised
@@ -374,23 +404,27 @@ levels:
         # combat rebalance made those survivors numerous enough that
         # a too-distant flex arrived after the WEST base was already
         # being overrun.
-        - {type: 2tnk, owner: agent, position: [54, 20], stance: 3, count: 2, health: 100, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [54, 22], stance: 3, count: 2, health: 100, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [54, 18], stance: 3, health: 100, spawn_point: 1}
-        # ── WEST enemy push (LIGHT) — far west, same 16-rifle band
+        - {type: 2tnk, owner: agent, position: [54, 20], stance: 1, count: 2, health: 100, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [54, 22], stance: 1, count: 2, health: 100, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [54, 18], stance: 1, health: 100, spawn_point: 1}
+        # ── WEST enemy push (LIGHT) — far west, same 20-rifle band
         # as easy/medium.
-        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 16, health: 100}
-        # ── EAST enemy push (HEAVY) — far east, 34-rifle band.
-        # Slightly lighter than medium's 42: hard's seed-varied flex
-        # start (spawn_point 1 starts the flex EAST of centre) gives
-        # the WEST consolidation less travel time, and after the
-        # conceded EAST base falls the heavy push's survivors march
-        # on the held WEST base — at 42 those survivors arrived in
-        # such force they overran the WEST base before the survival
-        # floor on the slower spawn group. 34 still fully razes the
-        # conceded EAST base (a wrong-side consolidate loses every
-        # refinery) but leaves the held WEST base winnable.
-        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 34, health: 100}
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 20, health: 100}
+        # ── EAST enemy push (HEAVY) — far east, same 72-rifle band
+        # as easy/medium. Hard's earlier survival floor (2400 vs
+        # easy/medium's 3000) is what makes the heavy push need to be
+        # this large: a wrong-side full consolidation can hold the
+        # EAST base intact past tick 2400 against a lighter push
+        # (a 34-58 e1 EAST push was still standing at tick 2400 → a
+        # wrong-side consolidate snapshotted a WIN), so the EAST push
+        # must be heavy enough to RAZE the EAST base before the
+        # 2400 floor. 72 e1 does — `cons_east` loses every refinery
+        # on every seed — while the LIGHT west push stays winnable
+        # by the consolidated attack-move force.
+        # EAST push split into two stacked actor entries (36+36=72)
+        # because the scenario schema caps a single actor count at 50.
+        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 36, health: 100}
+        - {type: e1, owner: enemy, position: [155, 24], stance: 3, count: 36, health: 100}
         # Persistent unarmed enemy `fact` marker (anti auto-DRAW).
         # Enemy actors do not honour spawn_point, so a single marker
         # (no spawn_point) places under either seed.

@@ -8,20 +8,34 @@ properties (spawn_point contract for hard, fail_condition shape,
 benchmark anchors), and that the win/fail predicate tree is in the
 right band (after_ticks ≤ within_ticks ≤ reachable-tick).
 
-Recalibration note: the engine combat rebalance hugely strengthened
-stationary defenders, breaking the original bar — the light/heavy
-pushes (4 / 8-12 rifles) no longer threatened the buffed garrisons,
-and an `enemy_units_killed` auto-`done` ended the episode (DRAW)
-the instant the agent cleared a push, before the survival floor.
-The pack was re-tuned: pushes scaled up (WEST 16 / EAST 36-42 /
-hard EAST 34), `enemy_units_killed` termination dropped (the win is
-a survival-band check), a `not proc:1` fail clause added (a
-wrong-side consolidate loses every refinery — without it that play
-kept a lone fact and silently DREW), a persistent unarmed enemy
-`fact` marker added (anti auto-DRAW), the hard survival floor moved
-to tick 2400 and its attrition cap to 18. The capability stays
-load-bearing — stall / split / oscillate / wrong-side consolidate
-all LOSE; only consolidate-on-the-light-side WINS.
+Recalibration note (engine MOVEMENT fixes — `attack_unit` on an
+out-of-sight target paths normally instead of teleporting, and a
+moving unit both fires and takes fire en route, respecting stance):
+the fixes shifted combat bench-wide and broke this pack's bar two
+ways. (1) Agent units left at `stance:3` AttackAnything now
+auto-advance to intercept any visible enemy — so a STALL policy
+self-played the defence (the flex squad and both garrisons hunted
+the pushes unaided) and won for free. (2) A fully-consolidated
+force that attack-moves into a push is now strong enough to hold
+EITHER base — so a wrong-side consolidation onto the (formerly
+unsavable) heavy EAST push WON, collapsing the concede-vs-hold
+discrimination.
+
+The pack was re-tuned: every agent mobile unit set to `stance:1`
+ReturnFire (fires back when shot, never advances/initiates — so the
+agent must EXPLICITLY attack-move the consolidated force, making the
+capability load-bearing again); the WEST light push raised 16->20
+and the EAST heavy push raised to 72 (split into two 36-count actor
+entries — the schema caps a single count at 50) so the conceded
+base is genuinely unsavable even by a full consolidation. Earlier
+recalibration still in effect: `enemy_units_killed` termination
+dropped (the win is a survival-band check), a `not proc:1` fail
+clause, a persistent unarmed enemy `fact` marker (anti auto-DRAW),
+the hard survival floor at tick 2400 and its attrition cap at 18.
+
+The capability stays load-bearing — stall / split / oscillate /
+wrong-side consolidate all LOSE; only consolidate-on-the-light-side
+AND attack-move into the push WINS.
 """
 
 from __future__ import annotations
@@ -135,38 +149,45 @@ def _stall(rs, C):
 
 
 def _cons_west(rs, C):
-    """Intended policy: commit every mobile unit to the WEST base
-    (the light-push side). East garrison moves west too."""
+    """Intended policy: ATTACK-MOVE every mobile unit into the WEST
+    push (the light-push side) so the consolidated force actively
+    clears the raiders. The agent's units are stance:1 ReturnFire —
+    they neither advance nor initiate on their own, so the explicit
+    attack-move order is what makes this policy effective. A plain
+    `move_units` to a fixed rally point leaves the arrived units
+    idle and lets the rifles chip the base buildings down."""
     u = rs.get("units_summary", []) or []
     cmds = [
-        C.move_units([str(x["id"])], target_x=26, target_y=20)
+        C.attack_move([str(x["id"])], target_x=20, target_y=20)
         for x in u
-        if x["cell_x"] > 35
     ]
     return cmds or [C.observe()]
 
 
 def _cons_east(rs, C):
-    """Wrong-side commit: everything to east (heavy-push side)."""
+    """Wrong-side commit: attack-move everything into the EAST push
+    (the heavy-push side). The 72-rifle heavy push razes the EAST
+    base before the force can clear it, and the un-garrisoned WEST
+    base falls too — every refinery is lost."""
     u = rs.get("units_summary", []) or []
     cmds = [
-        C.move_units([str(x["id"])], target_x=76, target_y=20)
+        C.attack_move([str(x["id"])], target_x=84, target_y=20)
         for x in u
-        if x["cell_x"] < 65
     ]
     return cmds or [C.observe()]
 
 
 def _split_defend(rs, C):
-    """Split-defend: half the flex squad to each base, garrisons stay."""
+    """Split-defend: half the flex squad attack-moves to each base,
+    garrisons stay. Neither base gets enough reinforcement."""
     u = rs.get("units_summary", []) or []
     flex = sorted(
         [x for x in u if 38 <= x["cell_x"] <= 65], key=lambda x: x["id"]
     )
     cmds = []
     for i, x in enumerate(flex):
-        tgt = (26, 20) if i % 2 == 0 else (76, 20)
-        cmds.append(C.move_units([str(x["id"])], target_x=tgt[0], target_y=tgt[1]))
+        tgt = (20, 20) if i % 2 == 0 else (84, 20)
+        cmds.append(C.attack_move([str(x["id"])], target_x=tgt[0], target_y=tgt[1]))
     return cmds or [C.observe()]
 
 
@@ -176,24 +197,19 @@ class _PanicTC:
 
 
 def _panic_reinforce_factory():
-    """Reinforce-both-back-and-forth: flip the flex target every turn
-    (no commitment, no rest). Pure wasted travel."""
+    """Reinforce-both-back-and-forth: flip the attack-move target of
+    every unit every turn (no commitment, no rest). Pure wasted
+    travel — the force never settles long enough to clear either
+    push, so both bases fall."""
     tc = _PanicTC()
 
     def f(rs, C):
         tc.n += 1
         u = rs.get("units_summary", []) or []
-        flex = [
-            x
-            for x in u
-            if 38 <= x["cell_x"] <= 65
-            or abs(x["cell_x"] - 26) < 5
-            or abs(x["cell_x"] - 76) < 5
-        ]
-        tgt = (26, 20) if tc.n % 2 == 0 else (76, 20)
+        tgt = (20, 20) if tc.n % 2 == 0 else (84, 20)
         return [
-            C.move_units([str(x["id"])], target_x=tgt[0], target_y=tgt[1])
-            for x in flex
+            C.attack_move([str(x["id"])], target_x=tgt[0], target_y=tgt[1])
+            for x in u
         ] or [C.observe()]
 
     return f
