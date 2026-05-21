@@ -58,7 +58,7 @@ def _ctx(units_xy=(), tick=1000, killed=0, lost=0):
 def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
     # ≥3 tanks at the east NORTH-corridor safe zone (90,12) r=6,
-    # ≥3 alive, in time → WIN
+    # ≥3 alive, in time → WIN (easy keeps the (90,12) corridor)
     safe3 = [(90, 11), (90, 12), (90, 13)]
     assert evaluate(c.win_condition, _ctx(safe3, tick=2000, killed=0, lost=2))
     # Same tanks but only 2 alive (lost 3) → survival cap fails
@@ -77,7 +77,8 @@ def test_predicates_easy():
 
 def test_predicates_medium_tighter_clock():
     c = compile_level(load_pack(PACK_PATH), "medium")
-    safe3 = [(90, 11), (90, 12), (90, 13)]
+    # medium pulls the corridor to the far-NORTH safe zone (90,6) r=6
+    safe3 = [(90, 5), (90, 6), (90, 7)]
     # Intended: ≥3 in zone, ≥3 alive, before tick 2400 → WIN
     assert evaluate(c.win_condition, _ctx(safe3, tick=2000, killed=0, lost=2))
     # In zone but past tick 2400 → win clause fails on within_ticks
@@ -89,14 +90,14 @@ def test_predicates_medium_tighter_clock():
 
 def test_predicates_hard_two_safe_zones():
     c = compile_level(load_pack(PACK_PATH), "hard")
-    # NORTH safe zone (90,12) satisfies the any_of geometry
-    safe_north = [(90, 11), (90, 12), (90, 13)]
+    # FAR-NORTH safe zone (90,6) satisfies the any_of geometry
+    safe_north = [(90, 5), (90, 6), (90, 7)]
     assert evaluate(c.win_condition, _ctx(safe_north, tick=2000, killed=0, lost=2))
-    # SOUTH safe zone (90,28) also satisfies the any_of geometry
-    safe_south = [(90, 27), (90, 28), (90, 29)]
+    # FAR-SOUTH safe zone (90,34) also satisfies the any_of geometry
+    safe_south = [(90, 33), (90, 34), (90, 35)]
     assert evaluate(c.win_condition, _ctx(safe_south, tick=2000, killed=0, lost=2))
     # Tanks at the WRONG centre y (90,20) — outside BOTH zones at r=6
-    # ((90,20)-(90,12)=8>6 and (90,20)-(90,28)=8>6) → fails the geometry
+    # ((90,20)-(90,6)=14>6 and (90,20)-(90,34)=14>6) → fails geometry
     assert not evaluate(
         c.win_condition,
         _ctx([(90, 19), (90, 20), (90, 21)], tick=2000, killed=0, lost=2),
@@ -232,29 +233,25 @@ def _hold_the_base_policy(rs, Command):
 
 def _make_intended_evac_east_policy():
     """Intended EVAC-east policy: on the FIRST observation latch the
-    home y-band (north y<15, south y>25, centre otherwise) and pick
-    the matching safe zone (north → (90,12); south → (90,28); centre
-    → (90,20)). Every turn order ALL surviving tanks to move toward
-    that safe zone. The fact + proc are abandoned — they are sunk
-    cost in the doomed-base idiom."""
-    state = {"safe_xy": None}
+    starting tank column's own latitude (median cell_y) and every turn
+    order ALL surviving tanks east to (90, that-latitude). Evacuating
+    along the column's OWN corridor lands the survivors in whatever
+    safe zone sits at that latitude — easy's NORTH (90,12), medium's
+    far-NORTH (90,6), or hard's seed-chosen far-NORTH (90,6) /
+    far-SOUTH (90,34) — without hardcoding the zone. The fact + proc
+    are abandoned — they are sunk cost in the doomed-base idiom."""
+    state = {"ty": None}
 
     def pol(rs, Command):
         units = rs.get("units_summary", []) or []
         if not units:
             return [Command.observe()]
-        if state["safe_xy"] is None:
+        if state["ty"] is None:
             ys = sorted(u["cell_y"] for u in units)
-            hy_med = ys[len(ys) // 2]
-            if hy_med < 15:
-                state["safe_xy"] = (90, 12)
-            elif hy_med > 25:
-                state["safe_xy"] = (90, 28)
-            else:
-                state["safe_xy"] = (90, 20)
-        tx, ty = state["safe_xy"]
+            state["ty"] = ys[len(ys) // 2]
+        ty = state["ty"]
         return [
-            Command.move_units([str(u["id"])], target_x=tx, target_y=ty)
+            Command.move_units([str(u["id"])], target_x=90, target_y=ty)
             for u in units
         ]
 
@@ -269,7 +266,7 @@ def test_stall_policy_loses(level):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
+    seeds = (1, 2, 3, 4)
     for s in seeds:
         res = run_level(c, _stall_policy, seed=s)
         assert res.outcome == "loss", (
@@ -286,7 +283,7 @@ def test_hold_the_base_policy_loses(level):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
+    seeds = (1, 2, 3, 4)
     for s in seeds:
         res = run_level(c, _hold_the_base_policy, seed=s)
         assert res.outcome == "loss", (
@@ -304,7 +301,7 @@ def test_intended_evac_east_wins(level):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
+    seeds = (1, 2, 3, 4)
     for s in seeds:
         pol = _make_intended_evac_east_policy()
         res = run_level(c, pol, seed=s)

@@ -81,9 +81,10 @@
 #   - 5× 2tnk pre-placed: this matches the "≥N tanks/infantry" spec.
 #     5 starting allows up to 2 in-transit losses while still meeting
 #     the n:3 region clause (own_units_gte:3 is the survival cap).
-#   - Hard tier: 2× `spawn_point` groups (NORTH safe-zone (90,12)
-#     vs SOUTH safe-zone (90,28)) to satisfy the test_hard_tier
-#     UPGRADED contract. Per CLAUDE.md spawn_point contract: ALL
+#   - Hard tier: 2× `spawn_point` groups (FAR-NORTH safe-zone
+#     (90,6) vs FAR-SOUTH safe-zone (90,34)) to satisfy the
+#     test_hard_tier UPGRADED contract. Per CLAUDE.md spawn_point
+#     contract: ALL
 #     agent actors in hard carry spawn_point (the fact/proc
 #     duplicated across both groups at identical cells so the
 #     doomed-base setup is identical per seed).
@@ -253,21 +254,24 @@ levels:
 
   # ── MEDIUM ───────────────────────────────────────────────────────
   # +1 controlled variable vs easy: HEAVIER assault (3× 3tnk + 6× e3)
-  # AND tighter clock (within_ticks 3600). The base falls faster;
-  # the hold-the-base play loses faster. The EVAC route is still
-  # uncontested past x=40 (the hunt band concentrates at the base
-  # initially) — the intended EVAC still wins comfortably, but the
-  # decision MUST come on turn 1 (a 1-2 turn delay can put a tank
-  # within enemy cannon range as the column starts east).
+  # AND tighter clock (within_ticks 2400). The base falls faster;
+  # the hold-the-base play loses faster. The 5× 2tnk stage on the
+  # FAR-NORTH shoulder (y=4..8) — after the engine armour-class
+  # weapon pass the 3tnk anti-armour cannon out-trades a 2tnk much
+  # harder, so the EVAC corridor is pulled NORTH (y≈6) to keep it
+  # outside the heavies' lunge+cannon reach; a stalling reserve at
+  # y=4..8 is still inside GUARD_AGGRO (~16) of the assault at
+  # (17,18..22) and gets ground down. The intended EVAC still wins
+  # (≤2 in-transit losses), but the decision MUST come on turn 1.
   medium:
     description: >
       Your base (fact + proc) at the WEST edge (10,20) is under a
       HEAVIER assault that WILL raze the base — 3 heavy tanks
       (3tnk) and 6 anti-tank rocket infantry (e3) are already in
       firing range. You have 5 medium tanks (2tnk) staged at the
-      NORTH shoulder of the base. A safe zone is set up at the
-      EAST edge along the NORTH corridor (90,12). Win by getting
-      ≥3 of your tanks within radius 6 of (90,12) AND keeping ≥3
+      FAR-NORTH shoulder of the base. A safe zone is set up at the
+      EAST edge along the NORTH corridor (90,6). Win by getting
+      ≥3 of your tanks within radius 6 of (90,6) AND keeping ≥3
       tanks alive, BEFORE tick 2400. The base is EXPECTED to fall
       — losing the fact is not a fail. Stalling loses; holding
       loses; only prompt EVAC-east wins. The clock is tighter
@@ -277,13 +281,18 @@ levels:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: proc, owner: agent, position: [13, 20]}
-        # 5× 2tnk at the NORTH shoulder — same staging as easy so
-        # the natural EVAC corridor is the NORTH y=10..14 lane.
+        # 5× 2tnk at the FAR-NORTH shoulder (y=4..8). The corridor
+        # is pulled north of easy's (y=8..12) so the EVAC column
+        # clears the heavies' lunge+cannon reach — the engine
+        # armour-class weapon pass made the 3tnk cannon far deadlier
+        # vs the 2tnk column. y=4..8 is still inside GUARD_AGGRO
+        # (~16) of the assault at (17,18..22) (dist (10,8)->(17,18)
+        # ≈12) so a staller is still pulled in and ground down.
+        - {type: 2tnk, owner: agent, position: [10, 4],  stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 5],  stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 6],  stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 7],  stance: 1}
         - {type: 2tnk, owner: agent, position: [10, 8],  stance: 1}
-        - {type: 2tnk, owner: agent, position: [10, 9],  stance: 1}
-        - {type: 2tnk, owner: agent, position: [10, 10], stance: 1}
-        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1}
-        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1}
         # Heavier enemy assault — 3× 3tnk + 6× e3 at the base.
         # The extra 3tnk + 2× e3 (over easy) shorten the time
         # the column can dawdle at the shoulder before the guard
@@ -303,7 +312,7 @@ levels:
         - {type: fact, owner: enemy, position: [125, 20]}
     win_condition:
       all_of:
-        - {units_in_region_gte: {x: 90, y: 12, radius: 6, n: 3}}
+        - {units_in_region_gte: {x: 90, y: 6, radius: 6, n: 3}}
         - {own_units_gte: 3}
         # Tighter clock vs easy (2400 vs 2700) ⇒ the EVAC order
         # must come on turn 1 to leave room for the ~25-turn
@@ -318,39 +327,39 @@ levels:
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 controlled variable on top of medium: TWO `spawn_point` groups
-  # rotate the SAFE-ZONE LATITUDE per seed (NORTH (90,12) vs SOUTH
-  # (90,28)). The base and the heavy assault stay at (10,20) for
-  # both spawns (enemy actors don't honour spawn_point — CLAUDE.md);
-  # the per-seed difference is WHICH safe zone the agent must
-  # evacuate TO. A memorised "always move east to (90,20)" opening
-  # cannot generalise — the agent must read its starting tank
-  # cluster's y-band to pick the matching safe corridor.
-  #
-  # Hard ALSO adds a second hunt sub-group (4× e3 spawn_point group
-  # 2 — symmetric mid-map outriders that pursue the retreating
-  # column) per the spec ("hard ≥2 spawn_point groups"). The
-  # extra mid-map fire forces the EVAC to thread NORTH or SOUTH
-  # of the central pinch.
+  # rotate the SAFE-ZONE LATITUDE per seed (FAR-NORTH (90,6) vs
+  # FAR-SOUTH (90,34)). The base and the heavy assault stay at
+  # (10,20) for both spawns (enemy actors don't honour spawn_point —
+  # CLAUDE.md); the per-seed difference is WHICH safe zone the agent
+  # must evacuate TO. A memorised "always move east to (90,20)"
+  # opening cannot generalise — the agent must read its starting
+  # tank cluster's y-band to pick the matching safe corridor.
   #
   # NOTE on the spawn_point contract: only AGENT actors honour
   # spawn_point. The enemy fact + heavy base assault always place
   # (so the base ALWAYS falls regardless of the agent spawn). The
-  # NORTH spawn group has tanks staged at y=12..14 ⇒ a "match
+  # NORTH spawn group has tanks staged at y=4..8 ⇒ a "match
   # latitude" read on the agent's own starting y selects the
-  # NORTH (90,12) safe zone; SOUTH spawn group staged at y=26..28
-  # selects the SOUTH (90,28) safe zone.
+  # FAR-NORTH (90,6) safe zone; SOUTH spawn group staged at
+  # y=32..36 selects the FAR-SOUTH (90,34) safe zone. As in medium
+  # the corridors are pulled to the far shoulders — after the
+  # engine armour-class weapon pass the 3tnk cannon out-trades the
+  # 2tnk column hard, so the EVAC lane must sit outside the
+  # heavies' lunge+cannon reach while a stalling reserve on the
+  # shoulder is still inside GUARD_AGGRO (~16) of the assault.
   hard:
     description: >
       Your base (fact + proc) at the WEST edge (10,20) is under a
       heavy assault that WILL raze the base — 3 heavy tanks
       (3tnk) and 6 anti-tank rocket infantry (e3) are already in
       firing range. You have 5 medium tanks (2tnk), staged in a
-      seed-chosen corridor (NORTH at y≈13 OR SOUTH at y≈27 — read
-      your own tank cluster's y from obs to choose the matching
-      safe zone). The safe zone is set up at either (90,12) IF
-      your tanks started NORTH or (90,28) IF your tanks started
-      SOUTH. Win by getting ≥3 of your tanks within radius 6 of
-      YOUR safe zone AND keeping ≥3 tanks alive, BEFORE tick 2400.
+      seed-chosen corridor (FAR-NORTH at y around 6 OR FAR-SOUTH at
+      y around 34 — read your own tank cluster's y from obs to
+      choose the matching safe zone). The safe zone is set up at
+      either (90,6) IF your tanks started NORTH or (90,34) IF your
+      tanks started SOUTH. Win by getting ≥3 of your tanks within
+      radius 6 of YOUR safe zone AND keeping ≥3 tanks alive,
+      BEFORE tick 2400.
       The base is EXPECTED to fall. Stalling loses; holding the
       base loses; evacuating to the WRONG safe zone leaves you
       outside the win radius; only EVAC to YOUR safe zone wins.
@@ -365,35 +374,33 @@ levels:
         - {type: fact, owner: agent, position: [10, 20], spawn_point: 1}
         - {type: proc, owner: agent, position: [13, 20], spawn_point: 0}
         - {type: proc, owner: agent, position: [13, 20], spawn_point: 1}
-        # ── spawn_point 0 — NORTH corridor (y=8..12) ────────────
-        # 5× 2tnk staged at the north shoulder of the base, just
-        # outside GUARD_AGGRO ~16 from the southmost assault unit
-        # at (16,18): dist from (10,12)→(16,18)=sqrt(36+36)≈8.5;
-        # the central cluster ((10,10)→(16,18) = sqrt(36+64)≈10)
-        # is INSIDE aggro so a stalling tank gets pulled to the
-        # assault, but the EVAC corridor (y<10) is clear of fire
-        # within ~2 turns of movement. The agent reads its own
-        # cluster y from obs (median ≈ 10) → selects the NORTH
-        # safe zone (90,12).
+        # ── spawn_point 0 — FAR-NORTH corridor (y=4..8) ─────────
+        # 5× 2tnk staged at the far-north shoulder of the base. The
+        # cluster ((10,8)→(17,18) = sqrt(49+100)≈12) is INSIDE
+        # GUARD_AGGRO (~16) so a stalling tank is pulled to the
+        # assault and ground down — but the EVAC corridor (y≈4..6)
+        # clears the heavies' lunge+cannon reach once the column is
+        # moving. The agent reads its own cluster y from obs
+        # (median ≈ 6) → selects the FAR-NORTH safe zone (90,6).
+        - {type: 2tnk, owner: agent, position: [10, 4],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 5],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 6],  stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 7],  stance: 1, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [10, 8],  stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 9],  stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 10], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0}
-        # ── spawn_point 1 — SOUTH corridor (y=28..32) ───────────
-        # Mirror staging on the south side. Median y ≈ 30 →
-        # selects the SOUTH safe zone (90,28).
-        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [10, 29], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [10, 30], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [10, 31], stance: 1, spawn_point: 1}
+        # ── spawn_point 1 — FAR-SOUTH corridor (y=32..36) ───────
+        # Mirror staging on the south side. Median y ≈ 34 →
+        # selects the FAR-SOUTH safe zone (90,34).
         - {type: 2tnk, owner: agent, position: [10, 32], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 33], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 34], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 35], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 36], stance: 1, spawn_point: 1}
         # ── Heavy assault at the base (always places) ───────────
         # 3× 3tnk + 6× e3 at the doomed base (x=15..18, y=18..22).
         # The assault is on the fact/proc on turn 1 regardless of
         # which spawn the agent started at. Confined to y=18..22 so
-        # the NORTH (y=10..14) AND SOUTH (y=26..28) EVAC corridors
-        # are outside direct rocket-infantry firing range.
+        # the FAR-NORTH (y=4..8) AND FAR-SOUTH (y=32..36) EVAC
+        # corridors are well outside the heavies' lunge+cannon reach.
         - {type: 3tnk, owner: enemy, position: [17, 18], stance: 3}
         - {type: 3tnk, owner: enemy, position: [17, 20], stance: 3}
         - {type: 3tnk, owner: enemy, position: [17, 22], stance: 3}
@@ -415,14 +422,14 @@ levels:
         - {type: fact, owner: enemy, position: [125, 20]}
     win_condition:
       all_of:
-        # The `any_of` over the two safe zones: either NORTH
-        # (matching spawn_point 0) OR SOUTH (matching spawn_point
-        # 1) satisfies the geometry. A wrong-zone EVAC puts the
-        # column at the OPPOSITE y-band and falls outside both
-        # (distance from (90,12) to (90,28) is 16 > 2·r=12).
+        # The `any_of` over the two safe zones: either FAR-NORTH
+        # (matching spawn_point 0) OR FAR-SOUTH (matching
+        # spawn_point 1) satisfies the geometry. A wrong-zone EVAC
+        # puts the column at the OPPOSITE y-band and falls outside
+        # both (distance from (90,6) to (90,34) is 28 > 2·r=12).
         - any_of:
-            - {units_in_region_gte: {x: 90, y: 12, radius: 6, n: 3}}
-            - {units_in_region_gte: {x: 90, y: 28, radius: 6, n: 3}}
+            - {units_in_region_gte: {x: 90, y: 6,  radius: 6, n: 3}}
+            - {units_in_region_gte: {x: 90, y: 34, radius: 6, n: 3}}
         - {own_units_gte: 3}
         - {within_ticks: 2400}
     fail_condition:
