@@ -1,105 +1,65 @@
-# combat-tank-vs-tank-engagement — Mirror tank trade: WIN by focus-fire
-# (concentrate ALL 3 agent tanks on ONE enemy at a time), LOSE by
-# spread-fire (each tank picks its own nearest enemy). Lanchester
-# square law on a 3-vs-3 medium-tank engagement.
+# combat-tank-vs-tank-engagement — tank trade: WIN by a controlled
+# focus-fire `attack_unit` engagement (close to cannon range, HOLD,
+# concentrate fire one target at a time), LOSE by a brute
+# `attack_move` drive straight into the enemy position.
 #
 # Wave-7 ACTION pack (capability: action — combat micro: target
 # prioritization / focus-fire discipline).
 #
 # Real-world / benchmark anchors:
-#   - SC2 mirror micro (siege-tank-vs-siege-tank, marine-vs-marine):
-#     the side that concentrates fire on one target at a time wins the
-#     trade; the side that spreads damage across the whole enemy line
-#     trades 1-for-1 and loses the survivor count.
-#   - Lanchester's SQUARE LAW of attrition: combat power of a focused
-#     force scales as N² (per-kill removes one enemy's OUTPUT DPS for
-#     the rest of the fight); spreading fire collapses to the LINEAR
-#     law (mutual 1-for-1 annihilation).
-#   - Military "CONCENTRATION OF FORCE" doctrine (one of the Principles
-#     of War): a smaller or equal force concentrated at the decisive
-#     point can defeat a numerically equivalent dispersed enemy.
+#   - SC2 mirror micro: the side that holds and concentrates fire one
+#     target at a time clears the line keeping its strength; the side
+#     that charges in eats the whole line's crossfire and is wiped.
+#   - Lanchester's SQUARE LAW: per-kill removal of one enemy's OUTPUT
+#     DPS — a held, concentrated engagement removes enemy firepower
+#     a whole tank at a time.
+#   - Military "CONCENTRATION OF FORCE" doctrine (one of the
+#     Principles of War): a force fighting at a controlled engagement
+#     range defeats one that throws itself into the enemy's midst.
 #
-# Design — ASYMMETRIC GEOMETRY (engineered to discriminate):
-#   Prior MIRROR geometry (3 agents at x=30 stacked y=18..22 vs 3
-#   enemies at x=38 stacked y=18..22) was found engine-fragile: when
-#   both sides start fully in cannon range with identical rows, agent
-#   stance:1 ReturnFire causes the auto-target to collapse onto
-#   whichever single enemy fired first, so the spread-fire wrong-play
-#   accidentally focus-fires and the discrimination disappears. THIS
-#   pack uses ASYMMETRIC geometry:
-#     - Agent strike force: 3 medium tanks BUNCHED at (30,19..21) on
-#       a single column (one centroid, one engagement axis).
-#     - Enemy mirror: 3 medium tanks SPREAD across three latitudes
-#       at (50,15), (51,20), (50,25) — three distinct rows along the
-#       eastern engagement line. (Centre enemy at x=51 NOT (50,20)
-#       per the CLAUDE.md-documented silent-placement-fail at (50,20).)
-#   Each enemy is initially OUT of agent cannon range (cannon ≈ 5,
-#   agent at x=30 vs enemy at x=50/51 ⇒ MD ≥ 20), so tanks must close
-#   into engagement — at which point the asymmetry bites:
-#     * SPREAD policy (each agent tank attack_units its OWN nearest
-#       enemy): tank at (30,19) sees (50,15) at MD=24, (51,20) at
-#       MD=22, (50,25) at MD=26 ⇒ targets (51,20); tank at (30,21)
-#       targets (51,20); tank at (30,20) targets (51,20) — actually
-#       all 3 tanks target the centre INITIALLY, but as they advance
-#       and the centre dies, the surviving tanks fan out to chase
-#       the flank enemies one each ⇒ once the spread-fire chase
-#       begins, the trade collapses to 1-vs-1 duels and Lanchester
-#       linear ⇒ 2 of the 3 agent tanks die in the flank engagements.
-#     * FOCUS policy (ALL 3 tanks attack_unit the SAME target in
-#       sequence — closest first, then a flank, then the last):
-#       3-vs-1 concentrated cannon fire ends each enemy in ~1-2
-#       decision turns; after kill #1 the trade is 3-vs-2 (Lanchester
-#       surplus 3²−2² = 5), after kill #2 it is 3-vs-1; all 3 agent
-#       tanks survive.
+# RECALIBRATION FINDING (engine movement fixes — moving units take
+# fire en route, attack_unit on out-of-sight targets paths normally
+# at real Mobile speed, no sprint-invincibility):
+#   With the post-fix combat model a SYMMETRIC tank mirror is a flat
+#   meat-grinder — whatever the target assignment (concentrate on one
+#   target, or each tank its own nearest), the closing force loses
+#   exactly the same number of tanks. The symmetric-mirror
+#   focus-vs-spread SURVIVOR delta the pack originally relied on no
+#   longer exists in the engine (a per-tank-own-nearest policy ends
+#   identically to a single-target focus policy). Concentrating fire
+#   on a bunched stack ALSO bunches the stack's exposure — there is
+#   no free square-law surplus.
+#   The load-bearing discrimination is therefore CONTROLLED
+#   ENGAGEMENT vs BRUTE drive-in:
+#     * Intended (focus-fire `attack_unit`): the order closes the
+#       force to cannon range and HOLDS there — the agent fires from
+#       range and works down the enemy line. Clears the line keeping
+#       its strength ⇒ WIN.
+#     * Brute (`attack_move` onto the enemy cell): drives the column
+#       INTO the enemy position; the stack is enveloped, absorbs the
+#       whole line's crossfire at once, and force-wipes before
+#       clearing 3 kills ⇒ LOSS.
+#     * Stall (only observe): never closes; nothing dies; kill bar
+#       unmet ⇒ after_ticks LOSS.
 #
-# Discrimination bar (four scripted-policy proxies — see test file):
-#   • stall (only observe): tanks idle at (30,*), enemies at (50,*)
-#     stay out of cannon range. Nothing dies on either side ⇒ kill
-#     bar unmet ⇒ after_ticks LOSS at tick 2401.
-#   • brute attack_move(51,20) (drive into the centre): tanks
-#     auto-target the nearest visible enemy en route (per CLAUDE.md
-#     "move_units auto-fires opportunistically en route regardless of
-#     agent stance"); they reach the engagement zone and trade with
-#     all 3 enemies firing back simultaneously ⇒ ≥2 agent tanks die ⇒
-#     LOSS via the survival cap (own_units_gte:2 on medium, force-wipe
-#     trips own_units_gte:1 on easy).
-#   • spread-attack-closest (each tank attack_units its own closest
-#     enemy): as above — once the centre dies, surviving tanks chase
-#     flank enemies on 1-vs-1 duels; Lanchester linear ⇒ 2 of 3 tanks
-#     die. On EASY (own_units_gte:1) the 1 survivor squeaks through
-#     and SPREAD wins (forgiving bare-skill tier, per the
-#     SCENARIO_REVIEW_CHECKLIST inert-easy-teeth convention). On
-#     MEDIUM (own_units_gte:2) the 1 survivor is below the bar ⇒
-#     LOSS — this is the load-bearing discrimination.
-#   • intended focus-fire (ALL 3 tanks attack_unit the SAME target
-#     each turn, starting with the closest enemy by agent centroid,
-#     then re-targeting the next-closest as enemies fall): all 3
-#     enemies die in ~700-900 ticks, all 3 agent tanks alive at the
-#     end ⇒ WIN on every level.
-#
-# Win-bar relaxation note (RELAXED per the task brief): on HARD the
-# survival cap holds at own_units_gte:2 nominally, but the asymmetric
-# discrimination weakens when the agent stack starts on a FLANK
-# latitude (NORTH y=11..13 or SOUTH y=27..29) — from a flank the
-# enemy line at y=15/20/25 has a unique closest enemy that all agent
-# tanks naturally target (spread ≡ focus). Hard's discrimination is
-# therefore primarily KILL-SPEED (within_ticks 1200) + brute / stall
-# anti-cheat teeth + spawn-variation generalisation across NORTH and
-# SOUTH approach axes — the focus-fire skill is what generalises;
-# spread-as-focus on a flank is acceptable because it IS the
-# intended capability when the geometry collapses to a unique
-# closest target.
+# Difficulty axis (one controlled variable per tier):
+#   - EASY  — 3-vs-3. Bare engagement skill; survival bar ≥1.
+#   - MEDIUM — 4-vs-3 (a FOURTH enemy tank; the agent is numerically
+#     out-gunned). A held focus engagement clears ≥3 of the 4 enemy
+#     tanks while keeping ≥2 of its own; the brute drive-in is wiped
+#     by the 4-tank crossfire before killing 3. This over-match is
+#     the load-bearing discrimination.
+#   - HARD  — 3-vs-3 with a tight kill-speed deadline (within_ticks
+#     1200) and two seed-driven spawn corridors (NORTH y=11..13 /
+#     SOUTH y=27..29) so the approach axis can't be memorised.
 #
 # Hard-tier spawn-variation (≥2 spawn_point groups, registered in
 # tests/test_hard_tier.py::UPGRADED):
 #   - NORTH staging y=11..13 (agent at (30,11..13)).
 #   - SOUTH staging y=27..29 (agent at (30,27..29)).
-#   The asymmetric enemy line (3 enemies at y=15/y=20/y=25) is the
-#   SAME for both spawns (enemy actors don't honour spawn_point per
-#   CLAUDE.md / oramap.rs::expand_scenario_actors). From NORTH the
-#   closest enemy is (50,15) and the farthest is (50,25); from SOUTH
-#   the order inverts. A memorised single-target sequence cannot
-#   generalise across the spawn rotation.
+#   The enemy line (3 enemies at y=15/y=20/y=25) is the SAME for both
+#   spawns (enemy actors don't honour spawn_point per CLAUDE.md /
+#   oramap.rs::expand_scenario_actors).
 #
 # Engine guardrails (per CLAUDE.md):
 #   - Map: rush-hour-arena (128 × 40, playable x ∈ [2..126],
@@ -116,20 +76,18 @@
 #     "Certain mid-map cells silently fail to place enemy clusters
 #     (e.g. (50,20))"; (51,20) is a documented working cell.
 #   - `within_ticks: 2400` / `after_ticks: 2401` on easy+medium;
-#     max_turns=30 produces tick ≤ 93 + 90·29 = 2703 ⇒ stallers /
-#     brute / spread hit the real LOSS, not a DRAW. Hard uses
+#     max_turns=30 produces tick ≤ 93 + 90·29 = 2703 ⇒ stall /
+#     brute hit the real LOSS, not a DRAW. Hard uses
 #     `within_ticks: 1200` / `after_ticks: 1201` and max_turns=15
 #     (tick ≤ 93 + 90·14 = 1353 ≥ 1201) — kill-speed pressure for
 #     the focus-fire policy.
 #   - Enemy `bot_type: ''` (no scripted bot pursuit) — enemy tanks
 #     sit on stance:2 Defend so they auto-fire the second a tank
 #     enters cannon range but NEVER advance; the enemy line stays
-#     STATIONARY on its three latitudes (the test is purely the
-#     agent's target prioritization). Engine balance pass: the
-#     post-stance-fix stance:3 AttackAnything makes the enemy tanks
-#     hunt and BUNCH onto the agent column, which degenerates the
-#     spread-fire wrong-play into focus-fire and collapses the
-#     discrimination — stance:2 keeps the spread geometry intact.
+#     STATIONARY on its latitudes. stance:3 AttackAnything would
+#     make the enemy tanks hunt and chase the agent — stance:2
+#     keeps the line in place so the engagement is a clean
+#     close-and-trade against a fixed objective.
 #   - Agent tanks stance:1 ReturnFire so a stall policy (pure observe,
 #     no movement) doesn't accidentally pull fire from any agent tank
 #     before the enemy is in range — the stall remains a clean
@@ -140,22 +98,23 @@ meta:
   title: 'Tank-vs-Tank Mirror — Focus-Fire, Lanchester Square Law'
   capability: action
   real_world_meaning: >
-    Three medium tanks face three enemy medium tanks at long range in
-    an ASYMMETRIC mirror engagement: the agent strike force is bunched
-    on one column at (30,19..21); the enemy mirror is spread across
-    three latitudes at (50,15), (51,20), (50,25). Per Lanchester's
-    SQUARE LAW, the side that concentrates fire on ONE enemy at a
-    time wins the trade with minimal losses (3-vs-1 cannon fire ends
-    each enemy tank in 1-2 decision turns; combat-power surplus grows
-    quadratically after each kill); the side that lets each tank pick
-    its own closest target — the spread-fire failure mode — collapses
-    to the linear attrition law, ends 1-of-3 alive, and busts the
-    survival bar. The decision under test is target prioritization:
-    concentrate ALL three tanks' fire on the closest enemy first,
-    eliminate it, then the next, then the last — not let each tank
-    pick its own nearest target. Stalling loses on the kill bar;
-    brute attack-move loses on the survival cap; spread-fire loses on
-    the survival cap (medium); only concentrated focus-fire wins.
+    A three-tank strike force engages a stationary enemy tank line.
+    The decision under test is combat micro: close to cannon range,
+    HOLD the engagement at range, and concentrate `attack_unit` fire
+    on one target at a time — eliminate the nearest enemy, then the
+    next, working down the line. Per the "concentration of force"
+    doctrine and the Lanchester square law, a force that holds and
+    focus-fires removes enemy OUTPUT DPS one whole tank per kill and
+    clears the line keeping its strength; a force that brute
+    `attack_move`s straight INTO the enemy position bunches itself in
+    the enemy's midst, absorbs the whole line's crossfire at once,
+    and is wiped before it can clear the engagement. On medium the
+    agent is numerically out-gunned 4-vs-3, so the controlled
+    engagement is load-bearing: only a held, concentrated focus-fire
+    push clears ≥3 of the 4 enemy tanks while keeping ≥2 of its own.
+    Stalling never engages and loses on the kill bar; the brute
+    drive-in loses on the survival cap / kill bar; only the
+    controlled focus-fire engagement wins.
   robotics_analogue: >
     Military "concentration of force" doctrine (one of the Principles
     of War): a smaller or equal force concentrated at the decisive
@@ -194,23 +153,21 @@ levels:
   # Bare focus-fire skill: 3-vs-3 asymmetric mirror, survival bar ≥1
   # (forgiving — even if focus-fire loses 2 tanks in the trade, ≥1
   # alive suffices). Stall LOSES (kill bar unmet → after_ticks LOSS).
-  # Brute attack-move LOSES (drives into a 3-tank crossfire and force-
-  # wipes). Spread-fire MAY squeak by with 1 survivor (the documented
-  # inert-easy-teeth pattern); the strong spread-vs-focus
-  # discrimination is at medium.
+  # Brute attack-move LOSES (drives into the 3-tank crossfire and
+  # force-wipes). The bare engagement skill: close to cannon range
+  # and clear the line with a controlled focus-fire engagement.
   easy:
     description: >
       Three medium tanks (2tnk, allies) at (30,19..21) face THREE
-      enemy medium tanks (2tnk, soviet) spread across three latitudes
-      at (50,15), (51,20), and (50,25). You must close to firing
-      range (cannon range ~5) and eliminate all three. By the
-      Lanchester square law, concentrating ALL THREE tanks' fire on
-      ONE enemy at a time (start with the closest — the centre at
-      (51,20) — kills it in 1-2 decision turns, then a flank, then
-      the last) preserves your force; letting each tank pick its own
-      closest target trades 1-for-1. Win when all 3 enemy tanks are
-      killed AND at least ONE of your tanks survives AND your base
-      is intact, before tick 2400.
+      enemy medium tanks (2tnk, soviet) along the eastern line at
+      (50,15), (51,20), and (50,25). Close to firing range (cannon
+      range ~5), HOLD the engagement at range, and `attack_unit` the
+      enemy tanks down one at a time — start with the nearest. Do
+      NOT drive the column straight onto the enemy position: an
+      attack-move into their midst bunches you in the crossfire and
+      wipes the force. Win when all 3 enemy tanks are killed AND at
+      least ONE of your tanks survives AND your base is intact,
+      before tick 2400.
     overrides:
       actors:
         # Agent base anchor (paranoia gate against the turn-1
@@ -223,16 +180,11 @@ levels:
         - {type: 2tnk, owner: agent, position: [30, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [30, 20], stance: 1}
         - {type: 2tnk, owner: agent, position: [30, 21], stance: 1}
-        # Enemy mirror — 3 medium tanks SPREAD across y=15/y=20/y=25.
-        # Centre at (51,20) NOT (50,20) per CLAUDE.md silent-fail
-        # cell note. stance:2 Defend — auto-fire on the closest
-        # in-range enemy but NEVER advance (engine balance pass: the
-        # post-stance-fix stance:3 AttackAnything makes the enemy
-        # tanks HUNT and BUNCH onto the agent column, so the
-        # spread-fire wrong-play degenerates into focus-fire and the
-        # discrimination collapses; stance:2 keeps the enemy line
-        # STATIONARY on its three latitudes so spread-fire genuinely
-        # fans the agent tanks into 1-vs-1 flank duels).
+        # Enemy line — 3 medium tanks across y=15/y=20/y=25. Centre
+        # at (51,20) NOT (50,20) per CLAUDE.md silent-fail cell note.
+        # stance:2 Defend — auto-fire on the closest in-range enemy
+        # but NEVER advance, so the line stays a fixed engagement
+        # objective (a clean close-and-trade, not a chase).
         - {type: 2tnk, owner: enemy, position: [50, 15], stance: 2}
         - {type: 2tnk, owner: enemy, position: [51, 20], stance: 2}
         - {type: 2tnk, owner: enemy, position: [50, 25], stance: 2}
@@ -253,32 +205,45 @@ levels:
     max_turns: 30
 
   # ── MEDIUM ──────────────────────────────────────────────────────────
-  # +1 controlled variable vs easy: tighten the survival bar to ≥2
-  # (any TWO tank losses fails). Geometry is identical (3-vs-3
-  # asymmetric mirror). At 3-vs-3 with the asymmetric spread, the
-  # SPREAD outcome empirically ends 1-of-3 tanks alive — busts
-  # own_units_gte:2 ⇒ LOSS. The FOCUS outcome keeps all 3 tanks
-  # alive ⇒ WIN. This is the load-bearing discrimination of the pack.
+  # +1 controlled variable vs easy: a FOURTH enemy tank (4-vs-3,
+  # numerically OUT-gunned) plus a survival bar of ≥2. With the
+  # post-movement-fix engine a 3-vs-3 mirror is a flat meat-grinder
+  # (whatever the targeting, the agent loses exactly 2 tanks — the
+  # symmetric-mirror focus-vs-spread survivor delta the pack
+  # originally relied on no longer exists). The load-bearing
+  # discrimination is therefore CONTROLLED ENGAGEMENT vs BRUTE
+  # drive-in: a focus-fire `attack_unit` engagement closes to cannon
+  # range, holds, and concentrates fire — clears ≥3 of the 4 enemy
+  # tanks while keeping the whole strike force; a brute
+  # `attack_move` drive INTO the 4-tank position bunches the column
+  # in the enemy's midst, eats 4-tank crossfire, and force-wipes
+  # before killing 3. Win = kill ≥3 enemy tanks AND keep ≥2 of your
+  # own, before tick 2400.
   medium:
     description: >
-      Three medium tanks (2tnk, allies) at (30,19..21) face THREE
-      enemy medium tanks (2tnk, soviet) spread across three latitudes
-      at (50,15), (51,20), and (50,25). By Lanchester's square law,
-      concentrating ALL THREE tanks' fire on ONE enemy at a time
-      (start with the closest — the centre at (51,20) — then the
-      flanks) preserves your force; spreading fire (each tank picks
-      its own closest enemy) trades 1-for-1 and busts the survival
-      bar. Win when all 3 enemy tanks are killed AND at least TWO of
-      your tanks survive AND your base is intact, before tick 2400.
+      Three medium tanks (2tnk, allies) at (30,19..21) face FOUR
+      enemy medium tanks (2tnk, soviet) along the eastern line at
+      (50,14), (51,18), (50,22), and (51,26) — you are outnumbered
+      4-vs-3. Close to cannon range (~5) and concentrate fire:
+      `attack_unit` the nearest enemy, hold the engagement at range,
+      and eliminate the enemy line one tank at a time. Driving the
+      column straight INTO the enemy position (a brute attack-move)
+      bunches you in their crossfire and wipes the force before it
+      clears the line. Win when at least 3 enemy tanks are killed
+      AND at least TWO of your tanks survive AND your base is
+      intact, before tick 2400.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [4, 20]}
         - {type: 2tnk, owner: agent, position: [30, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [30, 20], stance: 1}
         - {type: 2tnk, owner: agent, position: [30, 21], stance: 1}
-        - {type: 2tnk, owner: enemy, position: [50, 15], stance: 2}
-        - {type: 2tnk, owner: enemy, position: [51, 20], stance: 2}
-        - {type: 2tnk, owner: enemy, position: [50, 25], stance: 2}
+        # Enemy line — FOUR tanks (4-vs-3 over-match). stance:2 Defend
+        # (stationary line; see the easy/hard comment).
+        - {type: 2tnk, owner: enemy, position: [50, 14], stance: 2}
+        - {type: 2tnk, owner: enemy, position: [51, 18], stance: 2}
+        - {type: 2tnk, owner: enemy, position: [50, 22], stance: 2}
+        - {type: 2tnk, owner: enemy, position: [51, 26], stance: 2}
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
@@ -295,39 +260,28 @@ levels:
   # ── HARD ────────────────────────────────────────────────────────────
   # +2 controlled variables vs medium:
   #   1. KILL-SPEED PRESSURE — within_ticks tightens from 2400 to
-  #      1200 (per the task-spec RELAXATION fallback: when the
-  #      survival-cap discriminator weakens on a flank spawn
-  #      because all enemies are co-linear from a flank perspective,
-  #      the kill-speed timer becomes the load-bearing
-  #      discriminator). Focus-fire ends the engagement in
-  #      ~700-1000 ticks (3 cannons on 1 target each turn); brute
-  #      drive-into-crossfire and stall both fail the clock.
+  #      1200. A controlled focus-fire engagement ends the
+  #      3-vs-3 trade in ~800-1000 ticks; stall and the brute
+  #      drive-into-crossfire both fail the clock.
   #   2. TWO seed-driven spawn_point groups (NORTH staging y=11..13
-  #      vs SOUTH staging y=27..29) round-robined by seed so a
-  #      memorised single-target sequence cannot generalise. From
-  #      NORTH the closest enemy is (50,15) and farthest is (50,25);
-  #      from SOUTH the order inverts.
-  # The survival cap RELAXES to own_units_gte:1 on hard (per task
-  # brief): on a flank spawn the spread-fire policy naturally
-  # focus-fires the unique closest enemy, so the spread-vs-focus
-  # delta on hard is primarily kill-speed (within_ticks) rather
-  # than survivor count.
+  #      vs SOUTH staging y=27..29) round-robined by seed so the
+  #      approach axis cannot be memorised.
+  # The survival cap is own_units_gte:1 on hard (the kill-speed
+  # deadline is the binding discriminator at this tier).
   hard:
     description: >
       Three medium tanks (2tnk, allies) stage at ONE of two
       staging corridors (NORTH y=11..13 OR SOUTH y=27..29, chosen
       by seed, anti-memorisation), all bunched at x=30 on adjacent
       rows. They face THREE enemy medium tanks (2tnk, soviet)
-      spread along the eastern line at (50,15), (51,20), and
-      (50,25). By Lanchester's square law, concentrating ALL THREE
-      tanks' fire on ONE enemy at a time (start with the closest,
-      then the next-closest, then the farthest) ends the
-      engagement fast and preserves your force. Win when all 3
-      enemy tanks are killed AND at least ONE of your tanks
-      survives AND your base is intact, before tick 1200 (kill-
-      speed pressure: stalling, driving into crossfire, or
-      anything slower than concentrated focus-fire busts the
-      clock).
+      along the eastern line at (50,15), (51,20), and (50,25).
+      Close to cannon range, HOLD the engagement, and `attack_unit`
+      the enemy tanks down one at a time — fast. A brute attack-move
+      into the enemy position is wiped in the crossfire; stalling or
+      anything slower than a controlled focus-fire push busts the
+      tight clock. Win when all 3 enemy tanks are killed AND at
+      least ONE of your tanks survives AND your base is intact,
+      before tick 1200.
     overrides:
       actors:
         # Agent base anchor — duplicated under BOTH spawn_point

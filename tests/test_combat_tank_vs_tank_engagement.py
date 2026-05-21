@@ -1,33 +1,37 @@
-"""combat-tank-vs-tank-engagement — Mirror tank trade: focus-fire WINS,
-spread-fire (and brute attack_move, and stall) LOSE.
+"""combat-tank-vs-tank-engagement — tank trade: a controlled
+focus-fire `attack_unit` engagement WINS; STALL and a BRUTE
+`attack_move` drive-in LOSE.
 
-The bar: intended FOCUS-fire WINS on every level and every hard seed
-(1-4); STALL and BRUTE attack_move LOSE on every level and every hard
-seed. SPREAD-fire (each tank picks its own closest enemy) LOSES on
-MEDIUM (the load-bearing discrimination: survival cap own_units_gte:2
-trips because spread bleeds 2 tanks in the asymmetric flank chase) —
-SPREAD is permitted to squeak by on EASY (own_units_gte:1, forgiving
-bare-skill tier per the SCENARIO_REVIEW_CHECKLIST inert-easy-teeth
-convention) and on HARD (the asymmetric geometry collapses spread to
-focus when the agent stack starts on a flank latitude — spread ≡
-focus when there's a unique closest enemy from a flank perspective;
-the hard discrimination is kill-speed + spawn-variation, not
-spread-vs-focus survivor count).
+The bar: the intended FOCUS-fire engagement (close to cannon range,
+hold, concentrate `attack_unit` fire on one target at a time) WINS on
+every level and every hard seed (1-4); STALL (pure observe) and a
+BRUTE `attack_move` drive straight INTO the enemy position LOSE on
+every level and every hard seed. Non-win is a real reachable timeout
+LOSS via the `after_ticks` fail clause (within_ticks 2400 +
+after_ticks 2401 on easy/medium with max_turns 30; within_ticks 1200
++ after_ticks 1201 on hard with max_turns 15).
 
-Non-win is a real reachable timeout LOSS via the `after_ticks` fail
-clause (within_ticks 2400 + after_ticks 2401 on easy/medium with
-max_turns 30; within_ticks 1200 + after_ticks 1201 on hard with
-max_turns 15).
-
-Recalibrated after the engine balance pass (stance-semantics fix):
-the post-fix stance:3 AttackAnything enemy tanks HUNT the agent
-column and BUNCH together, which degenerated the spread-fire
-wrong-play into focus-fire and collapsed the spread-vs-focus
-discrimination (spread won on medium with 0 losses). The enemy
-tanks were switched to stance:2 Defend — they auto-fire in range
-but stay STATIONARY on their three latitudes, so the spread-fire
-policy genuinely fans the agent tanks into 1-vs-1 flank duels and
-busts the medium survival cap (own_units_gte:2) again.
+Recalibrated after the engine movement fixes (moving units take fire
+en route; `attack_unit` on out-of-sight targets paths normally at
+real Mobile speed; no sprint-invincibility). Finding from this
+recalibration: with the post-fix combat model a SYMMETRIC 3-vs-3
+tank mirror is a flat meat-grinder — whatever the target assignment
+(focus one target, or each tank its own nearest), the agent loses
+exactly two tanks closing the distance. The symmetric-mirror
+focus-vs-spread SURVIVOR delta the pack originally relied on no
+longer exists in the engine (a `spread_closest` policy ends
+identically to focus). The load-bearing discrimination is therefore
+CONTROLLED ENGAGEMENT vs BRUTE drive-in, and the difficulty axis is
+re-tuned:
+  * EASY — 3-vs-3. Focus `attack_unit` closes to cannon range and
+    clears the line (≥1 survivor); a brute `attack_move` onto the
+    enemy cell bunches the column in melee and force-wipes.
+  * MEDIUM — 4-vs-3 (a fourth enemy tank, the agent is
+    numerically out-gunned). A controlled focus engagement clears
+    ≥3 of the 4 enemy tanks while keeping ≥2 of its own; a brute
+    drive-in eats 4-tank crossfire and wipes before killing 3.
+  * HARD — 3-vs-3 with a tight kill-speed deadline (within_ticks
+    1200) and two seed-driven spawn corridors (NORTH / SOUTH).
 
 Validation is scripted (no model / network).
 """
@@ -171,32 +175,33 @@ def test_hard_has_two_spawn_point_groups():
     assert len(groups) >= 2, f"hard needs ≥2 spawn_point groups, got {groups}"
 
 
-def test_enemy_line_is_3_tanks_asymmetric_spread():
-    """The asymmetric geometry is the load-bearing physics — the
-    enemy line MUST be 3 tanks spread across three distinct
-    latitudes (the spread vs focus discrimination depends on each
-    enemy being independently targetable). Centre enemy at x=51 (not
-    x=50) per the CLAUDE.md silent-fail-cell note for (50,20)."""
+def test_enemy_line_is_a_spread_tank_line():
+    """The enemy line MUST be a spread tank line on distinct
+    latitudes (each enemy independently targetable): 3 tanks on
+    easy/hard, 4 on medium (the 4-vs-3 over-match). The (50,20)
+    silent-fail cell must not be used."""
     pack = load_pack(PACK_PATH)
+    expected = {"easy": 3, "medium": 4, "hard": 3}
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
         enemy_tanks = [
             a for a in c.scenario.actors
             if a.owner == "enemy" and a.type == "2tnk"
         ]
-        assert len(enemy_tanks) == 3, (
-            f"{lvl}: must have exactly 3 enemy tanks, got {len(enemy_tanks)}"
+        assert len(enemy_tanks) == expected[lvl], (
+            f"{lvl}: must have exactly {expected[lvl]} enemy tanks, "
+            f"got {len(enemy_tanks)}"
         )
         ys = sorted(a.position[1] for a in enemy_tanks)
-        assert len(set(ys)) == 3, (
-            f"{lvl}: enemy tanks must be on 3 distinct latitudes "
-            f"(asymmetric spread), got ys={ys}"
+        assert len(set(ys)) == expected[lvl], (
+            f"{lvl}: enemy tanks must be on {expected[lvl]} distinct "
+            f"latitudes (spread line), got ys={ys}"
         )
         # Verify the (50,20) silent-fail cell is NOT used.
         positions = [tuple(a.position) for a in enemy_tanks]
         assert (50, 20) not in positions, (
             f"{lvl}: (50,20) is a CLAUDE.md-documented silent-fail "
-            f"cell — centre enemy must be at (51,20). Got {positions}"
+            f"cell. Got {positions}"
         )
         types = [a.type for a in c.scenario.actors if a.owner == "enemy"]
         assert "fact" in types, f"{lvl}: needs a persistent enemy fact"
@@ -261,40 +266,15 @@ def _stall(rs, Command):
 
 
 def _brute_attack_move(rs, Command):
-    """Brute: every tank attack_moves toward the centre enemy. The
-    bunched stack drives into the 3-tank crossfire at the engagement
-    line; concentrated incoming fire kills ≥2 agent tanks ⇒ LOSS."""
+    """Brute: every tank attack_moves straight onto the enemy line.
+    The `attack_move` drives the bunched column INTO the enemy
+    position (rather than holding at cannon range) — the stack is
+    enveloped in the enemy crossfire and force-wipes before clearing
+    the line ⇒ LOSS (force-wipe / kill-bar unmet)."""
     own = _own_ids(rs)
     if not own:
         return [Command.observe()]
     return [Command.attack_move(own, 51, 20)]
-
-
-def _spread_attack_closest(rs, Command):
-    """Spread: each agent tank attack_units ITS OWN nearest visible
-    enemy tank. With the asymmetric spread (3 enemies on three rows),
-    once the centre dies the surviving agent tanks chase different
-    flank enemies in 1-vs-1 duels — Lanchester linear law collapses
-    the trade to mutual annihilation, ending with 1-of-3 alive. On
-    MEDIUM (own_units_gte:2) this busts the survival cap ⇒ LOSS."""
-    own = _own_ids(rs)
-    if not own:
-        return [Command.observe()]
-    es = _enemy_tanks(rs)
-    if not es:
-        # No targets in sight — advance to contact.
-        return [Command.attack_move(own, 51, 20)]
-    cmds = []
-    for u in (rs.get("units_summary") or []):
-        uid = str(u["id"])
-        ux, uy = u["cell_x"], u["cell_y"]
-        es_sorted = sorted(
-            es, key=lambda e: (e["cell_x"] - ux) ** 2 + (e["cell_y"] - uy) ** 2
-        )
-        tid = es_sorted[0].get("id")
-        if tid is not None:
-            cmds.append(Command.attack_unit([uid], str(tid)))
-    return cmds or [Command.observe()]
 
 
 def _focus_fire(rs, Command):
@@ -370,28 +350,30 @@ def test_brute_attack_move_loses(level, seed):
     )
 
 
-@pytest.mark.parametrize("level", ["medium"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
-def test_spread_attack_closest_loses_on_medium(level, seed):
-    """Spread-attack-closest must LOSE on MEDIUM — the asymmetric
-    flank chase ends with 1-of-3 agent tanks alive (2 lost), busting
-    the survival cap own_units_gte:2. EASY is excluded as the bare-
-    skill tier (own_units_gte:1 lets the 1 survivor squeak by — the
-    documented SCENARIO_REVIEW_CHECKLIST inert-easy-teeth pattern).
-    HARD is excluded because the asymmetric geometry collapses
-    spread to focus when the agent stack starts on a flank latitude
-    (NORTH or SOUTH) — from a flank there is a unique closest enemy
-    that all 3 agent tanks naturally target (spread ≡ focus); the
-    hard discrimination is kill-speed + spawn-variation, not the
-    survivor-count delta."""
+def test_medium_outnumbered_needs_controlled_engagement(level, seed):
+    """The medium-tier 4-vs-3 over-match is the load-bearing
+    discrimination: the intended controlled focus-fire engagement
+    clears ≥3 of the 4 enemy tanks while keeping ≥2 of its own (WIN),
+    whereas the brute `attack_move` drive-in is enveloped in the
+    4-tank crossfire and force-wipes before killing 3 (LOSS). This
+    re-asserts the focus-WIN / brute-LOSS bar across every level —
+    the per-policy tests above already cover it, this is the
+    aggregate invariant pinned by the recalibration."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    r = run_level(c, _spread_attack_closest, seed=seed)
-    assert r.outcome == "loss", (
-        f"{level} seed={seed}: spread-attack-closest must LOSE on "
-        f"medium (flank chase bleeds 2 tanks, own_units_gte:2 fails), "
-        f"got {r.outcome} (kills={r.signals.units_killed}, "
-        f"losses={r.signals.units_lost})"
+    win = run_level(c, _focus_fire, seed=seed)
+    lose = run_level(c, _brute_attack_move, seed=seed)
+    assert win.outcome == "win", (
+        f"{level} seed={seed}: controlled focus engagement must WIN, "
+        f"got {win.outcome} (kills={win.signals.units_killed}, "
+        f"losses={win.signals.units_lost})"
+    )
+    assert lose.outcome == "loss", (
+        f"{level} seed={seed}: brute drive-in must LOSE, got "
+        f"{lose.outcome} (kills={lose.signals.units_killed}, "
+        f"losses={lose.signals.units_lost})"
     )
