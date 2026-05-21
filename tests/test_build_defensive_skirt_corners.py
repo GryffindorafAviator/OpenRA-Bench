@@ -22,10 +22,17 @@ pbox count alone is not enough:
   ever-seen set that stays true after the fact is razed — CLAUDE.md
   footgun);
 * `units_killed_gte:K` ⇒ the skirt has to actually engage the rush;
+  the pbox is the load-bearing weapon (engine pbox-weapon fix), and
+  with no pre-placed agent defenders the pbox skirt is the SOLE kill
+  source — a stall / pure-army layout kills 0;
 * `within_ticks` paired with `after_ticks` ⇒ a non-finisher is a real
   reachable timeout LOSS (no interrupts ⇒ each step is exactly 90
   ticks, so max_turns is a hard tick budget the `after_ticks` deadline
   reliably bites in).
+
+The rush arrives as a `scheduled_events: spawn_actors` wave at tick
+1800 — AFTER the skirt has had time to assemble — with one band sitting
+ON each corner region so a pbox planted there engages it immediately.
 
 The scripted-policy validations prove deterministically that:
 
@@ -91,10 +98,17 @@ def _fact_cell(rs):
     return facts[0].get("cell_x"), facts[0].get("cell_y")
 
 
+# Corner-region offsets from the fact (NE, NW, SE, SW). The four
+# corner discs sit at fact + (+/-18, +/-11). The scheduled rush bands
+# spawn ON these discs, so a pbox planted in a disc engages its band
+# the moment the wave arrives.
+SKIRT_OFFSETS = [(18, -11), (-18, -11), (18, 11), (-18, 11)]
+
+
 def make_adaptive_skirt():
     """Intended SKIRT topology: read the fact's cell from the observation
     on turn 1, then place one pbox in EACH of the four corner regions
-    around it (offsets +/-12 in x, +/-10 in y). This is the policy the
+    around it (offsets +/-18 in x, +/-11 in y). This is the policy the
     pack rewards: the skirt must follow the fact, which on hard flips
     between x=50 and x=78 by seed."""
     state = {"cells": None}
@@ -105,12 +119,7 @@ def make_adaptive_skirt():
             if fc is None:
                 return [C.observe()]
             fx, fy = fc
-            state["cells"] = [
-                (fx + 12, fy - 10),  # NE
-                (fx - 12, fy - 10),  # NW
-                (fx + 12, fy + 10),  # SE
-                (fx - 12, fy + 10),  # SW
-            ]
+            state["cells"] = [(fx + dx, fy + dy) for dx, dy in SKIRT_OFFSETS]
         return _build_and_place(rs, C, state["cells"])
 
     return policy
@@ -129,25 +138,23 @@ def make_concentrate():
             if fc is None:
                 return [C.observe()]
             fx, fy = fc
-            cx, cy = fx + 12, fy - 10  # NE corner
-            state["cells"] = [
-                (cx - 1, cy - 1), (cx + 1, cy - 1),
-                (cx - 1, cy + 1), (cx + 1, cy + 1),
-            ]
+            cx, cy = fx + 18, fy - 11  # NE corner
+            # Four pboxes in a 1-cell-spaced row at the NE corner.
+            state["cells"] = [(cx - i, cy) for i in range(4)]
         return _build_and_place(rs, C, state["cells"])
 
     return policy
 
 
 def make_wrong_centre_skirt():
-    """A skirt centred on the OLD (64,20) location — wins easy/medium
-    (where the fact IS at (64,20)) but FAILS the region clauses on hard
-    (where the fact is at (50,20) or (78,20) per seed, so a skirt around
-    (64,20) lands every pbox >=10 cells outside the active corner discs
-    of radius 4). Demonstrates the spawn-driven discrimination: a
-    memorised cell list that worked at lower tiers does NOT generalise
-    to the hard fact-flip."""
-    cells = [(76, 10), (52, 10), (76, 30), (52, 30)]
+    """A skirt centred on the OLD (64,20) location — the easy/medium
+    fact cell — but applied on HARD where the fact is at (50,20) or
+    (78,20) per seed. A skirt around (64,20) lands every pbox >=10 cells
+    outside the active corner discs (radius 4), failing the region
+    clauses. Demonstrates the spawn-driven discrimination: a memorised
+    cell list that worked at lower tiers does NOT generalise to the hard
+    fact-flip."""
+    cells = [(64 + dx, 20 + dy) for dx, dy in SKIRT_OFFSETS]
 
     def policy(rs, C):
         return _build_and_place(rs, C, cells)
@@ -229,6 +236,56 @@ def test_win_requires_four_corner_region_clauses():
             if isinstance(cl, dict) and "building_in_region" in cl
         ]
         assert len(regions) == 4, layout
+
+
+def test_win_requires_a_kill_quota():
+    """The pbox skirt must actively KILL the rush: every level's win
+    clause carries a `units_killed_gte` quota. With no pre-placed agent
+    defenders the pbox skirt is the sole kill source, so this clause
+    makes the pbox weapon load-bearing."""
+    pack = load_pack(PACK)
+    for lvl in LEVELS:
+        c = compile_level(pack, lvl)
+        wc = c.win_condition.model_dump(exclude_none=True)
+        kill = [
+            cl for cl in wc.get("all_of", []) or []
+            if isinstance(cl, dict) and "units_killed_gte" in cl
+        ]
+        assert kill, f"{lvl}: missing units_killed_gte kill quota"
+        assert int(kill[0]["units_killed_gte"]) >= 8, (lvl, kill)
+
+
+def test_rush_arrives_as_a_scheduled_event():
+    """The four-corner rush is injected via `scheduled_events:
+    spawn_actors` AFTER the skirt has time to assemble — there is no
+    t=0 enemy band racing the build."""
+    pack = load_pack(PACK)
+    for lvl in LEVELS:
+        raw = pack.levels[lvl]
+        ov = getattr(raw, "overrides", None) or {}
+        if hasattr(ov, "model_dump"):
+            ov = ov.model_dump(exclude_none=True)
+        evts = ov.get("scheduled_events") or []
+        assert evts, f"{lvl}: expected a scheduled rush wave"
+        assert any(e.get("type") == "spawn_actors" for e in evts), (lvl, evts)
+
+
+def test_no_pre_placed_agent_combat_screen():
+    """The pbox skirt must be the sole kill source — there is no
+    pre-placed agent combat screen ringing the fact. Only ONE
+    non-combatant agent e1 per active spawn group is parked in a far
+    map corner (so units_summary is non-empty for the env-reset check);
+    it never fights."""
+    for lvl in LEVELS:
+        c = compile_level(load_pack(PACK), lvl)
+        agent_units = [
+            a for a in c.scenario.actors
+            if a.owner == "agent" and a.type == "e1"
+        ]
+        assert len(agent_units) <= 2, (lvl, [a.position for a in agent_units])
+        for a in agent_units:
+            x, y = a.position
+            assert x <= 6 and (y <= 6 or y >= 34), (lvl, a.position)
 
 
 @pytest.mark.parametrize("level", LEVELS)
