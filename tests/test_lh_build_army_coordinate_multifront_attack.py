@@ -55,11 +55,24 @@ def _stall_policy():
     return pol
 
 
+def _enemy_fact_near(obs, cx, cy):
+    """Return the visible enemy `fact` whose cell is within 8 of
+    (cx, cy), or None. Buildings surface in `enemy_summary` once a
+    unit has line of sight on the corner."""
+    for e in (obs.get("enemy_summary", []) or []):
+        if e.get("type") != "fact":
+            continue
+        if abs(e["cell_x"] - cx) <= 8 and abs(e["cell_y"] - cy) <= 8:
+            return e
+    return None
+
+
 def _attack_one_front_only_policy():
-    """Build the army to the threshold, then attack-move EVERY tank
-    onto the NE fact. The NE destruction clause latches, the army
-    clause latches, but the SE destruction clause NEVER latches (the
-    SE fact stands untouched). Must LOSE on every (level, seed)."""
+    """Build the army to the threshold, then commit EVERY tank onto
+    the NE fact (attack_unit once the fact is in sight, attack_move
+    while still en route). The NE destruction clause latches, the
+    army clause latches, but the SE destruction clause NEVER latches
+    (the SE fact stands untouched). Must LOSE on every (level, seed)."""
     def pol(obs, Cmd):
         units = obs.get("units_summary", []) or []
         own_b = {b["type"] for b in (obs.get("own_buildings", []) or [])}
@@ -72,7 +85,11 @@ def _attack_one_front_only_policy():
         if tnk:
             tnk_ids = [u["id"] for u in tnk]
             # ALL tanks at the NE fact — SE is ignored on purpose.
-            cmds.append(Cmd.attack_move(tnk_ids, NE[0], NE[1]))
+            nef = _enemy_fact_near(obs, NE[0], NE[1])
+            if nef is not None:
+                cmds.append(Cmd.attack_unit(tnk_ids, str(nef["id"])))
+            else:
+                cmds.append(Cmd.attack_move(tnk_ids, NE[0], NE[1]))
         if not cmds:
             cmds.append(Cmd.observe())
         return cmds
@@ -136,16 +153,28 @@ def _intended_mass_and_split_policy(army_n: int):
             cmds.append(Cmd.build("2tnk"))
         # PHASE 2: once army milestone latched, split-attack.
         # The split is deterministic by tank id (lower half → NE,
-        # upper half → SE) so the test is reproducible.
+        # upper half → SE) so the test is reproducible. Each prong
+        # attack_units the enemy fact once it is in sight (stance:0
+        # starter tanks do not auto-engage a building they merely
+        # walk up to — the commit must be an explicit order),
+        # attack_moving while still en route.
         if milestone["army"] and tnk:
             tnk_sorted = sorted(tnk, key=lambda u: u["id"])
             half = max(1, len(tnk_sorted) // 2)
             ne_ids = [u["id"] for u in tnk_sorted[:half]]
             se_ids = [u["id"] for u in tnk_sorted[half:]]
+            nef = _enemy_fact_near(obs, NE[0], NE[1])
+            sef = _enemy_fact_near(obs, SE[0], SE[1])
             if ne_ids:
-                cmds.append(Cmd.attack_move(ne_ids, NE[0], NE[1]))
+                if nef is not None:
+                    cmds.append(Cmd.attack_unit(ne_ids, str(nef["id"])))
+                else:
+                    cmds.append(Cmd.attack_move(ne_ids, NE[0], NE[1]))
             if se_ids:
-                cmds.append(Cmd.attack_move(se_ids, SE[0], SE[1]))
+                if sef is not None:
+                    cmds.append(Cmd.attack_unit(se_ids, str(sef["id"])))
+                else:
+                    cmds.append(Cmd.attack_move(se_ids, SE[0], SE[1]))
         if not cmds:
             cmds.append(Cmd.observe())
         return cmds
