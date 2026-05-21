@@ -17,49 +17,53 @@
 # smoke runs, all seeds 1–4 × every tier):
 #   - 4× medium tanks (2tnk) pre-placed at the west edge.
 #   - Mixed enemy infantry cluster at the centre column (x=60):
-#       easy   3× e1 + 2× e3 (5 enemies)
-#       medium 4× e1 + 3× e3 (7 enemies)
-#       hard   5× e1 + 3× e3 (8 enemies)
+#       easy   3× e3 + 3× e1 (6 enemies, y=17..22)
+#       medium 3× e3 + 4× e1 (7 enemies, y=16..22)
+#       hard   3× e3 + 5× e1 (8 enemies, y=16..23)
 #     `e3` (rocket infantry) is anti-armour and BITES tanks within ~5
-#     cells of the cluster — a frontal column charge through the cluster
-#     bleeds the tanks below the survival cap. e1 (small-arms ~3) is
-#     filler that makes up the kill bar so the cluster can't be one-
-#     shotted by overwhelming firepower.
-#   - The enemy is STATIONARY (no `bot_type`, default stance: return
-#     fire only). This is critical: a `hunt` bot would chase the lone
-#     cutoff tank as it flanks, breaking the off-axis safe-route
-#     assumption AND making the "stall lets the enemy walk into you"
-#     degeneracy trivially satisfiable.
+#     cells of the cluster. The cluster is packed COMPACTLY so a
+#     frontal column charge entering e3 range (x≈59) takes
+#     concentrated fire from every e3 at once and bleeds ≥2 tanks
+#     below the survival cap before it can fight back. e1 (small-arms)
+#     is filler that makes up the kill bar.
+#   - The enemy cluster carries an EXPLICIT `stance: 2` (Defend) —
+#     stationary, auto-fires on the closest in-range foe but never
+#     advances. This is critical: with the engine's four-stance
+#     semantics the default (omitted-stance) behaviour is no longer
+#     reliably stationary; an advancing cluster would chase the lone
+#     cutoff tank as it flanks (breaking the off-axis safe-route
+#     assumption) AND make the "stall lets the enemy walk into you"
+#     degeneracy trivially satisfiable. Explicit stance:2 pins the
+#     cluster as a stationary firewall.
 #   - The win predicate requires THREE things AT THE SAME EVALUATION:
 #       (1) `units_killed_gte: K`             — all centre enemies dead
 #       (2) `units_in_region_gte:{85,20,r=8,n=1}` — cutoff tank present
 #       (3) `own_units_gte: 3`                  — at least 3 tanks alive
 #     plus `within_ticks: 4500` to deny stallers.
 #
-# Discrimination bar (six scripted-policy proxies in the test file;
+# Discrimination bar (five scripted-policy proxies in the test file;
 # every level × every seed 1–4 must hold):
 #   • stall (only observe)            → LOSS. No kills, no in-region,
 #     timeout fires.
-#   • brute attack_move-east-through-cluster (all 4 tanks toward 85,20)
-#                                       → LOSS. The column passes
-#     through the e3 cluster within Dragon range and loses ≥2 tanks
-#     en route → `own_units_gte:3` fails. The kill bar may or may not
-#     be met (depends on tier) but survival busts either way.
+#   • brute attack_move-east (all 4 tanks toward 85,20) → LOSS. The
+#     column drives straight into the stationary e3 wall, takes
+#     concentrated fire and loses ≥2 tanks → `own_units_gte:3` fails.
 #   • brute attack_move-centre (all 4 tanks toward 60,20) → LOSS.
-#     The column does engage and may even kill all centre enemies on
-#     easy/medium, BUT NO TANK IS IN THE EAST CUT-OFF REGION → the
-#     `units_in_region_gte` clause is never satisfied → after_ticks
-#     LOSS.
+#     The column engages but loses ≥2 tanks to the concentrated e3
+#     fire (no flank, no off-axis cutoff) AND no tank reaches the
+#     east cut-off region → both the survival cap and the
+#     `units_in_region_gte` clause fail → LOSS.
 #   • east-only (send ONE tank east, hold the rest) → LOSS. One tank
 #     can't kill the cluster; held tanks don't engage → kill bar
-#     fails. Even on easy with 5 enemies, a solo east tank can't
-#     pull the kill bar in the time budget.
+#     fails. A solo east tank driving past the cluster is shredded by
+#     the e3 fire.
 #   • intended cut-off-then-engage (NORTH route via y=5..10 OR SOUTH
 #     route via y=30..35) → WIN. The cutoff tank routes off-axis (out
 #     of e3 Dragon range), arrives at (85,20). The remaining 3 tanks
-#     attack-move the centre, kill the e1+e3 cluster, lose at most 1
-#     tank (well within `own_units_gte:3`). Kill bar AND in-region AND
-#     survival all satisfied → WIN.
+#     STOP and focus-fire (attack_unit) the cluster one target at a
+#     time, kill the e3+e1 cluster, lose at most 1 tank (well within
+#     `own_units_gte:3`). Kill bar AND in-region AND survival all
+#     satisfied → WIN.
 #
 # Engine guardrails (per CLAUDE.md):
 #   - Map: rush-hour-arena (128 × 40, playable x ∈ [2..126], y ∈ [2..38]).
@@ -69,7 +73,7 @@
 #     engine would auto-`done` on enemy-elimination before the
 #     `units_in_region_gte` predicate evaluates).
 #   - Per CLAUDE.md (60,20) is not on the silent-fail list (the cited
-#     problems are (50,20), (60,28), (90,30)); the e1/e3 cluster
+#     problems are (50,20), (60,28), (90,30)); the e3/e1 cluster
 #     spans (60, 16..23) on hard, no member at a known-bad cell.
 #   - All deadlines (`after_ticks 4501`) are reachable within max_turns
 #     (~90 ticks/turn ⇒ tick ≤ 93 + 90·(max_turns−1) = 5403 on
@@ -94,11 +98,10 @@ meta:
     tanks from the west. The win predicate explicitly requires the
     agent to have ESTABLISHED an eastern cut-off (≥1 own unit at
     (85,20,r=8)) at the moment the kill bar is met AND to have ≥3
-    tanks alive. Brute charging without the cut-off either bleeds
-    the force under the survival cap (attack-move east through the
-    cluster) or wins the centre fight with no tank east (attack-move
-    to the centre) — both LOSE. Stalling never opens fire, also a
-    LOSS on the clock.
+    tanks alive. Brute charging without the cut-off bleeds the force
+    under the survival cap — a column attack-moving into the compact
+    stationary e3 wall loses ≥2 tanks whether it heads east or for
+    the centre. Stalling never opens fire, also a LOSS on the clock.
   robotics_analogue: >
     Multi-agent strike geometry: the placement of a "blocker" /
     "anvil" unit on the opposite side of the target BEFORE the main
@@ -132,25 +135,27 @@ base:
 
 levels:
   # ── EASY ──────────────────────────────────────────────────────────
-  # Bare encirclement skill: 5-unit cluster (3× e1 + 2× e3 anti-armour)
-  # at the centre. The 2× e3 are enough to punish a frontal-column
-  # charge but not enough to overwhelm 3 attacking tanks from the
-  # west. Generous tick budget.
+  # Bare encirclement skill: 6-unit cluster (3× e3 anti-armour +
+  # 3× e1 filler) packed compactly at the centre. The 3× e3 punish a
+  # frontal-column charge (≥2 tanks lost) but 3 focus-firing tanks
+  # from the west clear the cluster losing ≤1. Generous tick budget.
   easy:
     description: >
       Four medium tanks (2tnk) stage at the west edge (x=6, y=18..21).
-      A five-unit enemy infantry cluster holds the centre at (60,
-      y=18..22): 3× e1 (rifle, small-arms) + 2× e3 (rocket, anti-
-      armour). To win the encirclement you must POSITION ≥1 tank in
-      the east cut-off region (85, 20, r=8) AND kill all 5 enemies
-      AND keep ≥3 tanks alive, before tick 4500. Detach ONE tank on
-      a flank route (via y=5..10 or y=30..35 to stay out of e3
-      Dragon range) and run it east to (85, 20); engage the centre
-      with the remaining THREE tanks. A head-on attack-move-east
-      through the cluster bleeds tanks below the survival cap and
-      LOSES; an attack-move-centre kills the e1+e3 but no tank
-      reaches the east region — also LOSES. Stall LOSES on the
-      clock.
+      A six-unit enemy infantry cluster holds the centre at (60,
+      y=17..22): 3× e3 (rocket, anti-armour) + 3× e1 (rifle, small-
+      arms), packed compactly and stationary (Defend stance). To win
+      the encirclement you must POSITION ≥1 tank in the east cut-off
+      region (85, 20, r=8) AND kill all 6 enemies AND keep ≥3 tanks
+      alive, before tick 4500. Detach ONE tank on a flank route (via
+      y=5..10 or y=30..35 to stay out of e3 Dragon range) and run it
+      east to (85, 20); engage the centre with the remaining THREE
+      tanks, STOPPING to focus-fire the cluster. A head-on attack-
+      move-east column charge runs straight into the stationary e3
+      wall, takes concentrated fire and bleeds ≥2 tanks below the
+      survival cap — LOSES; an attack-move-centre kills the cluster
+      but no tank reaches the east region — also LOSES. Stall LOSES
+      on the clock.
     overrides:
       actors:
         # Strike force — 4 medium tanks staged at the west edge.
@@ -160,13 +165,22 @@ levels:
         - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
-        # ENEMY centre cluster — 3× e1 + 2× e3. Stationary defenders
-        # (no bot_type); stance defaults to return-fire when attacked.
-        - {type: e1, owner: enemy, position: [60, 18]}
-        - {type: e3, owner: enemy, position: [60, 19]}
-        - {type: e1, owner: enemy, position: [60, 20]}
-        - {type: e3, owner: enemy, position: [60, 21]}
-        - {type: e1, owner: enemy, position: [60, 22]}
+        # ENEMY centre cluster — 3× e3 (anti-armour) + 3× e1
+        # (filler) packed compactly at y=17..22. EXPLICIT stance:2
+        # (Defend) — stationary, auto-fires on the closest in-range
+        # foe but never advances. The compact stationary e3 wall is
+        # what bleeds a frontal column charge: a brute attack-move
+        # column entering e3 range at x≈59 takes concentrated fire
+        # from every e3 at once and loses ≥2 tanks before it can
+        # fight back. Three tanks that STOP and focus-fire (the
+        # intended play, the cutoff tank flanking off-axis) clear
+        # the cluster losing ≤1.
+        - {type: e3, owner: enemy, position: [60, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 19], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 22], stance: 2}
         # SENTINEL — unarmed enemy `fact` far in the north corner.
         # Keeps the episode alive past enemy-cluster elimination so
         # the in-region predicate evaluates on the terminal frame
@@ -175,7 +189,7 @@ levels:
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
-        - {units_killed_gte: 5}
+        - {units_killed_gte: 6}
         - {units_in_region_gte: {x: 85, y: 20, radius: 8, n: 1}}
         - {own_units_gte: 3}
         - {within_ticks: 4500}
@@ -186,33 +200,37 @@ levels:
     max_turns: 60
 
   # ── MEDIUM ────────────────────────────────────────────────────────
-  # +1 controlled variable vs easy: the enemy cluster gains TWO more
-  # units (one e1 + one e3 → 7 total at y=17..23). Kill bar 7 makes
-  # the east-only solo-tank play decisively too slow; the e3 density
-  # makes brute-charge-east decisively bleed.
+  # +1 controlled variable vs easy: the enemy cluster gains one more
+  # e1 (3× e3 + 4× e1 → 7 total, compact at y=16..22). Kill bar 7
+  # makes the east-only solo-tank play decisively too slow; the
+  # compact stationary e3 wall makes brute-charge decisively bleed.
   medium:
     description: >
       Four medium tanks (2tnk) stage at the west edge (x=6, y=18..21).
       A seven-unit enemy infantry cluster holds the centre at (60,
-      y=17..23): 4× e1 + 3× e3 (rocket anti-armour). To win you must
-      POSITION ≥1 tank in the east cut-off region (85, 20, r=8) AND
-      kill all 7 enemies AND keep ≥3 tanks alive, before tick 4500.
-      Detach ONE tank on a flank route (via y=5..10 or y=30..35) and
-      run it east to (85, 20); engage the centre with the remaining
-      three. Head-on, east-only, and stall all LOSE.
+      y=16..22): 3× e3 (rocket anti-armour) + 4× e1, packed compactly
+      and stationary (Defend stance). To win you must POSITION ≥1
+      tank in the east cut-off region (85, 20, r=8) AND kill all 7
+      enemies AND keep ≥3 tanks alive, before tick 4500. Detach ONE
+      tank on a flank route (via y=5..10 or y=30..35) and run it east
+      to (85, 20); engage the centre with the remaining three,
+      stopping to focus-fire the cluster. Head-on, east-only, and
+      stall all LOSE.
     overrides:
       actors:
         - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
-        - {type: e1, owner: enemy, position: [60, 17]}
-        - {type: e3, owner: enemy, position: [60, 18]}
-        - {type: e1, owner: enemy, position: [60, 19]}
-        - {type: e3, owner: enemy, position: [60, 20]}
-        - {type: e1, owner: enemy, position: [60, 21]}
-        - {type: e3, owner: enemy, position: [60, 22]}
-        - {type: e1, owner: enemy, position: [60, 23]}
+        # Stationary Defend (stance:2) cluster — 3× e3 anti-armour
+        # interleaved with 4× e1 filler, compact at y=16..22.
+        - {type: e3, owner: enemy, position: [60, 16], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 17], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 22], stance: 2}
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
@@ -243,14 +261,15 @@ levels:
       Four medium tanks (2tnk) stage at ONE of two west-edge corridors
       (NORTH y=12..15 OR SOUTH y=25..28, chosen by seed, anti-
       memorisation). An eight-unit enemy infantry cluster holds the
-      centre at (60, y=16..23): 5× e1 + 3× e3 (rocket anti-armour).
-      To win you must POSITION ≥1 tank in the east cut-off region
-      (85, 20, r=8) AND kill all 8 enemies AND keep ≥3 tanks alive,
-      before tick 4500. From the NORTH spawn run the cutoff tank via
-      y=5..10 to (85, 20); from the SOUTH spawn run it via y=30..35.
-      Engage the centre with the remaining three tanks descending
-      onto the cluster from the staging latitude. Head-on, east-only,
-      and stall all LOSE on every seed.
+      centre at (60, y=16..23): 3× e3 (rocket anti-armour) + 5× e1,
+      packed compactly and stationary (Defend stance). To win you
+      must POSITION ≥1 tank in the east cut-off region (85, 20, r=8)
+      AND kill all 8 enemies AND keep ≥3 tanks alive, before tick
+      4500. From the NORTH spawn run the cutoff tank via y=5..10 to
+      (85, 20); from the SOUTH spawn run it via y=30..35. Engage the
+      centre with the remaining three tanks, stopping to focus-fire
+      the cluster. Head-on, east-only, and stall all LOSE on every
+      seed.
     overrides:
       actors:
         # spawn_point 0 — NORTH staging corridor (y=12..15). Already
@@ -266,15 +285,16 @@ levels:
         - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [6, 27], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, spawn_point: 1}
-        # 8× cluster symmetric across y=20 at the centre.
-        - {type: e1, owner: enemy, position: [60, 16]}
-        - {type: e3, owner: enemy, position: [60, 17]}
-        - {type: e1, owner: enemy, position: [60, 18]}
-        - {type: e3, owner: enemy, position: [60, 19]}
-        - {type: e1, owner: enemy, position: [60, 20]}
-        - {type: e3, owner: enemy, position: [60, 21]}
-        - {type: e1, owner: enemy, position: [60, 22]}
-        - {type: e1, owner: enemy, position: [60, 23]}
+        # 8× cluster symmetric across y=20 — 3× e3 anti-armour
+        # interleaved with 5× e1 filler, stationary Defend stance.
+        - {type: e1, owner: enemy, position: [60, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 19], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [60, 23], stance: 2}
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:

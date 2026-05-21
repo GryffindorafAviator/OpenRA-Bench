@@ -1,11 +1,11 @@
 """combat-prevent-retreat — cut-off encirclement before engaging.
 
-The bar: 4× medium tanks (2tnk) start at the west edge; a mixed e1+e3
-infantry cluster holds the centre (60, 16..23). The win predicate
-requires:
+The bar: 4× medium tanks (2tnk) start at the west edge; a compact,
+stationary (Defend stance:2) e3+e1 infantry cluster holds the centre
+(60, 16..23). The win predicate requires:
 
   • `units_killed_gte: K`              — the full cluster wiped
-    (K=5 easy / 7 medium / 8 hard)
+    (K=6 easy / 7 medium / 8 hard)
   • `units_in_region_gte:{85,20,r=8,n=1}` — ≥1 own tank in the east
     cut-off region at evaluation time
   • `own_units_gte: 3`                  — at least 3 tanks survive
@@ -14,26 +14,31 @@ requires:
 This combination forces the Cannae idiom: ONE flank tank routes
 off-axis (via y=5..10 from a NORTH spawn or y=30..35 from a SOUTH
 spawn, out of e3 Dragon range) to take the eastern anvil; the
-remaining THREE engage the centre from the west. The cluster's
-anti-armour e3s punish a head-on column charge (`brute_east` loses
-≥2 tanks → survival cap busts); a centre-only charge leaves no tank
-east (in-region clause fails); a solo east tank can't pull the kill
-bar in budget.
+remaining THREE engage the centre from the west, STOPPING to
+focus-fire (`attack_unit`) the cluster one target at a time. The
+compact stationary e3 wall punishes a head-on column charge
+(`brute_east` / `brute_centre` drive into concentrated e3 fire and
+lose ≥2 tanks → survival cap busts); a centre-only charge also
+leaves no tank east (in-region clause fails); a solo east tank
+can't pull the kill bar in budget.
 
 Discrimination (verified per-level × per-seed 1–4):
 
   • stall (observe-only)              — LOSS on every level/seed
                                         (no kills, deadline fires).
   • brute_east (attack_move all to 85,20)
-                                       — LOSS: column bled by e3
-                                         Dragons; survival cap busts.
+                                       — LOSS: column drives into
+                                         the stationary e3 wall and
+                                         loses ≥2 tanks; survival
+                                         cap busts.
   • brute_centre (attack_move all to 60,20)
-                                       — LOSS: cluster killed but
-                                         no tank east → in-region
-                                         clause fails → after_ticks.
+                                       — LOSS: column bled by the
+                                         e3 wall AND no tank east →
+                                         survival + in-region both
+                                         fail → LOSS.
   • east_only (move 1 east, hold rest)— LOSS: kill bar never met
                                          (1 tank vs cluster too slow).
-  • intended (cut-off then engage)    — WIN every level/seed.
+  • intended (cut-off then focus-fire)— WIN every level/seed.
 
 Validation is scripted (no model / network)."""
 from __future__ import annotations
@@ -112,7 +117,7 @@ def test_predicates_per_level():
     pack = load_pack(PACK_PATH)
     # (kill_bar, surv_min, within, after_fail)
     expectations = {
-        "easy":   (5, 3, 4500, 4501),
+        "easy":   (6, 3, 4500, 4501),
         "medium": (7, 3, 4500, 4501),
         "hard":   (8, 3, 4500, 4501),
     }
@@ -236,6 +241,27 @@ def test_enemy_is_static_no_bot_type():
     )
 
 
+def test_enemy_cluster_carries_explicit_defend_stance():
+    """The cluster carries an EXPLICIT stance:2 (Defend) — stationary,
+    auto-fires in range, never advances. The engine's four-stance
+    semantics mean an omitted stance is no longer reliably stationary
+    (an advancing cluster would chase the cutoff tank and let a
+    staller win); the explicit stance:2 pins the e3 wall in place."""
+    pack = load_pack(PACK_PATH)
+    for lvl in ("easy", "medium", "hard"):
+        c = compile_level(pack, lvl)
+        cluster = [
+            a for a in c.scenario.actors
+            if a.owner == "enemy" and a.type in ("e1", "e3")
+        ]
+        assert cluster, f"{lvl}: no cluster declared"
+        for a in cluster:
+            assert a.stance == 2, (
+                f"{lvl}: cluster member {a.type}@{a.position} must carry "
+                f"explicit stance:2 (Defend); got stance={a.stance}"
+            )
+
+
 def test_hard_has_two_spawn_point_groups():
     """Hard-tier curation: ≥2 distinct agent spawn_point groups so the
     seed round-robins which staging corridor (north y=12 or south y=28)
@@ -267,17 +293,19 @@ def _stall(rs, Command):
 
 
 def _brute_east(rs, Command):
-    """All 4 tanks attack-move EAST through the cluster toward (85,20).
-    The column passes within e3 Dragon range and bleeds below the
-    survival cap → LOSS on every level."""
+    """All 4 tanks attack-move EAST toward (85,20). The column drives
+    straight into the compact stationary e3 wall, takes concentrated
+    fire and bleeds ≥2 tanks below the survival cap → LOSS on every
+    level."""
     ids = _tank_ids(rs)
     return [Command.attack_move(ids, 85, 20)] if ids else [Command.observe()]
 
 
 def _brute_centre(rs, Command):
-    """All 4 tanks attack-move the centre cluster at (60,20). May clear
-    the cluster (kills bar met) but NO TANK IS IN THE EAST REGION at
-    evaluation time → in-region clause fails → after_ticks LOSS."""
+    """All 4 tanks attack-move the centre cluster at (60,20). The
+    column is bled by the stationary e3 wall (≥2 tanks lost) AND no
+    tank is in the east cut-off region → survival cap and in-region
+    clause both fail → LOSS."""
     ids = _tank_ids(rs)
     return [Command.attack_move(ids, 60, 20)] if ids else [Command.observe()]
 
@@ -300,7 +328,10 @@ def _make_intended():
     the actual spawn (NORTH spawn → off-y=5; SOUTH spawn → off-y=35),
     pick the cutoff tank closest to that latitude, route it via three
     waypoints out of e3 Dragon range to (85,20). The remaining three
-    tanks attack-move the centre cluster from the west."""
+    tanks STOP and focus-fire (attack_unit) the centre cluster one
+    target at a time — concentrated fire clears the compact e3 wall
+    losing ≤1 tank, where an attack-move spread charge would bleed
+    ≥2."""
     state = {}
 
     def policy(rs, Command):
@@ -333,7 +364,17 @@ def _make_intended():
             ):
                 state["phase"] += 1
         if others:
-            cmds.append(Command.attack_move(others, 60, 20))
+            ens = [
+                e for e in (rs.get("enemy_summary") or [])
+                if str(e.get("type", "")).lower() in ("e1", "e3")
+            ]
+            if ens:
+                # Focus-fire the western-most cluster member with all
+                # three engaging tanks (concentrated fire).
+                ens.sort(key=lambda e: int(e["cell_x"]))
+                cmds.append(Command.attack_unit(others, str(ens[0]["id"])))
+            else:
+                cmds.append(Command.attack_move(others, 60, 20))
         return cmds or [Command.observe()]
 
     return policy
@@ -356,9 +397,10 @@ def test_stall_loses(level, seed):
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_brute_east_loses(level, seed):
-    """Attack-move all tanks east through the cluster. The e3 Dragon
-    fire bleeds the column below the survival cap → `own_units_gte:3`
-    fails → LOSS on every level/seed."""
+    """Attack-move all tanks east toward (85,20). The column drives
+    into the compact stationary e3 wall; concentrated Dragon fire
+    bleeds it below the survival cap → `own_units_gte:3` fails →
+    LOSS on every level/seed."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
@@ -374,9 +416,10 @@ def test_brute_east_loses(level, seed):
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_brute_centre_loses(level, seed):
-    """Attack-move all tanks to the centre cluster (60,20). Even when
-    the cluster is wiped (kill bar met), NO TANK IS IN THE EAST CUT-
-    OFF REGION → in-region clause fails → after_ticks LOSS."""
+    """Attack-move all tanks to the centre cluster (60,20). The column
+    is bled by the stationary e3 wall (≥2 tanks lost) AND no tank
+    reaches the east cut-off region → survival cap and in-region
+    clause both fail → LOSS."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
