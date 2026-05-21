@@ -157,29 +157,31 @@ base:
 
 levels:
   # ── EASY ────────────────────────────────────────────────────────────
-  # Bare chokepoint-hold skill. 4x 2tnk vs a force of 12 light tanks
+  # Bare chokepoint-hold skill. 4x 2tnk vs a force of 14 light tanks
   # (1tnk) hunting from the east. Holding the 3-cell corridor caps the
-  # enemy to a 3-abreast trickle — the squad out-trades it. Charging
-  # into the open east, or letting the enemy fan into the open west,
-  # gets the squad surrounded. Win: kill >=8, keep >=3 tanks, fact
-  # alive, before tick 5400.
+  # enemy to a 3-abreast trickle — concentrated fire out-trades it.
+  # Charging into the open east, or letting the enemy fan into the open
+  # west, gets the squad surrounded. Win: kill >=9, keep >=3 tanks in
+  # the choke region, fact alive, before tick 5400.
   easy:
     description: >
       Four medium tanks (2tnk) hold a narrow corridor. Two silo walls
       split the map; the ONLY path between the west and east halves is
       a 3-cell-tall lane (y=19,20,21) running x=44..96. Your squad is
       pre-placed inside the corridor at the choke (around x=52..53). A
-      force of TWELVE enemy light tanks (1tnk) stages in the EAST OPEN
-      and hunts your squad — every enemy drives at the nearest tank
-      and pursues. Win by destroying at least EIGHT enemy units while
-      keeping at least THREE of your tanks alive and your construction
-      yard intact, before tick 5400. HOLD THE CORRIDOR: keep your four
-      tanks anchored in the lane and concentrate their fire on the
-      frontmost enemy — the walls confine the attackers to a 3-abreast
-      trickle you can grind down. Charging EAST out of the corridor
-      into the open, or pulling WEST and letting the enemy fan out,
-      lets all twelve enemies surround you at once and focus-fire your
-      squad down.
+      force of FOURTEEN enemy light tanks (1tnk) stages in the EAST
+      OPEN and hunts your squad — every enemy drives at the nearest
+      tank and pursues. Win by destroying at least NINE enemy units
+      while keeping at least THREE of your tanks alive AND anchored in
+      the corridor, with your construction yard intact, before tick
+      5400. HOLD THE CORRIDOR: keep your four tanks anchored in the
+      lane and concentrate their fire on the frontmost enemy — the
+      walls confine the attackers to a 3-abreast trickle you can grind
+      down. Sitting idle and letting the squad spread its fire across
+      the front is too slow — the force wears you down first. Charging
+      EAST out of the corridor into the open, or pulling WEST and
+      letting the enemy fan out, lets the whole force surround you at
+      once and focus-fire your squad down.
     overrides:
       actors:
         # SQUAD — 4 medium tanks PRE-PLACED at the choke, inside the
@@ -195,9 +197,15 @@ levels:
         # fight. building_count_gte:fact:1 in the win clause; razed
         # only if the enemy breaks the hold and reaches the west base.
         - {type: fact, owner: agent, position: [10, 20]}
-        # ENEMY FORCE — 12 light tanks hunting from the east open.
+        # ENEMY FORCE — 14 light tanks hunting from the east open.
         # They converge on the squad and pursue; the corridor funnels
-        # them to a 3-abreast trickle through the lane.
+        # them to a 3-abreast trickle through the lane. (Recalibrated
+        # 2026-05-20: bumped 12→14 after the engine movement fixes —
+        # a pre-placed stance:2 squad on pure auto-fire could grind a
+        # 12-tank trickle to the old kill quota unaided, so a stall
+        # policy won for free. 14 attackers + a quota of 9 means only
+        # active focus-fire of the frontmost tank clears the bar; the
+        # spread auto-fire of an idle squad is worn down first.)
         - {type: 1tnk, owner: enemy, position: [104, 19], stance: 3, count: 1}
         - {type: 1tnk, owner: enemy, position: [104, 20], stance: 3, count: 1}
         - {type: 1tnk, owner: enemy, position: [104, 21], stance: 3, count: 1}
@@ -210,6 +218,8 @@ levels:
         - {type: 1tnk, owner: enemy, position: [110, 19], stance: 3, count: 1}
         - {type: 1tnk, owner: enemy, position: [110, 20], stance: 3, count: 1}
         - {type: 1tnk, owner: enemy, position: [110, 21], stance: 3, count: 1}
+        - {type: 1tnk, owner: enemy, position: [106, 18], stance: 3, count: 1}
+        - {type: 1tnk, owner: enemy, position: [108, 18], stance: 3, count: 1}
         # Persistent far-east enemy fact — absorbs engine auto-done on
         # enemy-wipe so the terminal frame is evaluated.
         - {type: fact, owner: enemy, position: [122, 20]}
@@ -2020,9 +2030,15 @@ levels:
         - {type: silo, owner: enemy, position: [ 96, 38], stance: 0}
     win_condition:
       all_of:
-        - {units_killed_gte: 8}
+        - {units_killed_gte: 9}
         - {own_units_gte: 3}
         - {building_count_gte: {type: fact, n: 1}}
+        # HOLD THE CORRIDOR — ≥3 tanks must still be inside the choke
+        # region at the win evaluation. A squad that charged east
+        # (brute) or pulled west into the open (wrong-path) fails the
+        # geometry even if it scraped the kill quota; only a squad
+        # anchored in the lane satisfies it.
+        - {units_in_region_gte: {x: 53, y: 20, radius: 12, n: 3}}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
@@ -3892,6 +3908,8 @@ levels:
         - {units_killed_gte: 9}
         - {own_units_gte: 3}
         - {building_count_gte: {type: fact, n: 1}}
+        # HOLD THE CORRIDOR — ≥3 tanks anchored in the choke region.
+        - {units_in_region_gte: {x: 53, y: 20, radius: 12, n: 3}}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
@@ -7594,9 +7612,15 @@ levels:
         - {type: silo, owner: enemy, position: [ 96, 38], stance: 0, spawn_point: 1}
     win_condition:
       all_of:
-        - {units_killed_gte: 8}
+        - {units_killed_gte: 9}
         - {own_units_gte: 3}
         - {building_count_gte: {type: fact, n: 1}}
+        # HOLD THE CORRIDOR — ≥3 tanks anchored in the choke region.
+        # Critical on hard: with the seed-flipped enemy cluster a
+        # wrong-path retreat WEST into the open could still scrape the
+        # kill quota on some seeds; the geometry clause makes that a
+        # LOSS — the squad must be in the lane, not just alive.
+        - {units_in_region_gte: {x: 53, y: 20, radius: 12, n: 3}}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
