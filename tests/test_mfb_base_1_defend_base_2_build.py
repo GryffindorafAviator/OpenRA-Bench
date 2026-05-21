@@ -1,17 +1,29 @@
 """mfb-base-1-defend-base-2-build — secure-expand under harass.
 
-The bar: the intended SPLIT policy (defenders engage the patrol;
+The bar: the intended SPLIT policy (defenders focus-fire the raid;
 fresh MCV drives east and deploys inside the target region) WINS on
-every level and every hard seed. Three failure modes all LOSE on
+every level and every seed (1..4). Three failure modes all LOSE on
 every level + seed:
   • STALL  — only `observe()` issued; defenders are HoldFire so the
-              patrol razes base #1's `fact` unopposed → fail by
+              raid razes base #1's `fact` unopposed → fail by
               `not has_building:fact`.
-  • MCV-ONLY-EAST — push the MCV east, never engage the patrol;
+  • MCV-ONLY-EAST — push the MCV east, never engage the raid;
               same razed-fact outcome.
-  • ALL-DEFEND   — engage the patrol, never deploy the MCV; the
+  • ALL-DEFEND   — engage the raid, never deploy the MCV; the
               second `fact` never appears → clock kills the run
               (`after_ticks` fail).
+
+Recalibration note (engine balance fixes — armor-class weapon
+selection, stance semantics, parallel production, pbox now fires):
+the grenadier raid spawn moved from (22,30) to (20,30). At (22,30)
+the grenadiers spent their whole approach inside the agent's fog,
+so the HoldFire defenders never got a meaningful attack order and
+merely sat idle — survival was RNG. The post-balance combat shift
+tipped that RNG: on the hard SOUTH spawn the defenders were wiped
+exactly as the MCV deployed, losing a unit race the intended split
+should win. At (20,30) the grenadiers are in base #1's vision from
+turn 0, so the defenders can actually be ordered onto them — the
+defense becomes a real, controllable fight.
 
 Validation is scripted (no model / network) — uses
 `openra_bench.eval_core.run_level`.
@@ -192,22 +204,24 @@ def _nearest_east_target(mcv, level):
 
 
 def _intended_split_policy_for(level):
-    """Two-track policy: defenders engage the western probe; MCV
-    drives east and deploys inside the target region."""
+    """Two-track policy: defenders FOCUS-FIRE the western raid; MCV
+    drives east and deploys inside the target region.
+
+    The defenders concentrate fire on the single westmost (closest
+    to base #1) visible raider rather than splitting targets — a
+    focused volley breaks the grenadier raid before it razes base
+    #1, keeping the base's fact and ≥1 own unit alive through the
+    MCV-deploy turn."""
 
     def _policy(rs, Command):
         cmds = []
-        # Track A: defenders engage nearest western enemy.
+        # Track A: defenders focus-fire the westmost western raider.
         enemies = _west_enemies(rs)
         riflemen = _agent_riflemen(rs)
         if enemies and riflemen:
-            for u in riflemen:
-                ux, uy = u["cell_x"], u["cell_y"]
-                target = min(
-                    enemies,
-                    key=lambda e: (e["cell_x"] - ux) ** 2 + (e["cell_y"] - uy) ** 2,
-                )
-                cmds.append(Command.attack_unit([str(u["id"])], str(target["id"])))
+            target = min(enemies, key=lambda e: e.get("cell_x", 0))
+            ids = [str(u["id"]) for u in riflemen]
+            cmds.append(Command.attack_unit(ids, str(target["id"])))
         # Track B: drive the MCV east and deploy in region.
         mcv = _find_mcv(rs)
         if mcv is not None:
@@ -274,7 +288,7 @@ def test_intended_split_wins(level):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
+    seeds = (1, 2, 3, 4)  # all hard seeds; recalibration covers every level
     for s in seeds:
         res = run_level(c, _intended_split_policy_for(level), seed=s)
         assert res.outcome == "win", (
@@ -291,7 +305,7 @@ def test_stall_loses(level):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
+    seeds = (1, 2, 3, 4)  # all hard seeds; recalibration covers every level
     for s in seeds:
         res = run_level(c, _stall_policy, seed=s)
         assert res.outcome == "loss", (
@@ -307,7 +321,7 @@ def test_mcv_only_east_loses(level):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
+    seeds = (1, 2, 3, 4)  # all hard seeds; recalibration covers every level
     for s in seeds:
         res = run_level(c, _mcv_only_east_policy_for(level), seed=s)
         assert res.outcome == "loss", (
@@ -323,7 +337,7 @@ def test_all_defend_loses(level):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
+    seeds = (1, 2, 3, 4)  # all hard seeds; recalibration covers every level
     for s in seeds:
         res = run_level(c, _all_defend_policy, seed=s)
         assert res.outcome == "loss", (
