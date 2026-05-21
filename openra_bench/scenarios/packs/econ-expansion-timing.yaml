@@ -1,0 +1,253 @@
+# Validate: python -m openra_bench.scenarios.validate packs/econ-expansion-timing.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# ECON-EXPANSION-TIMING (Wave-11 — capacity-expansion timing / when to
+# add the 2nd harvester before the break-even tick).
+#
+# REASONING capability — capex TIMING under a hard deadline. The agent
+# inherits a running pipeline (fact + proc + powr + 1× harv) and the
+# Vehicle-queue prereq (weap) plus EXACTLY enough reserve cash to buy
+# ONE more harvester. The economy bar M is set so a SINGLE harvester
+# physically cannot reach it before the deadline T — the post-warmup
+# income of one harv is ~1.1 cash/tick, which clears only ~harv1's
+# ceiling. A SECOND harvester roughly DOUBLES income, but the harv
+# costs 1100 up front and has a ~450-tick warmup before it returns
+# cash; so the 2nd harv only pays back inside the budget if it is
+# bought EARLY — the payback period requires the buy before a
+# break-even tick. Buy it late (turn ~6-10) and the doubled income
+# does not run long enough to clear M; stall, run one harv only, or
+# spend the reserve on a non-revenue line all miss the bar too.
+#
+# The decision is the timing: notice the bar is unreachable with
+# current capacity, and commit the capacity capex EARLY — not "build
+# a harvester eventually", but "build it before the break-even tick".
+#
+# Real-world anchor: SC2 worker-count optimization (when to add the
+# next SCV/probe so the larva/mineral curve clears a timing push);
+# capacity-expansion timing; OR break-even analysis (the payback
+# period of a capex must fit inside the planning horizon).
+#
+# ENGINE NOTES (verified 2026-05-20 against installed openra_train
+# wheel with /tmp probe pack + scripted policies):
+#  1. `economy_value_gte: M` reads c.signals.cash + c.signals.resources
+#     (the EV — spendable cash plus stored ore). Building a harvester
+#     DEDUCTS 1100 cash up front, so an early-buy play visibly dips
+#     before the doubled income overtakes the baseline.
+#  2. Harv build requires fact + powr + weap (the war factory is the
+#     Vehicle-queue host). All three are pre-placed; the reserve cash
+#     funds exactly one harv (1100), so the buy is an indivisible
+#     capex — there is no "buy a third up front" option.
+#  3. Income on rush-hour-arena from one harv on the near patches
+#     (22,18)/(22,22) is ~1.1 cash/tick after a ~450-tick warmup.
+#     Measured EV ceilings (starting_cash 1100):
+#       deadline 2700:  harv1=4100  build@90=6000  build@450=5500
+#       deadline 3600:  harv1=5100  build@90=8500  build@450=8000
+#                                              build@900=7000
+#       deadline 4500:  harv1=6100  build@90=10500 build@450=10000
+#     The bars below sit ABOVE harv1's ceiling and ABOVE a late buy's
+#     ceiling, but BELOW an early buy's ceiling — so only an early
+#     2nd-harv buy clears M before T.
+#  4. Tick/turn alignment (CLAUDE.md ~90 ticks/turn): easy max_turns
+#     30 → ceiling 93+90·29=2703 ≥ within_ticks 2700; medium 40 →
+#     3603 ≥ 3600; hard 50 → 4503 ≥ 4500. fail after_ticks =
+#     within_ticks+1 ⇒ a non-finisher is a real reachable LOSS.
+#  5. Far inert enemy `e1` at (120,36) stance:0 keeps the engine from
+#     auto-`done`ing on no-enemy-actors (CLAUDE.md auto-done footgun).
+#  6. Hard tier: two agent spawn_point groups (NORTH y=10..14 / SOUTH
+#     y=28..32); each carries its own fact+proc+powr+weap+harv and a
+#     symmetric near-patch pair so the income economics are identical
+#     per spawn — a memorised "build at (8,18)" opening cannot
+#     generalise (spawn_point filters AGENT actors only; neutral
+#     mines place every seed so both latitudes get symmetric patches).
+
+meta:
+  id: econ-expansion-timing
+  title: 'Econ — Add the 2nd Harvester Before Break-Even'
+  capability: reasoning
+  real_world_meaning: >
+    Capacity-expansion timing under a hard deadline. A revenue
+    operation is running below the throughput it needs to clear a
+    stated target by a stated date; the supervisor holds exactly
+    enough budget for ONE more collector. A collector costs cash up
+    front and has a warmup before it returns revenue, so its payback
+    period only fits inside the planning horizon if the capex is
+    committed EARLY. The decision is the timing: recognise that
+    current capacity misses the bar, and add the second collector
+    before the break-even tick — not "expand eventually". Stalling,
+    running the single collector, buying the collector too late, or
+    spending the reserve on a non-revenue line all miss the target.
+  robotics_analogue: >
+    Throughput scaling in an autonomous collection fleet: a target
+    output must be met by a hard deadline; one extra collector can
+    be afforded; the collector has acquisition cost plus a spin-up
+    delay before it is productive. Add it early and its payback
+    period fits the horizon and the target clears; add it late and
+    the extra throughput does not run long enough — the deadline
+    passes short. Break-even timing of a capacity capex is the test.
+  benchmark_anchor:
+    - SC2 worker-count optimization
+    - capacity-expansion timing
+    - OR break-even analysis
+  author: wave-11
+
+base_map: rush-hour-arena
+starting_cash: 1100  # EXACTLY one harvester ⇒ indivisible capacity capex
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors:
+    # Running pipeline: fact + proc + powr + weap (Vehicle queue host
+    # for the harv) + 1× harv + 2× near ore patches.
+    - {type: fact, owner: agent, position: [8, 18]}
+    - {type: proc, owner: agent, position: [12, 18]}
+    - {type: powr, owner: agent, position: [8, 22]}
+    - {type: weap, owner: agent, position: [16, 22]}
+    - {type: harv, owner: agent, position: [14, 18]}
+    - {type: mine, owner: neutral, position: [22, 18]}
+    - {type: mine, owner: neutral, position: [22, 22]}
+    # Far inert enemy marker — prevents engine auto-done on
+    # no-enemy-actors (CLAUDE.md). stance:0 + far position so it
+    # cannot influence the run.
+    - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # The bare skill: notice the bar is unreachable with one harvester
+  # and add a second. Generous deadline — a 2nd harv bought within
+  # the first ~6 decision turns clears the bar. Stall (no income)
+  # LOSES at 1100; one-harv-only LOSES at its 4100 ceiling; building
+  # the harv too late (turn ~10+) LOSES; an early 2nd-harv buy WINS.
+  easy:
+    description: >
+      A running economy (1× harvester + refinery + 2 ore patches) and
+      reserve cash for EXACTLY one more harvester (1100 cr). Win when
+      economy value (cash + stored ore) reaches 5200 AND your
+      construction yard is intact, before tick 2700. A single
+      harvester tops out near 4100 by the deadline — it cannot reach
+      the bar. The intended play is to build('harv') EARLY: a second
+      harvester roughly doubles income, but it costs 1100 up front
+      and warms up over ~450 ticks, so its payback only fits the
+      budget if bought in the first few turns. Stalling, running the
+      one harvester, or buying the second harvester too late all miss
+      the bar; the war factory (weap) is pre-placed so the harvester
+      buy is available from turn 1.
+    starting_cash: 1100
+    win_condition:
+      all_of:
+        - economy_value_gte: 5200
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 2700
+    # within_ticks ≤ 93+90·29 = 2703 ⇒ deadline bites inside max_turns;
+    # after_ticks=2701 ⇒ a non-finisher is a real LOSS, not a draw.
+    fail_condition:
+      any_of:
+        - after_ticks: 2701
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: the break-even tick is TIGHTER. The bar
+  # (7300 EV by tick 3600) clears for a 2nd harv bought within ~6-7
+  # turns but NOT for a buy at turn ~10 (build@900 tops out at 7000).
+  # A late expansion now loses where on easy it would have squeaked.
+  medium:
+    description: >
+      Same running economy and the same one-harvester reserve (1100
+      cr). Win when economy value reaches 7300 AND your construction
+      yard is intact, before tick 3600. One harvester tops out near
+      5100 by the deadline — well short. A second harvester clears
+      the bar ONLY if bought early: its payback period (acquisition
+      cost plus ~450-tick warmup) must fit before the deadline, so a
+      buy around turn 10 already tops out near 7000 and misses.
+      Stalling, running one harvester, or expanding too late all
+      LOSE; an early second-harvester buy WINS.
+    starting_cash: 1100
+    win_condition:
+      all_of:
+        - economy_value_gte: 7300
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 3600
+    # within_ticks ≤ 93+90·39 = 3603 ⇒ reachable in max_turns;
+    # after_ticks=3601 ⇒ a non-finisher is a real LOSS.
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 40
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. The break-even tick is TIGHTEST — the bar (10200 EV by tick
+  #      4500) clears only for a 2nd harv bought in the first ~4
+  #      turns (build@270 tops out at 10500; build@450 at 10000 just
+  #      misses). The payback window is razor-thin.
+  #   2. TWO seed-driven AGENT spawn_point groups (NORTH y=10..14 /
+  #      SOUTH y=28..32) each carry their own fact+proc+powr+weap+harv
+  #      and a symmetric near-patch pair so the income economics are
+  #      identical per spawn — a memorised "build at (8,18)" opening
+  #      cannot generalise (the model must identify its own base each
+  #      episode). spawn_point filters AGENT actors only; neutral
+  #      mines place every seed so both latitudes get symmetric ore.
+  hard:
+    description: >
+      Tighter bar (10200 EV) on the same clock band with seed-varied
+      starts. The running economy and the one-harvester reserve
+      (1100 cr) are unchanged, but the break-even tick is now razor
+      thin: a single harvester tops out near 6100, and a second
+      harvester clears the bar ONLY if bought in the first few turns
+      — a buy at turn ~6 already tops out near 10000 and just misses.
+      Your base is at the north or south flank depending on the seed;
+      identify it, then commit the capacity capex immediately.
+      Stalling, running one harvester, or expanding too late all
+      LOSE; an early second-harvester buy WINS.
+    starting_cash: 1100
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base (y=10..14); near patches y=10/14.
+        - {type: fact, owner: agent, position: [8, 10], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: weap, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 10], spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=28..32); near patches y=28/32.
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 32], spawn_point: 1}
+        - {type: weap, owner: agent, position: [16, 32], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 28], spawn_point: 1}
+        # Symmetric near-patch ore at BOTH latitudes — neutral actors
+        # are not spawn-filtered, so duplicating both pairs keeps the
+        # income loop identical per spawn group.
+        - {type: mine, owner: neutral, position: [22, 10]}
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 28]}
+        - {type: mine, owner: neutral, position: [22, 32]}
+        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+    win_condition:
+      all_of:
+        - economy_value_gte: 10200
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4500
+    # within_ticks ≤ 93+90·49 = 4503 ⇒ reachable in max_turns;
+    # after_ticks=4501 ⇒ a non-finisher is a real LOSS.
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 50
