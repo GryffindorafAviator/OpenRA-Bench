@@ -25,13 +25,17 @@
 #
 # DISCRIMINATIONS (no defect, no cheat — every brute/lazy play LOSES):
 #
-#   • stall (observe only): the 5 pre-placed defenders are stance:3
-#     (AttackAnything) and auto-engage hostiles in range, but with no
-#     explicit pursuit they sit out of weapon arc as the hunters
-#     converge from the centre. Across ~5000 ticks the static garrison
-#     bleeds out under attrition; the `units_killed_gte` bar is never
-#     met (kills ≈ 0) AND own_units drops to zero → fail-clause fires
-#     (LOSS, not a draw, before tick 5400).
+#   • stall (observe only): the pre-placed defenders are stance:2
+#     (Defend) — they auto-fire on a hostile inside their weapon arc
+#     but never advance. An un-commanded garrison meets the hunters
+#     piecemeal at melee, splits its fire, and is swarmed and wiped;
+#     the `units_killed_gte` bar is never met AND own_units drops to
+#     zero → fail-clause fires (LOSS, not a draw, before tick 5400).
+#     (stance:3 / AttackAnything is deliberately NOT used — after the
+#     engine stance-semantics fix a stance:3 garrison auto-HUNTS the
+#     whole map and would clear both waves with zero agent input,
+#     handing a stall a free WIN. stance:2 keeps the stall baseline
+#     genuinely passive so the reserve-capacity skill is load-bearing.)
 #
 #   • forward-rush (chase the visible enemies all the way to the fog
 #     corner): the defender screen attack-moves to the Wave-2 fog
@@ -60,16 +64,21 @@
 #     close to the "~tick 1500" spec target.
 #   - The defender screen is 3× 2tnk (medium tank, durable + dual-
 #     purpose anti-armor / anti-infantry cannon) + 2× e3 (rocket
-#     soldier, range 7, high anti-vehicle DPS). 5× e1 alone get
+#     soldier, range 7, high anti-vehicle DPS) on easy/medium, and
+#     a heavier 4× 2tnk + 3× e3 on hard (the hard surprise is TWO
+#     Wave-2 squads, so the actively-commanded screen needs the
+#     extra mass to hold both spawn corners). 5× e1 alone get
 #     overwhelmed by hunt-bot e1s at melee in the first 200 ticks
 #     (verified — see git history); the 2tnk durability is needed
 #     to absorb the opening rush, the e3 range is needed to bleed
 #     the trailing waves.
-#   - Pre-placed defenders are stance:3 (AttackAnything) so the
-#     "stall" baseline is genuinely passive (no agent input
-#     required for any auto-fire) and the FAILURE MODE on stall is
-#     a slow attrition bleed across the whole ~5400-tick budget,
-#     not an instant first-turn force-wipe.
+#   - Pre-placed defenders are stance:2 (Defend) — they auto-fire
+#     on an in-range hostile but never advance. This keeps the
+#     "stall" baseline genuinely passive: an un-commanded garrison
+#     is swarmed piecemeal and wiped. (stance:3 / AttackAnything
+#     would auto-hunt the whole map and hand a stall a free win.)
+#     The intended play issues explicit `attack_move` — which
+#     overrides stance — to concentrate the whole screen's fire.
 #   - Inert enemy `fact` marker far east (anti-DRAW): without a
 #     persistent enemy actor the engine auto-`done`s on enemy-elim
 #     once both waves die, before the win/fail evaluator runs
@@ -83,10 +92,10 @@
 #     becomes visible (faster detection of the surprise axis).
 #   - `own_unit_destroyed` interrupt → re-decide when a defender
 #     falls.
-#   - The pre-placed 5 defenders + fact + proc (no tent / cash 0)
-#     means the model CANNOT train fresh infantry — the binding
-#     decision is RESERVING the starting force, not out-producing
-#     the threat.
+#   - The pre-placed defenders (5 on easy/medium, 7 on hard) + fact
+#     + proc (no tent / cash 0) means the model CANNOT train fresh
+#     infantry — the binding decision is RESERVING the starting
+#     force, not out-producing the threat.
 #   - hard tier: 2 agent spawn_point groups (NORTH base y=12 /
 #     SOUTH base y=28) so the corner the surprise wave comes FROM
 #     flips per seed; symmetric Wave-2 squads at BOTH corners
@@ -181,26 +190,37 @@ levels:
       replacements. To WIN you must, before tick 5400, kill ≥7 enemy
       units across BOTH waves AND still have your construction yard
       (fact) standing AND still have ≥2 of your own units alive.
-      Stalling (passive defence — the garrison bleeds out under
-      attrition), chasing the visible cluster all the way to the
-      fog corner (Wave 1 walks past your base while your screen is
-      far afield), or busting the attrition floor (≤3 own units lost)
-      all LOSE.
+      The defenders auto-fire on whatever enters their arc but never
+      advance on their own — you must actively command them to
+      concentrate fire and intercept each wave. Stalling (passive
+      defence — the garrison is swarmed piecemeal and wiped before
+      it can clear both waves), chasing the visible cluster all the
+      way to the fog corner (Wave 1 walks past your base while your
+      screen is far afield), or busting the attrition floor all LOSE.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: proc, owner: agent, position: [6,  20]}
-        # 5 pre-placed defenders (3× 2tnk + 2× e3), stance:3
-        # (AttackAnything — they auto-engage hostiles in weapon arc
-        # but do not actively pursue beyond their range). 5× e1 alone
-        # cannot survive the opening hunt-bot rush (verified —
-        # melee'd in ~200 ticks); the 2tnk durability + e3 reach are
-        # both needed for the screen to hold the line.
-        - {type: 2tnk, owner: agent, position: [14, 20], stance: 3}
-        - {type: 2tnk, owner: agent, position: [14, 18], stance: 3}
-        - {type: 2tnk, owner: agent, position: [14, 22], stance: 3}
-        - {type: e3,   owner: agent, position: [16, 19], stance: 3}
-        - {type: e3,   owner: agent, position: [16, 21], stance: 3}
+        # 5 pre-placed defenders (3× 2tnk + 2× e3), stance:2
+        # (Defend — auto-fire on an in-range hostile but never
+        # advance). stance:2 is the load-bearing choice: a stall
+        # baseline must be GENUINELY passive. After the engine
+        # stance-semantics fix, stance:3 (AttackAnything) makes an
+        # idle garrison auto-HUNT the whole map and clear both waves
+        # with no agent input — a stall would WIN for free. With
+        # stance:2 a stall garrison only trades with whatever walks
+        # into its arc, gets swarmed piecemeal, and is wiped (kills
+        # never reach the bar) ⇒ real LOSS. The intended play issues
+        # explicit `attack_move` (which overrides stance) so the
+        # whole screen CONCENTRATES fire and intercepts each wave.
+        # 5× e1 alone cannot survive the opening hunt-bot rush
+        # (verified — melee'd in ~200 ticks); the 2tnk durability +
+        # e3 reach are both needed for the screen to hold the line.
+        - {type: 2tnk, owner: agent, position: [14, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [14, 18], stance: 2}
+        - {type: 2tnk, owner: agent, position: [14, 22], stance: 2}
+        - {type: e3,   owner: agent, position: [16, 19], stance: 2}
+        - {type: e3,   owner: agent, position: [16, 21], stance: 2}
         # Wave 1 — obvious 4-unit cluster at the centre on the
         # base latitude. Stance:3 + hunt bot drives them straight
         # at the agent centroid; they arrive at the defender
@@ -247,17 +267,23 @@ levels:
       force — no barracks, no cash. To WIN you must, before tick
       5400, kill ≥8 enemy units across BOTH waves AND still have
       your construction yard (fact) standing AND still have ≥2 of
-      your own units alive. Stalling, chasing the visible cluster
-      all the way to the fog corner, or attrition-busting all LOSE.
+      your own units alive. The defenders auto-fire in their arc
+      but never advance on their own — you must actively command
+      them. Stalling (the passive garrison is swarmed and wiped),
+      chasing the visible cluster all the way to the fog corner,
+      or attrition-busting all LOSE.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: proc, owner: agent, position: [6,  20]}
-        - {type: 2tnk, owner: agent, position: [14, 20], stance: 3}
-        - {type: 2tnk, owner: agent, position: [14, 18], stance: 3}
-        - {type: 2tnk, owner: agent, position: [14, 22], stance: 3}
-        - {type: e3,   owner: agent, position: [16, 19], stance: 3}
-        - {type: e3,   owner: agent, position: [16, 21], stance: 3}
+        # 5 pre-placed defenders, stance:2 (Defend) — see the easy
+        # level for the rationale (stance:3 would let a stall
+        # auto-hunt and win for free; stance:2 keeps stall passive).
+        - {type: 2tnk, owner: agent, position: [14, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [14, 18], stance: 2}
+        - {type: 2tnk, owner: agent, position: [14, 22], stance: 2}
+        - {type: e3,   owner: agent, position: [16, 19], stance: 2}
+        - {type: e3,   owner: agent, position: [16, 21], stance: 2}
         # Wave 1 — 4-unit cluster (canonical spec count).
         - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 4}
         # Wave 2 — EQUAL size (4 e1) at NE fog corner.
@@ -300,31 +326,45 @@ levels:
       the OPPOSITE corner one is the long-haul late follow-on.
       Your base round-robins between a NORTH and a SOUTH latitude
       so which corner the surprise wave arrives from cannot be
-      memorised. Your 5 pre-placed defenders (3 medium tanks + 2
+      memorised. Your 7 pre-placed defenders (4 medium tanks + 3
       rocket soldiers) are your ENTIRE force — no barracks, no
       cash. To WIN you must, before tick 5400, kill ≥9 enemy units
       across BOTH waves AND still have your construction yard
       (fact) standing AND still have ≥2 of your own units alive.
-      Stalling, chasing one fog corner deep, or attrition bust all
-      LOSE.
+      The defenders auto-fire on whatever enters their arc but
+      never advance on their own — you must actively command them
+      to concentrate fire and intercept each wave. Stalling
+      (the passive garrison is swarmed piecemeal and wiped),
+      chasing one fog corner deep, or attrition bust all LOSE.
     overrides:
       actors:
         # ── spawn_point 0 — NORTH base (y=12). ─────────────────────
+        # Hard fields a HEAVIER 7-unit garrison (4× 2tnk + 3× e3,
+        # vs the 5 of easy/medium): hard's surprise is TWO Wave-2
+        # squads (NE + SE corners), so the actively-commanded screen
+        # needs the extra mass to hold both the opening rush and the
+        # follow-on on either spawn corner. A stall stays a LOSS —
+        # stance:2 keeps an idle 7-garrison just as passive (it is
+        # swarmed piecemeal and wiped, kills never reach the bar).
         - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
         - {type: proc, owner: agent, position: [6,  12], spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [14, 12], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [14, 10], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [14, 14], stance: 3, spawn_point: 0}
-        - {type: e3,   owner: agent, position: [16, 11], stance: 3, spawn_point: 0}
-        - {type: e3,   owner: agent, position: [16, 13], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 12], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 10], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 14], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14,  8], stance: 2, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [16, 11], stance: 2, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [16, 13], stance: 2, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [16,  9], stance: 2, spawn_point: 0}
         # ── spawn_point 1 — SOUTH base (y=28). ─────────────────────
         - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
         - {type: proc, owner: agent, position: [6,  28], spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [14, 28], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [14, 26], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [14, 30], stance: 3, spawn_point: 1}
-        - {type: e3,   owner: agent, position: [16, 27], stance: 3, spawn_point: 1}
-        - {type: e3,   owner: agent, position: [16, 29], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 28], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 26], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 30], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 32], stance: 2, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [16, 27], stance: 2, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [16, 29], stance: 2, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [16, 31], stance: 2, spawn_point: 1}
         # Wave 1 — obvious 4-unit cluster at the centre on the mid
         # latitude (y=20). The hunt bot drives them toward the
         # nearest agent target so the cluster naturally engages

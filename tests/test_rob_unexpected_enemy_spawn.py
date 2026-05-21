@@ -13,8 +13,8 @@ The win predicate makes BOTH waves load-bearing:
   the fog corner while Wave 1 walks past the unguarded base razes
   the fact;
 * `own_units_gte:2` ⇒ a minimum reserve survived — attrition busts
-  (forward-rush, stall) get the screen wiped (≥4 lost from 5 →
-  fail);
+  (forward-rush, stall) get the screen wiped (the whole garrison
+  lost → fail);
 * `within_ticks:5400` paired with `after_ticks:5401` ⇒ a non-finisher
   is a real reachable timeout LOSS (90 turns × ≤90 ticks/step
   reaches ≥5400 in interrupt mode), never a draw.
@@ -80,10 +80,11 @@ def _visible_enemy_units(rs):
 
 
 def stall(rs, C):
-    """Observe-only baseline. The 5 defenders are stance:3 so they
-    auto-fire on hostiles in weapon arc, but without any pursuit they
-    bleed out under attrition across the full 5400-tick budget
-    (k=0, all 5 lost) → fail-clause fires (LOSS, not a draw)."""
+    """Observe-only baseline. The defenders are stance:2 (Defend) so
+    they auto-fire on a hostile inside their arc but never advance.
+    An un-commanded garrison meets the hunters piecemeal, splits its
+    fire, and is swarmed and wiped — kills never reach the bar and
+    own_units drops to zero → fail-clause fires (LOSS, not a draw)."""
     return [C.observe()]
 
 
