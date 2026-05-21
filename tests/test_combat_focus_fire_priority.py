@@ -6,7 +6,18 @@ LOSE on every level and every hard seed. Every enemy squad is a STATIC
 stance:2 (Defend) shield-wall-plus-rocket-rear formation, so the
 focus-fire priority is a real decision rather than a melee. Non-win is
 a real LOSS: stall via the `after_ticks` timeout fail clause, brute /
-spread via the `units_lost_lte` attrition cap.
+spread via the ZERO `units_lost_lte` attrition cap.
+
+Recalibrated after the engine movement fixes (moving units take fire
+en route; attack_unit on an out-of-sight target paths at real speed).
+The strike force now stages at x=60 — just outside the rocket rear-
+rank's Dragon range — so a stall policy is never engaged (clean
+timeout LOSS) and the focus-fire policy spots the squad and opens fire
+from turn 1 instead of a 64-cell blind march under fire. The rocket
+rear-rank dropped to 2 (3+ e3 out-damage a 4-tank focus post-fix), the
+hard squad is compact so both seed-driven spawn corridors can reach
+the whole squad (no out-of-reach DRAW), and the easy attrition cap
+tightened to 0.
 
 Validation is scripted (no model / network).
 """
@@ -78,12 +89,13 @@ def _alive(n):
 
 def test_easy_predicates():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    # Intended: kills 7 (whole squad), ≤1 tank lost, in time → WIN
-    assert evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=7, lost=1))
+    # Intended: kills 7 (whole squad), ZERO tanks lost, in time → WIN
+    assert evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=7, lost=0))
     # Kill bar unmet (only 6 kills) → not a win
-    assert not evaluate(c.win_condition, _ctx(units=_alive(3), tick=2000, kills=6, lost=0))
-    # Attrition cap busted (2 lost > 1) → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(2), tick=2000, kills=3, lost=2))
+    assert not evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=6, lost=0))
+    # Attrition cap busted (any tank lost, cap is 0) → fail; also not a win
+    assert evaluate(c.fail_condition, _ctx(units=_alive(3), tick=2000, kills=7, lost=1))
+    assert not evaluate(c.win_condition, _ctx(units=_alive(3), tick=2000, kills=7, lost=1))
     # All tanks dead → fail (own_units_gte:1 trips via fail clause)
     assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=3, lost=4))
     # Timeout with bar unmet → fail (after_ticks 2701)
@@ -92,30 +104,30 @@ def test_easy_predicates():
 
 def test_medium_predicates():
     c = compile_level(load_pack(PACK_PATH), "medium")
-    # Intended: kills 11, 0 lost → WIN
-    assert evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=11, lost=0))
-    # Bar unmet (only 10 kills) → not a win
-    assert not evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=10, lost=0))
+    # Intended: kills 10, 0 lost → WIN
+    assert evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=10, lost=0))
+    # Bar unmet (only 9 kills) → not a win
+    assert not evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=9, lost=0))
     # Any tank lost (cap is 0) → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(3), tick=2000, kills=11, lost=1))
+    assert evaluate(c.fail_condition, _ctx(units=_alive(3), tick=2000, kills=10, lost=1))
     # Force wipe → fail
-    assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=11, lost=4))
+    assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=10, lost=4))
     # Timeout → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(4), tick=2702, kills=10, lost=0))
+    assert evaluate(c.fail_condition, _ctx(units=_alive(4), tick=2702, kills=9, lost=0))
 
 
 def test_hard_predicates():
     c = compile_level(load_pack(PACK_PATH), "hard")
-    # Intended: kills 18, 0 lost → WIN
-    assert evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=18, lost=0))
+    # Intended: kills 14, 0 lost → WIN
+    assert evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=14, lost=0))
     # Bar unmet → not a win
-    assert not evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=17, lost=0))
+    assert not evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=13, lost=0))
     # Any tank lost (cap is 0) → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(3), tick=2000, kills=18, lost=1))
+    assert evaluate(c.fail_condition, _ctx(units=_alive(3), tick=2000, kills=14, lost=1))
     # Force wipe → fail
-    assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=18, lost=4))
+    assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=14, lost=4))
     # Timeout → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(4), tick=2702, kills=17, lost=0))
+    assert evaluate(c.fail_condition, _ctx(units=_alive(4), tick=2702, kills=13, lost=0))
 
 
 def test_timeout_reachable_inside_max_turns():
