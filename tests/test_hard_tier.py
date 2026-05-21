@@ -275,6 +275,19 @@ UPGRADED = [
     # bait/strike vector flips per seed.
     "coord-diversionary-attack",
     "def-in-depth",
+    # Wave-11 REASONING defense-in-depth pack — military defense-in-
+    # depth doctrine / security layered-defense / MicroRTS-defense
+    # anchor. The same finite pillbox budget split into a FRONT band
+    # plus a REAR band at greater depth beats a single thick wall
+    # against a heavy wave: the win predicate requires 2 pbox in EACH
+    # of two non-overlapping depth regions, so a single concentrated
+    # band satisfies at most one region clause and loses. Hard tier
+    # defines two agent spawn_point groups (NORTH base y=14 / SOUTH
+    # base y=26) round-robined by seed, AND two enemy spawn_point
+    # groups so the heavy wave's latitude flips by seed; both depth
+    # bands must follow the seed-chosen base latitude so a memorised
+    # "build bands at y=20" plan cannot generalise.
+    "def-in-depth-vs-single",
     # Wave-8 REASONING fog-ambush pack — SC2 hidden defense / military
     # ambush doctrine / fog warfare anchor. Defenders pre-placed in
     # concealment OFF the direct enemy axis must HOLD their hidden
@@ -1236,6 +1249,47 @@ UPGRADED = [
     # every seed, converging on whichever latitude the seed selected
     # — a memorised army-placement cell cannot generalise.
     "lh-tech-rush-vs-army-rush",
+    # Wave-11 ACTION pack — vision relay chain (military relay chain /
+    # sensor-network coverage / communications-relay anchor). Four jeep
+    # scouts must be SPACED across a corridor — one per intermediate
+    # relay region plus one parked on the far objective — so the win's
+    # `all_of` of `units_in_region_gte` clauses (each relay leg + the
+    # far leg) holds simultaneously and the far jeep's vision discovers
+    # the hidden enemy cluster. One-scout-far leaves the relays empty;
+    # bunched scouts occupy only one region at a time — both LOSE.
+    # Hard tier defines two agent spawn_point groups (NORTH corridor
+    # y=13 / SOUTH corridor y=27) round-robined by seed; the whole
+    # relay corridor moves with the base and the win is an `any_of`
+    # over the NORTH and SOUTH chains, so a memorised corridor latitude
+    # cannot generalise. The hidden e3 clusters place on BOTH latitudes
+    # (enemy actors don't honour spawn_point — CLAUDE.md).
+    "coord-relay-vision-chain",
+    # Wave-11 PERCEPTION pack — continuous target tracking (military
+    # target tracking / intrusion-detection continuous monitoring).
+    # An enemy army marches across the map A→B→C→D, scripted with
+    # spawn-before-destroy scheduled_events; the win is a `then:`
+    # chain of detection bars (one per leg) so a one-shot scout
+    # latches only the first and stalls — only a scout that shadows
+    # the army leg by leg completes the chain. Hard tier defines two
+    # agent spawn_point groups (NORTH base y=14 / SOUTH base y=26)
+    # round-robined by seed; the army's march is scripted by
+    # scheduled_events (which don't honour spawn_point) so it is
+    # identical across seeds — the tracking doctrine generalises, a
+    # memorised base-latitude opening does not.
+    "scout-track-enemy-movement",
+    # Wave-11 econ reasoning: travel-vs-throughput patch selection
+    # (OR travel-vs-throughput / SC2 expansion timing / logistics
+    # routing anchor). One harvester, a NEAR small patch and a FAR
+    # large patch; under a tight cash deadline the near patch's
+    # short round-trip banks the bar while the far patch (larger
+    # pile, but latency-bound) busts the clock. Hard defines two
+    # agent spawn_point groups (NORTH base y=14 / SOUTH base y=28)
+    # round-robined by seed; the full base + the NEAR/FAR patch pair
+    # are duplicated at both latitudes so the spawn-matched near
+    # patch flips per seed, and the win predicate is `any_of` over
+    # the two spawn-matched NEAR clauses — a memorised "always route
+    # to (16,14)" policy loses on the SOUTH seeds.
+    "econ-far-patch-vs-near-patch",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
