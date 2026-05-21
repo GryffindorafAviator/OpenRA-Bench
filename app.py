@@ -1167,6 +1167,11 @@ def _play_status_md(sess) -> str:
     line = f"**Turn {st['turn']}/{st['max_turns']}** · tick {st['tick']}"
     if st["done"]:
         line += f" · **{st['outcome'].upper()}** — game over"
+        if st.get("save_path"):
+            line += (
+                f"\n\n_Run saved (standard playback format): "
+                f"`{st['save_path']}`_"
+            )
     return line
 
 

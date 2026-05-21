@@ -468,7 +468,14 @@ class InteractiveSession:
         s.close()
     """
 
-    def __init__(self, compiled: Any, seed: int = 1):
+    def __init__(
+        self,
+        compiled: Any,
+        seed: int = 1,
+        record: bool = True,
+        playback_root: Any = None,
+        player: str = "Human",
+    ):
         from openra_rl_training.training.rust_env_pool import RustEnvPool
 
         from .eval_core import _scenario_to_tmp_yaml
@@ -492,6 +499,21 @@ class InteractiveSession:
         self.outcome = "draw"
         self.done = False
         self._closed = False
+        self.save_path: str | None = None
+        # Standard-playback recording: a human run produces the IDENTICAL
+        # artifact a model run does — a Playback dir (turns.jsonl,
+        # per-turn minimap PNGs, messages.json, manifest.json) under the
+        # same PLAYBACK_ROOT — so the Battle Viewer and leaderboard treat
+        # human and LLM runs apples-to-apples (no separate human format).
+        self._player = player
+        self._playback = None
+        self._finalized = False
+        self._history: list[dict] = []
+        self._issued = 0
+        self._pb_terrain = None
+        self._pb_explored: set = set()
+        if record:
+            self._setup_playback(playback_root)
 
     # A live engine session is a resource handle, not a value. Gradio's
     # `gr.State` deep-copies whatever it holds — and the RustEnvPool
@@ -506,7 +528,13 @@ class InteractiveSession:
 
     @classmethod
     def from_pack(
-        cls, pack_id: str, level: str = "easy", seed: int = 1
+        cls,
+        pack_id: str,
+        level: str = "easy",
+        seed: int = 1,
+        record: bool = True,
+        playback_root: Any = None,
+        player: str = "Human",
     ) -> "InteractiveSession":
         """Compile a pack by id and open a session on it."""
         from .scenarios import load_pack
@@ -515,7 +543,10 @@ class InteractiveSession:
         compiled = compile_level(
             load_pack(PACKS_DIR / f"{pack_id}.yaml"), level
         )
-        return cls(compiled, seed=seed)
+        return cls(
+            compiled, seed=seed, record=record,
+            playback_root=playback_root, player=player,
+        )
 
     @property
     def Command(self) -> Any:
@@ -545,7 +576,154 @@ class InteractiveSession:
             "outcome": self.outcome,
             "done": self.done,
             "tick": self._adapter.signals.game_tick,
+            "save_path": self.save_path,
         }
+
+    # ── Standard-playback recording ──────────────────────────────────
+    def _setup_playback(self, playback_root: Any) -> None:
+        """Open a Playback dir — the same one model runs use."""
+        try:
+            import os
+            from datetime import datetime, timezone
+            from pathlib import Path
+
+            from .playback import Playback
+
+            root = Path(
+                playback_root
+                or os.environ.get(
+                    "OPENRA_BENCH_PLAYBACK_ROOT",
+                    Path(__file__).resolve().parents[1] / "playback",
+                )
+            )
+            run_id = "human-" + datetime.now(timezone.utc).strftime(
+                "%Y%m%dT%H%M%SZ"
+            )
+            safe = "".join(
+                c if (c.isalnum() or c in "-_") else "-"
+                for c in self._player
+            )
+            pb = Playback(
+                root / f"{run_id}__{safe}",
+                cell=f"{self.compiled.pack_id}:{self.compiled.level}",
+                seed=self.seed,
+            )
+            pb.run_id, pb.model = run_id, self._player
+            self._playback = pb
+            self._history = [{
+                "role": "system",
+                "content": (
+                    f"Human-labeling session — {self.compiled.pack_id}:"
+                    f"{self.compiled.level} seed {self.seed}. Objective: "
+                    f"{self.objective or '(see briefing)'}"
+                ),
+            }]
+        except Exception:  # noqa: BLE001 — recording never breaks play
+            self._playback = None
+
+    def _pb_frame(self, rs: dict) -> "str | None":
+        """Per-turn minimap PNG (b64) via the SAME renderer model
+        playback uses, so saved human frames match model frames."""
+        try:
+            from .minimap import terrain_png_for
+
+            if self._pb_terrain is None:
+                self._pb_terrain = terrain_png_for(
+                    self.compiled.scenario.base_map
+                )
+            from .prompt_v2 import minimap_b64 as _v2_mm
+
+            png = _v2_mm(
+                rs, self._pb_terrain, self._pb_explored,
+                constant_colors=self.compiled.level in ("easy", "medium"),
+            )
+            if png is None:
+                from .agent import _render_minimap_b64
+
+                png = _render_minimap_b64(rs, self._pb_terrain)
+            return png
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _record_turn_playback(self, actions, calls, cmds, ctx) -> None:
+        """Append one turn to the Playback + the message transcript."""
+        if self._playback is None:
+            return
+        from .goal_tracker import turn_goal
+
+        rs = self._adapter.render_state()
+        self._issued += len(cmds)
+        self._playback.record_turn(
+            self.turn, rs, cmds, self._adapter.signals,
+            self._pb_frame(rs),
+            goal=turn_goal(self.compiled.win_condition, ctx),
+        )
+        # Transcript turn — same {role, content, tool_calls} shape a
+        # ModelAgent writes, so messages.json is uniform across human
+        # and LLM runs.
+        self._history.append(
+            {"role": "user", "content": HumanController._briefing(rs)}
+        )
+        self._history.append({
+            "role": "assistant",
+            "content": "; ".join(a.describe() for a in actions) or "observe",
+            "reasoning": "; ".join(a.note for a in actions if a.note),
+            "tool_calls": [
+                {
+                    "id": f"h{i}", "type": "function",
+                    "function": {
+                        "name": c["name"], "arguments": c["arguments"],
+                    },
+                }
+                for i, c in enumerate(calls)
+            ],
+        })
+        for i in range(len(calls)):
+            self._history.append(
+                {"role": "tool", "tool_call_id": f"h{i}", "content": "ok"}
+            )
+
+    def _finalize_playback(self, ctx) -> None:
+        """Write messages.json + manifest.json — the same manifest shape
+        `run_level` writes for a model run, tagged as a human run."""
+        if self._playback is None or self._finalized:
+            return
+        self._finalized = True
+        from .goal_tracker import turn_goal
+
+        final_goal = turn_goal(self.compiled.win_condition, ctx)
+        sig = self._adapter.signals
+        try:
+            self._playback.write_messages(self._history)
+            self._playback.finalize({
+                "scenario": f"{self.compiled.pack_id}:{self.compiled.level}",
+                "pack_id": self.compiled.pack_id,
+                "level": self.compiled.level,
+                "capability": self.compiled.meta.capability,
+                "run_id": self._playback.run_id,
+                "model": self._playback.model,
+                "agent_type": "Human",
+                "seed": self.seed,
+                "outcome": self.outcome,
+                "turns": self.turn,
+                "max_turns": self.max_turns,
+                "actions_issued": self._issued,
+                "actions_warned": 0,
+                "agent_stats": {"turns": self.turn},
+                "objective_progress": final_goal.get(
+                    "objective_progress", 0.0
+                ),
+                "reward_vector": final_goal.get("reward_vector", {}),
+                "signals": {
+                    "economy_value": sig.cash + sig.resources,
+                    "explored_percent": round(sig.explored_percent, 2),
+                    "units_killed": sig.units_killed,
+                    "units_lost": sig.units_lost,
+                },
+            })
+            self.save_path = str(self._playback.dir)
+        except Exception:  # noqa: BLE001
+            pass
 
     def submit_turn(self, actions: "list[HumanAction]") -> dict:
         """Advance one decision turn with the human's gestures. Mirrors
@@ -592,6 +770,10 @@ class InteractiveSession:
             or self.turn >= self.max_turns
         ):
             self.done = True
+        # Standard-playback recording — log this turn, finalize on done.
+        self._record_turn_playback(actions or [], calls, cmds, ctx)
+        if self.done:
+            self._finalize_playback(ctx)
         return self.status()
 
     def close(self) -> None:
@@ -599,6 +781,34 @@ class InteractiveSession:
         if self._closed:
             return
         self._closed = True
+        # An abandoned run (closed before game-over) is still finalized
+        # so its Playback dir carries a manifest and stays viewable.
+        if (
+            self._playback is not None
+            and not self._finalized
+            and self.turn > 0
+        ):
+            try:
+                from .scenarios.win_conditions import WinContext
+
+                self._finalize_playback(
+                    WinContext(
+                        signals=self._adapter.signals,
+                        render_state=self._adapter.render_state(),
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        elif self._playback is not None and self.turn == 0:
+            # Never-played recorded session — drop the empty dir rather
+            # than littering the playback root.
+            import shutil
+
+            try:
+                self._playback._turns_fh.close()
+            except Exception:  # noqa: BLE001
+                pass
+            shutil.rmtree(self._playback.dir, ignore_errors=True)
         try:
             self._pool.release(self._env)
             self._pool.shutdown()

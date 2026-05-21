@@ -339,7 +339,7 @@ def test_interactive_session_steps_turn_by_turn():
     compiled = _smallest_easy_pack()
     assert compiled is not None
 
-    sess = InteractiveSession(compiled, seed=1)
+    sess = InteractiveSession(compiled, seed=1, record=False)
     try:
         # The observation is a real render_state — what the LLM sees.
         rs = sess.render_state()
@@ -372,7 +372,9 @@ def test_interactive_session_from_pack():
     from openra_bench.human_labeling import InteractiveSession
 
     compiled = _smallest_easy_pack()
-    sess = InteractiveSession.from_pack(compiled.pack_id, "easy", seed=2)
+    sess = InteractiveSession.from_pack(
+        compiled.pack_id, "easy", seed=2, record=False
+    )
     try:
         assert sess.seed == 2
         assert sess.Command is not None
@@ -385,5 +387,53 @@ def test_interactive_session_from_pack():
                 [HumanAction(mode="move", units=[uid], target=(30, 18))]
             )
             assert sess.turn == 1
+    finally:
+        sess.close()
+
+
+def test_interactive_session_emits_standard_playback(tmp_path):
+    """A recorded human session produces the SAME Playback artifact a
+    model run does — turns.jsonl + per-turn minimap PNGs + messages.json
+    + a manifest — so the Battle Viewer / leaderboard treat human and
+    LLM runs apples-to-apples."""
+    import json
+    from pathlib import Path
+
+    from openra_bench.human_labeling import InteractiveSession
+
+    compiled = _smallest_easy_pack()
+    assert compiled is not None
+
+    sess = InteractiveSession(
+        compiled, seed=1, record=True, playback_root=tmp_path,
+        player="Human",
+    )
+    try:
+        guard = compiled.max_turns + 5
+        steps = 0
+        while not sess.done and steps < guard:
+            sess.submit_turn([HumanAction(mode="observe")])
+            steps += 1
+        assert sess.done
+        save = sess.status()["save_path"]
+        assert save, "a finished recorded session must report save_path"
+        run_dir = Path(save)
+        # Standard Playback layout — identical to a model run's.
+        assert (run_dir / "turns.jsonl").is_file()
+        assert (run_dir / "messages.json").is_file()
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+        assert manifest["model"] == "Human"
+        assert manifest["agent_type"] == "Human"
+        assert manifest["pack_id"] == compiled.pack_id
+        assert manifest["outcome"] in ("win", "loss", "draw")
+        assert manifest["turns"] == sess.turn
+        # Per-turn minimap PNG frames were written.
+        assert list(run_dir.glob("minimap_turn*.png"))
+        # turns.jsonl has one record per turn.
+        lines = [
+            ln for ln in (run_dir / "turns.jsonl").read_text().splitlines()
+            if ln.strip()
+        ]
+        assert len(lines) == sess.turn
     finally:
         sess.close()
