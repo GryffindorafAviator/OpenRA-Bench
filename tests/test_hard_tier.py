@@ -1424,6 +1424,30 @@ UPGRADED = [
     # memorised "drive to (27,21)" plan strikes empty ground on the
     # off-latitude seed.
     "def-counter-battery",
+    # Cleanup pass — 19 active packs whose hard tier already defines two
+    # agent-side spawn_point groups (agent_sp=[0,1], verified to produce
+    # ≥2 distinct seeded starts via units_summary) but were not yet
+    # listed. One line each; all pass the parametrized compile+run and
+    # spawn-count tests.
+    "lh-defense-tech-second-base",  # hard: 2 agent spawn_point groups
+    "rob-objective-change-midway",  # hard: 2 agent spawn_point groups
+    "def-position-expected-direction",  # hard: 2 agent spawn_point groups
+    "coord-squad-handoff",  # hard: 2 agent spawn_point groups
+    "econ-recover-from-zero-cash",  # hard: 2 agent spawn_point groups
+    "lh-scout-react-counter",  # hard: 2 agent spawn_point groups
+    "coord-relay-attack",  # hard: 2 agent spawn_point groups
+    "lh-100-turn-marathon-survival",  # hard: 2 agent spawn_point groups
+    "lh-multi-checkpoint-5-plus",  # hard: 2 agent spawn_point groups
+    "def-pre-position-mobile-reserve",  # hard: 2 agent spawn_point groups
+    "combat-skirmish-then-disengage",  # hard: 2 agent spawn_point groups
+    "lh-build-army-coordinate-multifront-attack",  # hard: 2 agent spawn_point groups
+    "econ-deny-enemy-expansion",  # hard: 2 agent spawn_point groups
+    "econ-target-cash-amount-by-deadline",  # hard: 2 agent spawn_point groups
+    "scout-detect-enemy-tech",  # hard: 2 agent spawn_point groups
+    "coord-converge-on-target",  # hard: 2 agent spawn_point groups
+    "econ-quantitative-vs-qualitative-spend",  # hard: 2 agent spawn_point groups
+    "def-tower-line-vs-cluster",  # hard: 2 agent spawn_point groups
+    "coord-cover-and-move",  # hard: 2 agent spawn_point groups
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
