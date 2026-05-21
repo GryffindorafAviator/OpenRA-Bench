@@ -47,9 +47,19 @@ base:
   tools: [move_units, attack_unit, stop_units]
   planning: true
   termination: {max_ticks: 12000}
+  # The scout column is stance:0 (HoldFire). After the engine
+  # stance-semantics fix, the default stance:3 (AttackAnything)
+  # actively HUNTS — a stance:3 unit with no enemy in range advances
+  # toward the nearest enemy on its own. Left at the default, the
+  # scout column self-delivers across the map and discovers every
+  # hidden squad WITHOUT a single agent order, collapsing the
+  # perception task: a do-nothing stall would WIN for free. stance:0
+  # pins the column at spawn so discovery requires deliberate
+  # `move_units` scouting and a stall genuinely fails the
+  # enemies_discovered_gte bar.
   actors:
-    - {type: jeep, owner: agent, position: [6, 5], count: 3}
-    - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+    - {type: jeep, owner: agent, position: [6, 5], count: 3, stance: 0}
+    - {type: 1tnk, owner: agent, position: [8, 8], count: 2, stance: 0}
 
 levels:
   # Tick budgets aligned to 93 + 90·(max_turns - 1) so the timeout
@@ -59,17 +69,23 @@ levels:
   # exit as draw, not loss; see CLAUDE.md).
   easy:
     description: >
-      Exactly 2 enemy squads hidden in fog (one near-east, one
-      far-east). Find both within 2200 ticks losing <=1 unit. Both
-      are roughly on the same lane — a straight east sweep finds
-      them. Missing one or losing too many = loss.
+      Exactly 2 enemy squads hidden in fog: one in the mid-corridor
+      (near-east) and one in the far-east. Find BOTH within 2200
+      ticks losing <=1 unit. The two squads sit on different
+      latitudes, so a single straight sweep down one lane finds at
+      most one — split the scout column to cover both. Missing a
+      squad, over-scouting past the clock, or losing too many = loss.
     overrides:
       actors:
-        - {type: jeep, owner: agent, position: [6, 5], count: 3}
-        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
-        # Two distinct enemy squads, deliberately count K=2.
-        - {type: e1, owner: enemy, position: [55, 15], stance: 2, count: 2}
-        - {type: e3, owner: enemy, position: [105, 18], stance: 2, count: 2}
+        - {type: jeep, owner: agent, position: [6, 5], count: 3, stance: 0}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2, stance: 0}
+        # Two distinct enemy squads, deliberately count K=2. Each
+        # squad is ONE actor (count:1) so `enemies_discovered_gte`
+        # counts CLUSTERS, not bodies — discovering one squad is
+        # worth exactly 1 toward K. (A count:2 squad would make the
+        # K=2 win satisfiable by finding a SINGLE cluster.)
+        - {type: e1, owner: enemy, position: [55, 15], stance: 2, count: 1}
+        - {type: e3, owner: enemy, position: [105, 18], stance: 2, count: 1}
     win_condition:
       all_of:
         - enemies_discovered_gte: 2
@@ -92,11 +108,19 @@ levels:
       unexplored mass is after each contact and commit there.
     overrides:
       actors:
-        - {type: jeep, owner: agent, position: [6, 5], count: 3}
-        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
-        - {type: e1, owner: enemy, position: [105, 8], stance: 2, count: 2}    # NE
-        - {type: e3, owner: enemy, position: [105, 32], stance: 2, count: 2}   # SE
-        - {type: dog, owner: enemy, position: [55, 4], stance: 2, count: 2}    # mid-N
+        - {type: jeep, owner: agent, position: [6, 5], count: 3, stance: 0}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2, stance: 0}
+        # Each squad is ONE actor (count:1) so enemies_discovered_gte
+        # counts CLUSTERS toward K=3 — a 2-of-3 sweep gets only 2 < 3
+        # and loses. The mid-N `dog` pocket is stance:0 (HoldFire):
+        # after the engine stance-semantics fix, a stance:2 dog
+        # actively chases a passing scout and runs it down off-route;
+        # stance:0 makes it a passive perception target so the
+        # intended careful split-scout can reveal it without the
+        # chase, while a single-axis sweep still misses the pocket.
+        - {type: e1, owner: enemy, position: [105, 8], stance: 2, count: 1}    # NE
+        - {type: e3, owner: enemy, position: [105, 32], stance: 2, count: 1}   # SE
+        - {type: dog, owner: enemy, position: [55, 4], stance: 0, count: 1}    # mid-N
     win_condition:
       all_of:
         - enemies_discovered_gte: 3
@@ -119,12 +143,18 @@ levels:
       every remaining fog cell) blows the clock.
     overrides:
       actors:
-        - {type: jeep, owner: agent, position: [6, 5], count: 3}
-        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
-        - {type: e1, owner: enemy, position: [105, 8], stance: 2, count: 2}
-        - {type: e3, owner: enemy, position: [105, 32], stance: 2, count: 2}
-        - {type: dog, owner: enemy, position: [115, 4], stance: 2, count: 2}    # far-NW relative to push
-        - {type: e2, owner: enemy, position: [60, 28], stance: 2, count: 2}     # south-of-mid pocket
+        - {type: jeep, owner: agent, position: [6, 5], count: 3, stance: 0}
+        - {type: 1tnk, owner: agent, position: [8, 8], count: 2, stance: 0}
+        # Each squad is ONE actor (count:1) so enemies_discovered_gte
+        # counts CLUSTERS toward K=4 — a best-effort sweep finds only
+        # 2-3 and loses. The far-NW `dog` is stance:0 (HoldFire) — a
+        # passive pocket the engine stance-fix would otherwise turn
+        # into a chaser; the armed e1/e3/e2 squads stay stance:2 so a
+        # charge-through still bleeds attrition.
+        - {type: e1, owner: enemy, position: [105, 8], stance: 2, count: 1}
+        - {type: e3, owner: enemy, position: [105, 32], stance: 2, count: 1}
+        - {type: dog, owner: enemy, position: [115, 4], stance: 0, count: 1}    # far-NW relative to push
+        - {type: e2, owner: enemy, position: [60, 28], stance: 2, count: 1}     # south-of-mid pocket
     win_condition:
       all_of:
         - enemies_discovered_gte: 4
