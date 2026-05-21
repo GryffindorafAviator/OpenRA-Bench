@@ -936,18 +936,20 @@ UPGRADED = [
     "tp-rush-objective-very-fast",
     # Wave-10 ACTION parallel-scheduling pack — speedrun TWO
     # objectives in parallel (speedrun parallel / parallel scheduling
-    # / SC2 multi-prong anchor). A single 6-unit force (4× 2tnk + 2×
-    # jeep) staged at the far west must raze TWO enemy `fact`s — one
-    # at the NE corner (115,8), one at the SE corner (115,32) — inside
-    # one tight shared clock. The intended play splits the force at
-    # t=0 and runs both prongs concurrently; serialising (raze one
-    # corner, then re-task survivors ~24 cells to the other) busts the
-    # clock. Hard defines TWO agent spawn_point groups (NORTH staging
-    # y≈10 vs SOUTH staging y≈30); the two enemy `fact`s + garrison
-    # are duplicated across both spawn groups so they place every seed
-    # (per-owner spawn_point filter — CLAUDE.md), while the agent
-    # staging latitude varies by seed so a memorised split plan cannot
-    # generalise.
+    # / SC2 multi-prong anchor). A 4× 2tnk + 2× jeep force, pre-staged
+    # at the far west as two aligned sub-groups, must raze TWO enemy
+    # `fact`s — one at the NE corner (115,8), one at the SE corner
+    # (115,32) — inside one tight shared clock. The intended play
+    # dispatches BOTH prongs in the same decision turn so the two
+    # ~1100-tick rushes run concurrently; a serial play (raze one
+    # objective, then dispatch the other prong only after the first
+    # fact falls) stacks the rushes back-to-back (~2× make-span) and
+    # busts the clock. Hard defines TWO agent spawn_point groups
+    # (NORTH-shifted vs SOUTH-shifted staging) round-robined by seed;
+    # the enemy actors declare no spawn_point so the two objective
+    # `fact`s + garrison place every seed at the fixed corners (the
+    # standard agent-side-axis idiom), while the agent staging
+    # latitude varies so a memorised dispatch mis-targets.
     "tp-rush-multi-objective",
     # Wave-8 REASONING sacrifice pack — forlorn hope / military
     # sacrifice doctrine / SC2 expendable strike package anchor.
@@ -1151,7 +1153,44 @@ UPGRADED = [
     # fund a War Factory + tank batch; hard tier 2 spawn_point groups
     # (NORTH y=4 / SOUTH y=34).
     "maint-sell-and-recoup-cash",
-
+    # Wave-10 long-horizon 3-phase military pack (SC2 timing-push /
+    # military defense-then-counter / PlanBench long-sequencing
+    # anchor). The `then:` chain is opening (build powr+proc) →
+    # defense (kill the rush, hold past T1) → counter (raze the far
+    # enemy construction yard). Hard defines two agent spawn_point
+    # groups (NORTH base y=14 / SOUTH base y=24) round-robined by
+    # seed. ENGINE FACT: on the spawn_point path the engine places
+    # scenario enemy UNIT actors next to the active agent base, so
+    # the rush is immediate — the hard tier therefore pre-places a
+    # defensive infantry squad per spawn group; enemy BUILDING
+    # actors keep their absolute coords, so the counter objective
+    # fact stays far east (118,20) every seed. A memorised "place
+    # powr at (12,20)" opening misses one of the two spawn groups.
+    "lh-opening-to-defense-to-counter",
+    # Parallel-production throughput pack (queueing theory / SC2
+    # multi-factory throughput / manufacturing parallelism anchor) —
+    # exercises the parallel-production engine fix (a 2nd war factory
+    # doubles vehicle output). Hard tier defines two agent
+    # spawn_point groups (NORTH base y=14 / SOUTH base y=26) round-
+    # robined by seed; the whole base (fact + proc + powr×2 + fix +
+    # weap) is duplicated across both spawns so the throughput
+    # decision is identical but the 2nd-weap placement coords must be
+    # read from the actual base position. Per-group inert HoldFire e1
+    # spawn-witness surfaces the variation via units_summary.
+    "build-production-throughput-multibuilding",
+    # Wave-10 REASONING pack — criticality-weighted repair triage
+    # (disaster-recovery / SRE incident triage / SC2 SCV-repair
+    # anchor). Three damaged buildings under three grenadier bands:
+    # the proc is on a lethal trajectory and must be repaired, the
+    # pbox looks the most damaged but is a low-value decoy that
+    # survives on its own, the weap is medium. Hard tier defines two
+    # agent spawn_point groups (NORTH base column x=20 / SOUTH base
+    # column x=70) round-robined by seed; the agent base AND the
+    # matching enemy bands BOTH declare `spawn_point`, so the
+    # per-owner filter (oramap.rs `expand_scenario_actors`)
+    # instantiates exactly one self-consistent base latitude with its
+    # bands per seed and a memorised opening cannot generalise.
+    "build-repair-priority-under-fire",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

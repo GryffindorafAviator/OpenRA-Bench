@@ -1,0 +1,336 @@
+# build-repair-priority-under-fire — criticality-weighted repair triage:
+# three damaged buildings under fire, repair the high-value-and-lethally-
+# threatened one FIRST.
+#
+# REASONING capability — Wave-10 "disaster-recovery triage / criticality-
+# weighted maintenance" pack. Three of the agent's structures are under
+# simultaneous attrition from three separate grenadier bands, and the
+# agent's hold-the-line job is a pure TRIAGE DECISION: which building to
+# put the `repair` organ on FIRST. The three buildings present a
+# deliberately mis-leading damage picture:
+#
+#   - proc (refinery)  — HIGH value, on a LETHAL trajectory. Six
+#     grenadiers chew the wood-armoured refinery down and KILL it inside
+#     ~2 turns if it is not repaired. proc is required by the win
+#     predicate; losing it is an instant fail.
+#   - pbox (pillbox)   — LOW value, the DECOY. Five grenadiers chip the
+#     pillbox down to ~25% HP fast, so a naive "repair the most-damaged
+#     building" heuristic targets the pbox — but the pbox is NOT in the
+#     win predicate and, once its band is cleared by the local
+#     defenders, it STABILISES at ~25% and survives untouched. Repairing
+#     it is wasted effort.
+#   - weap (war factory) — MEDIUM. On easy a light band leaves the
+#     high-HP war factory standing on its own; on medium/hard the band
+#     is heavy enough that weap ALSO needs repair, deepening the triage
+#     from "pick the 1 critical building" to "pick the 2 critical
+#     buildings, skip the low-value decoy".
+#
+# The intended capability is criticality-weighted triage: rank by
+# (value x lethal-trajectory), not by raw damage percentage. The pbox
+# LOOKS the most damaged; the proc IS the one that dies. Repair the
+# proc (easy) / the proc AND the weap (medium, hard) and skip the pbox.
+#
+# Bar:
+#   - stall (only observe): LOSS — the proc band is never bridged; the
+#     refinery is chewed to 0 inside ~2 turns; fail clause `not
+#     building_count_gte:proc` fires.
+#   - repair-pbox-first (toggle repair on the most-damaged-LOOKING
+#     building, the pbox): LOSS — the pbox is saved but the pbox is not
+#     in the win predicate; the proc gets no repair and dies; same fail
+#     clause fires.
+#   - INTENDED triage (repair proc first — easy; proc + weap — medium /
+#     hard): WIN — the autorepair heal rate (1% max-HP/tick) out-paces
+#     the grenade chip on the bridged building(s); the pre-placed
+#     hold-the-line defenders clear the bands; the kill bar latches and
+#     proc (+ weap) are still standing inside the clock.
+#
+# Anchor: disaster-recovery triage / criticality-weighted maintenance —
+# the SRE incident-response playbook ("triage by criticality x blast
+# radius, not by which alert is loudest"); the SC2 SCV-repair doctrine
+# ("get the SCV onto the building that will POP, not the one that looks
+# worst"); aircraft / plant preventive-maintenance prioritisation
+# (criticality-weighted, not worst-first).
+#
+# ENGINE FACTS (CLAUDE.md):
+# - `repair` toggles autorepair on a building ID; it heals ~1% of the
+#   building's max HP per tick and deducts a small proportional cash
+#   cost (world.rs:3046-3094). Repair auto-stops when the building is
+#   full or the owner runs out of cash. Buildings surface in the
+#   agent's `own_buildings` observation, each with a list-index `id`
+#   the agent targets directly.
+# - `building_count_gte:{type: proc, n: 1}` enforces proc-survival
+#   atomically — every tick re-counts the live building actors (the
+#   accumulating-set footgun is on `has_building`, not on
+#   building_count_gte).
+# - Reachable tick approx 93 + 90*(max_turns-1). Every within_ticks /
+#   after_ticks value below sits inside reachable for its tier, so the
+#   deadline always bites (no draw degeneracy). A "repair proc only,
+#   let the weap die" play on medium/hard loses the war factory, which
+#   trips the `not building_count_gte:{weap}` fail clause immediately —
+#   a clean LOSS the moment the building falls, no draw.
+# - Grenadier (e2) carries the Grenade weapon: 6000 damage, Versus
+#   Wood 100% / Heavy 25%, 60-tick reload. proc and weap are
+#   Wood-armoured (full chip); pbox is Heavy-armoured (quarter chip),
+#   so the SAME band size bleeds proc/weap much faster than pbox.
+# - Enemy bands are stance:3 (AttackAnything) with NO bot_type — they
+#   stay localised on their own building cluster instead of charging a
+#   shared centroid, so the three-way damage picture is stable and the
+#   triage is a clean read.
+# - The agent's hold-the-line defenders are stance:3 (AttackAnything)
+#   so they auto-advance into and clear their local band without an
+#   explicit order — this pack tests the REPAIR-TARGET decision, not
+#   combat micro. The kill bar is reachable purely from the auto-clears.
+# - The unarmed high-HP enemy `fact` far east prevents the engine
+#   auto-`done` on enemy-elimination before the win/clock is evaluated.
+#   Because the loss/draw boundary must never depend on a race between
+#   the stance:3 defenders hunting that far `fact` and the deadline,
+#   the fail predicate ALSO trips on `not building_count_gte:{weap}` —
+#   the moment a required building falls the run is a clean immediate
+#   LOSS, never a draw.
+# - hard: agent base + enemy bands BOTH declare `spawn_point` (per-owner
+#   filter, oramap.rs::expand_scenario_actors) so each seed instantiates
+#   exactly one base latitude with its matching bands — a memorised
+#   opening cannot generalise across seeds.
+
+meta:
+  id: build-repair-priority-under-fire
+  title: 'Repair Priority Under Fire — Triage the Refinery, Not the Decoy'
+  capability: reasoning
+  real_world_meaning: >
+    Three of your structures are under simultaneous attrition and you
+    have one repair organ to commit. The damage picture is deliberately
+    misleading: the pillbox (pbox) is chipped to ~25% HP and LOOKS the
+    most damaged, but it is low-value and, once its attackers are
+    cleared, it survives on its own. The refinery (proc) looks less
+    damaged at first but is on a LETHAL trajectory — six grenadiers kill
+    it within ~2 turns unless you toggle `repair` on it immediately. The
+    intended decision is criticality-weighted triage: rank by value x
+    lethal-trajectory, not by raw damage percent. Repair the proc first
+    (and on the harder tiers the war factory too); skipping the
+    refinery to "fix the worst-looking building" loses it, and stalling
+    loses it.
+  robotics_analogue: >
+    SRE / disaster-recovery incident triage: several services are
+    degraded at once and the operator has one repair lever. The correct
+    move is to rank by criticality x blast-radius, not by whichever
+    dashboard is reddest — restore the income-bearing / load-bearing
+    subsystem that is about to fail hard before touching a loud-but-
+    low-value one. The same criticality-weighted prioritisation governs
+    SC2 SCV-repair target choice and aircraft / plant preventive
+    maintenance.
+  benchmark_anchor:
+    - "disaster recovery triage"
+    - "criticality-weighted maintenance"
+    - "SC2 SCV repair"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 8000
+
+base:
+  agent:
+    faction: allies
+  # Stance-only enemy (no bot_type) — each grenadier band stays on its
+  # own building cluster rather than charging a shared centroid, so the
+  # three-way damage picture stays a clean, stable read.
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    # The load-bearing tool: toggles autorepair on a building.
+    - repair
+  planning: true
+  # Re-decide the instant the attackers come into sight or a defender
+  # falls — repair triage is reactive, decided turn 1, not on a fixed
+  # tick schedule.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+  actors: []
+
+levels:
+  # ── EASY ── the bare triage skill. Three buildings, three bands:
+  #   proc — 6 grenadiers / 4 defenders → DIES ~turn 2 unrepaired;
+  #          autorepair out-paces the chip and it survives.
+  #   weap — 3 grenadiers / 3 defenders → high-HP war factory rides
+  #          out the band on its own HP (no repair needed).
+  #   pbox — 5 grenadiers / 5 defenders → chipped to ~25% fast (the
+  #          most-damaged-LOOKING building) then stabilises; low value,
+  #          NOT in the win predicate.
+  # Intended play: repair the proc. within_ticks 2400 (~turn 27);
+  # max_turns 30 → reachable tick 2703, so after_ticks 2401 bites.
+  easy:
+    description: >
+      Three of your structures are under attrition from three separate
+      grenadier bands: the refinery (proc), the war factory (weap), and
+      the pillbox (pbox). The pillbox is chipped down fast and looks the
+      most damaged — but it is low value and its defenders will save it.
+      The refinery is on a lethal trajectory: it dies within about two
+      turns unless you toggle REPAIR on it now. Win when the refinery
+      and the war factory are both still standing AND you have killed at
+      least 12 attackers, before tick 2400. If the refinery falls, or
+      the clock runs out with the kill bar unmet, you lose. Stalling and
+      repairing the most-damaged-looking building (the pillbox) both
+      lose the refinery.
+    overrides:
+      actors:
+        # proc — HIGH value, LETHAL trajectory. 6 grenadiers kill the
+        # wood-armoured refinery in ~2 turns; 4 hold-the-line defenders
+        # clear the band in ~4. Repair must bridge the gap.
+        - {type: proc, owner: agent, position: [20, 8]}
+        - {type: e3,   owner: agent, position: [26, 9], stance: 3, count: 4}
+        - {type: e2,   owner: enemy, position: [20, 4], stance: 3, count: 6}
+        # weap — MEDIUM. Light 3-grenadier band; the high-HP war
+        # factory rides it out on its own HP — no repair needed on easy.
+        - {type: weap, owner: agent, position: [20, 20]}
+        - {type: e3,   owner: agent, position: [26, 21], stance: 3, count: 3}
+        - {type: e2,   owner: enemy, position: [20, 16], stance: 3, count: 3}
+        # pbox — LOW value DECOY. 5 grenadiers chip the pillbox to ~25%
+        # fast (looks worst); 5 defenders clear the band; pbox then
+        # stabilises and survives. Not in the win predicate.
+        - {type: pbox, owner: agent, position: [20, 32]}
+        - {type: e3,   owner: agent, position: [26, 33], stance: 3, count: 5}
+        - {type: e2,   owner: enemy, position: [20, 36], stance: 3, count: 5}
+        # Base context — service depot + construction yard tucked safely
+        # in the rear, away from every band.
+        - {type: fix,  owner: agent, position: [44, 20]}
+        - {type: fact, owner: agent, position: [48, 20]}
+        # Unarmed high-HP enemy fact far east — prevents engine
+        # auto-DRAW on enemy-elim before the win/clock is evaluated.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - units_killed_gte: 12
+        - within_ticks: 2400
+    fail_condition:
+      any_of:
+        - after_ticks: 2401
+        - not: {building_count_gte: {type: proc, n: 1}}
+        - not: {building_count_gte: {type: weap, n: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ── +1 controlled variable: the war factory's band is now
+  # heavy enough (7 grenadiers) that the weap ALSO dies unrepaired. The
+  # triage deepens from "repair the 1 critical building" to "repair the
+  # 2 critical buildings (proc + weap), skip the low-value decoy
+  # (pbox)". Tighter clock: within_ticks 2000 (~turn 22), max_turns 26
+  # → reachable tick 2343, so after_ticks 2001 bites. A "repair proc
+  # only" play keeps the proc but loses the weap → the win never
+  # latches (weap_count_gte fails) → the after_ticks fail catches it as
+  # a LOSS, not a draw.
+  medium:
+    description: >
+      Three structures are under attrition from three grenadier bands:
+      the refinery (proc), the war factory (weap), and the pillbox
+      (pbox). The pillbox is chipped down fast and looks the most
+      damaged — but it is low value and survives on its own. The
+      refinery AND the war factory are both on lethal trajectories: each
+      dies within a few turns unless you toggle REPAIR on it. Win when
+      the refinery and the war factory are both still standing AND you
+      have killed at least 15 attackers, before tick 2000. If the
+      refinery falls, or the clock runs out with the win unmet, you
+      lose. Stalling, repairing only the pillbox, and repairing only one
+      of the two critical buildings all lose.
+    overrides:
+      actors:
+        - {type: proc, owner: agent, position: [20, 8]}
+        - {type: e3,   owner: agent, position: [26, 9], stance: 3, count: 4}
+        - {type: e2,   owner: enemy, position: [20, 4], stance: 3, count: 6}
+        # weap band heavier (7 grenadiers) — the war factory now dies
+        # unrepaired; repair is mandatory on it too.
+        - {type: weap, owner: agent, position: [20, 20]}
+        - {type: e3,   owner: agent, position: [26, 21], stance: 3, count: 3}
+        - {type: e2,   owner: enemy, position: [20, 16], stance: 3, count: 7}
+        - {type: pbox, owner: agent, position: [20, 32]}
+        - {type: e3,   owner: agent, position: [26, 33], stance: 3, count: 5}
+        - {type: e2,   owner: enemy, position: [20, 36], stance: 3, count: 5}
+        - {type: fix,  owner: agent, position: [44, 20]}
+        - {type: fact, owner: agent, position: [48, 20]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - units_killed_gte: 15
+        - within_ticks: 2000
+    fail_condition:
+      any_of:
+        - after_ticks: 2001
+        - not: {building_count_gte: {type: proc, n: 1}}
+        - not: {building_count_gte: {type: weap, n: 1}}
+    max_turns: 26
+
+  # ── HARD ── +1 controlled variable: TWO spawn_point groups round-
+  # robin the AGENT base latitude (NORTH y=8..32 cluster / SOUTH
+  # y=8..32 mirror) per seed, so a single memorised opening cannot
+  # generalise. Agent base AND the matching enemy bands BOTH declare
+  # `spawn_point` — the per-owner filter (oramap.rs::expand_scenario_
+  # actors) instantiates exactly one self-consistent base + bands per
+  # seed; the persistent every-seed enemy auto-`done` fact is
+  # duplicated across both groups. Same composition and clock as
+  # medium (proc + weap both lethal; pbox decoy).
+  hard:
+    description: >
+      Three structures — the refinery (proc), the war factory (weap),
+      and the pillbox (pbox) — are under attrition from three grenadier
+      bands. Your base stages from a seed-chosen latitude, so a single
+      memorised opening cannot generalise. The pillbox is chipped down
+      fast and looks the most damaged but is low value and survives on
+      its own; the refinery and the war factory are both on lethal
+      trajectories and each needs REPAIR. Win when the refinery and the
+      war factory are both still standing AND you have killed at least
+      15 attackers, before tick 2000. If the refinery falls, or the
+      clock runs out with the win unmet, you lose. Stalling, repairing
+      only the pillbox, and repairing only one critical building all
+      lose.
+    overrides:
+      actors:
+        # NORTH base group (spawn_point 0). Full base + bands duplicated
+        # under each spawn_point: ANY agent actor with a spawn_point
+        # filters OUT every ungrouped agent actor, and the matching
+        # enemy bands declare the same spawn_point so each seed gets a
+        # self-consistent instantiation.
+        - {type: proc, owner: agent, position: [20, 8],  spawn_point: 0}
+        - {type: e3,   owner: agent, position: [26, 9], stance: 3, count: 4, spawn_point: 0}
+        - {type: e2,   owner: enemy, position: [20, 4],  stance: 3, count: 6, spawn_point: 0}
+        - {type: weap, owner: agent, position: [20, 20], spawn_point: 0}
+        - {type: e3,   owner: agent, position: [26, 21], stance: 3, count: 3, spawn_point: 0}
+        - {type: e2,   owner: enemy, position: [20, 16], stance: 3, count: 7, spawn_point: 0}
+        - {type: pbox, owner: agent, position: [20, 32], spawn_point: 0}
+        - {type: e3,   owner: agent, position: [26, 33], stance: 3, count: 5, spawn_point: 0}
+        - {type: e2,   owner: enemy, position: [20, 36], stance: 3, count: 5, spawn_point: 0}
+        - {type: fix,  owner: agent, position: [44, 20], spawn_point: 0}
+        - {type: fact, owner: agent, position: [48, 20], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 0}
+        # SOUTH base group (spawn_point 1) — the base mirrored east-
+        # ward into the x=70.. column with the same y-geometry, so each
+        # seed faces a structurally identical triage from a different
+        # start. Bands and the auto-`done` fact mirror with it.
+        - {type: proc, owner: agent, position: [70, 8],  spawn_point: 1}
+        - {type: e3,   owner: agent, position: [76, 9], stance: 3, count: 4, spawn_point: 1}
+        - {type: e2,   owner: enemy, position: [70, 4],  stance: 3, count: 6, spawn_point: 1}
+        - {type: weap, owner: agent, position: [70, 20], spawn_point: 1}
+        - {type: e3,   owner: agent, position: [76, 21], stance: 3, count: 3, spawn_point: 1}
+        - {type: e2,   owner: enemy, position: [70, 16], stance: 3, count: 7, spawn_point: 1}
+        - {type: pbox, owner: agent, position: [70, 32], spawn_point: 1}
+        - {type: e3,   owner: agent, position: [76, 33], stance: 3, count: 5, spawn_point: 1}
+        - {type: e2,   owner: enemy, position: [70, 36], stance: 3, count: 5, spawn_point: 1}
+        - {type: fix,  owner: agent, position: [94, 20], spawn_point: 1}
+        - {type: fact, owner: agent, position: [98, 20], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 1}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - units_killed_gte: 15
+        - within_ticks: 2000
+    fail_condition:
+      any_of:
+        - after_ticks: 2001
+        - not: {building_count_gte: {type: proc, n: 1}}
+        - not: {building_count_gte: {type: weap, n: 1}}
+    max_turns: 26
