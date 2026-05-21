@@ -11,11 +11,12 @@
 # a LIGHT tank (1tnk) straight at the harv from the east — it
 # intercepts the harv MID-ROUTE, far from base sight, while the
 # harv is on its way to refine. Two pre-placed 2tnk defenders sit
-# at the base on stance:3 (AttackAnything / Hunt) so they auto-
-# engage anything in sight — but base sight (~6 cells around y=20)
-# does not cover the kill zone (raider engages the harv at
-# x≈40..50). The defenders MUST be MOVED east along the route to
-# INTERCEPT the raider before it reaches the commuting harv.
+# at the base on stance:2 (Defend) — they auto-fire on any enemy
+# that enters weapon range but NEVER advance on their own. Base
+# sight (~6 cells around y=20) does not cover the kill zone (raider
+# engages the harv at x≈40..50), so the defenders MUST be MOVED
+# east along the route (attack_move / attack_unit override stance)
+# to INTERCEPT the raider before it reaches the commuting harv.
 # Standing the defenders idle at base ⇒ raider reaches harv ⇒
 # `not unit_type_count_gte:{harv,1}` fires ⇒ LOSS.
 #
@@ -42,8 +43,9 @@
 #   • intended intercept-on-route: defenders attack_move east
 #     along the harv's commute axis (the y-band of the agent's
 #     own harv) — they meet the raider mid-route (around x=45..50),
-#     engage on stance:3 (2× 2tnk dps44 vs 1tnk hp 230 → 5 ticks),
-#     destroy the raider before it reaches the harv. The harv
+#     engage (2× 2tnk vs 1tnk — the defender pair out-damages the
+#     light-tank raider and destroys it before it reaches the harv).
+#     The harv
 #     continues to commute; throughput accumulates at ~500 cr per
 #     round trip (~20 turns); the economy bar clears before the
 #     deadline → WIN.
@@ -91,14 +93,19 @@
 #   • Persistent far enemy `fact` at (120,20) keeps the episode
 #     alive past the raider being destroyed (no DRAW collapse on
 #     auto-done).
-#   • stance:3 (AttackAnything / Hunt) for the defenders is what
-#     this pack specifically tests: stance:1 (ReturnFire) means
-#     defenders never engage because the raider attacks the harv
-#     only and never fires on the tanks — so stance:1 collapses to
-#     "no engagement possible" regardless of defender position.
-#     stance:3 makes the auto-engage real WHEN defenders are in
-#     SIGHT of the raider; the agent's load-bearing decision is
-#     "drive the defenders into raider sight on the route".
+#   • stance:2 (Defend) for the defenders is what this pack
+#     tests. stance:1 (ReturnFire) means defenders never engage —
+#     the raider attacks the harv only and never fires on the tanks,
+#     so a stance:1 defender holds fire indefinitely. stance:3
+#     (AttackAnything) is wrong the OTHER way: it makes idle
+#     defenders auto-HUNT, walking the whole map and destroying the
+#     persistent far enemy fact (collapsing the run to DRAW on
+#     auto-done) — and a "stand at base" stall would then win for
+#     free as the hunters self-deliver onto the raider. stance:2
+#     auto-fires only on an enemy in weapon range and never
+#     advances; the agent's load-bearing decision is to drive the
+#     defenders east onto the route with attack_move / attack_unit
+#     (explicit orders override stance).
 #   • Hard tier defines 2 agent spawn_point groups (NORTH route
 #     y=14 / SOUTH route y=26) round-robined by seed. The
 #     defender pair must intercept on the ACTIVE base's y-band —
@@ -156,7 +163,7 @@ levels:
   # ── EASY ─────────────────────────────────────────────────────────
   # Bare skill: ONE harvester commutes proc↔mine across ~50 cells
   # of exposed route. ONE 1tnk raider drives at it from the east.
-  # Two 2tnk defenders start at the base on stance:3 (auto-engage
+  # Two 2tnk defenders start at the base on stance:2 (auto-fire
   # ANYTHING in sight). The agent must move the defenders east
   # onto the route to intercept the raider before it reaches the
   # harv. Economy bar is gentle (1000 EV = 2 round-trip refines).
@@ -167,7 +174,8 @@ levels:
       the refinery (proc at (12,20)). An enemy light tank (raider
       bot, worker-priority — drives straight at your harvester) is
       staged at (90,20). Two 2tnk defenders are pre-placed at your
-      base on AttackAnything stance, but base sight (~6 cells)
+      base on Defend stance (auto-fire in range, no advance), but
+      base sight (~6 cells)
       does NOT cover the mid-route kill zone around x=40..50 where
       the raider intercepts the harvester. Win when economy value
       reaches 1000 AND your harvester is alive AND your factory
@@ -191,15 +199,18 @@ levels:
         # The intended `harvest` order commutes it to (60,20) and
         # back; one round trip yields ~500 cr.
         - {type: harv, owner: agent, position: [14, 20]}
-        # Two defender 2tnks at the base on stance:3
-        # (AttackAnything / Hunt). stance:3 is REQUIRED — stance:1
+        # Two defender 2tnks at the base on stance:2 (Defend).
+        # stance:2 is REQUIRED — stance:1
         # (ReturnFire) means the defenders never engage because
         # the raider attacks the harv only and never fires on the
-        # defenders. With stance:3 the defenders auto-engage the
+        # defenders. stance:3 (AttackAnything) is wrong the other
+        # way: idle defenders would auto-hunt the whole map and
+        # destroy the persistent far enemy fact (DRAW on auto-done).
+        # With stance:2 the defenders auto-fire on the
         # raider WHEN they're in sight of it; the agent's load-
         # bearing decision is moving them onto the route.
-        - {type: 2tnk, owner: agent, position: [15, 19], stance: 3}
-        - {type: 2tnk, owner: agent, position: [15, 21], stance: 3}
+        - {type: 2tnk, owner: agent, position: [15, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [15, 21], stance: 2}
         # Neutral ore patch — placed FAR east so the commute is
         # long (~50 cells one-way) and the kill zone is well
         # beyond base sight.
@@ -244,7 +255,8 @@ levels:
       (12,20) and the far ore patch (mine at (60,20)), one
       raider light tank driving at the harvester from the east
       (90,20), two pre-placed 2tnk defenders at the base on
-      AttackAnything stance. Bar tightened to economy value 1500
+      Defend stance (auto-fire in range, no advance). Bar
+      tightened to economy value 1500
       (the harvester must complete several uninterrupted round
       trips) within tick 5400. Standing the defenders idle at
       base lets the raider intercept the harvester on the route;
@@ -258,8 +270,8 @@ levels:
         - {type: proc, owner: agent, position: [12, 20]}
         - {type: powr, owner: agent, position: [8, 18]}
         - {type: harv, owner: agent, position: [14, 20]}
-        - {type: 2tnk, owner: agent, position: [15, 19], stance: 3}
-        - {type: 2tnk, owner: agent, position: [15, 21], stance: 3}
+        - {type: 2tnk, owner: agent, position: [15, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [15, 21], stance: 2}
         - {type: mine, owner: neutral, position: [60, 20]}
         - {type: 1tnk, owner: enemy, position: [90, 20]}
         - {type: fact, owner: enemy, position: [120, 20]}
@@ -308,7 +320,8 @@ levels:
       tank is staged at (90,20) on the central y=20 corridor; it
       beelines toward whichever harvester exists on the seed-
       chosen y-band. Two 2tnk defenders are pre-placed at YOUR
-      base on AttackAnything stance. Win when economy value
+      base on Defend stance (auto-fire in range, no advance). Win
+      when economy value
       reaches 1500 AND your harvester is alive AND your factory
       and refinery are intact, before tick 5400. You must move
       the defenders east along YOUR base's latitude to intercept
@@ -327,16 +340,16 @@ levels:
         - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
         - {type: powr, owner: agent, position: [8, 12], spawn_point: 0}
         - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [15, 13], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [15, 15], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [15, 13], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [15, 15], stance: 2, spawn_point: 0}
         # spawn_point 1 — SOUTH supply route (y=26). Mirrored
         # base + harv + defenders on the south latitude.
         - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
         - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
         - {type: powr, owner: agent, position: [8, 28], spawn_point: 1}
         - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [15, 25], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [15, 27], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [15, 25], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [15, 27], stance: 2, spawn_point: 1}
         # Neutral ore patches — one per route latitude. Both
         # place every seed (mine is neutral, not agent-side, so
         # the spawn_point filter only applies to OWN/agent

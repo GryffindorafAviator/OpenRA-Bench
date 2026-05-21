@@ -79,13 +79,18 @@ def test_uses_raider_bot():
     assert bot == "raider", f"expected raider bot, got {bot!r}"
 
 
-def test_defenders_are_stance_3_attack_anything():
-    """stance:3 (AttackAnything / Hunt) for the defenders is REQUIRED
-    by the design: stance:1 (ReturnFire) means defenders never engage
-    because the raider attacks the harv only and never fires on the
-    tanks — so stance:1 collapses the discrimination. With stance:3
-    the defenders auto-engage the raider WHEN moved into sight; the
-    agent's load-bearing decision is moving them onto the route."""
+def test_defenders_are_stance_2_defend():
+    """stance:2 (Defend) for the defenders is REQUIRED by the design.
+    stance:1 (ReturnFire) means defenders never engage because the
+    raider attacks the harv only and never fires on the tanks — so
+    stance:1 collapses the discrimination. stance:3 (AttackAnything)
+    is wrong the OTHER way: idle defenders auto-HUNT the whole map and
+    destroy the persistent far enemy fact (collapsing the run to DRAW
+    on auto-done) and a "stand at base" stall then wins for free.
+    stance:2 auto-fires only on an enemy in weapon range and never
+    advances; the agent's load-bearing decision is to drive the
+    defenders east onto the route (attack_move / attack_unit override
+    stance)."""
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
@@ -101,12 +106,12 @@ def test_defenders_are_stance_3_attack_anything():
             if stance is None:
                 # Pydantic-ish actor: extras may live under
                 # `model_extra` (pydantic v2). Fail explicitly if we
-                # cannot find it — the pack MUST declare stance:3.
+                # cannot find it — the pack MUST declare stance:2.
                 raw = getattr(d, "model_extra", None) or {}
                 stance = raw.get("stance")
-            assert stance == 3, (
-                f"{lvl}: defender at {d.position} must be stance:3 "
-                f"(AttackAnything); got stance={stance!r}"
+            assert stance == 2, (
+                f"{lvl}: defender at {d.position} must be stance:2 "
+                f"(Defend); got stance={stance!r}"
             )
 
 
@@ -386,38 +391,56 @@ def _defenders_stand_at_base(rs, Command):
     return cmds or [Command.observe()]
 
 
+def _raider(rs):
+    """The inbound enemy 1tnk raider, once it enters the agent's
+    vision (surfaced in `enemy_summary`)."""
+    for e in (rs.get("enemy_summary") or []):
+        if str(e.get("type", "")).lower() == "1tnk":
+            return e
+    return None
+
+
 def _intended_intercept_on_route(rs, Command):
     """The intended capability:
 
       1. Re-issue harvest each turn to the (single) harv so it keeps
          commuting between the proc and the far mine on its OWN
          y-band.
-      2. attack_move the defender pair EAST along the harv's lane
-         (its own y-band) — they meet the raider mid-route around
-         x=30..40 and engage on stance:3. raider 2tnk dies; harv
-         survives; income accumulates.
+      2. Drive the defender pair EAST along the harv's lane to
+         INTERCEPT the raider: attack_unit it once it is in vision,
+         else attack_move toward its last-seen position. The
+         defenders are stance:2 (Defend) — they will not advance on
+         their own, so the explicit attack order is load-bearing.
+         The defender pair out-damages the light-tank raider and
+         destroys it before it reaches the harv; income accumulates.
 
-    The (active-spawn) harv's y-band determines BOTH the harvest
-    target and the defender attack_move target — works for easy/
-    medium (y=20), hard NORTH (y=14), hard SOUTH (y=26).
+    The (active-spawn) harv's y-band determines the harvest target;
+    the raider's tracked position drives the intercept — works for
+    easy/medium (y=20), hard NORTH (y=14), hard SOUTH (y=26).
     """
     cmds = []
     h = _harv(rs)
     defenders = _defenders(rs)
     if h is None and not defenders:
         return [Command.observe()]
+    raider = _raider(rs)
     if h is not None:
         my = int(h.get("cell_y", 20))
         cmds.append(Command.harvest([str(h["id"])], 60, my))
-        # Defenders intercept east on the harv's own y-band.
         for d in defenders:
-            cmds.append(Command.attack_move([str(d["id"])], 50, my))
+            if raider is not None:
+                cmds.append(Command.attack_unit([str(d["id"])],
+                                                str(raider["id"])))
+            else:
+                # Raider not yet in vision — push east along the
+                # harv's lane to close the intercept distance.
+                cmds.append(Command.attack_move([str(d["id"])], 55, my))
     else:
         # Lost the harv before issuing the first order — best-effort
         # is to still push the defenders east on their own row.
         for d in defenders:
             dy = int(d.get("cell_y", 20))
-            cmds.append(Command.attack_move([str(d["id"])], 50, dy))
+            cmds.append(Command.attack_move([str(d["id"])], 55, dy))
     return cmds or [Command.observe()]
 
 
