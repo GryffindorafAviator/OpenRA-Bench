@@ -1,19 +1,27 @@
 """combat-harass-balanced-hit-and-run — BALANCED pulsed harass.
 
-Bar: intended hit-run-cycle WINS on every level and every hard seed;
-stall (only observe), commit-and-stay (charge and never retreat), and
-retreat-only (never engage) LOSE on every level. Non-win is a real
-reachable timeout LOSS (not a draw).
+Bar: the intended hit-and-run cycle WINS on every level and every hard
+seed; stall (only observe), retreat-only (never engage), brute
+(attack-nearest, which switches onto the un-killable guard tank), and
+commit-and-stay (charge deep into the guarded zone and hold) all LOSE
+on every level. Non-win is a real reachable timeout LOSS (not a draw).
 
-Validation is scripted (no model / network): the four policies below
-are the exhaustive proxies for the four real strategies and exercise
-the predicate teeth directly.
+Recalibrated 2026-05-20 after the engine balance fixes (armour-class
+weapon selection, stance semantics). The previous design used
+harvesters as the score targets; post-fix the jeep's anti-infantry
+M60mg cannot dent a harvester's heavy armour (and harvesters crush
+jeeps), so the kill bar became unsatisfiable. The score targets are
+now soft e1 rifle workers (the jeep MG one-shots them, stance:0 so
+they are passive) and the leashed defender is a 3tnk heavy tank — the
+genuine un-killable threat (jeep MG cannot scratch its heavy armour;
+its cannon one-shots a jeep). The load-bearing decision: strike the
+soft workers from MG range and disengage before the leashed tank
+bears; never charge deep into the guarded zone, and never waste fire
+on the un-killable tank.
 
-The intended hit-run-cycle policy is the load-bearing test: it
-implements the pulsed-harass cycle in scripted form (per-jeep state
-machine: APPROACH → STRIKE → RETREAT → re-engage), and it MUST WIN on
-every level under units_lost_lte:0 (medium/hard) — i.e. retreat must
-actually work against the leashed guard (AGGRO=16, LEASH=18).
+Validation is scripted (no model / network): the policies below are
+the exhaustive proxies for the real strategies and exercise the
+predicate teeth directly.
 """
 
 from __future__ import annotations
@@ -88,16 +96,16 @@ def test_predicates_medium_zero_loss_bar():
     assert 5401 <= 93 + 90 * (c.max_turns - 1)
 
 
-def test_predicates_hard_four_kills_and_zero_loss():
+def test_predicates_hard_three_kills_and_zero_loss():
     c = compile_level(load_pack(PACK_PATH), "hard")
     jeeps = [(6, 10), (6, 10)]
 
-    # Intended: 4 kills, ZERO losses → WIN
-    assert evaluate(c.win_condition, _ctx(jeeps, tick=4000, killed=4, lost=0))
-    # 3 kills only → predicate fails (need ≥4)
-    assert not evaluate(c.win_condition, _ctx(jeeps, tick=4000, killed=3, lost=0))
+    # Intended: 3 kills, ZERO losses → WIN
+    assert evaluate(c.win_condition, _ctx(jeeps, tick=4000, killed=3, lost=0))
+    # 2 kills only → predicate fails (need ≥3)
+    assert not evaluate(c.win_condition, _ctx(jeeps, tick=4000, killed=2, lost=0))
     # Any loss → fail
-    assert evaluate(c.fail_condition, _ctx(jeeps, tick=4000, killed=4, lost=1))
+    assert evaluate(c.fail_condition, _ctx(jeeps, tick=4000, killed=3, lost=1))
     # Past deadline → real loss, reachable
     assert evaluate(c.fail_condition, _ctx(jeeps, tick=5402, killed=0, lost=0))
     assert 5401 <= 93 + 90 * (c.max_turns - 1)
@@ -146,110 +154,94 @@ def test_timeout_loss_is_reachable_on_every_level():
 # Constants from CLAUDE.md / openra-sim/src/scripted_bot.rs:
 #   GUARD_AGGRO = 16 cells (post-radius for lunge)
 #   GUARD_LEASH = 18 cells (post-radius for snap-back)
-# Hit-run-cycle thresholds chosen to bracket those exactly:
-#   ENGAGE_RADIUS  = 14  (inside aggro: pulse close enough to score)
-#   RETREAT_TRIGGER = 14 (start running when within 14 of any guard)
-#   SAFE_RADIUS    = 22  (outside leash by margin: guard snapped back)
-
-# RETREAT the instant a guard is visible inside this radius. The
-# rocket-soldier (e3) has long range and 2+ shots per turn against
-# jeep HP, so a single decision spent inside it is fatal. Setting
-# RETREAT_TRIGGER above the guard's own AGGRO (16) means we run as
-# soon as we get within visual distance — the strike fires THIS turn
-# (because attack_unit on a visible harv at the cluster edge is in
-# jeep MG range) and the retreat fires NEXT turn.
-ENGAGE_RADIUS = 12
-RETREAT_TRIGGER = 18
-SAFE_RADIUS = 22
+# The intended hit-run-cycle retreats the instant the leashed tank is
+# within RETREAT_TRIGGER cells — the jeep MG out-ranges nothing on the
+# 3tnk and the cannon one-shots a jeep, so a single decision spent in
+# the tank's envelope is fatal.
+RETREAT_TRIGGER = 16
 
 
-def _harvs(enemies):
-    return [e for e in enemies if (e.get("type") or "").lower() == "harv"]
+def _workers(enemies):
+    """Soft e1 score targets (jeep MG one-shots them)."""
+    return [e for e in enemies if (e.get("type") or "").lower() == "e1"]
 
 
 def _guards(enemies):
-    # The leashed defender is e3 in this pack; bot_type:guard makes it
-    # lunge/snap. (harv has type 'harv', e3 has type 'e3'; the fact
-    # marker is is_building=True and is filtered by callers.)
+    """The leashed defender is a 3tnk heavy tank (un-killable by the
+    jeep's anti-infantry MG; one-shots a jeep with its cannon)."""
     return [
         e for e in enemies
-        if (e.get("type") or "").lower() == "e3"
+        if (e.get("type") or "").lower() == "3tnk"
         and not e.get("is_building")
     ]
-
-
-def _known_cluster_x_for(level):
-    """The kill cluster's x coordinate (the agent is told this in the
-    objective brief: harv cluster at center-east). Easy uses one
-    cluster at x≈73; medium the same; hard uses cluster A at x≈69 and
-    cluster B at x≈97 (handled by the policy ranging east)."""
-    return 73
 
 
 def _hit_run_cycle_policy(rs, Command):
     """Pulsed hit-and-run — the intended BALANCED strategy.
 
-    Per-jeep state machine (memoryless; derived each turn from geometry
-    + the known cluster axis: the agent is told where the cluster is):
-      - If a guard is within RETREAT_TRIGGER (14) cells → RETREAT west
-        ~14 cells (cross the leash; the snap-back triggers next turn).
-      - Else if a harv is in sight → APPROACH+STRIKE the nearest harv
-        (move_units auto-fires en route, but attack_unit makes it
-        unambiguous and faster).
-      - Else if no enemy visible (fog from the far-west start) →
-        ADVANCE east toward the known cluster axis to acquire vision.
+    Per-jeep, memoryless, derived each turn from geometry:
+      - Track the cluster latitude (the y of the nearest visible
+        worker) so the jeep advances and retreats along the worker
+        lane rather than drifting off it.
+      - If the leashed tank is within RETREAT_TRIGGER cells → RETREAT
+        west ~26 cells along the lane (cross the leash; the snap-back
+        triggers as the tank loses the jeep past LEASH=18).
+      - Else if a worker is visible → STRIKE the nearest one
+        (attack_unit; the jeep MG one-shots a soft e1 worker).
+      - Else (fog from the far-west start) → ADVANCE east along the
+        lane to acquire vision of the cluster.
 
-    The cycle is self-sustaining once contact is made: strike → in
-    range of guard → retreat west → guard snaps back past leash →
-    re-advance → strike next.
+    The cycle is self-sustaining: strike → tank lunges into range →
+    retreat past the leash → tank snaps back → re-advance → strike
+    the next worker. The jeep never wastes fire on the un-killable
+    tank and never lingers in its cannon envelope.
     """
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
     if not units:
         return [Command.observe()]
-    harvs = _harvs(enemies)
+    workers = _workers(enemies)
     guards = _guards(enemies)
     cmds = []
     for u in units:
         ux, uy = u["cell_x"], u["cell_y"]
-        # Nearest visible guard (if any) — the thing we must avoid.
-        nearest_g = None
-        if guards:
-            nearest_g = min(
-                guards,
-                key=lambda g: (g["cell_x"] - ux) ** 2 + (g["cell_y"] - uy) ** 2,
-            )
-            gd2 = (nearest_g["cell_x"] - ux) ** 2 + (nearest_g["cell_y"] - uy) ** 2
-        else:
-            gd2 = 10 ** 9
-        # If we are inside the guard's reach → RETREAT west past leash.
-        if nearest_g is not None and gd2 <= RETREAT_TRIGGER ** 2:
-            tx = max(2, ux - 14)
-            ty = uy
-            cmds.append(
-                Command.move_units([str(u["id"])], target_x=tx, target_y=ty)
-            )
-            continue
-        # Safe: if a harv is visible, strike the nearest one.
-        if harvs:
-            target = min(
-                harvs,
+        # Lane = latitude of the nearest visible worker (else hold y).
+        if workers:
+            nearest_w = min(
+                workers,
                 key=lambda e: (e["cell_x"] - ux) ** 2 + (e["cell_y"] - uy) ** 2,
             )
+            lane = nearest_w["cell_y"]
+        else:
+            nearest_w = None
+            lane = uy
+        # Nearest leashed tank — the thing we must not linger near.
+        gd2 = 10 ** 9
+        if guards:
+            gd2 = min(
+                (g["cell_x"] - ux) ** 2 + (g["cell_y"] - uy) ** 2
+                for g in guards
+            )
+        # Inside the tank's reach → RETREAT west along the lane.
+        if gd2 <= RETREAT_TRIGGER ** 2:
             cmds.append(
-                Command.attack_unit([str(u["id"])], str(target["id"]))
+                Command.move_units(
+                    [str(u["id"])], target_x=max(2, ux - 26), target_y=lane
+                )
             )
             continue
-        # No enemy in sight (fog): advance east toward the known
-        # cluster axis until vision picks up the cluster. Step ~10
-        # cells per decision so we don't overrun into aggro on one go.
-        target_x = min(_known_cluster_x_for(None) - 4, ux + 12)
-        if target_x > ux:
+        # Safe: strike the nearest soft worker.
+        if nearest_w is not None:
             cmds.append(
-                Command.move_units([str(u["id"])], target_x=target_x, target_y=uy)
+                Command.attack_unit([str(u["id"])], str(nearest_w["id"]))
             )
-        else:
-            cmds.append(Command.observe())
+            continue
+        # No worker in sight (fog): advance east along the lane.
+        cmds.append(
+            Command.move_units(
+                [str(u["id"])], target_x=min(64, ux + 10), target_y=lane
+            )
+        )
     return cmds
 
 
@@ -259,30 +251,60 @@ def _stall_policy(rs, Command):
 
 
 def _commit_and_stay_policy(rs, Command):
-    """Charge the cluster and STAY — never retreat. The e3 rocket
-    soldier (out-DPS jeeps) will kill at least one jeep before all
-    harvs fall; units_lost_lte fails on medium/hard. (When fog hides
-    the harvs from the western start, advance east to the cluster
-    axis to acquire vision, then sit on the nearest harv.)"""
+    """Charge deep into the guarded cluster and HOLD — attack the
+    DEEPEST worker (max x, nearest the tank post) and never retreat.
+    The 3tnk's cannon one-shots a jeep, so committing inside its
+    envelope until the workers fall loses both jeeps before the kill
+    bar is met → LOSS. (When fog hides the cluster from the western
+    start, advance east to acquire vision, then commit.)"""
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
-    harvs = _harvs(enemies)
+    workers = _workers(enemies)
     if not units:
         return [Command.observe()]
     cmds = []
     for u in units:
         ux, uy = u["cell_x"], u["cell_y"]
-        if harvs:
-            target = min(
-                harvs,
-                key=lambda e: (e["cell_x"] - ux) ** 2 + (e["cell_y"] - uy) ** 2,
-            )
+        if workers:
+            # Push onto the deepest worker — into the tank's envelope.
+            target = max(workers, key=lambda e: e["cell_x"])
             cmds.append(Command.attack_unit([str(u["id"])], str(target["id"])))
         else:
-            # No vision yet — march east toward the cluster axis.
             cmds.append(
                 Command.move_units(
-                    [str(u["id"])], target_x=min(74, ux + 14), target_y=uy
+                    [str(u["id"])], target_x=min(90, ux + 10), target_y=uy
+                )
+            )
+    return cmds
+
+
+def _brute_policy(rs, Command):
+    """Brute: attack the NEAREST enemy unit, no retreat. When the
+    leashed tank lunges it becomes the nearest enemy and the brute
+    switches onto it — wasting fire on the un-killable 3tnk while its
+    cannon one-shots the jeep → LOSS."""
+    units = rs.get("units_summary", []) or []
+    enemies = rs.get("enemy_summary", []) or []
+    targets = [
+        e for e in enemies
+        if (e.get("type") or "").lower() in ("e1", "3tnk")
+        and not e.get("is_building")
+    ]
+    if not units:
+        return [Command.observe()]
+    cmds = []
+    for u in units:
+        ux, uy = u["cell_x"], u["cell_y"]
+        if targets:
+            t = min(
+                targets,
+                key=lambda e: (e["cell_x"] - ux) ** 2 + (e["cell_y"] - uy) ** 2,
+            )
+            cmds.append(Command.attack_unit([str(u["id"])], str(t["id"])))
+        else:
+            cmds.append(
+                Command.move_units(
+                    [str(u["id"])], target_x=min(115, ux + 10), target_y=uy
                 )
             )
     return cmds
@@ -296,8 +318,7 @@ def _retreat_only_policy(rs, Command):
         return [Command.observe()]
     cmds = []
     for u in units:
-        # Park at the far-west wall (any cell well outside any guard's
-        # AGGRO=16; the post is at x≥70).
+        # Park at the far-west wall (well outside any guard's AGGRO).
         cmds.append(
             Command.move_units([str(u["id"])], target_x=4, target_y=u["cell_y"])
         )
@@ -305,59 +326,83 @@ def _retreat_only_policy(rs, Command):
 
 
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
-def test_intended_hit_run_cycle_wins(level):
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_intended_hit_run_cycle_wins(level, seed):
+    """Intended hit-and-run WINS on every level and every hard seed:
+    strike the soft workers from MG range, retreat past the leash when
+    the tank closes, re-engage — kill bar met with ZERO jeeps lost
+    (medium/hard) / ≤1 lost (easy)."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
-    for s in seeds:
-        res = run_level(c, _hit_run_cycle_policy, seed=s)
-        assert res.outcome == "win", (
-            f"{level} seed={s}: intended hit-run-cycle should WIN, got "
-            f"{res.outcome} after {res.turns} turns (killed="
-            f"{res.signals.units_killed}, lost={res.signals.units_lost})"
-        )
-
-
-@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
-def test_stall_policy_loses(level):
-    pytest.importorskip("openra_train")
-    from openra_bench.eval_core import run_level
-
-    c = compile_level(load_pack(PACK_PATH), level)
-    res = run_level(c, _stall_policy, seed=1)
-    assert res.outcome == "loss", (
-        f"{level}: stall must LOSE (kill bar unmet, clock), got "
-        f"{res.outcome} after {res.turns} turns; killed="
-        f"{res.signals.units_killed}"
-    )
-
-
-@pytest.mark.parametrize("level", ["medium", "hard"])
-def test_commit_and_stay_loses(level):
-    """On medium/hard the cap is units_lost_lte:0 — committing in
-    rocket range until the harvs die loses a jeep and fails."""
-    pytest.importorskip("openra_train")
-    from openra_bench.eval_core import run_level
-
-    c = compile_level(load_pack(PACK_PATH), level)
-    res = run_level(c, _commit_and_stay_policy, seed=1)
-    assert res.outcome == "loss", (
-        f"{level}: commit-and-stay must LOSE (jeep dies to e3 rocket), "
-        f"got {res.outcome} after {res.turns} turns; killed="
-        f"{res.signals.units_killed}, lost={res.signals.units_lost}"
+    res = run_level(c, _hit_run_cycle_policy, seed=seed)
+    assert res.outcome == "win", (
+        f"{level} seed={seed}: intended hit-run-cycle should WIN, got "
+        f"{res.outcome} after {res.turns} turns (killed="
+        f"{res.signals.units_killed}, lost={res.signals.units_lost})"
     )
 
 
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
-def test_retreat_only_loses(level):
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_stall_policy_loses(level, seed):
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    res = run_level(c, _retreat_only_policy, seed=1)
+    res = run_level(c, _stall_policy, seed=seed)
     assert res.outcome == "loss", (
-        f"{level}: retreat-only must LOSE (kill bar unmet), got "
-        f"{res.outcome}; killed={res.signals.units_killed}"
+        f"{level} seed={seed}: stall must LOSE (kill bar unmet, clock), "
+        f"got {res.outcome} after {res.turns} turns; "
+        f"killed={res.signals.units_killed}"
+    )
+
+
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_commit_and_stay_loses(level, seed):
+    """Charge deep into the guarded zone and hold → the 3tnk cannon
+    one-shots a jeep before the kill bar is met → LOSS."""
+    pytest.importorskip("openra_train")
+    from openra_bench.eval_core import run_level
+
+    c = compile_level(load_pack(PACK_PATH), level)
+    res = run_level(c, _commit_and_stay_policy, seed=seed)
+    assert res.outcome == "loss", (
+        f"{level} seed={seed}: commit-and-stay must LOSE (jeep dies to "
+        f"the 3tnk cannon), got {res.outcome} after {res.turns} turns; "
+        f"killed={res.signals.units_killed}, lost={res.signals.units_lost}"
+    )
+
+
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_brute_attack_nearest_loses(level, seed):
+    """Attack-nearest (which switches onto the lunging un-killable
+    3tnk) → a jeep is lost to the cannon → LOSS."""
+    pytest.importorskip("openra_train")
+    from openra_bench.eval_core import run_level
+
+    c = compile_level(load_pack(PACK_PATH), level)
+    res = run_level(c, _brute_policy, seed=seed)
+    assert res.outcome == "loss", (
+        f"{level} seed={seed}: brute attack-nearest must LOSE (jeep lost "
+        f"to the un-killable 3tnk), got {res.outcome} after {res.turns} "
+        f"turns; killed={res.signals.units_killed}, "
+        f"lost={res.signals.units_lost}"
+    )
+
+
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_retreat_only_loses(level, seed):
+    pytest.importorskip("openra_train")
+    from openra_bench.eval_core import run_level
+
+    c = compile_level(load_pack(PACK_PATH), level)
+    res = run_level(c, _retreat_only_policy, seed=seed)
+    assert res.outcome == "loss", (
+        f"{level} seed={seed}: retreat-only must LOSE (kill bar unmet), "
+        f"got {res.outcome}; killed={res.signals.units_killed}"
     )
