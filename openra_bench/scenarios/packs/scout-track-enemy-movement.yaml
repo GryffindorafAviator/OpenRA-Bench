@@ -1,0 +1,548 @@
+# scout-track-enemy-movement.yaml
+#
+# PERCEPTION capability — Wave-11 "track a moving target". The
+# classical military-target-tracking drill: an enemy army does NOT
+# sit still — it MARCHES across the map along a multi-leg path
+# (A -> B -> C). A scout that observes the army ONCE, at its
+# starting position, loses the track the instant the army moves on;
+# the stale shroud at position A no longer reflects ground truth.
+# The intended policy keeps a scout MOVING WITH the army — re-
+# observing it at each successive position over time — so the
+# agent always knows where the army is and can vector its tanks to
+# INTERCEPT it at the final leg.
+#
+# This is the perception sibling of `scout-cycle-keep-info-fresh`
+# (information FRESHNESS — re-observe a stale region for
+# reinforcements that appear there). The distinct skill HERE is
+# CONTINUOUS TARGET TRACKING: the target itself is MOBILE and the
+# scout must keep it in vision as it travels, not re-check one
+# fixed region.
+#
+# HOW THE ARMY "MOVES" (the load-bearing engine mechanism)
+# --------------------------------------------------------
+# A scripted `hunt` / `patrol` bot cannot be used: `hunt` would
+# drag the army straight at the agent base (collapsing the geometry
+# the tracking teeth depend on) and `patrol` only oscillates around
+# its OWN spawn (it never traverses the map). The army's march is
+# therefore scripted with Wave-9 `scheduled_events:` — a paired
+# `destroy_actors` (remove the band at leg N) + `spawn_actors`
+# (re-create an identical band at leg N+1). The band visibly
+# "relocates" A -> B -> C at scripted ticks.
+#
+# CRUCIAL CONSEQUENCE for the perception teeth: a `spawn_actors`
+# band gets FRESH actor ids (CLAUDE.md / test_scheduled_events).
+# `enemies_discovered_gte` counts UNIQUE enemy unit ids EVER
+# observed. So the SAME army at leg B counts as NEW discoveries
+# relative to leg A — but ONLY if a scout has vision of leg B when
+# the band is there. A scout that watched leg A and never moved
+# sees the leg-A band vanish (destroy_actors) and never re-acquires
+# the band at B or C: its discovered-id set stops growing.
+#
+# THE PATH (rush-hour-arena, 128x40, playable bounds (2,2,124,36)):
+#   * Leg A  — band spawns/starts at (38,10)  [NW quadrant]
+#   * Leg B  — at tick T1 the band relocates to (70,20) [centre]
+#   * Leg C  — at tick T2 the band relocates to (96,30) [SE quadrant]
+# Each leg is ~34 cells from the last and in a different quadrant,
+# so a stationary scout's ~6-cell vision radius cannot cover two
+# legs at once: the scout MUST travel to follow the army.
+#
+# WIN PREDICATE
+#   then: [ enemies_discovered_gte: K1,         # SEE the army at leg A
+#           after_ticks: T1,                    # ... past the A->B move
+#           enemies_discovered_gte: K2,         # SEE it again at leg B
+#           after_ticks: T2,                    # ... past the B->C move
+#           enemies_discovered_gte: K3 ]        # SEE it again at leg C
+#     — an ORDERED chain: the discovered-id count must keep growing
+#     AFTER each relocation, which is only possible if a scout has
+#     re-acquired the moved army. A one-time scout latches clause 1
+#     and STALLS — clauses 3/5 need vision of legs B/C.
+#   AND units_killed_gte: Kk   — the tanks must INTERCEPT and
+#     destroy >=Kk of the army at its final leg (rules out a
+#     perception-only no-engagement play; also proves the agent
+#     actually knew where the army WAS).
+#   AND within_ticks: T        — finish on the clock.
+#
+# FAIL PREDICATE
+#   any_of: [ after_ticks: T+1,                 # real reachable LOSS
+#             not building_count_gte:fact:1,    # base lost
+#             (after_ticks:300 AND not own_units_gte:1) ]  # force wiped
+#
+# DISCRIMINATIONS (the bar — every lazy / one-shot / stall / wrong-
+# place play LOSES; only the intended continuous-tracking play WINS):
+#
+#   * stall (observe only): no jeep ever moves. The army marches
+#     A->B->C unobserved; the leg-A band at (38,10) is never even
+#     in vision (the agent base is at the WEST, x~12, ~26 cells
+#     away). The first `enemies_discovered_gte:K1` never latches,
+#     the `then:` chain never starts -> after_ticks bites -> LOSS.
+#
+#   * scout-once (push a jeep to leg A, then stop): the jeep sees
+#     the leg-A band, latching clause 1. Then it sits still. At
+#     tick T1 the band relocates to leg B (70,20) — ~32 cells from
+#     the parked jeep, far outside vision. The jeep's discovered-id
+#     set stops growing; clause 3 (K2) is never met; the chain
+#     stalls -> after_ticks bites -> LOSS.
+#
+#   * scout-wrong-leg (jeep camps the army's STARTING cell or
+#     guesses one leg): same failure — vision of one fixed cell
+#     covers at most one leg of a three-leg march.
+#
+#   * track-but-no-intercept: the scout follows the army perfectly
+#     (all three detection clauses latch) but the tanks never
+#     commit. units_killed_gte:Kk fails -> LOSS. Tracking without
+#     acting on the track is not a win.
+#
+#   * intended continuous-tracking: one jeep SHADOWS the army —
+#     move to leg A, see the band; when it relocates, move to leg
+#     B, re-acquire; when it relocates again, move to leg C, re-
+#     acquire. The other jeep can pre-position toward leg C. With
+#     the army's leg-C position KNOWN, the tanks attack_move to
+#     (96,30) and destroy >=Kk of the band. All `then:` clauses
+#     latch in order; kill + clock bars met. WIN.
+#
+# ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - `scheduled_events:` is the Wave-9 engine feature
+#     (oramap.rs::read_scheduled_events, env.rs::fire_scheduled_
+#     events). `destroy_actors` removes every actor matching
+#     `filter:` (owner + circular region); `spawn_actors` injects
+#     fresh-id actors. The army's march is destroy(leg N) +
+#     spawn(leg N+1) at each relocation tick.
+#   - `enemies_discovered_gte` counts UNIQUE enemy unit ids EVER
+#     seen. A relocated (re-spawned) band has NEW ids, so it is
+#     additive to the discovered set — but only while a scout
+#     covers the new leg.
+#   - The `then:` composite latches each clause once true and
+#     advances IN ORDER (win_conditions.py::_then). A one-shot
+#     scout latches clause 1 and stalls on clause 3.
+#   - HIDDEN / tracked enemies use `stance:0` (HoldFire): the
+#     band must NOT walk toward the agent on its own (a stance:3
+#     band would auto-hunt into the agent's vision + tank range
+#     and collapse the perception test — a stall policy would
+#     "track" + kill it for free). With stance:0 the band holds
+#     each leg until the SCRIPTED relocation moves it.
+#   - AGENT combat units (2tnk) also use `stance:0`: a scenario-
+#     declared stance:3 ground unit AUTO-HUNTS the whole map on
+#     the live engine, which would let a stall policy win for
+#     free by self-delivering the tanks. stance:0 keeps the kill
+#     bar load-bearing — the agent must issue an explicit
+#     attack_move / attack_unit to engage the army at leg C.
+#   - `e3` (not `e1`) for the tracked band — `e1` at some cells
+#     fails to surface in `enemy_positions` (CLAUDE.md footgun);
+#     `e3` surfaces reliably. The relocation legs (38,10),
+#     (70,20), (96,30) avoid the known mid-map dead cells
+#     (50,20)/(60,28)/(90,30) — verified by smoke run.
+#   - Inert enemy `fact` MARKER far east (122,4): anti-DRAW per
+#     CLAUDE.md — without a persistent enemy actor the engine
+#     auto-`done`s on enemy-elim before the win/fail evaluator
+#     runs. Buildings don't count toward enemies_discovered.
+#   - `fact` on the AGENT side anchors `building_count_gte:fact:1`
+#     and sidesteps the `not own_units_gte:1` turn-1 footgun.
+#   - Tick budget ~90/turn; max_turns 50 -> reachable tick
+#     93 + 90*49 = 4503. within_ticks:4000 + fail after_ticks:4001
+#     both sit inside reachable, the windows don't overlap, so a
+#     non-win run reliably crosses 4001 -> real LOSS, never DRAW.
+#   - scheduled_events do NOT honour spawn_point (only the
+#     actors: list does) — on hard, both agent spawn groups share
+#     the SAME enemy march; the seed varies only the agent base
+#     latitude.
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/scout-track-enemy-movement.yaml
+
+meta:
+  id: scout-track-enemy-movement
+  title: 'Track the March — Keep a Moving Enemy Army in Vision Over Time'
+  capability: perception
+  real_world_meaning: >
+    Tracking a mobile target is not a one-shot observation. An
+    enemy army marches across the map on a multi-leg route; a
+    scout that glances at it once, at its starting position, loses
+    the track the instant the army moves on. The intended policy
+    keeps a scout MOVING WITH the army — re-observing it at each
+    successive position — so the agent always knows where the
+    target is and can vector its strike force to intercept. This
+    is the perception cell that tests CONTINUOUS TARGET TRACKING:
+    the target itself is mobile, and a stale fixed observation is
+    worse than useless.
+  robotics_analogue: >
+    Persistent military target tracking and intrusion-detection
+    continuous monitoring: a radar / ISR asset that fixes a moving
+    convoy once and then assumes it stayed put vectors the
+    interceptor to empty ground. A tracking system must hand the
+    target from sensor to sensor, continuously re-observing it as
+    it travels, to maintain a live track. Likewise an autonomous
+    surveillance robot following a moving subject must keep it in
+    the camera frame frame-after-frame — a single detection
+    decays into a stale, wrong position the moment the subject
+    walks away.
+  benchmark_anchor:
+    - "military target tracking"
+    - "intrusion detection"
+    - "continuous monitoring"
+  author: "openra-bench"
+
+# rush-hour-arena: 128x40, playable bounds (2,2,124,36). Agent
+# base at the WEST (x~12). The enemy army marches A(38,10) ->
+# B(70,20) -> C(96,30): three quadrants, ~34 cells apart, so a
+# stationary ~6-cell-vision scout covers at most one leg. The
+# tanks intercept the army at its final leg C.
+base_map: rush-hour-arena
+starting_cash: 1000
+
+base:
+  agent:
+    faction: allies
+    cash: 1000
+  # Stance-only enemy: the band holds each leg (stance:0, set
+  # per-actor) and is RELOCATED by scheduled_events, not by a
+  # bot. No `hunt`/`patrol` bot — `hunt` would drag the band at
+  # the agent base; `patrol` only oscillates around its spawn
+  # and never traverses the map (CLAUDE.md botgen notes).
+  enemy:
+    faction: soviet
+    cash: 0
+  # Pure-perception + combat toolset (NO build / NO harvest):
+  # the test is the CONTINUOUS-TRACKING pattern, not production.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 6000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Minimum-viable target-tracking drill. The army (4x e3) starts
+  # at leg A (38,10), relocates to leg B (70,20) at tick 1400, and
+  # to leg C (96,30) at tick 2700. The win chain has THREE
+  # detection bars (one per leg). K1=3 (see the leg-A band), K2=6
+  # (see leg A's band + leg B's fresh-id copy -> a one-shot scout
+  # is one full band short), K3=9 (also see leg C's copy). Kk=2
+  # kills at leg C. T=4000.
+  easy:
+    description: >
+      An enemy army (4 rifle infantry) is on the MARCH. It starts
+      in the NW at (38,10); at tick 1400 it relocates to the
+      CENTRE (70,20); at tick 2700 it relocates to the SE
+      (96,30). You have 2 jeep scouts and 4 medium tanks at your
+      WEST base, plus a partial base (fact + proc + powr + tent +
+      weap). Keep a scout MOVING WITH the army — see it at the
+      NW, then follow it to the CENTRE, then to the SE — so you
+      always know where it is, then send the tanks to intercept
+      it at its final position. Win requires: SEE the army at
+      leg 1 (>=3 enemies) AND (after tick 1400) SEE it again at
+      leg 2 (>=6 total) AND (after tick 2700) SEE it again at
+      leg 3 (>=9 total) AND destroy >=2 of it AND finish before
+      tick 4000. Stalling loses on the deadline; scouting the
+      army ONCE loses because the moved army is never re-
+      acquired.
+    overrides:
+      actors:
+        # 2 jeep scouts — stance:0 (HoldFire), pure perception.
+        - {type: jeep, owner: agent, position: [13, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [13, 22], stance: 0}
+        # 4 medium tanks — stance:0 (no auto-hunt); the combat
+        # arm, committed via attack_move/attack_unit (Kk=2).
+        - {type: 2tnk, owner: agent, position: [12, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [12, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [12, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [12, 23], stance: 0}
+        # Partial agent base — `fact` anchors the
+        # building_count_gte:fact:1 fail clause.
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: proc, owner: agent, position: [8, 16]}
+        - {type: powr, owner: agent, position: [8, 24]}
+        - {type: tent, owner: agent, position: [10, 17]}
+        - {type: weap, owner: agent, position: [10, 23]}
+        # Leg A — the army HOLDS the NW at (38,10), stance:0. It
+        # will not advance on its own; it is RELOCATED by the
+        # scheduled_events below.
+        - {type: e3, owner: enemy, position: [38, 10], stance: 0, count: 4}
+        # Inert enemy `fact` marker far east. Anti-DRAW per CLAUDE.md.
+        - {type: fact, owner: enemy, position: [122, 4]}
+      # The army's MARCH, scripted with scheduled_events. At each
+      # relocation the NEXT leg's band is SPAWNED FIRST and the
+      # PREVIOUS leg's band is destroyed 60 ticks LATER. Ordering
+      # matters: a `destroy_actors` frees the removed actors' ids,
+      # and a `spawn_actors` that fired AFTER the free would RECYCLE
+      # those freed ids — collapsing `enemies_discovered` (which
+      # counts UNIQUE ids). Spawning the new band BEFORE the old
+      # band's ids are freed guarantees the new band carries
+      # genuinely fresh ids, so re-acquiring the relocated army
+      # grows the discovered-id set. The 60-tick overlap is also
+      # realistic — the army is briefly visible at both the old and
+      # new leg as it "marches".
+      scheduled_events:
+        # A -> B: spawn the CENTRE band at tick 1400, remove the
+        # NW band at tick 1460.
+        - tick: 1400
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [70, 20], stance: 0, count: 4}
+        - tick: 1460
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 38, y: 10, radius: 8}
+        # B -> C: spawn the SE band (the army's final leg — the
+        # tanks intercept here) at tick 2700, remove the CENTRE
+        # band at tick 2760.
+        - tick: 2700
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [96, 30], stance: 0, count: 4}
+        - tick: 2760
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 70, y: 20, radius: 8}
+    win_condition:
+      all_of:
+        # Ordered: see the army at leg A, then PAST the A->B move
+        # see it again at leg B, then PAST the B->C move see it
+        # again at leg C. Each later clause needs >1 full band's
+        # worth of UNIQUE ids, so it is reachable ONLY if a scout
+        # re-acquired the army at the new leg. K1=3, K2=6, K3=9
+        # (band 4 each leg, -1 grace per leg for shroud jitter).
+        - then:
+            id: scout-track-enemy-movement-easy
+            clauses:
+              - {enemies_discovered_gte: 3}
+              - {after_ticks: 1400}
+              - {enemies_discovered_gte: 6}
+              - {after_ticks: 2700}
+              - {enemies_discovered_gte: 9}
+        - {units_killed_gte: 2}
+        - {within_ticks: 4000}
+    fail_condition:
+      any_of:
+        # after_ticks:4001 < the episode's reachable end-tick
+        # (max_turns 50 => ~4503): a non-win run definitely
+        # crosses this clause -> real LOSS, never a silent DRAW.
+        # within_ticks:4000 is one tick below so win/fail
+        # windows don't overlap.
+        - {after_ticks: 4001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - all_of:
+          - {after_ticks: 300}
+          - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a larger army (6x e3) and a tighter
+  # kill bar (Kk=3) so the agent must commit the tanks to leg C
+  # AFTER tracking, plus FOUR march legs instead of three (an
+  # extra relocation -> an extra detection bar -> a longer track).
+  # The army marches A(38,10) -> B(70,12) -> C(70,28) -> D(96,30).
+  medium:
+    description: >
+      An enemy army (6 rifle infantry) is on a FOUR-leg march:
+      NW (38,10) -> NE (70,12) at tick 1100 -> SE-centre (70,28)
+      at tick 2000 -> SE corner (96,30) at tick 2900. You have 2
+      jeep scouts and 4 medium tanks at your WEST base, plus a
+      partial base. Keep a scout MOVING WITH the army through
+      every leg so you always know where it is, then send the
+      tanks to intercept it at its final position. Win requires:
+      SEE the army at leg 1 (>=4) AND (after tick 1100) SEE it
+      at leg 2 (>=8) AND (after tick 2000) SEE it at leg 3
+      (>=12) AND (after tick 2900) SEE it at leg 4 (>=16) AND
+      destroy >=3 of it AND finish before tick 4000. Stalling,
+      one-shot scouting, and tracking-without-intercept all LOSE.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [13, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [13, 22], stance: 0}
+        - {type: 2tnk, owner: agent, position: [12, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [12, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [12, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [12, 23], stance: 0}
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: proc, owner: agent, position: [8, 16]}
+        - {type: powr, owner: agent, position: [8, 24]}
+        - {type: tent, owner: agent, position: [10, 17]}
+        - {type: weap, owner: agent, position: [10, 23]}
+        # Leg A — larger army (6x e3); kill bar Kk=3.
+        - {type: e3, owner: enemy, position: [38, 10], stance: 0, count: 6}
+        - {type: fact, owner: enemy, position: [122, 4]}
+      # March scripted with scheduled_events. Each leg's band is
+      # SPAWNED FIRST, then the previous leg's band is destroyed 60
+      # ticks LATER — so the new band carries genuinely fresh ids
+      # (a destroy frees ids; a spawn that fired after the free
+      # would recycle them and collapse `enemies_discovered`, which
+      # counts UNIQUE ids). See the easy-tier note.
+      scheduled_events:
+        # A -> B: spawn at tick 1100, destroy old at tick 1160.
+        - tick: 1100
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [70, 12], stance: 0, count: 6}
+        - tick: 1160
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 38, y: 10, radius: 8}
+        # B -> C: spawn at tick 2000, destroy old at tick 2060.
+        - tick: 2000
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [70, 28], stance: 0, count: 6}
+        - tick: 2060
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 70, y: 12, radius: 8}
+        # C -> D: spawn at tick 2900 (final leg — tanks intercept
+        # here), destroy old at tick 2960.
+        - tick: 2900
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [96, 30], stance: 0, count: 6}
+        - tick: 2960
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 70, y: 28, radius: 8}
+    win_condition:
+      all_of:
+        # FOUR detection bars (band 6 each leg, -2 grace per leg):
+        # K1=4, K2=8, K3=12, K4=16. Each later bar needs another
+        # full band's worth of UNIQUE ids -> reachable only if a
+        # scout re-acquired the army at every new leg.
+        - then:
+            id: scout-track-enemy-movement-medium
+            clauses:
+              - {enemies_discovered_gte: 4}
+              - {after_ticks: 1100}
+              - {enemies_discovered_gte: 8}
+              - {after_ticks: 2000}
+              - {enemies_discovered_gte: 12}
+              - {after_ticks: 2900}
+              - {enemies_discovered_gte: 16}
+        - {units_killed_gte: 3}
+        - {within_ticks: 4000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - all_of:
+          - {after_ticks: 300}
+          - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven agent
+  # spawn_point groups (base at y=14 vs y=26) round-robined by
+  # seed (CLAUDE.md hard-tier requirement). Same four-leg march +
+  # detection chain; the agent's base latitude varies so a
+  # memorised opening cannot generalise — the tracking DOCTRINE
+  # (shadow the army leg by leg) still does. scheduled_events do
+  # NOT honour spawn_point, so the army's march is identical on
+  # both spawn groups.
+  hard:
+    description: >
+      An enemy army (6 rifle infantry) is on a FOUR-leg march:
+      NW (38,10) -> NE (70,12) at tick 1100 -> SE-centre (70,28)
+      at tick 2000 -> SE corner (96,30) at tick 2900. You have 2
+      jeep scouts and 4 medium tanks at your WEST base — the
+      base's exact LATITUDE varies per seed. Keep a scout MOVING
+      WITH the army through every leg, then send the tanks to
+      intercept it at its final position. Win requires: SEE the
+      army at leg 1 (>=4) AND (after tick 1100) SEE it at leg 2
+      (>=8) AND (after tick 2000) SEE it at leg 3 (>=12) AND
+      (after tick 2900) SEE it at leg 4 (>=16) AND destroy >=3
+      of it AND finish before tick 4000. Stalling, one-shot
+      scouting, tracking-without-intercept, and base-latitude-
+      memorised openings all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — base shifted NORTH (y=14). Every agent
+        # actor is tagged: if ANY agent actor declares spawn_point
+        # the agent actors WITHOUT one are filtered out (CLAUDE.md).
+        - {type: jeep, owner: agent, position: [13, 12], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [13, 16], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [12, 11], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [12, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [12, 15], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [12, 17], stance: 0, spawn_point: 0}
+        - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [8, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 18], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 11], spawn_point: 0}
+        - {type: weap, owner: agent, position: [10, 17], spawn_point: 0}
+        # spawn_point 1 — base shifted SOUTH (y=26). Symmetric.
+        - {type: jeep, owner: agent, position: [13, 24], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [13, 28], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [12, 23], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [12, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [12, 27], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [12, 29], stance: 0, spawn_point: 1}
+        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [8, 22], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 23], spawn_point: 1}
+        - {type: weap, owner: agent, position: [10, 29], spawn_point: 1}
+        # Enemy actors don't honour spawn_point — placed once.
+        - {type: e3, owner: enemy, position: [38, 10], stance: 0, count: 6}
+        - {type: fact, owner: enemy, position: [122, 4]}
+      # March scripted with scheduled_events — spawn-before-destroy
+      # (60-tick overlap) so each relocated band has fresh ids; see
+      # the easy/medium-tier notes. scheduled_events don't honour
+      # spawn_point, so the march is identical on both spawn groups.
+      scheduled_events:
+        - tick: 1100
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [70, 12], stance: 0, count: 6}
+        - tick: 1160
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 38, y: 10, radius: 8}
+        - tick: 2000
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [70, 28], stance: 0, count: 6}
+        - tick: 2060
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 70, y: 12, radius: 8}
+        - tick: 2900
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [96, 30], stance: 0, count: 6}
+        - tick: 2960
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 70, y: 28, radius: 8}
+    win_condition:
+      all_of:
+        - then:
+            id: scout-track-enemy-movement-hard
+            clauses:
+              - {enemies_discovered_gte: 4}
+              - {after_ticks: 1100}
+              - {enemies_discovered_gte: 8}
+              - {after_ticks: 2000}
+              - {enemies_discovered_gte: 12}
+              - {after_ticks: 2900}
+              - {enemies_discovered_gte: 16}
+        - {units_killed_gte: 3}
+        - {within_ticks: 4000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - all_of:
+          - {after_ticks: 300}
+          - {not: {own_units_gte: 1}}
+    max_turns: 50

@@ -1,0 +1,374 @@
+# rob-deadline-shortened-midway.yaml
+#
+# REASONING capability — Wave-11 "schedule compression". The
+# project-management drill known as crashing the schedule: a plan
+# was paced against one deadline, then mid-execution the deadline is
+# pulled FORWARD. A team still pacing for the original date now
+# misses; the only recovery is to compress — accelerate, drop slack,
+# commit every resource immediately.
+#
+# This is the cell that uniquely needs the Wave-9 engine feature
+# `scheduled_events:` event kind `shorten_deadline`
+# (oramap.rs::ScheduledEventKind::ShortenDeadline, fired by
+# env.rs::fire_scheduled_events): without a mid-episode deadline
+# clamp, no scenario could test "the budget you planned against
+# just shrank — re-plan NOW". A fixed `within_ticks` at t=0 only
+# tests "be fast"; it cannot test "re-pace when the goalpost
+# moves".
+#
+# DESIGN
+# ------
+# Pre-place (agent side, WEST base):
+#   * 4× 2tnk (medium tanks, stance:0 HoldFire) — the strike force.
+#     CRITICAL: stance:0, NOT stance:3. A scenario-declared
+#     stance:3 ground unit AUTO-HUNTS the whole map on the live
+#     engine (verified: the tanks self-deliver to the enemy fact
+#     with zero agent orders) — which would let a STALL policy win
+#     for free. stance:0 means the agent MUST explicitly commit the
+#     force; the pacing decision becomes load-bearing.
+#   * 1× fact (agent construction yard) — anchors the
+#     `building_count_gte:fact:1` fail clause (CLAUDE.md
+#     `not own_units_gte:1` footgun: a fact at t=0 means the fail
+#     clause cannot misfire on turn 1).
+#
+# Pre-place (enemy side, EAST):
+#   * 1× fact (the OBJECTIVE) — an unarmed, high-HP enemy
+#     construction yard far east. The agent must raze it. It is the
+#     `enemy_key_buildings_destroyed:[fact]` target AND the
+#     persistent enemy actor that holds the episode alive past the
+#     shorten event (CLAUDE.md: the engine auto-`done`s on enemy
+#     elimination — a lone enemy `fact` keeps the win/fail evaluator
+#     running until the deadline actually bites).
+#
+# Scheduled event (the load-bearing feature):
+#   * at tick 1000: `shorten_deadline` clamps the episode's
+#     `max_ticks` DOWN to `new_max_ticks` (the SHORTENED budget).
+#     The win predicate's `within_ticks` is set to exactly that
+#     shortened value, and the fail predicate's `after_ticks` to
+#     shortened+1. An agent pacing for the original (generous)
+#     `termination.max_ticks` has plenty of slack until tick 1000 —
+#     then the budget collapses and only a force already committed
+#     at full speed still lands the objective in time.
+#
+# WIN PREDICATE
+#   all_of:
+#     - enemy_key_buildings_destroyed:[fact]   — raze the enemy HQ
+#     - within_ticks: SHORTENED                — beat the COMPRESSED
+#       deadline (the value the tick-1000 event clamps to)
+#
+# FAIL PREDICATE
+#   any_of:
+#     - after_ticks: SHORTENED+1               — missed the
+#       compressed deadline → real LOSS (the episode, with
+#       max_ticks clamped to SHORTENED, `done`s at the first turn
+#       boundary PAST SHORTENED, which is ≥ SHORTENED+1 → the clause
+#       bites → LOSS, never a silent DRAW)
+#     - not building_count_gte:fact:1          — lost own HQ
+#
+# DISCRIMINATIONS (the bar — every leisurely / stall / paced-for-
+# the-original-deadline policy LOSES; only an immediate full-speed
+# commit WINS):
+#
+#   • stall (observe only): the stance:0 tanks never move; the
+#     enemy fact is never razed; `within_ticks` never satisfied;
+#     the clamped deadline bites → LOSS.
+#
+#   • leisurely / paced-for-the-original-deadline: the agent
+#     dawdles early (scouts, observes, splits attention, stages the
+#     force) as if it had the full original budget. Each wasted
+#     decision turn pushes the objective ~90 ticks later. By the
+#     time the tick-1000 `shorten_deadline` event fires, a force
+#     that left late simply cannot cover the ground and raze the
+#     fact before the COMPRESSED `within_ticks` — the episode
+#     `done`s past the clamp → `after_ticks` bites → LOSS. A pace
+#     that would comfortably have met the ORIGINAL deadline now
+#     loses: that is the schedule-compression teeth.
+#
+#   • attack-move-only beeline: `attack_move` toward the objective
+#     cell walks the tanks to the enemy fact but does NOT auto-fire
+#     on the building — the tanks sit beside an intact fact. The
+#     agent must SWITCH to `attack_unit` on the enemy building id
+#     the moment it surfaces in `enemy_buildings_summary`. A pure
+#     beeline never razes the HQ → LOSS.
+#
+#   • intended schedule-compression: commit ALL four tanks at full
+#     speed from turn 1 (`attack_move` toward the objective), and
+#     the instant the enemy fact appears in `enemy_buildings_summary`
+#     switch to `attack_unit` on its id. The force reaches and
+#     razes the fact comfortably before the COMPRESSED deadline.
+#     WIN. (Equivalently: an agent that paced slowly early must,
+#     when the tick-1000 event fires, immediately crash its
+#     schedule — drop all slack and rush — to still make it.)
+#
+# ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - Tick budget ~90/turn; max_turns 60 ⇒ reachable tick
+#     93+90·59 = 5403 (uncompressed). This pack enables interrupts
+#     (enemy_building_spotted / own_unit_destroyed), so `run_level`
+#     advances with `step_until_event` — turns resolve a little
+#     faster than the fixed-90 estimate. Measured end-to-end: an
+#     immediate full-speed 4-tank commit razes the fact at tick
+#     ~1737 (easy, fact at x=100) / ~1857 (medium+hard, fact at
+#     x=108); each wasted decision turn adds ~90 ticks. The
+#     tick-1000 `shorten_deadline` event clamps `max_ticks` DOWN to
+#     the SHORTENED value; a non-win episode then `done`s at the
+#     first turn boundary past it. easy + medium `within_ticks:2000`
+#     (easy: immediate wins with ~260-tick slack, a 3-turn dawdle
+#     loses; medium: objective 8 cells deeper, a 2-turn dawdle
+#     loses). hard `within_ticks:2050` with 2 seed-driven spawn
+#     groups — a 2-turn dawdle loses. The tier axis is a tighter
+#     compressed budget plus (hard) seed-varied base latitude.
+#   - `shorten_deadline` only ever CLAMPS DOWN (never grows
+#     `max_ticks`) — the original `termination.max_ticks:9000` is a
+#     generous nominal budget a leisurely policy paces against; the
+#     event collapses it to ~2000 mid-episode.
+#   - The enemy `fact` is unarmed + high-HP: it is the objective
+#     AND the persistent enemy actor that defeats premature engine
+#     auto-`done` (CLAUDE.md: without a live enemy actor a
+#     destroy/reach scenario can DRAW before the evaluator runs).
+#   - AGENT strike units use `stance:0` (HoldFire): a
+#     scenario-declared `stance:3` ground unit AUTO-HUNTS the whole
+#     map unaided (CLAUDE.md), which would let a stall policy win
+#     for free. stance:0 makes the pacing/commit decision the
+#     load-bearing verb.
+#   - `attack_move` auto-fires on enemy UNITS en route but does not
+#     raze an enemy BUILDING by itself — the intended policy must
+#     issue `attack_unit` on the fact's surfaced building id.
+#   - The fail `after_ticks` (SHORTENED+1) is BELOW the episode's
+#     post-clamp end tick, so a non-win run definitely crosses it
+#     before the episode caps out → a real LOSS, not a silent
+#     DRAW. `within_ticks` is one tick under it so the win/fail
+#     windows never overlap.
+#   - Enemy actors don't honour spawn_point (CLAUDE.md) — the
+#     enemy fact is placed once; the hard-tier spawn variation is
+#     purely the agent base's latitude.
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/rob-deadline-shortened-midway.yaml
+
+meta:
+  id: rob-deadline-shortened-midway
+  title: 'Deadline Shortened Midway — Crash the Schedule When the Budget Shrinks'
+  capability: reasoning
+  real_world_meaning: >
+    A plan was paced against one deadline; mid-execution the
+    deadline is pulled FORWARD. A team still working to the
+    original date misses entirely — the only recovery is to
+    compress the schedule: drop every slack activity, commit all
+    resources at once, and accelerate. The intended policy does not
+    pace leisurely against a generous nominal budget; it executes
+    fast from the start (or instantly re-paces the moment the
+    budget shrinks), so a mid-episode deadline cut still finds the
+    objective achievable. A leisurely pace that would have met the
+    original deadline now loses.
+  robotics_analogue: >
+    Real-time task re-planning under a tightened time budget: a
+    delivery robot routed for a 30-minute window is told mid-route
+    the package is now needed in 12 — it must drop optional
+    sub-goals and take the fastest path immediately, not finish the
+    leisurely plan. Likewise a manufacturing line told a shipment
+    moved up must crash its schedule (parallelise, cut slack)
+    rather than run the original cadence.
+  benchmark_anchor:
+    - "project-management schedule compression (crashing the schedule)"
+    - "crashing the schedule / fast-tracking under a pulled-in deadline"
+    - "deadline pressure — real-time re-planning when the time budget shrinks"
+  author: "openra-bench"
+
+# rush-hour-arena: 128×40, playable bounds (2,2,124,36). Agent
+# strike force at the WEST base (x≈15). The enemy `fact` objective
+# sits far EAST. A `shorten_deadline` scheduled event at tick 1000
+# clamps the episode budget down to the SHORTENED value — the win
+# `within_ticks` is exactly that value, so only a force committed
+# at full speed from the start makes the compressed deadline.
+base_map: rush-hour-arena
+starting_cash: 1000
+
+base:
+  agent:
+    faction: allies
+    cash: 1000
+  # Stance-only enemy: the objective is a passive enemy `fact`. No
+  # `hunt` bot — a mobile defender would drag the engagement off the
+  # objective cell and muddy the pure schedule-compression teeth.
+  enemy:
+    faction: soviet
+    cash: 0
+  # Movement + commit toolset (NO build / NO harvest): the test is
+  # the PACING decision — commit the pre-placed force fast — not
+  # production.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  interrupts:
+    enemy_building_spotted: true
+    own_unit_destroyed: true
+  # Generous NOMINAL budget a leisurely policy paces against; the
+  # tick-1000 `shorten_deadline` event collapses it mid-episode.
+  termination:
+    max_ticks: 9000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Minimum-viable schedule-compression drill. 4× 2tnk at the WEST
+  # base (x=15); the enemy `fact` objective at (100,20). The
+  # tick-1000 `shorten_deadline` event clamps the budget to 2000.
+  # An immediate full-speed 4-tank commit razes the fact at tick
+  # ~1893 (≈107-tick slack under within_ticks:2000); each wasted
+  # decision turn adds ~90 ticks, so a 2-turn dawdle already loses.
+  easy:
+    description: >
+      Your 4 medium tanks are at the WEST base. Far EAST stands the
+      enemy headquarters (an enemy construction yard). DEADLINE
+      WARNING: at game tick 1000 the time budget is CUT — the
+      machine deadline drops to game tick 2000. Win requires:
+      DESTROY the enemy construction yard AND finish before game
+      tick 2000. The only way to make it is to commit all four
+      tanks at full speed immediately: send them EAST toward the
+      enemy HQ now, and the moment the enemy building appears,
+      switch to attack it directly. Stalling loses on the deadline;
+      a leisurely pace (observing, staging, dawdling early) loses
+      because the shortened budget no longer covers a late start.
+    overrides:
+      actors:
+        # 4 medium tanks — stance:0 (HoldFire, no auto-hunt). The
+        # strike force; must be EXPLICITLY committed by the agent.
+        - {type: 2tnk, owner: agent, position: [15, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [15, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [17, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [17, 21], stance: 0}
+        # Agent HQ — anchors the building_count_gte:fact:1 fail
+        # clause (CLAUDE.md not-own_units_gte turn-1 footgun).
+        - {type: fact, owner: agent, position: [10, 20]}
+        # Enemy HQ — the OBJECTIVE and the persistent enemy actor
+        # (anti-DRAW: holds the episode alive past the shorten event
+        # until the deadline bites).
+        - {type: fact, owner: enemy, position: [100, 20]}
+      # Wave-9 schedule-compression event: at tick 1000 clamp the
+      # episode budget DOWN to 2000. A policy pacing for the
+      # nominal 9000 budget now misses unless it was already moving
+      # fast.
+      scheduled_events:
+        - {tick: 1000, type: shorten_deadline, new_max_ticks: 2000}
+    win_condition:
+      all_of:
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        # The COMPRESSED deadline — exactly the value the tick-1000
+        # event clamps `max_ticks` to. An immediate commit razes
+        # the fact at ~1893 < 2000 (WIN); a 2-turn dawdle finishes
+        # at ~2073 > 2000 (LOSS).
+        - {within_ticks: 2000}
+    fail_condition:
+      any_of:
+        # SHORTENED+1. With `max_ticks` clamped to 2000 the episode
+        # `done`s at the first turn boundary past 2000 (≈2073) —
+        # which is ≥ 2001, so a non-win run reliably CROSSES this
+        # clause → a real LOSS, never a silent DRAW. within_ticks
+        # (2000) is one tick below it so the windows never overlap.
+        - {after_ticks: 2001}
+        # Lost own HQ.
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a TIGHTER compressed budget. The enemy
+  # fact moves further east to (108,20) — 8 cells deeper than easy
+  # — while `shorten_deadline` still clamps to 2000. The extra
+  # distance shrinks the slack: an immediate full-speed commit
+  # razes the fact at tick ~1857 (WIN); a single wasted decision
+  # turn (~90 ticks) pushes it to ~1947 — still in — but a 2-turn
+  # dawdle finishes at ~2037 > 2000 (LOSS). The margin tightens to
+  # one decision turn vs easy's three — the agent must crash its
+  # schedule from the very first turns.
+  medium:
+    description: >
+      Your 4 medium tanks are at the WEST base. Far EAST stands the
+      enemy headquarters (an enemy construction yard). DEADLINE
+      WARNING: at game tick 1000 the time budget is CUT — the
+      machine deadline drops to game tick 2000. Win requires:
+      DESTROY the enemy construction yard AND finish before game
+      tick 2000. The compressed budget is tight: commit all four
+      tanks at full speed on turn 1, send them EAST, and switch to
+      attack the enemy building the instant it appears. Stalling
+      and any leisurely pace lose on the compressed deadline.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [15, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [15, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [17, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [17, 21], stance: 0}
+        - {type: fact, owner: agent, position: [10, 20]}
+        # Objective further east — tighter compressed budget.
+        - {type: fact, owner: enemy, position: [108, 20]}
+      scheduled_events:
+        - {tick: 1000, type: shorten_deadline, new_max_ticks: 2000}
+    win_condition:
+      all_of:
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        # Same clamp value as easy (2000) but the objective is 8
+        # cells deeper, so the slack is tighter: immediate commit
+        # razes the fact at ~1857 < 2000 (WIN); a 2-turn dawdle
+        # finishes at ~2037 > 2000 (LOSS).
+        - {within_ticks: 2000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven agent
+  # spawn_point groups (base at y=14 vs y=26) round-robined by seed
+  # (CLAUDE.md hard-tier requirement). Same objective (enemy fact
+  # at (108,20)) and same compressed budget (clamp to 2050); the
+  # agent base's LATITUDE varies per seed so a memorised opening
+  # cannot generalise — only the schedule-compression DOCTRINE
+  # (commit the force at full speed immediately, raze the HQ before
+  # the clamp) does. The x-distance to the objective is identical
+  # across both spawn groups, so the compressed budget is fair for
+  # either latitude.
+  hard:
+    description: >
+      Your 4 medium tanks are at the WEST base — the base's exact
+      LATITUDE varies per seed. Far EAST stands the enemy
+      headquarters (an enemy construction yard). DEADLINE WARNING:
+      at game tick 1000 the time budget is CUT — the machine
+      deadline drops to game tick 2050. Win requires: DESTROY the
+      enemy construction yard AND finish before game tick 2050.
+      Commit all four tanks at full speed on turn 1, drive EAST,
+      and switch to attack the enemy building the instant it
+      appears. Stalling, any leisurely pace, and base-latitude-
+      memorised openings all lose on the compressed deadline.
+    overrides:
+      actors:
+        # spawn_point 0 — base shifted NORTH (y=14).
+        - {type: 2tnk, owner: agent, position: [15, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [15, 15], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [17, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [17, 15], stance: 0, spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        # spawn_point 1 — base shifted SOUTH (y=26). Symmetric;
+        # identical x-distance to the objective.
+        - {type: 2tnk, owner: agent, position: [15, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [15, 27], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [17, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [17, 27], stance: 0, spawn_point: 1}
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        # Enemy actors don't honour spawn_point — placed once.
+        - {type: fact, owner: enemy, position: [108, 20]}
+      scheduled_events:
+        - {tick: 1000, type: shorten_deadline, new_max_ticks: 2050}
+    win_condition:
+      all_of:
+        - {enemy_key_buildings_destroyed: {types: [fact]}}
+        - {within_ticks: 2050}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2051}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
