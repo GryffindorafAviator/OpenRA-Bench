@@ -35,6 +35,16 @@ network) that:
 * the `after_ticks` deadline is reachable inside `max_turns`;
 * the hard tier defines ≥2 spawn_point groups (so the base latitude
   and matching surprise-axis vary by seed — anti-memorisation).
+
+Recalibration note (engine movement+combat fixes): with the moving-
+units-take-fire / no-teleport-chase changes the easy 4-rifle south
+rush, on reaching an UNDEFENDED full-HP fact, was soaked long enough
+by the four idle HoldFire defenders that the fact survived the
+4500-tick cap — a stall then DREW instead of LOSING. The easy fact
+is now pre-placed at `health: 50` so an undefended fact razes ~turn
+45, comfortably inside the budget; the intended play intercepts the
+rush SOUTH and never lets it touch the fact, so the WIN path is
+unaffected.
 """
 
 from __future__ import annotations
