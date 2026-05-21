@@ -19,6 +19,13 @@ Bar (CLAUDE.md "no defect, no cheat"):
      SOUTH y=26 base orientation, rear-guard tank marks the spawn)
      so a memorised opening cannot generalise.
 
+Recalibrated 2026-05 after the engine movement fixes ((A) attack_unit
+on out-of-sight targets paths normally, (B) moving units fire and take
+fire en route, stance-respecting): a lone weak raider could no longer
+overrun an undefended harv lane, so easy's pure-mine-no-defense leaked
+into a win. The easy raider strike is now TWO 3tnk and the easy
+defender ring FOUR 3tnk so pure-mine LOSES and intended still WINS.
+
 Anchors: SC2 contested expansion / split-mining; game theory common-
 pool resource (Hardin tragedy of commons); competitive market entry /
 TAM contention; fishing common-resource dynamics.

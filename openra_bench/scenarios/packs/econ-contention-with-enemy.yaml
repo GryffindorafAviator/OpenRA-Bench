@@ -45,7 +45,7 @@
 # 3. The `raider` ScriptedBehavior (openra-sim/src/scripted_bot.rs)
 #    targets the nearest agent `harv` each turn; falls back to
 #    nearest combat actor only when no harv is alive. The agent's
-#    pre-ringed defenders (2× 3tnk at x=26 on easy, 3× 3tnk on
+#    pre-ringed defenders (4× 3tnk at x=26 on easy, 3× 3tnk on
 #    medium, 4× 3tnk on hard) are declared `stance: 2` (Defend) so
 #    they HOLD the ring and auto-engage the inbound raider when it
 #    enters weapon range — the intended policy is to LEAVE the
@@ -62,16 +62,21 @@
 #    sweep east (the "pure-mine-no-defense + chase enemy proc"
 #    failure mode) is what loses, not a passive ringed defender.
 # 5. Bar tuning (run_level seed-1..4, scripted policies, recalibrated
-#    2026-05 after the engine balance fixes):
-#      - stall:                   ev=500        lost=0..2 (no harvest)
-#      - pure-mine-no-defense:    ev=500..1500  lost=2 (raider unopposed)
+#    2026-05 after the engine movement fixes — (A) attack_unit on
+#    out-of-sight targets paths normally, (B) moving units fire and
+#    take fire en route, stance-respecting):
+#      - stall:                   ev=500        lost=0 (no harvest)
+#      - pure-mine-no-defense:    ev=1500..2500 lost=2 (raiders unopposed)
 #      - pure-defend:             ev=500        lost=2 (no harvest)
 #      - intended-balance:        ev=2500..3500 lost=0 (harvs survive)
 #    Easy bar 2000, medium bar 3500, hard bar 3500. The intended
 #    economy_value_gte latch fires at turn ~10 (easy) / ~16-17
 #    (medium/hard) — well inside the 61-turn budget. Every
 #    non-intended play falls below the bar (or loses all harvs);
-#    intended clears it every level / every seed.
+#    intended clears it every level / every seed. The easy raider
+#    strike was raised to TWO 3tnk (was one 1tnk) so the unopposed
+#    harv lane is genuinely overrun; the easy defender ring was raised
+#    to FOUR 3tnk so the intended ringed-defence still wins.
 # 6. Tick alignment (CLAUDE.md): max_turns=61 ⇒ ceiling tick
 #    93 + 90·60 = 5493. within_ticks=5400 and after_ticks=5401 both
 #    fit; non-finishers LOSE (not draw).
@@ -133,15 +138,24 @@ base:
     - {type: proc, owner: agent, position: [12, 18]}
     - {type: harv, owner: agent, position: [14, 18]}
     - {type: harv, owner: agent, position: [14, 20]}
-    # Two 3tnk defenders ringed east of the contested patch — stance:2
-    # (Defend) so they HOLD the ring and auto-engage the raider when it
-    # enters weapon range, without advancing. After the engine stance
-    # fix the omitted-stance default is stance:3 (AttackAnything),
+    # Four 3tnk defenders ringed east of the contested patch — stance:2
+    # (Defend) so they HOLD the ring and auto-engage the raiders when
+    # they enter weapon range, without advancing. After the engine
+    # stance fix the omitted-stance default is stance:3 (AttackAnything),
     # which makes the defenders HUNT and march off east to chase the
     # enemy flavor harvs — abandoning the harv lane. stance:2 restores
     # the "leave them ringed, only spend orders on harvest" idiom.
+    # Recalibrated 2026-05: after the engine movement fixes a lone weak
+    # raider could no longer kill an undefended harv lane (it was
+    # whittled by the harvs' own return-fire / lost initiative), so
+    # pure-mine-no-defense leaked into a win. The easy raider strike is
+    # now TWO 3tnk (matching medium's count, but plain heavies) and the
+    # defender ring is FOUR 3tnk so the intended ringed-defender play
+    # still protects every harvester.
     - {type: '3tnk', owner: agent, position: [26, 18], stance: 2}
+    - {type: '3tnk', owner: agent, position: [26, 19], stance: 2}
     - {type: '3tnk', owner: agent, position: [26, 20], stance: 2}
+    - {type: '3tnk', owner: agent, position: [26, 21], stance: 2}
     # Shared central ore patch — the contention target.
     - {type: mine, owner: neutral, position: [22, 20]}
     - {type: mine, owner: neutral, position: [22, 22]}
@@ -153,39 +167,42 @@ base:
     - {type: proc, owner: enemy, position: [80, 20]}
     - {type: harv, owner: enemy, position: [76, 18]}
     - {type: harv, owner: enemy, position: [76, 22]}
-    # ONE raider tank (easy) — see overrides for medium/hard.
-    - {type: '1tnk', owner: enemy, position: [60, 20]}
+    # TWO raider 3tnks staggered on the y-line (easy) — see overrides
+    # for medium/hard. A single weak raider can no longer pick off an
+    # undefended harv lane after the engine movement fixes.
+    - {type: '3tnk', owner: enemy, position: [60, 18]}
+    - {type: '3tnk', owner: enemy, position: [60, 22]}
     # Persistent enemy marker far east — prevents engine auto-`done`
     # on raider squad wipe before the economy bar is satisfied.
     - {type: fact, owner: enemy, position: [128, 20]}
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # The bare skill: ONE weak raider (1tnk), loose bar (2000 EV), 2
-  # 3tnk defenders pre-ringed. Stall LOSES (no income); pure-mine-
-  # no-defense LOSES (defenders moved off-vector → raider picks off
+  # The bare skill: TWO raider 3tnks, loose bar (2000 EV), 4 3tnk
+  # defenders pre-ringed. Stall LOSES (no income); pure-mine-
+  # no-defense LOSES (defenders moved off-vector → raiders pick off
   # harvs); pure-defend LOSES (no harvest orders → no income); the
   # intended committed-balance play (harvest + leave defenders
-  # ringed) WINS comfortably (probed EV ≈ 12500 by tick 5400 on
-  # seeds 1..4).
+  # ringed) WINS comfortably (probed EV 2500 by turn ~10 on
+  # seeds 1..4, harvs intact).
   easy:
     description: >
       Your refinery (`proc` at 12,18) sits west of a shared ore patch
       at (22,20). Two harvesters are pre-placed at (14,18) and
-      (14,20); two heavy tanks ring the patch at (26,*). ONE enemy
-      raider tank is staged east at (60,20) — it specifically targets
-      your harvesters (worker-priority `raider` bot). The enemy also
-      fields a refinery and two harvesters at the east side of the
-      patch zone (visible as rival harvesters contesting the same
-      patch). Win when your economy value (cash + stored resources)
-      reaches 2000 AND at least 2 harvesters are still alive, before
-      tick 5400. Stalling leaves EV at the 500 starting floor;
-      chasing the raider east with your defenders abandons the patch
-      and the raider's successor / lone path picks off your harvs;
-      pulling harvesters home and only defending stops the income.
-      The intended play is to keep both harvesters in `harvest` mode
-      AND leave your ringed defenders in place — they auto-engage
-      the raider on contact, and throughput climbs unimpeded.
+      (14,20); four heavy tanks ring the patch at (26,*). TWO enemy
+      raider tanks are staged east at (60,18) and (60,22) — they
+      specifically target your harvesters (worker-priority `raider`
+      bot). The enemy also fields a refinery and two harvesters at the
+      east side of the patch zone (visible as rival harvesters
+      contesting the same patch). Win when your economy value (cash +
+      stored resources) reaches 2000 AND at least 2 harvesters are
+      still alive, before tick 5400. Stalling leaves EV at the 500
+      starting floor; chasing the raiders east with your defenders
+      abandons the patch and the raiders pick off your harvs; pulling
+      harvesters home and only defending stops the income. The
+      intended play is to keep both harvesters in `harvest` mode AND
+      leave your ringed defenders in place — they auto-engage the
+      raiders on contact, and throughput climbs unimpeded.
     overrides: {}
     win_condition:
       all_of:
