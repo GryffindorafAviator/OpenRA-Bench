@@ -20,7 +20,7 @@ The win predicate makes BOTH axes load-bearing:
 These tests prove with deterministic scripted policies (no model,
 no network) that:
 
-* the intended pbox+e1 parallel-queue policy WINS every level + every
+* the intended pbox+e1 defense-first policy WINS every level + every
   hard seed (1..4);
 * stall / all-defense / all-economy / brute-army all LOSE every level +
   every hard seed (a real LOSS, not a draw);
@@ -65,10 +65,15 @@ def stall(rs, C):
 
 
 def make_intended():
-    """Balanced parallel-queue policy: a single pillbox covers the lane
-    mouth (Defense queue) AND a stream of e1 defenders trains from the
-    pre-placed barracks (Infantry queue). Both bars satisfied before
-    the rush completes its travel to the fact."""
+    """Defense-first intended policy: queue the pillbox on turn 1 and
+    place it covering the lane mouth (Defense queue), THEN — once the
+    pbox is standing and actively firing — keep training e1 defenders
+    from the pre-placed barracks (Infantry queue). Prioritising the
+    Defense queue gets the M60mg pillbox online before the concentrated
+    rusher band arrives; the trained e1 defenders then satisfy the
+    throughput SLA (own_units_gte) while the pbox holds the choke.
+    Both axes (pbox + units) stay load-bearing — the e1 stream is still
+    required for own_units_gte:3 and the pbox for the building bars."""
 
     def policy(rs, C):
         own_b = rs.get("own_buildings") or []
@@ -82,18 +87,21 @@ def make_intended():
             return [C.observe()]
         fx, fy = xy
         cmds = []
-        # Defense queue: queue + place a pbox covering the lane mouth.
-        if "pbox" not in types:
+        has_pbox = "pbox" in types
+        # Defense queue FIRST: queue + place a pbox covering the lane
+        # mouth without splitting cash against the Infantry queue.
+        if not has_pbox:
             if "pbox" not in prod_items:
                 cmds.append(C.build("pbox"))
             cmds.append(C.place_building("pbox", fx + 6, fy))
-        # Infantry queue: keep training e1 defenders in parallel.
+        # Infantry queue: once the pbox is up, keep training e1
+        # defenders to satisfy the throughput SLA.
         units = rs.get("units_summary") or []
         n_units = sum(
             1 for u in units
             if str(u.get("type", "")).lower() in ("e1", "e3")
         )
-        if n_units < 8 and "e1" not in prod_items:
+        if has_pbox and n_units < 8 and "e1" not in prod_items:
             cmds.append(C.build("e1"))
         if not cmds:
             cmds.append(C.observe())
@@ -232,7 +240,7 @@ def test_intended_balanced_policy_wins_every_level_and_seed(level):
     for seed in SEEDS:
         r = run_level(c, make_intended(), seed=seed)
         assert r.outcome == "win", (
-            f"{level} seed{seed}: intended pbox+e1 parallel-queue play "
+            f"{level} seed{seed}: intended pbox+e1 defense-first play "
             f"must WIN; got {r.outcome} (tick={r.signals.game_tick}, "
             f"kills={r.signals.units_killed}, "
             f"lost={r.signals.units_lost}, "
