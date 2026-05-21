@@ -1,0 +1,391 @@
+# Validate: python -m openra_bench.scenarios.validate packs/mfb-redundant-tech-buildings.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# MFB-REDUNDANT-TECH-BUILDINGS (Wave-10 REASONING: production
+# resilience — N+1 redundant capacity planning).
+#
+# Real-world anchor: N+1 redundancy / robust capacity planning /
+# SC2 multi-production (a second War Factory so unit output survives
+# the loss of the first). The classic resilience-engineering rule:
+# never run a single point of failure for a critical capability —
+# provision a standby BEFORE the primary fails, not after.
+#
+# Pack frame: the agent inherits a complete base — a Construction
+# Yard (`fact`), an Ore Refinery (`proc`), a Power Plant (`powr`), a
+# Service Depot (`fix`, the vehicle-production prerequisite) and ONE
+# War Factory (`weap`). That single `weap` is the only unit-producing
+# structure — and it is EXPOSED: it is pre-placed far to the east,
+# surrounded by a 6-strong enemy mammoth-tank (`4tnk`) ring at
+# `stance:2` (Defend). The strikers auto-fire on the in-range
+# building and RAZE the exposed `weap` inside the first ~3 decision
+# turns (~tick 273) — long before any vehicle could roll out of it
+# (a `2tnk` takes ~540 ticks to produce). The `weap` WILL be
+# destroyed; this is not a question.
+#
+# The agent must:
+#   1. recognise that the inherited `weap` is a single point of
+#      failure that WILL be lost,
+#   2. pre-build a SECOND `weap` (`build('weap')`, cost 2000) and
+#      `place_building` it INSIDE the safe western base (next to the
+#      Construction Yard, out of the strikers' weapon range) BEFORE
+#      the exposed one falls,
+#   3. produce the army (`build('2tnk')` ×3, cost 850 each) from the
+#      surviving redundant `weap`.
+#
+# WIN (every level):
+#   building_count_gte:{type:weap, n:1}    (≥1 War Factory ALIVE at end)
+#   AND unit_type_count_gte:{type:2tnk, n:3}  (3 medium tanks produced)
+#   AND building_count_gte:{type:fact, n:1}   (Construction Yard alive)
+#   AND within_ticks:<budget>
+#
+# FAIL (every level):
+#   any_of[ after_ticks:<budget+1>, not building_count_gte:{fact,1} ]
+#
+# Why the win predicate makes the N+1 capability LOAD-BEARING:
+#   • `building_count_gte:{weap,1}` reads the LIVE `own_buildings`
+#     list per frame (win_conditions.py — counts current building
+#     actors, NOT the accumulating `own_building_types` set used by
+#     `has_building`). The exposed `weap` is razed at ~tick 273, so
+#     this clause is FALSE for the rest of the episode UNLESS the
+#     agent built a second, surviving `weap`.
+#   • `unit_type_count_gte:{2tnk,3}` cannot be reached from the
+#     exposed `weap` alone: it dies at ~tick 273 and the first
+#     `2tnk` needs ~540 ticks of production. A stall / build-no-
+#     backup policy produces ZERO tanks before its only factory is
+#     gone — production halts permanently → the clock bites as a
+#     real LOSS.
+#   • The intended N+1 policy builds the backup `weap` early, places
+#     it safely, and the army rolls off the SURVIVING factory.
+#
+# Failure modes the predicate forces to LOSE (the bar):
+#   • stall (Command.observe only) — builds nothing; the exposed
+#     `weap` is razed, no backup, no tanks → after_ticks LOSS.
+#   • build-no-backup (spam `build('2tnk')` from the inherited
+#     `weap`, never build a 2nd factory) — the exposed factory dies
+#     at ~tick 273 before a single tank completes; production halts;
+#     `2tnk` count stays 0 and `weap` count stays 0 → after_ticks
+#     LOSS. This is the canonical single-point-of-failure inversion
+#     the scenario is built to catch.
+#   • intended N+1 (pre-build a redundant `weap` in the safe west
+#     base, then produce ≥3 `2tnk` from it) — WINS.
+#
+# ENGINE FACTS verified on the live engine (2026-05-20):
+#  1. `2tnk` (medium tank) costs 850 and its production needs the
+#     `weap` (war factory) AND `fix` (service depot) prerequisites —
+#     both pre-placed here so the only missing link is a SURVIVING
+#     war factory. Smoke-verified: with fact+powr+proc+fix+weap a
+#     `build('2tnk')` rolls a tank in ~540 ticks.
+#  2. `place_building` does NOT enforce build-adjacency (CLAUDE.md);
+#     a `build('weap') + place_building` chain works at arbitrary
+#     in-bounds coords. The intended idiom places the backup `weap`
+#     next to the surviving Construction Yard in the west base —
+#     out of the eastern strikers' weapon range.
+#  3. `stance:2` (Defend) — the enemy `4tnk` ring auto-fires on the
+#     in-range exposed `weap` and razes it, but NEVER advances
+#     (CLAUDE.md stance semantics). So the strike does its single
+#     job — destroy the exposed factory — and then sits inert; it
+#     never marches on the western base, so `fact` survives for
+#     every policy and the only LOSS path is the deadline. Smoke-
+#     verified: 6× `4tnk` at `stance:2` raze the exposed `weap` at
+#     ~tick 273 and the agent `fact` is still alive at episode end.
+#  4. `building_count_gte` reads the LIVE `own_buildings` list per
+#     frame, so `building_count_gte:{weap,1}` toggles FALSE the
+#     instant the exposed `weap` is razed and only re-satisfies if a
+#     second `weap` exists — unlike `has_building` which uses the
+#     accumulating type-set and never toggles back (CLAUDE.md
+#     footgun).
+#  5. The persistent unarmed enemy `fact` marker far east keeps the
+#     engine's all-enemies-eliminated auto-`done` path gated, so a
+#     non-winner reaches the deadline as a real LOSS, not a DRAW
+#     (CLAUDE.md engine auto-`done` footgun).
+#  6. Tick alignment (CLAUDE.md): max tick ≈ 93 + 90·(max_turns−1).
+#     easy max_turns 70 → ceiling 6303 ≥ within_ticks 6300, fail
+#     after_ticks 6301 ✓. medium/hard max_turns 60 → ceiling 5403 ≥
+#     within_ticks 5400, fail after_ticks 5401 ✓.
+#  7. Hard tier `spawn_point` rule (CLAUDE.md oramap.rs): ANY agent
+#     actor with a spawn_point causes agent actors WITHOUT one to be
+#     filtered out — so the FULL base (fact + powr + proc + fix +
+#     exposed weap + harv) is DUPLICATED across both spawn groups at
+#     spawn-matched cells (NORTH y=14 / SOUTH y=26). Enemy actors do
+#     NOT honour spawn_point (they always place); the 6× `4tnk`
+#     strike ring is DUPLICATED at BOTH latitudes so the per-spawn
+#     strike geometry is symmetric. The foreign-latitude ring sits
+#     at the dormant (filtered-out) weap location and, being
+#     `stance:2`, never advances on the active base.
+#
+# Why this pack is different from `build-engineer-rebuild-after-loss`:
+#   • `build-engineer-rebuild-after-loss` is REACTIVE: a building is
+#     destroyed mid-episode and the agent must NOTICE the loss and
+#     REBUILD the same asset afterwards (a `then:[not X, then X]`
+#     destruction-then-rebuild latch). The reasoning is "detect +
+#     recover AFTER the fact".
+#   • `mfb-redundant-tech-buildings` is PROACTIVE: the loss of the
+#     single `weap` is INEVITABLE and the agent must PRE-BUILD a
+#     redundant second factory BEFORE the primary falls so that
+#     production never halts. The reasoning is "provision the
+#     standby AHEAD of the known failure" — N+1 capacity planning,
+#     not after-the-fact disaster recovery. A reactive rebuild here
+#     is too slow: by the time the agent reacts to the razing, the
+#     deadline math no longer leaves room for a fresh factory plus 3
+#     tanks. Redundancy must be planned, not improvised.
+
+meta:
+  id: mfb-redundant-tech-buildings
+  title: 'Redundant Production — Build a Backup War Factory (N+1 Planning)'
+  capability: reasoning
+  real_world_meaning: >
+    Production resilience through N+1 redundancy. The agent inherits
+    a working base whose only unit-producing structure — a single War
+    Factory — is a known single point of failure: it is exposed and
+    WILL be destroyed by an enemy strike in the opening. The capacity-
+    planning task is to provision a SECOND War Factory in a safe
+    location BEFORE the exposed one falls, so unit production survives
+    the loss. A policy that runs the single factory until it dies
+    halts production permanently and never fields its army; a policy
+    that pre-builds the redundant factory keeps producing and meets
+    the bar. This is robust capacity planning: never operate a
+    critical capability on a single point of failure — stand up the
+    backup ahead of the foreseen failure, not after it.
+  robotics_analogue: >
+    N+1 redundancy for a critical production node. An autonomous
+    operation depends on a single assembly cell that sits in a
+    hazard zone and is certain to be lost. Resilient planning
+    commissions a redundant assembly cell in a protected location
+    BEFORE the exposed one fails, so throughput continues
+    uninterrupted. Waiting for the failure and then improvising a
+    replacement blows the delivery deadline; provisioning the
+    standby in advance — paying the redundancy cost up front — keeps
+    the line running.
+  benchmark_anchor:
+    - "redundancy / N+1 planning"
+    - "robust capacity planning"
+    - "SC2 multi-production"
+  author: openra-bench-wave-10
+
+base_map: rush-hour-arena
+
+# Reserve sized for the N+1 plan: one backup `weap` (2000) + three
+# `2tnk` (850 each = 2550) = 4550, with slack. A policy that wastes
+# the reserve (army-only spam, no backup factory) cannot recover —
+# its single factory is razed before any tank rolls out.
+starting_cash: 6000
+
+base:
+  agent: {faction: allies}
+  # No scripted bot — the threat is a fixed pre-placed `4tnk` ring at
+  # `stance:2` (Defend). Their single job: raze the exposed `weap`,
+  # then sit inert (Defend never advances). A hunt bot would over-
+  # pressure the whole base and turn an N+1-planning test into a
+  # combat-survival test.
+  enemy: {faction: soviet, bot_type: ''}
+  # Build palette: build + place_building drive the redundant-factory
+  # provisioning and the army; harvest keeps income credible;
+  # move_units + stop allow repositioning. No offensive verbs — this
+  # is a capacity-planning pack, not a combat pack.
+  tools: [observe, build, place_building, harvest, move_units, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare skill: recognise the single-point-of-failure factory, build
+  # a redundant one in the safe west base, produce 3 tanks. Generous
+  # clock (within_ticks 6300, max_turns 70 → ceiling 6303 ✓).
+  easy:
+    description: >
+      You inherit a working base — a Construction Yard ('fact'), a
+      Power Plant ('powr'), an Ore Refinery ('proc'), a Service Depot
+      ('fix') and ONE War Factory ('weap') — plus an Ore Truck
+      ('harv'), an ore patch and $6000. That single War Factory is
+      your only unit-producing structure AND it is EXPOSED: it sits
+      far to the east ringed by six enemy heavy tanks that will RAZE
+      it in the opening turns. It WILL be destroyed before any tank
+      can roll out of it. To survive the loss: build a SECOND War
+      Factory ('build' "weap", cost 2000) and place it next to your
+      Construction Yard in the safe western base, then produce three
+      medium tanks ('build' "2tnk", cost 850 each) from the surviving
+      factory. WIN = you still own a War Factory AND have 3 medium
+      tanks AND still own your Construction Yard, before tick 6300.
+      Stalling, or running the single exposed factory until it dies
+      without a backup, leaves production permanently halted and
+      misses the bar.
+    starting_cash: 6000
+    overrides:
+      actors:
+        # ── Western base (the safe site for the redundant factory) ──
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [11, 18]}
+        - {type: proc, owner: agent, position: [14, 18]}
+        - {type: fix,  owner: agent, position: [17, 18]}
+        # Income (credible, not load-bearing for the win predicate).
+        - {type: harv, owner: agent, position: [12, 21]}
+        - {type: mine, owner: neutral, position: [22, 21]}
+        # ── The EXPOSED single-point-of-failure War Factory ─────────
+        # Pre-placed far east at low HP, ringed by six `4tnk` at
+        # stance:2 (Defend) — razed at ~tick 273, never any closer to
+        # the western base.
+        - {type: weap, owner: agent, position: [60, 18], health: 8}
+        - {type: '4tnk', owner: enemy, position: [58, 18], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [62, 18], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [60, 16], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [60, 20], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [58, 16], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [62, 20], stance: 2}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [110, 30]}
+    win_condition:
+      all_of:
+        # ≥1 War Factory ALIVE at end — false once the exposed `weap`
+        # is razed unless a redundant one was built.
+        - building_count_gte: {type: weap, n: 1}
+        # 3 medium tanks — unreachable from the exposed factory alone
+        # (razed at ~tick 273; first tank needs ~540 ticks).
+        - unit_type_count_gte: {type: '2tnk', n: 3}
+        # Construction Yard alive (mirrors the fail clause).
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 70
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: the clock tightens (within_ticks 5400,
+  # max_turns 60 → ceiling 5403 ✓). The same N+1 plan — pre-build the
+  # redundant factory, then 3 tanks — still wins comfortably (~tick
+  # 2973 in validation), but a hesitant / reactive opening that
+  # dallies before committing the backup factory now risks the
+  # deadline. The single-point-of-failure failure modes lose exactly
+  # as on easy.
+  medium:
+    description: >
+      Same inherited base as easy — Construction Yard, Power Plant,
+      Refinery, Service Depot and ONE exposed War Factory ringed by
+      six enemy heavy tanks that will raze it — plus $6000. The
+      exposed factory is still a single point of failure that WILL
+      be destroyed before it can produce anything. Build a SECOND
+      War Factory ('build' "weap", 2000) in the safe western base
+      next to your Construction Yard, then produce three medium
+      tanks ('build' "2tnk", 850 each) from the surviving factory.
+      The deadline is tighter — tick 5400 — so commit the redundant
+      factory early; do not wait for the exposed one to fall before
+      reacting. WIN = you still own a War Factory AND have 3 medium
+      tanks AND still own your Construction Yard, before tick 5400.
+      Stalling or running the single exposed factory with no backup
+      misses the bar.
+    starting_cash: 6000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [11, 18]}
+        - {type: proc, owner: agent, position: [14, 18]}
+        - {type: fix,  owner: agent, position: [17, 18]}
+        - {type: harv, owner: agent, position: [12, 21]}
+        - {type: mine, owner: neutral, position: [22, 21]}
+        - {type: weap, owner: agent, position: [60, 18], health: 8}
+        - {type: '4tnk', owner: enemy, position: [58, 18], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [62, 18], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [60, 16], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [60, 20], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [58, 16], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [62, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [110, 30]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: weap, n: 1}
+        - unit_type_count_gte: {type: '2tnk', n: 3}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven AGENT
+  # spawn_point groups (NORTH base y=14 / SOUTH base y=26) round-
+  # robined by seed. Per CLAUDE.md `spawn_point` rules:
+  #   * ANY agent actor with spawn_point ⇒ agent actors WITHOUT
+  #     spawn_point are filtered out, so the FULL base (fact + powr +
+  #     proc + fix + exposed weap + harv) is DUPLICATED across both
+  #     spawn groups at spawn-matched cells.
+  #   * Enemy actors do NOT honour spawn_point (they always place);
+  #     the 6× `4tnk` strike ring is DUPLICATED at BOTH latitudes so
+  #     the per-spawn strike geometry is symmetric. The foreign-
+  #     latitude ring sits at the dormant (filtered-out) weap
+  #     location and, being `stance:2` (Defend), never advances on
+  #     the active base.
+  # A memorised "place the backup weap at (20,22)" cannot generalise
+  # — the agent must read the actual Construction Yard latitude from
+  # the observation and place the redundant factory beside it.
+  hard:
+    description: >
+      Same N+1 capacity-planning task as medium (one exposed War
+      Factory ringed by six enemy heavy tanks that will raze it,
+      $6000, tick 5400 deadline) but your base may begin in the
+      NORTH band (y≈14) OR the SOUTH band (y≈26) of the map
+      depending on the seed. Read the Construction Yard's actual
+      position from the observation and place the redundant War
+      Factory beside it in the safe western base; then produce three
+      medium tanks from the surviving factory. A memorised
+      placement cell will mis-place out of build radius on one of
+      the two spawns. WIN = you still own a War Factory AND have 3
+      medium tanks AND still own your Construction Yard, before tick
+      5400. The same single-point-of-failure plays — stalling, or
+      running the lone exposed factory with no backup — lose as on
+      medium.
+    starting_cash: 6000
+    overrides:
+      actors:
+        # ── SPAWN 0 (NORTH base, y=14) ────────────────────────────
+        - {type: fact, owner: agent, position: [8, 14],  spawn_point: 0}
+        - {type: powr, owner: agent, position: [11, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [17, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [12, 11], spawn_point: 0}
+        - {type: weap, owner: agent, position: [60, 14], health: 8, spawn_point: 0}
+        # ── SPAWN 1 (SOUTH base, y=26) ────────────────────────────
+        - {type: fact, owner: agent, position: [8, 26],  spawn_point: 1}
+        - {type: powr, owner: agent, position: [11, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [17, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [12, 29], spawn_point: 1}
+        - {type: weap, owner: agent, position: [60, 26], health: 8, spawn_point: 1}
+        # Neutral ore patches — one per latitude (neutral actors
+        # ignore the spawn_point filter, like enemy actors).
+        - {type: mine, owner: neutral, position: [22, 11]}
+        - {type: mine, owner: neutral, position: [22, 29]}
+        # ── Enemy strike ring DUPLICATED at both latitudes (enemy
+        # actors do NOT honour spawn_point — CLAUDE.md). The active-
+        # latitude ring razes the exposed weap; the foreign-latitude
+        # ring sits at the dormant (filtered-out) weap location and,
+        # being stance:2, never advances.
+        - {type: '4tnk', owner: enemy, position: [58, 14], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [62, 14], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [60, 12], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [60, 16], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [58, 12], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [62, 16], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [58, 26], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [62, 26], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [60, 24], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [60, 28], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [58, 24], stance: 2}
+        - {type: '4tnk', owner: enemy, position: [62, 28], stance: 2}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [110, 33]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: weap, n: 1}
+        - unit_type_count_gte: {type: '2tnk', n: 3}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
