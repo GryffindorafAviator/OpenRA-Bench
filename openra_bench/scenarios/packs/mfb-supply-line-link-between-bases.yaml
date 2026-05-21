@@ -1,0 +1,493 @@
+# mfb-supply-line-link-between-bases — Defend the Inter-Base Corridor
+#
+# ACTION capability — CORRIDOR INTERDICTION / supply-line protection.
+# The agent owns TWO bases linked by a single overland corridor: a
+# WEST base (fact + proc at x=15, y=20) and an EAST base (fact + proc
+# at x=85, y=20). The two bases are joined by the y=20 logistics
+# route. The agent commands FOUR medium tanks (2tnk) and must
+# POSITION them ALONG the corridor — at the corridor midpoint, not
+# parked at either base — so that raider bands probing into the
+# corridor from the NORTH and SOUTH edges are interdicted in the
+# corridor BEFORE they can peel off and raze a base.
+#
+# Why "patrol the corridor", not "garrison a base":
+#   The scripted `rusher` bot drives every raider band at the agent
+#   CENTROID. The raider bands enter from the NORTH and SOUTH edges
+#   at corridor-x columns (x≈40 / x≈50 / x≈60) — i.e. they cross the
+#   y=20 corridor on their way in. If the four tanks are POSITIONED
+#   ON THE CORRIDOR at the midpoint (x≈50, y=20) the centroid sits
+#   on the corridor: every band is drawn straight onto the corridor
+#   squad and destroyed there (2tnk-vs-e1 is ~1-shot dominance per
+#   CLAUDE.md / combat-focus-fire-priority), the kill bar clears, and
+#   a tank sits inside the `units_in_region_gte:{x:50,y:20,r:6,n:1}`
+#   corridor clause at win time.
+#   If the tanks are GARRISONED AT A BASE (x=15 or x=85) or SPLIT
+#   2/2 across the two bases, NO tank is ever within radius 6 of the
+#   corridor midpoint (50,20) — the corridor clause can never be
+#   satisfied, the run cannot win, and the `after_ticks` deadline
+#   fires as a real reachable LOSS. The corridor region clause is
+#   the load-bearing discriminator: only a squad positioned ON the
+#   link satisfies it.
+#
+# Real-world / benchmark anchors (binding meta.benchmark_anchor):
+#   - Military supply-line protection: a logistics route linking two
+#     installations must be PATROLLED along its length; garrisoning
+#     only the endpoints leaves the route itself open to interdiction.
+#   - Logistics route security / convoy-lane defence: the threat is
+#     to the LINK, not the nodes — security capacity belongs on the
+#     corridor, mobile, not pinned to the depots.
+#   - SC2 harass-route defence: a mobile defensive squad shadows the
+#     map's main travel lane to interdict harass squads before they
+#     reach either base, rather than splitting static defence between
+#     the two mineral lines.
+#
+# DISCRIMINATIONS (the bar — every lazy / wrong-position play LOSES,
+# only the intended corridor-patrol WINS):
+#
+#   • stall (only `observe`): the 4 tanks idle on the NORTH shoulder
+#     where they spawn (y=11 on easy/medium, >6 cells from the
+#     (50,20) corridor midpoint). stance:2 (Defend) means they never
+#     advance on their own, so the corridor clause is never
+#     satisfied. The run cannot win and the `after_ticks` deadline
+#     fires → real reachable LOSS (verified outcome, not a DRAW).
+#
+#   • garrison-WEST / garrison-EAST (all 4 tanks parked at one base):
+#     no tank is ever within radius 6 of the corridor midpoint
+#     (x=15 / x=85 are 35 cells from x=50) → the corridor clause
+#     stays empty → the run cannot win → `after_ticks` LOSS.
+#
+#   • split-2/2 (two tanks at each base): the corridor itself is
+#     UNDEFENDED — the region clause at (50,20) is empty (nearest
+#     tank is at x=15 or x=85, distance 35 ≫ radius 6) → cannot win
+#     → `after_ticks` LOSS.
+#
+#   • hard wrong-latitude patrol (move the squad to the OTHER
+#     candidate corridor midpoint — e.g. (50,28) when the bases
+#     spawned at y=12): the hard win `any_of` PAIRS each midpoint
+#     with a base-position check, so a wrong-latitude patrol fails
+#     both branches (its actual-latitude branch wants a tank at the
+#     empty midpoint; the patrolled-latitude branch wants a base
+#     there) → `after_ticks` LOSS. A memorised "always (50,20)"
+#     patrol misses both candidate midpoints by 8 cells → LOSS.
+#
+#   • intended CORRIDOR-PATROL: move all four tanks onto the
+#     corridor at its midpoint (≈x=50, matching base latitude). The
+#     rusher bands converge on the centroid (now on the corridor)
+#     and are destroyed in the corridor before reaching a base.
+#     Both bases keep their fact + proc, the kill bar clears, and a
+#     tank sits inside the corridor-midpoint region at win time →
+#     WIN.
+#
+# ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - `rusher` bot — each raider band converges on the agent
+#     CENTROID. A corridor-positioned squad puts the centroid ON the
+#     corridor so every band is drawn into the corridor engagement.
+#     (`hunt` was tried first but, as the def-multi-direction
+#     docstring records, hunt-bot e1 bands idle off-map for most of
+#     the tick budget and never reliably reach the corridor squad —
+#     the kill bar then never materialises even for the intended
+#     play. `rusher` reliably walks every band into engagement.)
+#   - Raider bands enter from the NORTH (y≈4..6) and SOUTH (y≈34..36)
+#     edges at corridor-x columns so they cross the corridor on the
+#     way in — a corridor-positioned squad interdicts them mid-route.
+#   - Agent 2tnk defenders are `stance:2` (Defend) — they auto-fire
+#     on in-range raiders but NEVER advance on their own (the
+#     stance:3 AttackAnything hunt-drift would let an idle staller's
+#     squad self-deliver onto the corridor and win for free — the
+#     documented CLAUDE.md stance-3 footgun). Only an explicit
+#     `attack_move` / `move_units` order takes the squad to the
+#     corridor.
+#   - 2tnk-vs-e1 dominance (CLAUDE.md / combat-focus-fire-priority):
+#     four tanks concentrated on the corridor reliably clear the
+#     e1 bands and meet the kill bar.
+#   - `building_count_gte:{type:fact,n:2}` and `{type:proc,n:2}` are
+#     PRESENT-TENSE pair-alive checks (NOT `has_building`, which is
+#     a one-shot ever-seen set — the documented CLAUDE.md footgun).
+#     Both bases ship with fact + proc preplaced, so the clauses
+#     hold at t=0 and BITE only if a raider razes a building.
+#   - `units_in_region_gte:{x:50,y:20,radius:6,n:1}` — the
+#     load-bearing corridor clause: REQUIRES ≥1 tank on the
+#     corridor midpoint at win time. A base garrison (x=15 / x=85)
+#     is 35 cells away — far outside radius 6.
+#   - Persistent unarmed enemy `fact` marker parked in the far SE
+#     corner so the engine does not auto-`done` on enemy-elim
+#     before the win/fail evaluator runs (CLAUDE.md auto-done
+#     footgun) — guarantees a real reachable LOSS on a deadline
+#     timeout.
+#   - Fixed-step decision cadence (NO interrupts): the engine
+#     advances ~90 ticks per decision turn at a PREDICTABLE rate.
+#     Interrupt mode was tried first but the constant
+#     `enemy_unit_spotted` / `own_unit_destroyed` re-decisions drop
+#     the per-turn step to ~41 ticks, which makes the `after_ticks`
+#     deadline unreachable inside max_turns (a non-winner then
+#     DRAWs instead of LOSING — the tick/turn-misalignment defect).
+#   - Tick/turn alignment (~90 ticks/turn fixed-step): every
+#     level's `after_ticks` fail is reachable inside its `max_turns`
+#     so a non-winner emits a real LOSS, not a DRAW:
+#       easy/medium/hard : after_ticks 2301 ≤ 93 + 90·49 = 4503 ✓
+#       (max_turns 50). Empirically a staller reaches tick 2343 at
+#       turn 26 → the deadline bites well inside the budget; the
+#       intended corridor patrol WINS by tick ~360..460 every level
+#       and seed, comfortably under within_ticks 2300.
+#   - Hard tier: two agent `spawn_point` groups round-robin the
+#     corridor LATITUDE (NORTH corridor y=12 vs SOUTH corridor
+#     y=28). Per the CLAUDE.md spawn-filter rule EVERY agent actor
+#     declares an explicit spawn_point — both bases AND the four
+#     tanks are duplicated across both groups at their respective
+#     latitudes; otherwise the filter would drop the un-tagged
+#     actors. The win `any_of` PAIRS each candidate corridor
+#     midpoint with a `building_in_region` base-position check so a
+#     wrong-latitude (or memorised-(50,20)) patrol satisfies
+#     neither branch. Enemy raiders don't honour spawn_point
+#     (CLAUDE.md) so both latitudes' bands are declared — the
+#     rusher bot converges on the active-spawn agent centroid.
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/mfb-supply-line-link-between-bases.yaml
+
+meta:
+  id: mfb-supply-line-link-between-bases
+  title: 'Supply-Line Link — Patrol the Corridor Between Two Bases'
+  capability: action
+  real_world_meaning: >
+    Two bases are joined by a single overland supply corridor; raider
+    bands probe into that corridor from the flanks. The agent commands
+    a mobile squad of four tanks and must POSITION them ON the
+    corridor — at its midpoint, not parked at either base — so that
+    every raider band is interdicted mid-route before it can peel off
+    and raze a base building. Garrisoning a single base over-defends
+    it while leaving the far base and the corridor open; splitting the
+    squad 2/2 across the two bases leaves the corridor itself
+    undefended and the central bands slip through. Only a squad
+    positioned along the link interdicts every band. This is the
+    decision drill of supply-line protection: the threat is to the
+    LINK, and the defensive capacity belongs on the corridor, not on
+    the endpoints.
+  robotics_analogue: >
+    Logistics route security: a convoy lane connecting two depots must
+    be patrolled along its length. Posting all security at the depots
+    (the nodes) leaves the route (the edge) open to interdiction — the
+    canonical convoy-ambush failure mode. A mobile patrol shadowing
+    the lane intercepts threats in transit; static gate guards at each
+    depot do not. Same total security capacity, different topology,
+    qualitatively different route survivability.
+  benchmark_anchor:
+    - "military supply-line protection"
+    - "logistics route security"
+    - "SC2 harass-route defense"
+  author: openra-bench
+
+# Pack-level base_map is the sentinel `rush-hour-arena` so the loader
+# can map-resolve before per-level overrides materialise the actual
+# generator-spec arena .oramap (same pattern as the other mfb-* packs).
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    # `rusher`: each raider band converges on the agent CENTROID.
+    # When the four tanks are POSITIONED ON THE CORRIDOR at the
+    # midpoint, the centroid sits at (50, corridor_y) and every band
+    # is drawn straight onto the corridor squad — the squad
+    # interdicts them all in the corridor and the kill bar clears.
+    # When the tanks are GARRISONED AT A BASE or SPLIT 2/2 across
+    # the two bases, the corridor-midpoint region clause is never
+    # satisfied (no tank within radius 6 of (50, corridor_y)) — the
+    # run cannot win and times out on the deadline. (`hunt` was
+    # tried first but, as the def-multi-direction docstring records,
+    # hunt-bot e1 bands idle off-map for most of the tick budget and
+    # never reliably reach the corridor squad — the kill bar then
+    # never materialises even for the intended play. `rusher`
+    # reliably walks every band into the corridor engagement.)
+    bot_type: rusher
+  # Combat-only toolset (no build / no harvest): the test is the
+  # POSITIONING of a fixed mobile squad along the corridor, not
+  # production.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Fixed-step decision cadence (no interrupts): the engine advances
+  # ~90 ticks per decision turn, so the per-level `after_ticks` fail
+  # is reachable at a PREDICTABLE turn count. Interrupt mode was
+  # tried first but the constant `enemy_unit_spotted` /
+  # `own_unit_destroyed` re-decisions drop the per-turn step to
+  # ~41 ticks, which makes the deadline unreachable inside max_turns
+  # (a non-winner then DRAWs instead of LOSING — the documented
+  # tick/turn-misalignment defect). The agent re-observes every turn
+  # regardless, so corridor interdiction is still reactive.
+  termination:
+    max_ticks: 5000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare corridor-interdiction skill: TWO raider bands (one entering
+  # from the NORTH edge, one from the SOUTH edge) probe the y=20
+  # corridor. The four tanks START OFF the corridor — staged on the
+  # NORTH shoulder at (50,11) (>6 cells from the (50,20) midpoint) —
+  # so a staller never satisfies the corridor region clause. The
+  # agent must MOVE the squad onto the corridor at the midpoint to
+  # interdict both bands. Light bands (2 e1 each = 4 total). The
+  # load-bearing clauses: building_count_gte fact:2 + proc:2 (both
+  # bases intact) AND units_in_region_gte (a tank on the corridor).
+  # max_turns 50 → reachable tick 4503 fixed-step; after_ticks 2301
+  # bites well inside the budget (a staller times out by turn ~26).
+  easy:
+    description: >
+      You hold TWO bases linked by a supply corridor along y=20: a
+      WEST base (construction yard + refinery at (15,20)) and an EAST
+      base (construction yard + refinery at (85,20)). You command
+      FOUR medium tanks (2tnk) staged on the north shoulder at
+      (50,11). TWO raider bands are probing the corridor — one
+      crossing in from the NORTH edge, one from the SOUTH edge.
+      POSITION your tanks ON the corridor at its midpoint (within
+      radius 6 of (50,20)) so both raider bands are interdicted
+      mid-route. WIN when BOTH construction yards AND BOTH refineries
+      are still standing, you have destroyed at least 3 raiders, at
+      least one tank is on the corridor midpoint, and you finish
+      before tick 2300. Leaving the squad on the shoulder, garrisoning
+      a single base, or splitting 2/2 across the two bases all leave
+      the corridor undefended — the corridor-midpoint clause stays
+      empty and the run times out as a loss.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-supply-line-corridor-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # WEST base — fact + proc on the corridor (y=20).
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: proc, owner: agent, position: [19, 20]}
+        # EAST base — symmetric layout.
+        - {type: fact, owner: agent, position: [85, 20]}
+        - {type: proc, owner: agent, position: [81, 20]}
+        # FOUR 2tnk mobile squad — staged OFF the corridor on the
+        # NORTH shoulder at (50,11) (>6 cells from the (50,20)
+        # corridor midpoint, so a staller never satisfies the
+        # region clause). stance:2 (Defend) — auto-fires on raiders
+        # in range but NEVER advances on its own, so an idle staller
+        # cannot self-deliver the squad onto the corridor; only an
+        # explicit move/attack_move takes it there.
+        - {type: 2tnk, owner: agent, position: [49, 11], stance: 2}
+        - {type: 2tnk, owner: agent, position: [50, 11], stance: 2}
+        - {type: 2tnk, owner: agent, position: [51, 11], stance: 2}
+        - {type: 2tnk, owner: agent, position: [50, 12], stance: 2}
+        # TWO raider bands — one entering from the NORTH edge, one
+        # from the SOUTH edge, both at corridor-x columns so they
+        # cross the y=20 corridor on their way to a base. e1-only
+        # so the four-tank corridor cluster dominates (per CLAUDE.md
+        # / combat-focus-fire-priority). 2 e1 per band = 4 total.
+        - {type: e1, owner: enemy, position: [42,  6], stance: 3, count: 2}
+        - {type: e1, owner: enemy, position: [58, 34], stance: 3, count: 2}
+        # Persistent unarmed enemy `fact` marker far SE — keeps the
+        # engine from auto-`done` on enemy-elim before the win/fail
+        # evaluator runs (CLAUDE.md auto-done footgun). Off every
+        # corridor / base region.
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        # BOTH bases intact — present-tense pair-alive checks.
+        - building_count_gte: {type: fact, n: 2}
+        - building_count_gte: {type: proc, n: 2}
+        # The squad actually fought the raider bands.
+        - units_killed_gte: 3
+        # LOAD-BEARING corridor clause — a tank on the corridor
+        # midpoint. A base garrison (x=15 / x=85) is 35 cells away.
+        - units_in_region_gte: {x: 50, y: 20, radius: 6, n: 1}
+        - within_ticks: 2300
+    fail_condition:
+      any_of:
+        - after_ticks: 2301
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: a THIRD raider band probes the
+  # corridor straight down the central column (x=50 from the NORTH
+  # edge), and every band is heavier (3 e1 each = 9 total vs easy's
+  # 4). The kill bar rises to ≥6 — the heavier 9-raider pressure
+  # means only a four-tank squad CONCENTRATED on the corridor
+  # midpoint clears the bar; a split squad never satisfies the
+  # corridor clause anyway. Same clock (within_ticks 2300 /
+  # after_ticks 2301).
+  medium:
+    description: >
+      Same TWO bases linked by the y=20 supply corridor (WEST
+      construction yard + refinery at (15,20), EAST at (85,20)) and
+      the same FOUR-tank squad staged on the north shoulder at
+      (50,11). Now THREE raider bands probe the corridor — one from
+      the NORTH edge, one from the SOUTH edge, and one straight down
+      the CENTRAL column — each band heavier (3 raiders, 9 total).
+      POSITION your tanks ON the corridor midpoint (within radius 6
+      of (50,20)) to interdict all three bands. WIN when BOTH
+      construction yards AND BOTH refineries still stand, you have
+      destroyed at least 6 raiders, at least one tank is on the
+      corridor midpoint, and you finish before tick 2300. A squad
+      parked at a base or split 2/2 across the two bases never gets
+      a tank onto the corridor midpoint — the run cannot win and
+      times out as a loss.
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-supply-line-corridor-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        - {type: fact, owner: agent, position: [15, 20]}
+        - {type: proc, owner: agent, position: [19, 20]}
+        - {type: fact, owner: agent, position: [85, 20]}
+        - {type: proc, owner: agent, position: [81, 20]}
+        - {type: 2tnk, owner: agent, position: [49, 11], stance: 2}
+        - {type: 2tnk, owner: agent, position: [50, 11], stance: 2}
+        - {type: 2tnk, owner: agent, position: [51, 11], stance: 2}
+        - {type: 2tnk, owner: agent, position: [50, 12], stance: 2}
+        # THREE raider bands — NORTH edge, SOUTH edge, and a CENTRAL
+        # band entering straight down the x=50 column. Heavier than
+        # easy (3 e1 per band = 9 total vs easy's 4). Still e1-only
+        # so the four-tank corridor cluster remains the floor.
+        - {type: e1, owner: enemy, position: [40,  6], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [60, 34], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [50,  6], stance: 3, count: 3}
+        - {type: fact, owner: enemy, position: [152, 52]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - building_count_gte: {type: proc, n: 2}
+        - units_killed_gte: 6
+        - units_in_region_gte: {x: 50, y: 20, radius: 6, n: 1}
+        - within_ticks: 2300
+    fail_condition:
+      any_of:
+        - after_ticks: 2301
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO agent spawn_point
+  # groups round-robin the corridor LATITUDE — a NORTH corridor
+  # (bases + corridor at y=12) vs a SOUTH corridor (y=28). The four
+  # tanks stage on the shoulder of whichever corridor spawned, and
+  # the corridor-midpoint region moves with it. The win clause is an
+  # `any_of` over the two candidate corridor latitudes, and each
+  # branch PAIRS a `building_in_region` base-position check with the
+  # matching corridor-midpoint `units_in_region_gte` clause — so a
+  # wrong-latitude patrol (or a memorised "(50,20)" patrol) fails
+  # BOTH branches: the actual-latitude branch wants a tank at the
+  # empty midpoint, the patrolled-latitude branch wants a base
+  # there. THREE raider bands and the ≥6 kill bar match medium;
+  # same clock.
+  hard:
+    description: >
+      You hold TWO bases linked by a supply corridor whose LATITUDE
+      varies by seed — either a NORTH corridor (bases + corridor at
+      y=12) OR a SOUTH corridor (y=28). Read your base positions from
+      the observation. Your FOUR-tank squad is staged on the shoulder
+      of your corridor. THREE raider bands probe the corridor (NORTH
+      flank, SOUTH flank, and a central column). POSITION your tanks
+      ON your corridor's midpoint — within radius 6 of (50,12) if your
+      bases are at y=12, or (50,28) if they are at y=28 — to interdict
+      all three bands. WIN when BOTH construction yards AND BOTH
+      refineries still stand, you have destroyed at least 6 raiders,
+      at least one tank is on YOUR corridor's midpoint (the one
+      matching your base latitude), and you finish before tick 2300.
+      A squad parked at a base, split between the two bases, sent to
+      the wrong-latitude midpoint, or held at a memorised (50,20)
+      never satisfies the matching corridor clause — the run times
+      out as a loss.
+    objective_coords: relative
+    overrides:
+      base_map:
+        generator: arena
+        name: mfb-supply-line-corridor-arena
+        width: 160
+        height: 60
+        cordon: 4
+      actors:
+        # ── spawn_point 0 — NORTH corridor (bases + corridor at
+        # y=12). Per the CLAUDE.md spawn-filter rule every agent
+        # actor is explicitly tagged; the squad stages on the
+        # shoulder at y=5 (>6 cells from the (50,12) midpoint).
+        - {type: fact, owner: agent, position: [15, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [19, 12], spawn_point: 0}
+        - {type: fact, owner: agent, position: [85, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [81, 12], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [49, 5], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [50, 5], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [51, 5], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [50, 6], stance: 2, spawn_point: 0}
+        # ── spawn_point 1 — SOUTH corridor (bases + corridor at
+        # y=28). Mirrored layout; squad stages on the shoulder at
+        # y=35 (>6 cells from the (50,28) midpoint).
+        - {type: fact, owner: agent, position: [15, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [19, 28], spawn_point: 1}
+        - {type: fact, owner: agent, position: [85, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [81, 28], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [49, 35], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [50, 35], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [51, 35], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [50, 36], stance: 2, spawn_point: 1}
+        # SIX raider bands — three per candidate corridor. Enemy
+        # actors don't honour spawn_point (CLAUDE.md) so both
+        # latitudes' bands are declared; the hunt bot pursues the
+        # active-spawn agent cluster regardless, so only the bands
+        # near the active corridor engage in time.
+        # NORTH-corridor (y=12) bands: flank in from y=4 and y=20,
+        # plus a central column.
+        - {type: e1, owner: enemy, position: [40,  4], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [50,  4], stance: 3, count: 3}
+        # SOUTH-corridor (y=28) bands: flank in from y=20 and y=36,
+        # plus a central column.
+        - {type: e1, owner: enemy, position: [40, 36], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [50, 36], stance: 3, count: 3}
+        # Persistent unarmed enemy marker — no spawn_point (enemy
+        # actors place regardless), far SE, off every region.
+        - {type: fact, owner: enemy, position: [152, 52]}
+    # `any_of` over the two candidate corridor latitudes — but each
+    # branch PAIRS a base-position check (`building_in_region` on the
+    # WEST fact) with the matching corridor-midpoint clause. A patrol
+    # at the WRONG-latitude midpoint fails BOTH branches: the branch
+    # for its actual base latitude wants a tank at THAT midpoint
+    # (which is empty), and the branch for the patrolled latitude
+    # wants a base THERE (which is at the other latitude). So a
+    # memorised "always patrol (50,20)" — or "always (50,28)" —
+    # cannot satisfy either branch on either seed; the agent must
+    # read its base latitude and patrol the MATCHING corridor.
+    win_condition:
+      all_of:
+        - building_count_gte: {type: fact, n: 2}
+        - building_count_gte: {type: proc, n: 2}
+        - units_killed_gte: 6
+        - within_ticks: 2300
+        - any_of:
+            # NORTH corridor (bases at y=12): a WEST fact at y=12
+            # AND a tank on the (50,12) midpoint.
+            - all_of:
+                - building_in_region:
+                    {type: fact, x: 15, y: 12, radius: 6, count: 1}
+                - units_in_region_gte: {x: 50, y: 12, radius: 6, n: 1}
+            # SOUTH corridor (bases at y=28): a WEST fact at y=28
+            # AND a tank on the (50,28) midpoint.
+            - all_of:
+                - building_in_region:
+                    {type: fact, x: 15, y: 28, radius: 6, count: 1}
+                - units_in_region_gte: {x: 50, y: 28, radius: 6, n: 1}
+    fail_condition:
+      any_of:
+        - after_ticks: 2301
+        - not: {building_count_gte: {type: fact, n: 2}}
+    max_turns: 50
