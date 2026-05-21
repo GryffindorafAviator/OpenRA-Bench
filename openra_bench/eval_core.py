@@ -20,11 +20,20 @@ from typing import Any, Callable
 import yaml
 from openra_rl_training.training.rust_env_pool import RustEnvPool
 
+from .controller import (
+    Controller,
+    EpisodeContext,
+    as_controller,
+    introspection_source,
+)
 from .rust_adapter import EpisodeSignals, RustObsAdapter
 from .scenarios.schema import CompiledLevel
 from .scenarios.win_conditions import WinContext, evaluate
 
+# A policy is either a bare `agent_fn(render_state, Command) -> [Command]`
+# callable (the legacy shape, still accepted everywhere) or a Controller.
 AgentFn = Callable[[dict, Any], list]
+Policy = "AgentFn | Controller"
 
 
 def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
@@ -136,11 +145,14 @@ def scripted_explore_agent(render_state: dict, Command: Any) -> list:
 
 def run_episode(
     scenario_path: str,
-    agent_fn: AgentFn = scripted_explore_agent,
+    agent_fn: "AgentFn | Controller" = scripted_explore_agent,
     max_turns: int = 40,
     seed: int = 0,
     pool: RustEnvPool | None = None,
 ) -> EpisodeResult:
+    """Run a scenario for a fixed number of turns. `agent_fn` may be a
+    bare `agent_fn(render_state, Command) -> [Command]` callable or any
+    `Controller`; it is coerced through `as_controller()`."""
     owns_pool = pool is None
     if pool is None:
         pool = RustEnvPool(size=1, scenario_path=scenario_path)
@@ -149,12 +161,16 @@ def run_episode(
         adapter = RustObsAdapter()
         obs = env.reset(seed=seed)
         adapter.observe(obs)
+        controller = as_controller(agent_fn)
+        controller.reset(
+            EpisodeContext(seed=seed, max_turns=max_turns)
+        )
         trace: list[dict] = []
         turns = 0
         issued = warned = 0
         for turns in range(1, max_turns + 1):
             rs = adapter.render_state()
-            cmds = agent_fn(rs, env.Command) or [env.Command.observe()]
+            cmds = controller.act(rs, env.Command) or [env.Command.observe()]
             obs, _reward, done, info = env.step(cmds)
             adapter.observe(obs, done=done)
             issued += len(cmds)
@@ -188,13 +204,17 @@ def run_episode(
 
 def run_level(
     compiled: CompiledLevel,
-    agent_fn: AgentFn = scripted_explore_agent,
+    agent_fn: "AgentFn | Controller" = scripted_explore_agent,
     seed: int = 0,
     playback=None,
 ) -> EpisodeResult:
     """Run one scenario-pack level, scoring against its declarative
     win/fail conditions (checked every turn). Outcome maps to the
     `reward_outcome` convention: win=1.0, draw=0.5, loss=0.0.
+
+    `agent_fn` may be a bare `agent_fn(render_state, Command) ->
+    [Command]` callable, a `ModelAgent` bound method, or any
+    `Controller`; it is coerced through `as_controller()`.
     """
     if not compiled.map_supported:
         raise RuntimeError(
@@ -207,6 +227,19 @@ def run_level(
     try:
         adapter = RustObsAdapter()
         adapter.observe(env.reset(seed=seed))
+        # Coerce the policy through the unified Controller contract:
+        # a bare agent_fn, a ModelAgent bound method, or a Controller
+        # all resolve to a Controller the loop drives identically.
+        controller = as_controller(agent_fn)
+        controller.reset(
+            EpisodeContext(
+                pack_id=compiled.pack_id,
+                level=compiled.level,
+                seed=seed,
+                objective=compiled.scenario.description or "",
+                max_turns=compiled.max_turns,
+            )
+        )
         trace: list[dict] = []
         outcome = "draw"
         turns = 0
@@ -242,7 +275,7 @@ def run_level(
         forbidden = {str(t).lower() for t in (compiled.forbidden_tools or [])}
         for turns in range(1, compiled.max_turns + 1):
             rs = adapter.render_state()
-            cmds = agent_fn(rs, env.Command) or [env.Command.observe()]
+            cmds = controller.act(rs, env.Command) or [env.Command.observe()]
             for _cmd in cmds:
                 _tn = _cmd_tool_name(_cmd)
                 if _tn:
@@ -364,8 +397,9 @@ def run_level(
         )
         if playback is not None:
             # Dump the full model⇄env transcript when the agent is a
-            # ModelAgent (bound-method closure exposes the instance).
-            agent_obj = getattr(agent_fn, "__self__", None)
+            # ModelAgent — the Controller layer surfaces the underlying
+            # instance (bound-method __self__ or the Controller itself).
+            agent_obj = introspection_source(controller)
             hist = getattr(agent_obj, "history", None)
             if isinstance(hist, list):
                 playback.write_messages(hist)

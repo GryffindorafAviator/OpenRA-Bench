@@ -486,6 +486,11 @@ class ModelAgent:
             )
         self.history: list[dict] = [{"role": "system", "content": sys_content}]
         self.stats = {"turns": 0, "tool_calls": 0, "empty_replies": 0}
+        # Controller contract (openra_bench/controller.py): a ModelAgent
+        # IS a Controller — it exposes `name`, `reset`, `act` so the
+        # eval loop, the 1v1 harness, and the human-labeling harness can
+        # all drive it interchangeably with any other policy backend.
+        self.name = getattr(cfg, "model", None) or "model"
 
     def _user_message(self, render_state: dict) -> dict:
         # Briefing = vendored training briefing_v2 (one unit/line,
@@ -614,3 +619,16 @@ class ModelAgent:
                 {"role": "tool", "tool_call_id": f"c{i}", "content": "ok"}
             )
         return cmds
+
+    # ── Controller contract ──────────────────────────────────────────
+    def act(self, observation: dict, Command: Any) -> list:
+        """Controller contract — alias of `agent_fn`. Lets a ModelAgent
+        be passed straight to `run_level` / the 1v1 harness in place of
+        a bare `agent_fn` callable."""
+        return self.agent_fn(observation, Command)
+
+    def reset(self, ctx: Any = None) -> None:
+        """Controller contract per-episode hook. A ModelAgent is
+        constructed once per episode — its bounded chat history starts
+        fresh in `__init__` — so reset is a no-op; it exists so the
+        agent structurally satisfies the Controller protocol."""
