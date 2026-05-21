@@ -12,13 +12,26 @@ the base.
 The win predicate makes the commitment decision load-bearing:
 
 * `units_killed_gte:K` ⇒ the agent must field a real fighting force
-  and blunt the rush (a tech investment fields no army → ~2 kills at
-  most from the lone spawn-witness rifleman);
+  and blunt the rush (a tech investment fields no army → ZERO kills:
+  the hard tier's lone spawn-witness rifleman is stance:0 HoldFire
+  and never auto-fires);
 * `building_count_gte:{fact,1}` ⇒ the fact must STILL stand (present-
   tense predicate, not the one-shot `has_building` set — CLAUDE.md
   footgun); stalling or teching up loses the fact to the rush;
 * `within_ticks` paired with `after_ticks: T+1` in the fail clause ⇒
   a non-finisher is a real reachable timeout LOSS, never a draw.
+
+RECALIBRATION NOTE (engine movement fixes — moving units fire AND
+take fire en route, no sprint-past): with the fix a STATIONARY
+Defend rifleman reliably guns down a charging rush as it closes, so
+the hard tier's lone stance:2 spawn-witness e1 could solo the kill
+bar (6-7 kills on a favourable seed) and hand a stall / tech-rush
+play a no-capability WIN. The witness is now stance:0 HoldFire — it
+never auto-fires, so a stall / tech-rush scores ZERO kills and the
+fact is razed (real LOSS). The intended army-rush issues an explicit
+`attack_move` over ALL unit ids (the witness included); an explicit
+order overrides HoldFire, so the witness still contributes to the
+intended play.
 
 The scripted-policy validations prove deterministically that:
 

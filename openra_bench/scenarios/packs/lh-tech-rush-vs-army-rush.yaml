@@ -60,7 +60,12 @@
 #   - hard tier: 2 agent spawn_point groups (NORTH y=12 / SOUTH
 #     y=28) round-robined by seed; the full base is duplicated under
 #     each group, the enemy band has no spawn_point so it always
-#     places (back-compat).
+#     places (back-compat). The lone spawn-witness e1 per group is
+#     stance:0 HoldFire (RECALIBRATION — see the hard overrides):
+#     post-engine-fix a stance:2 Defend witness could solo the kill
+#     bar, so a stall/tech-rush could WIN with no capability; a
+#     HoldFire witness never fires, so only the intended army-rush
+#     scores kills.
 #
 # Validate (no engine / no network):
 #   python3 -m openra_bench.scenarios.validate \
@@ -261,20 +266,30 @@ levels:
         - {type: powr, owner: agent, position: [14, 14], spawn_point: 0}
         - {type: tent, owner: agent, position: [10, 16], spawn_point: 0}
         - {type: weap, owner: agent, position: [16, 12], spawn_point: 0}
-        # One stance:2 (Defend) e1 spawn-witness next to the fact:
+        # One stance:0 (HoldFire) e1 spawn-witness next to the fact:
         # gives the seed-driven start an observable unit so the
         # hard-tier curation test (which reads units_summary) sees
-        # the two distinct latitudes. A single rifleman cannot carry
-        # the kill bar (8) and the fact still falls to the rush, so a
-        # stall/tech-rush play still LOSES.
-        - {type: e1,   owner: agent, position: [12, 14], stance: 2, spawn_point: 0}
+        # the two distinct latitudes. RECALIBRATION (engine movement
+        # fixes): the witness is HoldFire, NOT Defend — with the
+        # engine fix a stationary Defend rifleman now reliably guns
+        # down the charging rush as it closes (moving units take
+        # fire, no sprint-past), and a lone Defend e1 could rack up
+        # 6-7 kills on a favourable seed and satisfy the kill bar for
+        # a stall/tech-rush play (a no-capability WIN). HoldFire
+        # means the witness never auto-fires, so a stall/tech-rush
+        # play scores ZERO kills and the fact is razed → LOSS. The
+        # intended army-rush issues an explicit `attack_move` over
+        # ALL unit ids (the witness included) — an explicit order
+        # overrides HoldFire — so the witness still contributes to
+        # the intended play.
+        - {type: e1,   owner: agent, position: [12, 14], stance: 0, spawn_point: 0}
         # spawn_point 1 — SOUTH base (same formation, in-bounds).
         - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
         - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
         - {type: powr, owner: agent, position: [14, 30], spawn_point: 1}
         - {type: tent, owner: agent, position: [10, 32], spawn_point: 1}
         - {type: weap, owner: agent, position: [16, 28], spawn_point: 1}
-        - {type: e1,   owner: agent, position: [12, 26], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 26], stance: 0, spawn_point: 1}
         # Two fast rush bands at distinct latitudes — both visible to
         # rusher targeting (it always charges the agent centroid).
         # Close at x=48 so both bands land fast regardless of which
@@ -289,8 +304,9 @@ levels:
     win_condition:
       all_of:
         # Kill bar 7 of the 12-strong total force: an intended army
-        # buy clears 8-10; stall and tech-rush top out at ~2 (the
-        # lone stance:2 spawn-witness e1) before the fact falls.
+        # buy clears 8-9; stall and tech-rush score ZERO (the lone
+        # spawn-witness e1 is stance:0 HoldFire and never fires) and
+        # the fact is razed → LOSS.
         - units_killed_gte: 7
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 4800
