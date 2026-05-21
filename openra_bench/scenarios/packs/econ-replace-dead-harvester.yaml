@@ -28,13 +28,16 @@
 #    on-nearest-foe failure mode that defeats `hunt` here (with any
 #    pre-placed defender closer to the attack group than the harvs,
 #    `hunt` re-targets to the defender and the harv never dies).
-#  - Engine 4tnk (dps 40, range 5, hp 600) vs harv (hp 600, unarmed)
-#    kills the harv in ~15 ticks. The own 3tnk pair (dps 30 each at
-#    range 5) is placed at distance 3-4 from the 4tnk's firing
-#    position, just inside sight (default 4 cells for non-buildings),
-#    so they engage on turn 1: 60 dps vs 4tnk hp 600 ⇒ 10 ticks to
-#    kill, BUT the 4tnk lands ~10 ticks of fire first ⇒ exactly the
-#    nearest harv (hp 600) dies, then the 4tnk is wiped.
+#  - The own 3tnk defenders are pre-placed at distance 3-4 from
+#    the 4tnk's firing position with explicit stance:2 (Defend):
+#    they auto-fire on the inbound 4tnk the moment it is in weapon
+#    range but never advance. The 4tnk lands enough fire to kill
+#    exactly the nearest harv before the 3tnk pack wipes it. NOTE
+#    (recalibration 2026-05-20): the engine's four-distinct stance
+#    semantics make stance:3 (AttackAnything) an active HUNTER —
+#    idle defenders on stance:3 walk the whole map and raze the
+#    persistent far enemy fact, collapsing the run to a DRAW. All
+#    3tnk defenders therefore carry explicit stance:2.
 #  - Tick budget (CLAUDE.md): max_turns=60 ⇒ ceiling tick 5403 ⇒
 #    within_ticks 5400 and after_ticks 5401 both fit (deadline bites
 #    as a reachable LOSS, not a draw).
@@ -126,13 +129,17 @@ levels:
         - {type: harv, owner: agent, position: [14, 18]}
         - {type: harv, owner: agent, position: [14, 20]}
         - {type: harv, owner: agent, position: [14, 22]}
-        # Two own 3tnk defenders flanking the patches at range 5.
-        # Engage the inbound 4tnk on Defend stance auto-engage.
+        # Two own 3tnk defenders flanking the patches at range 5,
+        # explicitly stance:2 (Defend) — auto-fire on the inbound
+        # 4tnk when it is in weapon range, but never advance on
+        # their own (stance:3 would auto-HUNT the whole map and raze
+        # the persistent far enemy fact, collapsing the run to a
+        # DRAW on engine auto-done).
         # DPS race: 2× 3tnk (dps 60) vs 4tnk hp 600 = 10 ticks; 4tnk
         # (dps 40) lands ~10 ticks of fire first ⇒ exactly the
         # nearest harv (hp 600) dies, then the 4tnk is wiped.
-        - {type: '3tnk', owner: agent, position: [15, 21]}
-        - {type: '3tnk', owner: agent, position: [15, 23]}
+        - {type: '3tnk', owner: agent, position: [15, 21], stance: 2}
+        - {type: '3tnk', owner: agent, position: [15, 23], stance: 2}
         # Two ore patches east of the proc.
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 22]}
@@ -184,8 +191,8 @@ levels:
         - {type: harv, owner: agent, position: [14, 18]}
         - {type: harv, owner: agent, position: [14, 20]}
         - {type: harv, owner: agent, position: [14, 22]}
-        - {type: '3tnk', owner: agent, position: [15, 21]}
-        - {type: '3tnk', owner: agent, position: [15, 23]}
+        - {type: '3tnk', owner: agent, position: [15, 21], stance: 2}
+        - {type: '3tnk', owner: agent, position: [15, 23], stance: 2}
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 22]}
         - {type: '4tnk', owner: enemy, position: [18, 22]}
@@ -247,15 +254,15 @@ levels:
         - {type: harv, owner: agent, position: [22, 18], spawn_point: 0}
         - {type: harv, owner: agent, position: [22, 20], spawn_point: 0}
         - {type: harv, owner: agent, position: [22, 22], spawn_point: 0}
-        - {type: '3tnk', owner: agent, position: [26, 18], spawn_point: 0}
-        - {type: '3tnk', owner: agent, position: [26, 20], spawn_point: 0}
-        - {type: '3tnk', owner: agent, position: [26, 22], spawn_point: 0}
-        - {type: '3tnk', owner: agent, position: [28, 20], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [26, 18], stance: 2, spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [26, 20], stance: 2, spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [26, 22], stance: 2, spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [28, 20], stance: 2, spawn_point: 0}
         # Spawn-distinguishing rear guard at NORTH y=14 (matches base
         # orientation); the SOUTH spawn places it at y=26. This is
         # what makes `unit_positions` differ across seeds (the hard-
         # tier curation contract checked by test_hard_tier.py).
-        - {type: '3tnk', owner: agent, position: [13, 14], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [13, 14], stance: 2, spawn_point: 0}
         - {type: mine, owner: neutral, position: [22, 18], spawn_point: 0}
         - {type: mine, owner: neutral, position: [22, 22], spawn_point: 0}
         # Spawn 1 — SOUTH base. Same central harv/defender geometry,
@@ -266,26 +273,27 @@ levels:
         - {type: harv, owner: agent, position: [22, 18], spawn_point: 1}
         - {type: harv, owner: agent, position: [22, 20], spawn_point: 1}
         - {type: harv, owner: agent, position: [22, 22], spawn_point: 1}
-        - {type: '3tnk', owner: agent, position: [26, 18], spawn_point: 1}
-        - {type: '3tnk', owner: agent, position: [26, 20], spawn_point: 1}
-        - {type: '3tnk', owner: agent, position: [26, 22], spawn_point: 1}
-        - {type: '3tnk', owner: agent, position: [28, 20], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 18], stance: 2, spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 20], stance: 2, spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 22], stance: 2, spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [28, 20], stance: 2, spawn_point: 1}
         # Spawn-distinguishing rear guard at SOUTH y=26.
-        - {type: '3tnk', owner: agent, position: [13, 26], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [13, 26], stance: 2, spawn_point: 1}
         - {type: mine, owner: neutral, position: [22, 18], spawn_point: 1}
         - {type: mine, owner: neutral, position: [22, 22], spawn_point: 1}
         # Two staggered raider waves. Both 4tnks land on every seed
-        # (CLAUDE.md: enemy actors are NOT spawn-filtered). To keep
-        # SEED PARITY (the same kill geometry across NORTH and SOUTH
-        # spawn groups), one 4tnk arrives from north (y=12, near the
-        # NORTH spawn's harv lane) and one from south (y=28, near the
-        # SOUTH spawn's harv lane). Each spawn group sees exactly one
-        # 4tnk on its own harv y-line plus one 4tnk on the far side
-        # (which has no targets to attack and slowly walks across).
-        # Staggered by x distance: close 4tnk at x=32 (~1 decision
-        # turn to engagement); far 4tnk at x=100 (~2-3 decision turns
-        # later). Each spawn must replace BOTH dead harvs.
-        - {type: '4tnk', owner: enemy, position: [32, 20]}
+        # (CLAUDE.md: enemy actors are NOT spawn-filtered) and beeline
+        # the central y=18..22 harv cluster. Staggered by x distance:
+        # the close 4tnk at x=45 reaches the harv lane after the
+        # stance:2 3tnk screen has had ~1 decision turn to converge,
+        # so it lands exactly ONE harv kill before the 3tnk pack
+        # wipes it; the far 4tnk at x=100 arrives ~2 decision turns
+        # later as a clean second wave and claims a second harv. The
+        # agent must replace BOTH dead harvs (2200 reserve = 2 harv).
+        # NB the close 4tnk at x=32 (the pre-balance-fix position)
+        # now overruns all three harvs before any replan is possible
+        # — x=45 restores the staggered-and-survivable bar.
+        - {type: '4tnk', owner: enemy, position: [45, 20]}
         - {type: '4tnk', owner: enemy, position: [100, 20]}
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:

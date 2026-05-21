@@ -124,6 +124,31 @@ def test_uses_raider_bot():
     assert bot == "raider", f"expected raider bot, got {bot!r}"
 
 
+def test_defenders_are_stance_2_defend():
+    """The pre-placed 3tnk defenders must carry explicit stance:2
+    (Defend). The engine's four-distinct stance semantics make
+    stance:3 (AttackAnything) an active HUNTER — idle defenders on
+    stance:3 walk the whole map after wiping the raider 4tnk and raze
+    the persistent far enemy fact, collapsing the run to a DRAW on
+    engine auto-done (so stall would NOT be a real LOSS). stance:2
+    auto-fires on an in-range enemy but never advances."""
+    pack = load_pack(PACK)
+    for lvl in ("easy", "medium", "hard"):
+        c = compile_level(pack, lvl)
+        defs_ = [a for a in c.scenario.actors
+                 if a.owner == "agent" and a.type == "3tnk"]
+        assert defs_, f"{lvl}: pack has no 3tnk defenders"
+        for d in defs_:
+            stance = getattr(d, "stance", None)
+            if stance is None:
+                raw = getattr(d, "model_extra", None) or {}
+                stance = raw.get("stance")
+            assert stance == 2, (
+                f"{lvl}: 3tnk defender at {d.position} must be "
+                f"stance:2 (Defend); got stance={stance!r}"
+            )
+
+
 def test_all_tiers_have_reachable_deadlines():
     """tick-alignment idiom: within_ticks ≤ ceiling AND
     after_ticks ≤ ceiling AND within_ticks == after_ticks (so a
