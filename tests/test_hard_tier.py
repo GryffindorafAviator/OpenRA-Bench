@@ -634,6 +634,15 @@ UPGRADED = [
     # symmetric across y=20 so either spawn faces an equivalent
     # column-vs-wedge decision and no memorised opening generalises.
     "combat-formation-tank-wedge",
+    # Wave-11 action pack — hold a narrow pass: 4× 2tnk anchor a 3-cell
+    # silo-walled corridor so a larger hunt force can only funnel ~3
+    # units abreast (military chokepoint defense / Thermopylae / SC2
+    # ramp hold). Hard tier defines two ENEMY-side spawn_point groups
+    # (NORTH cluster y=15..18 / SOUTH cluster y=22..25) round-robined by
+    # seed; the funnel approach flips per seed, but the corridor is the
+    # only path so the hold-the-choke doctrine generalises while a
+    # memorised opening does not.
+    "combat-hold-chokepoint",
     # Wave-6 perception pack — early-warning intrusion detection
     # paired with targeted intercept (SC2 early-warn scout /
     # NORAD early-warning / IDS / military reconnaissance-in-force
