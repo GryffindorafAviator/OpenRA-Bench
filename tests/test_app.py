@@ -1333,10 +1333,11 @@ class TestPlayTab:
         assert _play_objective_md(None) == ""
 
     def test_play_units_df_empty_without_session(self):
-        from app import _play_units_df
+        from app import _PLAY_UNIT_COLS, _play_units_df
 
         df = _play_units_df(None, [])
-        assert list(df.columns) == [
-            "sel", "id", "type", "x", "y", "hp%", "activity"
-        ]
+        assert list(df.columns) == _PLAY_UNIT_COLS
         assert len(df) == 0
+        assert _PLAY_UNIT_COLS == [
+            "sel", "unit", "type", "cell", "hp", "status"
+        ]

@@ -1089,34 +1089,47 @@ def _play_objective_md(sess) -> str:
     return f"### 🎯 Objective\n{_md_escape(obj)}"
 
 
+_PLAY_UNIT_COLS = ["sel", "unit", "type", "cell", "hp", "status"]
+
+
 def _play_units_df(sess, sel):
-    """Table of the human's own units — id, type, cell, hp, activity —
-    with a ✓ on the currently-selected ones. Disambiguates units that
-    overlap into a single dot on the minimap."""
-    cols = ["sel", "id", "type", "x", "y", "hp%", "activity"]
+    """Table of the human's own units. Selected units are marked '▶' and
+    sorted to the top so the current selection is obvious. `hp` is the
+    0-1 fraction the engine reports, shown as a percentage."""
     if sess is None:
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=_PLAY_UNIT_COLS)
     try:
         rs = sess.render_state()
     except Exception:  # noqa: BLE001
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=_PLAY_UNIT_COLS)
     selset = {str(s) for s in (sel or [])}
     rows = []
     for u in rs.get("units_summary", []) or []:
         if not isinstance(u, dict):
             continue
         uid = str(u.get("id", ""))
-        hp = u.get("hp", u.get("hp_pct", ""))
-        rows.append([
-            "✓" if uid in selset else "",
-            uid,
-            u.get("actor_type") or u.get("type") or "?",
-            u.get("cell_x"),
-            u.get("cell_y"),
-            hp,
-            u.get("activity", ""),
-        ])
-    return pd.DataFrame(rows, columns=cols)
+        try:
+            hp_txt = f"{int(round(float(u.get('hp', 1.0)) * 100))}%"
+        except (TypeError, ValueError):
+            hp_txt = "?"
+        is_sel = uid in selset
+        rows.append({
+            "sel": "▶" if is_sel else "",
+            "unit": uid,
+            "type": u.get("type") or u.get("actor_type") or "?",
+            "cell": f"({u.get('cell_x')}, {u.get('cell_y')})",
+            "hp": hp_txt,
+            "status": u.get("activity", "") or "idle",
+            "_sel": is_sel,
+        })
+    df = pd.DataFrame(rows, columns=_PLAY_UNIT_COLS + ["_sel"])
+    # Selected units float to the top so the selection is unmistakable.
+    df = (
+        df.sort_values("_sel", ascending=False, kind="stable")
+        .drop(columns="_sel")
+        .reset_index(drop=True)
+    )
+    return df
 
 
 def _play_status_md(sess) -> str:
@@ -1130,6 +1143,8 @@ def _play_status_md(sess) -> str:
 
 
 def _play_briefing_md(sess, sel, queue, note: str = "") -> str:
+    """The turn panel: current selection + queued orders FIRST, then the
+    exact text briefing the model is given for this turn."""
     if sess is None:
         return ""
     try:
@@ -1143,9 +1158,10 @@ def _play_briefing_md(sess, sel, queue, note: str = "") -> str:
     head = f"{note}\n\n" if note else ""
     return (
         f"{head}"
-        f"```\n{brief}\n```\n\n"
         f"**Selected units:** {sel_txt}  \n"
-        f"**Queued this turn:** {q_txt}"
+        f"**Queued this turn:** {q_txt}\n\n"
+        f"**Turn briefing — exactly what the model sees:**\n"
+        f"```\n{brief}\n```"
     )
 
 
@@ -1491,9 +1507,8 @@ def build_app() -> gr.Blocks:
                 )
                 play_brief = gr.Markdown()
                 play_units = gr.Dataframe(
-                    label="Your units (✓ = selected)",
-                    headers=["sel", "id", "type", "x", "y", "hp%",
-                             "activity"],
+                    label="Your units (▶ = selected, shown at top)",
+                    headers=_PLAY_UNIT_COLS,
                     interactive=False, wrap=True,
                 )
                 with gr.Row():
