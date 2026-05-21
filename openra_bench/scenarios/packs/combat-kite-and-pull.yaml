@@ -1,0 +1,254 @@
+# combat-kite-and-pull — ACTION, kiting micro: hit-and-PULL a slow
+# heavy enemy with a fast light strike force (Wave-12).
+#
+# The capability under test is the STRIKE-then-PULL cycle: a fast
+# light unit closes to weapon range, FIRES, then retreats out of the
+# heavy's lethal close-range window BEFORE the heavy can fire back —
+# and repeats. The heavy out-trades the light force head-on, so
+# standing and fighting LOSES; the light force's speed advantage is
+# the only edge, and it only pays off if the agent strings together
+# the move-away + attack_unit cycle every turn.
+#
+# Real-world anchors:
+#   • SC2 kiting micro (vulture/muta vs marines, stalker-vs-zealot):
+#     fast unit fires, steps back before the slower foe closes,
+#     re-engages. The "blink-back" / micro-dance.
+#   • Cavalry skirmish doctrine: light cavalry charges to contact,
+#     looses a volley, then WHEELS AWAY before the heavier line can
+#     engage — fire-and-maneuver, never a sustained melee.
+#   • Economy-of-force: a small mobile force defeats a heavier,
+#     concentrated foe by exploiting a mobility asymmetry rather
+#     than by mass.
+#
+# Distinct from `combat-kite-jeep-vs-tank` (Wave-4): that pack frames
+# the trade as "preserve ≥2 of 3"; this pack tightens the bar to a
+# perfect PULL — medium and hard require ALL THREE raiders to survive
+# (`own_units_gte:3` — a sloppy kite that trades even one raider for
+# the heavy LOSES) and carries an explicit "no-disengage" brute /
+# wrong-path policy in its four-policy bar. The shared idiom —
+# diagonal-lag geometry, hunt-bot heavy, the move-away + attack_unit
+# cycle — is the proven engine-realised kite test
+# (`combat-kite-jeep-vs-tank` medium/hard).
+#
+# Engine-realised pairing note: in OpenRA-Rust the literal jeep MG is
+# anti-infantry and does not dent heavy armour (engine weapons
+# table), so the fast "raider" is the allied medium tank 2tnk
+# (faster than the soviet 3tnk heavy, and its cannon CAN damage heavy
+# armour). The capability under test is the kite-and-pull cycle —
+# the unit pairing is the vehicle for that test, not the point.
+#
+# The four-policy bar (CLAUDE.md "no defect, no cheat, no draw"):
+#   • stall (observe only)            → LOSS. The raiders are
+#     stance:1 (ReturnFire) — they auto-return fire ONLY after the
+#     heavy shoots them, but a passive stack that never kites is
+#     out-traded and overrun by the closing heavy force → the
+#     survival bar fails and/or the `after_ticks` deadline bites.
+#   • stand-and-fight (attack_move onto the heavy, never retreat)
+#     → LOSS. The heavy cannon out-trades the raider stack head-on;
+#     the raiders die before the heavy's HP runs out → the survival
+#     bar (own_units_gte) fails.
+#   • brute / wrong-path (one attack_move order far east, chase the
+#     heavy with no disengage) → LOSS. Same close-range trade as
+#     stand-and-fight; no kite cycle ⇒ the raiders are overrun.
+#   • intended kite-and-pull (each turn: if the heavy is within ~6
+#     cells, MOVE the raiders AWAY along the lane; else attack_unit
+#     the heavy; repeat) → WIN. The speed advantage keeps the heavy
+#     at the edge of the raiders' fire envelope, whittling it down
+#     across fire-then-retreat cycles while preserving the survival
+#     bar.
+#
+# Topology (rush-hour-arena, 128×40, playable x 2..126, y 2..38):
+#   • Raiders stage centre-west, spread across three cells (not
+#     stacked — a stack pin-piles in retreat).
+#   • The heavy starts centre-east on the MID latitude (y=20) under
+#     the hunt bot so it pursues the raiders' centroid — the agent
+#     must out-pace it, and the hunt advance is what brings the
+#     heavy into vision so the kite cycle has a target.
+#   • Raiders stage OFF the heavy's latitude (a north corridor on
+#     easy/medium) so the kite cycle has a reactive y-axis window.
+#   • Persistent unarmed enemy `fact` far east keeps the episode
+#     alive past the heavy's death so the win/fail evaluator runs
+#     (CLAUDE.md auto-done footgun).
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_combat_kite_and_pull.py -q
+
+meta:
+  id: combat-kite-and-pull
+  title: 'Combat Micro — Kite and Pull a Slow Heavy Force'
+  capability: action
+  real_world_meaning: >
+    A fast light strike force must destroy a slower, heavier enemy
+    that out-trades it head-on. The only winning play is the
+    hit-and-PULL cycle: each turn, strike the heavy at weapon range,
+    then RETREAT the strike force out of the heavy's lethal
+    close-range window before it can fire back — and repeat. Standing
+    and fighting LOSES: the heavy cannon collapses the light force's
+    HP before its own runs out. The skill being measured is combat
+    micro under a mobility asymmetry — exploit the speed edge by
+    stringing together move-away + attack cycles instead of issuing
+    one beeline charge.
+  robotics_analogue: >
+    A fast/light agent team defeating a slow/heavy adversary by
+    exploiting a mobility asymmetry: a closed-loop evade-then-engage
+    policy rather than a one-shot commit. The per-turn decision is
+    proximity control — stay outside the adversary's lethal radius
+    while delivering effect at standoff range.
+  benchmark_anchor:
+    - "SC2 kiting micro"
+    - "cavalry skirmish doctrine"
+    - "military fire-and-maneuver doctrine"
+    - "economy-of-force"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  # `hunt` bot: the heavy actively PURSUES the raiders' centroid so
+  # the engagement starts on contact (no fog-blind opening) and the
+  # kite cycle has a moving target to pull. A stance:2 heavy left
+  # idle in the fog would never be discoverable; the hunt advance is
+  # what makes the heavy visible AND what the agent must out-pace.
+  enemy: {faction: soviet, cash: 0, bot_type: hunt}
+  tools: [observe, move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 7000}
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # Bare kite-and-pull skill: 3 medium-tank raiders vs ONE heavy
+  # (3tnk). Raiders stage off the heavy's latitude (north corridor
+  # y=10) so the kite cycle has a reactive window. Survival bar ≥2
+  # raiders. Stall LOSES (HoldFire raiders never engage → kill bar
+  # unmet → deadline). Stand-and-fight / brute LOSE (the heavy
+  # cannon out-trades the stack head-on).
+  easy:
+    description: >
+      Three fast medium-tank raiders (2tnk) stage at the centre-west
+      north corridor (y=10). ONE enemy heavy tank (3tnk) sits
+      centre-east on the mid latitude (x≈80, y=20). The heavy
+      out-trades your raiders at close range — standing and fighting
+      LOSES. The only winning play is the kite-and-PULL cycle: each
+      turn, if the heavy has closed within ~6 cells, MOVE your
+      raiders a few cells AWAY along the lane; otherwise attack_unit
+      the heavy from range; repeat. Kill the heavy and keep at least
+      TWO raiders alive before tick 4500. Stall (observe only) LOSES
+      — your raiders hold fire and never engage. Standing still or
+      bruting east with no disengage LOSES — the heavy cannon
+      collapses the stack.
+    overrides:
+      actors:
+        # RAIDERS — 3 medium tanks, stance:1 (ReturnFire): they
+        # return fire when shot but never open an engagement or
+        # advance on their own, so the agent must drive the kite
+        # cycle. Spread across three cells (a stack pin-piles in
+        # retreat).
+        - {type: 2tnk, owner: agent, position: [28,  9], stance: 1}
+        - {type: 2tnk, owner: agent, position: [30, 10], stance: 1}
+        - {type: 2tnk, owner: agent, position: [28, 11], stance: 1}
+        # THE HEAVY — soviet 3tnk under the hunt bot: it pursues
+        # the raiders' centroid. Mid latitude staging.
+        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2}
+        # Persistent unarmed far-east enemy marker — anti-DRAW.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {own_units_gte: 2}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 2}}
+    max_turns: 51
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: the survival bar tightens to ALL THREE
+  # raiders (`own_units_gte:3`). The kite-and-pull must be PERFECT —
+  # a sloppy cycle that lets the heavy land even one cannon shot
+  # trades a raider and busts the bar. Same single-heavy diagonal-lag
+  # geometry as easy (two heavies are unkiteable by a 3-raider force
+  # in the engine combat sheet — verified — so the medium escalation
+  # is bar tightness, not enemy count).
+  medium:
+    description: >
+      Three medium-tank raiders (2tnk) stage at the centre-west
+      north corridor (y=10). ONE enemy heavy tank (3tnk) starts
+      centre-east on the mid latitude (x≈80, y=20) and HUNTS your
+      raiders. The heavy out-trades your raiders head-on. Win by
+      kiting: each turn, if the heavy is within ~6 cells MOVE your
+      raiders AWAY along the lane, else attack_unit the heavy;
+      repeat. Kill the heavy and keep ALL THREE raiders alive
+      before tick 4500 — a kite that lets the heavy land even one
+      cannon shot trades a raider and LOSES. Stall, stand-and-fight,
+      and brute attack_move all LOSE.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [28,  9], stance: 1}
+        - {type: 2tnk, owner: agent, position: [30, 10], stance: 1}
+        - {type: 2tnk, owner: agent, position: [28, 11], stance: 1}
+        # ONE heavy on the mid latitude.
+        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 51
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. Tighter deadline (~3600 ticks) — the kite cadence must be
+  #      efficient: dawdle and the clock LOSES.
+  #   2. TWO agent spawn_point groups (NORTH y=10 / SOUTH y=30
+  #      corridor) round-robined by seed, so the pull vector flips
+  #      per seed and a memorised "always retreat on y=10" opening
+  #      cannot generalise. The heavy sits on the mid latitude
+  #      (y=20) between the corridors so both spawns face a
+  #      symmetric engagement geometry. The all-three survival bar
+  #      carries over from medium.
+  hard:
+    description: >
+      Three medium-tank raiders (2tnk) stage at ONE of two
+      centre-west corridors (NORTH y=10 OR SOUTH y=30, chosen by
+      seed). ONE enemy heavy tank (3tnk) starts centre-east on the
+      mid latitude (y=20) between the two corridors and HUNTS your
+      raiders. The heavy out-trades your raiders head-on; the only
+      winning play is the kite-and-PULL cycle — when the heavy
+      closes within ~6 cells MOVE your raiders AWAY along your lane,
+      else attack_unit the heavy; repeat. Kill the heavy and keep
+      ALL THREE raiders alive before tick 3600. Stall,
+      stand-and-fight, and brute attack_move all LOSE. The start
+      corridor varies by seed so a memorised opening cannot
+      generalise.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH corridor (y=10)
+        - {type: 2tnk, owner: agent, position: [28,  9], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [30, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [28, 11], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH corridor (y=30)
+        - {type: 2tnk, owner: agent, position: [28, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [30, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [28, 31], stance: 1, spawn_point: 1}
+        # One heavy centred on the mid latitude — symmetric
+        # engagement geometry from either spawn corridor.
+        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {own_units_gte: 3}
+        - {within_ticks: 3600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {own_units_gte: 3}}
+    max_turns: 41
