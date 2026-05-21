@@ -1,21 +1,29 @@
 """coord-cover-and-move — bounding overwatch across a centre fire zone.
 
 The bar (binding):
-- stall LOSES on every level + every seed (after_ticks fires);
-- single-squad-only LOSES on every level + every seed (the lone squad
-  absorbs the cluster's full fire AND the other squad never reaches
-  the win region — the n=4 region clause is unreachable);
+- stall LOSES on every level + every seed (after_ticks timeout);
+- both-charge-through-the-centre LOSES on every level + every seed
+  (the heavy-tank brawl busts the attrition cap);
+- single-squad-only LOSES on every level + every seed (half the force
+  idle → the n=4 region clause is unreachable);
+- the intended bound-and-cover (periphery route around the fire zone)
+  WINS on every level + every seed (the pack is solvable);
 - non-win is a real reachable timeout LOSS via the `after_ticks` fail
   clause (no DRAW degeneracy);
 - hard ships ≥2 `spawn_point` groups (seed-driven start variation).
 
-The intended bound-and-cover policy is checked against the model
-in production-grade rollouts rather than via a fragile scripted
-emulation. Engine combat lacks formal suppression mechanics, so a
-scripted "fire from cover" model cannot exactly reproduce the
-doctrinal advantage; the bounding-overwatch semantic is what the
-prose+geometry advertise, and the engine-level LOSS bar for the
-brute / lazy / stall policies is what the unit tests enforce.
+Recalibrated after the engine balance pass (armor-class weapon
+selection + stance + parallel-production + pbox-fires fixes): the
+original design assumed a dense anti-tank-infantry cluster could
+out-trade a 6-tank charge, but post-fix medium tanks decisively
+out-DPS infantry — a 6-tank column charging even a 24-strong e3
+swarm one-shots the rockets and crosses with ZERO losses, collapsing
+the "mass-charge loses" discriminator. The fire zone is now ANCHORED
+BY 4tnk HEAVY TANKS (1 easy / 2 medium+hard): the heavy-tank brawl is
+what punishes a centre charge, while the e3/e1 infantry keep the
+anti-tank-infantry doctrine and the range geometry meaningful. All
+enemy units are stance:2 Defend (auto-fire in range, STATIONARY) so a
+staller is a clean timeout LOSS, not chased down by hunters.
 
 Validation is scripted (no model / network).
 """
@@ -181,8 +189,8 @@ def test_two_squads_six_tanks_each_level():
 
 def test_fire_zone_uses_anti_tank_rocket_on_medium_and_hard():
     """The fire zone's lethality is the load-bearing property —
-    medium / hard must use e3 (anti-tank rocket soldier, dps12 vs
-    armour) at the centre cluster. Easy may use e1 (forgiving)."""
+    medium / hard must use e3 (anti-tank rocket soldier) at the
+    centre cluster. Easy may use e1 (forgiving)."""
     pack = load_pack(PACK_PATH)
     for lvl in ("medium", "hard"):
         c = compile_level(pack, lvl)
@@ -192,6 +200,43 @@ def test_fire_zone_uses_anti_tank_rocket_on_medium_and_hard():
         )
         # Persistent far enemy marker (engine auto-done mitigation).
         assert "fact" in types, f"{lvl}: needs persistent enemy fact"
+
+
+def test_fire_zone_anchored_by_heavy_tank():
+    """Post-engine-balance-pass invariant: medium tanks out-DPS
+    infantry, so the centre fire zone is anchored by 4tnk heavy
+    tank(s) — the heavy-tank brawl is what punishes a centre charge.
+    Every level must carry at least one enemy 4tnk; medium and hard
+    carry two."""
+    pack = load_pack(PACK_PATH)
+    for lvl, want in (("easy", 1), ("medium", 2), ("hard", 2)):
+        c = compile_level(pack, lvl)
+        n4tnk = sum(
+            1 for a in c.scenario.actors
+            if a.owner == "enemy" and a.type == "4tnk"
+        )
+        assert n4tnk >= want, (
+            f"{lvl}: fire zone must be anchored by ≥{want} enemy 4tnk "
+            f"(heavy-tank brawl), got {n4tnk}"
+        )
+
+
+def test_enemy_fire_zone_is_stationary_defend():
+    """All enemy fire-zone units are stance:2 Defend (auto-fire in
+    range but never advance) so a staller is a clean reachable
+    timeout LOSS rather than being hunted down — and the periphery
+    bounding lane stays open (a stance:3 hunter would chase the
+    bounding squad off its route)."""
+    pack = load_pack(PACK_PATH)
+    for lvl in ("easy", "medium", "hard"):
+        c = compile_level(pack, lvl)
+        for a in c.scenario.actors:
+            if a.owner != "enemy" or a.type == "fact":
+                continue
+            assert a.stance == 2, (
+                f"{lvl}: enemy fire-zone actor {a.type} at {a.position} "
+                f"must be stance:2 Defend, got stance={a.stance}"
+            )
 
 
 # ── engine-driven scripted policies ────────────────────────────────
@@ -211,20 +256,63 @@ def _stall(rs, Command):
     return [Command.observe()]
 
 
+def _both_charge(rs, Command):
+    """Brute: all 6 tanks attack_move straight through the centre of
+    the map toward the eastern win region. The column drives into the
+    centre fire zone (the heavy-tank brawl + rocket fire) and busts
+    the attrition cap → LOSS on every level / seed."""
+    units = _own_units(rs)
+    if not units:
+        return [Command.observe()]
+    return [Command.attack_move(_own_ids(rs), 100, 20)]
+
+
 def _single_squad_only(rs, Command):
-    """Only the squad on the NORTHERN half (cell_y < 20) crosses; the
-    southern squad is idle. Half the force never reaches the win
-    region, so the n=4 clause is unreachable → LOSS on every level
-    / seed."""
+    """Wrong-path: only ONE squad crosses; the other is idle. The
+    crossing squad is the UPPER HALF of the force by the agent's own
+    median latitude (spawn-aware so it is genuinely half the force
+    whichever spawn group the seed selects). Half the force never
+    reaches the win region, so the n=4 region clause is unreachable
+    → LOSS on every level / seed."""
+    units = _own_units(rs)
+    if not units:
+        return [Command.observe()]
+    ys = sorted(u["cell_y"] for u in units)
+    mid = ys[len(ys) // 2]
+    cmds = []
+    for u in units:
+        if u["cell_y"] < mid:
+            cmds.append(Command.move_units([str(u["id"])], 100, 20))
+        else:
+            cmds.append(Command.stop([str(u["id"])]))
+    return cmds
+
+
+def _bound_and_cover(rs, Command):
+    """Intended bounding-overwatch proxy: route every tank through the
+    FAR periphery (rise to y≈6 north / y≈34 south WEST of the fire
+    zone, traverse the periphery, then converge on the eastern win
+    region). The squads cross OUTSIDE the centre fire zone entirely
+    and take zero losses → WIN on every level / seed. This confirms
+    the pack is solvable; the doctrinal cover/move role-alternation
+    is what the prose + geometry advertise."""
     units = _own_units(rs)
     if not units:
         return [Command.observe()]
     cmds = []
     for u in units:
-        if u["cell_y"] < 20:
-            cmds.append(Command.move_units([str(u["id"])], 100, 20))
+        uid = str(u["id"])
+        ux, uy = u["cell_x"], u["cell_y"]
+        peri_y = 6 if uy < 20 else 34
+        if ux < 30:
+            # rise to the periphery WEST of the fire zone longitude
+            cmds.append(Command.move_units([uid], 35, peri_y))
+        elif ux < 80:
+            # traverse the periphery past the fire zone
+            cmds.append(Command.move_units([uid], 85, peri_y))
         else:
-            cmds.append(Command.stop([str(u["id"])]))
+            # converge on the eastern win region
+            cmds.append(Command.move_units([uid], 100, 20))
     return cmds
 
 
@@ -243,18 +331,30 @@ def test_stall_loses(level, seed):
     )
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_both_charge_loses(level, seed):
+    """Brute both-charge through the centre fire zone must LOSE on
+    every level / seed: the column drives into the heavy-tank brawl
+    and busts the attrition cap (≥2 lost easy/medium, ≥1 lost hard)."""
+    pytest.importorskip("openra_train")
+    from openra_bench.eval_core import run_level
+
+    c = compile_level(load_pack(PACK_PATH), level)
+    r = run_level(c, _both_charge, seed=seed)
+    assert r.outcome == "loss", (
+        f"{level} seed={seed}: both-charge through the centre must LOSE "
+        f"(heavy-tank brawl busts the attrition cap), got {r.outcome} "
+        f"(losses={r.signals.units_lost})"
+    )
+
+
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_single_squad_only_loses(level, seed):
     """Only one squad crosses — half the force idle, n=4 region
-    clause unreachable, and on medium/hard the lone column is
-    chewed up by the e3 cluster (so the cap also busts on top of
-    region-clause failure). Easy excluded: e1 rifle is too weak
-    to kill 2tnk armour AND the engine ends at max_turns 50 with
-    tick≈4173 < after_ticks 4501 ⇒ DRAW degeneracy on easy with
-    this idle-half policy. Documented bare-skill tier limitation;
-    matches SCENARIO_REVIEW_CHECKLIST.md note that "inert anti-
-    cheat teeth are acceptable on easy"."""
+    clause unreachable; the lone column also takes losses crossing
+    the centre fire zone. LOSS on every level / seed."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
@@ -263,5 +363,24 @@ def test_single_squad_only_loses(level, seed):
     assert r.outcome == "loss", (
         f"{level} seed={seed}: single-squad must LOSE (half force idle "
         f"→ n=4 region unreachable), got {r.outcome} "
+        f"(losses={r.signals.units_lost})"
+    )
+
+
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_bound_and_cover_wins(level, seed):
+    """The intended bounding-overwatch route (cross the fire zone via
+    the far periphery, not through the centre) must WIN on every level
+    / seed — confirms the pack is solvable and the no-cheat bar is not
+    achieved by making the scenario unwinnable."""
+    pytest.importorskip("openra_train")
+    from openra_bench.eval_core import run_level
+
+    c = compile_level(load_pack(PACK_PATH), level)
+    r = run_level(c, _bound_and_cover, seed=seed)
+    assert r.outcome == "win", (
+        f"{level} seed={seed}: intended bound-and-cover (periphery "
+        f"route) must WIN, got {r.outcome} after {r.turns} turns "
         f"(losses={r.signals.units_lost})"
     )
