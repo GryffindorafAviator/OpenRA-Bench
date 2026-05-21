@@ -1,0 +1,415 @@
+# mfb-rotating-production-pressure.yaml
+#
+# REASONING capability — Wave-10 "multi-base load balancing under
+# attack". The agent owns TWO complete bases (WEST at x=15, EAST at
+# x=85), each a fact + weap + proc + powr. Enemy raid bands ALTERNATE
+# between the two bases on a scripted clock (`scheduled_events:`): a
+# raid band lands ON the WEST base early, then — much later — a
+# second raid band lands ON the EAST base. The agent has no combat
+# orders; its ONLY defence is the medium tanks it produces, and a
+# freshly-built tank appears at the PRIMARY war factory. So the
+# agent must ROTATE which war factory is primary (`set_primary`) to
+# steer each batch of tanks to the base that is about to be raided —
+# garrison the WEST base before the early raid, then rotate the
+# primary to the EAST war factory so the later batch garrisons the
+# EAST base before its raid. A policy that produces all six tanks at
+# one base leaves the OTHER base un-garrisoned — its raid razes the
+# undefended war factory (and Construction Yard) and the win's
+# `building_count_gte:weap:2` / `fact:2` clauses fail.
+#
+# This is the SC2 multi-base production / load-balancing-under-
+# attack drill: an army doesn't pour out of one production cluster
+# when a second front opens — the player rotates production so each
+# threatened base has defenders WHEN the attack lands, not after.
+#
+# WHY THIS NEEDS `scheduled_events:` (the Wave-9 engine feature)
+# -------------------------------------------------------------
+# The raid PATTERN — west first, east much later — cannot be
+# expressed by t=0 placement: two raid bands placed at t=0 would
+# BOTH converge immediately and the "alternation" (the thing the
+# agent must read and rotate against) would not exist. Only a
+# scripted mid-episode spawn schedule produces "the WEST base is
+# the hot base now; the EAST base becomes the hot base at tick
+# 1500" — the alternating-pressure signal the rotation decision is
+# keyed on. See `oramap.rs::read_scheduled_events` /
+# `env.rs::fire_scheduled_events`; worked sibling:
+# `scout-cycle-keep-info-fresh`.
+#
+# ENGINE FACTS this pack is built on (CLAUDE.md / gamerules.rs):
+#   - `2tnk` (medium tank) — in the live vendored RA ruleset its
+#     `Buildable.Prerequisites` are `fix, ~vehicles.allies,
+#     ~techlevel.medium`. So each base carries a `fix` (Service
+#     Depot, which itself needs `weap`) and the agent faction
+#     `allies` satisfies `~vehicles.allies`. `Valued.Cost` 850;
+#     build-duration modifier 60 ⇒ build time ≈ 850·60/100 ≈ 510
+#     ticks per tank. The production queue is keyed on the PLAYER,
+#     so a single owned `fix` satisfies the prerequisite for the
+#     whole (serialized) vehicle queue — each base carries its own
+#     `fix` purely to be a complete, symmetric base.
+#   - `Command.build('2tnk')` issues `StartProduction` on the
+#     PLAYER (one global vehicle queue) — production is serialized,
+#     NOT per-building. The finished tank is placed by
+#     `world.rs::find_spawn_location`, which sorts production
+#     buildings PRIMARY-FIRST: the tank appears at the agent's
+#     PRIMARY `weap`. `Command.set_primary([weap_id])` flips which
+#     war factory is primary (`world.rs::set_primary_building` —
+#     one primary per owner+type; setting one clears the sibling).
+#     So `set_primary` is the load-bearing rotation verb: it steers
+#     each produced tank to the WEST or the EAST base.
+#   - A produced tank spawns at the primary `weap`'s exit cell, on
+#     top of its base, at the default Defend stance (stance 2) —
+#     it auto-fires on any raid unit in range without an explicit
+#     order. So routing a batch of tanks to a base == garrisoning
+#     that base. The agent has NO attack tools; production routing
+#     IS the defence.
+#   - Buildings have large HP (`weap` 100000, `fact` 150000); a
+#     modest raid band needs many hundreds of ticks to raze an
+#     UNDEFENDED war factory — long enough that a tank batch
+#     routed to that base in time clears the raid before the
+#     `weap` falls, but fatal if NO tank is ever routed there.
+#   - `bot_type: hunt` — each enemy unit attacks its OWN nearest
+#     foe (per-unit nearest). A raid band spawned ON a base picks
+#     that base's buildings (then the defending tanks) — it does
+#     NOT wander to the far base. Raid actors also carry
+#     `stance: 3` (AttackAnything) as belt-and-braces.
+#   - Inert enemy `fact` far off-map (anti-DRAW): the engine
+#     auto-`done`s on enemy elimination; a persistent unarmed
+#     enemy building keeps the episode alive until the
+#     win/fail evaluator runs at the deadline.
+#   - Tick budget ~90/turn ⇒ reachable tick ≈ 93 + 90·(max_turns
+#     − 1). within_ticks paired with after_ticks = within_ticks+1
+#     in fail ⇒ a non-finisher is a real reachable timeout LOSS,
+#     never a silent DRAW (CLAUDE.md rule 2).
+#
+# WIN PREDICATE
+#   all_of:
+#     - unit_type_count_gte: {type: 2tnk, n: 6}   # built the army
+#     - building_count_gte:  {type: weap, n: 2}   # BOTH war factories alive
+#     - building_count_gte:  {type: fact, n: 2}   # BOTH Construction Yards alive
+#     - within_ticks: T                            # on the clock
+#
+# FAIL PREDICATE
+#   any_of:
+#     - after_ticks: T+1                                  # real timeout LOSS
+#     - not building_count_gte: {type: weap, n: 2}        # a base was razed
+#     - not building_count_gte: {type: fact, n: 2}        # a base was razed
+#
+# DISCRIMINATIONS (the bar — every lazy / single-base play LOSES,
+# only the intended rotate-to-the-hot-base play WINS):
+#
+#   • stall (observe only): zero tanks ⇒ unit_type_count clause
+#     never met; AND both raids raze both bases ⇒
+#     `building_count_gte:weap:2` fails. Real LOSS.
+#
+#   • build-west-only (queue all 6 tanks, never rotate the
+#     primary off the WEST war factory): all six tanks spawn at
+#     the WEST base and crush the WEST raid — but the EAST base
+#     has ZERO defenders when its raid lands at tick 1500. The
+#     EAST `weap` (and `fact`) are razed ⇒ `building_count_gte:
+#     weap:2` / `fact:2` fail. Real LOSS.
+#
+#   • build-east-only (set the primary to the EAST war factory
+#     once, queue all 6 there): symmetric — the EAST base is
+#     garrisoned but the WEST base is undefended when its raid
+#     lands at tick 300; the WEST `weap`/`fact` are razed. Real
+#     LOSS.
+#
+#   • intended rotate-to-the-hot-base: set the primary to the
+#     WEST `weap`, queue the first batch of tanks (they garrison
+#     the WEST base and clear the tick-300 raid); then BEFORE the
+#     tick-1500 raid, `set_primary` the EAST `weap` so the
+#     remaining tanks garrison the EAST base and clear the
+#     tick-1500 raid. Six tanks built, both war factories and
+#     both Construction Yards alive, finish under the deadline.
+#     WIN.
+#
+# Validate (no model / no network):
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m pytest tests/test_mfb_rotating_production_pressure.py -q
+
+meta:
+  id: mfb-rotating-production-pressure
+  title: 'Rotating Production Pressure — Load-Balance Two Bases Under Alternating Raids'
+  capability: reasoning
+  real_world_meaning: >
+    The agent runs two production bases. An enemy raids them on an
+    alternating schedule — one base now, the other later. The agent
+    cannot fight directly; its only defence is the tanks it builds,
+    and produced units appear at whichever war factory is currently
+    the primary one. The intended policy ROTATES production: it
+    funnels the first batch of tanks to the base that is about to
+    be raided, then rotates the primary war factory so the next
+    batch garrisons the second base before ITS raid lands. Building
+    the whole army at a single base leaves the other base
+    undefended — its war factory and Construction Yard are razed.
+    The agent must read the alternating-pressure pattern and
+    re-route production to the currently-threatened base.
+  robotics_analogue: >
+    Load-balancing a fleet of production cells under a moving
+    fault: a logistics network has two depots and a disruption
+    that migrates between them. Routing every replenishment run to
+    one depot starves the other exactly when the disruption hits
+    it. The controller must track which site is currently under
+    stress and dynamically re-route capacity to the at-risk site
+    BEFORE the disruption arrives — anticipatory load balancing,
+    not reactive catch-up.
+  benchmark_anchor:
+    - 'SC2 multi-base production'
+    - 'load balancing'
+    - 'queueing under attack'
+  author: openra-bench
+
+# rush-hour-arena: 128×40, playable bounds ~(2,2,124,36). Two
+# complete agent bases — WEST around x=15, EAST around x=85 — both
+# on the y≈16..24 band. Raid bands spawn ON each base in turn via
+# `scheduled_events`.
+base_map: rush-hour-arena
+starting_cash: 6000
+
+base:
+  agent:
+    faction: allies
+    cash: 6000
+  # `hunt` bot: each raid unit attacks its OWN nearest foe. A raid
+  # band spawned on a base picks that base (then its tank
+  # garrison) — it does not wander cross-map to the other base.
+  enemy:
+    faction: soviet
+    bot_type: hunt
+  # Production-only toolset. `build` queues tanks; `set_primary`
+  # ROTATES which war factory the finished tank appears at (the
+  # load-bearing rotation verb); `set_rally_point` is an optional
+  # aid to pull a garrison onto a threatened cell. No attack tools:
+  # the test is production ROUTING, not micro.
+  tools:
+    - observe
+    - build
+    - set_primary
+    - set_rally_point
+  planning: true
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 9000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Minimum-viable rotation drill. WEST raid at tick 300 (3× e1),
+  # EAST raid at tick 1500 (3× e1). Six tanks (3 per base). max_turns
+  # 70 ⇒ reachable tick 93+90·69 = 6303; within_ticks 5400 +
+  # fail after_ticks 5401 ⇒ a non-finisher crosses 5401 well before
+  # the episode caps ⇒ real LOSS, not a DRAW.
+  easy:
+    description: >
+      You own TWO complete bases — a WEST base (Construction Yard,
+      War Factory, Refinery, Power Plant around x=15) and an EAST
+      base (same, around x=85). Enemy raids ALTERNATE: a raid band
+      hits the WEST base at tick 300, then a second raid band hits
+      the EAST base at tick 1500. You have no attack orders — your
+      only defence is the medium tanks you build, and a finished
+      tank appears at your PRIMARY war factory. Use set_primary to
+      route the first 3 tanks to the WEST war factory (so they
+      garrison the WEST base before its raid), then set_primary
+      the EAST war factory so the next 3 tanks garrison the EAST
+      base before its raid. Win: build >=6 medium tanks AND keep
+      BOTH war factories AND BOTH Construction Yards alive AND
+      finish before tick 5400. Stalling loses (no army; bases
+      razed). Building all 6 tanks at one base loses — the other
+      base is razed when its raid lands.
+    overrides:
+      actors:
+        # ── WEST base (x≈15) — fact + weap + fix + proc + powr.
+        # `weap` sits CLOSEST to the raid spawn cell (18,19) so the
+        # `hunt` raiders lock onto the war factory (the win's
+        # load-bearing `weap:2` clause), not `fix`/`proc`.
+        - {type: fact, owner: agent, position: [10, 19]}
+        - {type: weap, owner: agent, position: [14, 19]}
+        - {type: fix,  owner: agent, position: [10, 16]}
+        - {type: proc, owner: agent, position: [10, 23]}
+        - {type: powr, owner: agent, position: [15, 23]}
+        # ── EAST base (x≈85) — fact + weap + fix + proc + powr.
+        - {type: fact, owner: agent, position: [80, 19]}
+        - {type: weap, owner: agent, position: [84, 19]}
+        - {type: fix,  owner: agent, position: [80, 16]}
+        - {type: proc, owner: agent, position: [80, 23]}
+        - {type: powr, owner: agent, position: [85, 23]}
+        # Inert enemy `fact` marker far off-map — anti-DRAW
+        # (engine auto-`done`s on enemy elimination otherwise).
+        - {type: fact, owner: enemy, position: [122, 4]}
+      # Alternating raid schedule — the load-bearing feature. The
+      # WEST base is the hot base first (tick 300); the EAST base
+      # becomes the hot base at tick 1500. Each band spawns ON its
+      # target base (stance:3 AttackAnything) so it razes that
+      # base's war factory unless tanks have been routed there.
+      scheduled_events:
+        - tick: 300
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [18, 19], stance: 3, count: 3}
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [88, 19], stance: 3, count: 3}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        - {building_count_gte: {type: weap, n: 2}}
+        - {building_count_gte: {type: fact, n: 2}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: weap, n: 2}}}
+        - {not: {building_count_gte: {type: fact, n: 2}}}
+    max_turns: 70
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVIER raids (4× e1 each) so an
+  # undefended base is razed faster and a thin/late garrison is
+  # punished; same tick geometry and budget so the rotation window
+  # is the same but the cost of mis-routing rises.
+  medium:
+    description: >
+      You own TWO complete bases — WEST (around x=15) and EAST
+      (around x=85), each a Construction Yard + War Factory +
+      Refinery + Power Plant. Enemy raids ALTERNATE: a raid band
+      hits the WEST base at tick 300, then a heavier raid band
+      hits the EAST base at tick 1500. Your only defence is the
+      medium tanks you build; a finished tank appears at your
+      PRIMARY war factory. Route the first batch to the WEST war
+      factory (set_primary), then rotate the primary to the EAST
+      war factory so the next batch garrisons the EAST base before
+      its raid. Win: build >=6 medium tanks AND keep BOTH war
+      factories AND BOTH Construction Yards alive AND finish
+      before tick 5400. Stalling and building the whole army at
+      one base both lose — the un-garrisoned base is razed.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 19]}
+        - {type: weap, owner: agent, position: [14, 19]}
+        - {type: fix,  owner: agent, position: [10, 16]}
+        - {type: proc, owner: agent, position: [10, 23]}
+        - {type: powr, owner: agent, position: [15, 23]}
+        - {type: fact, owner: agent, position: [80, 19]}
+        - {type: weap, owner: agent, position: [84, 19]}
+        - {type: fix,  owner: agent, position: [80, 16]}
+        - {type: proc, owner: agent, position: [80, 23]}
+        - {type: powr, owner: agent, position: [85, 23]}
+        - {type: fact, owner: enemy, position: [122, 4]}
+      scheduled_events:
+        - tick: 300
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [18, 19], stance: 3, count: 5}
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [88, 19], stance: 3, count: 5}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        - {building_count_gte: {type: weap, n: 2}}
+        - {building_count_gte: {type: fact, n: 2}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: weap, n: 2}}}
+        - {not: {building_count_gte: {type: fact, n: 2}}}
+    max_turns: 70
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven agent
+  # spawn_point groups round-robined by seed (CLAUDE.md hard-tier
+  # contract). Group 0 — both bases on the y≈14..18 (NORTH) band;
+  # group 1 — both bases on the y≈24..28 (SOUTH) band. Each raid
+  # band is duplicated across BOTH spawn groups at the matching
+  # latitude (raid actors carry `spawn_point` so the per-owner
+  # filter keeps only the band for the chosen seed). A memorised
+  # base latitude cannot generalise; the rotate-to-the-hot-base
+  # DOCTRINE still does.
+  hard:
+    description: >
+      You own TWO complete bases — a WEST base and an EAST base,
+      each a Construction Yard + War Factory + Refinery + Power
+      Plant. The exact LATITUDE of both bases varies per seed.
+      Enemy raids ALTERNATE: a raid band hits the WEST base at
+      tick 300, then a heavier raid band hits the EAST base at
+      tick 1500. Your only defence is the medium tanks you build;
+      a finished tank appears at your PRIMARY war factory. Route
+      the first batch to the WEST war factory (set_primary), then
+      rotate the primary to the EAST war factory so the next batch
+      garrisons the EAST base before its raid. Win: build >=6
+      medium tanks AND keep BOTH war factories AND BOTH
+      Construction Yards alive AND finish before tick 5400.
+      Stalling, building the whole army at one base, and
+      latitude-memorised openings all lose.
+    overrides:
+      actors:
+        # ── spawn_point 0 — both bases on the NORTH band (y≈10..18).
+        # `fix` is placed at the OUTER (north) edge, far from the
+        # y=20 raid mid-band, so `weap` stays the building nearest
+        # each raid spawn and the raiders lock onto the war factory.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: weap, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: proc, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [15, 18], spawn_point: 0}
+        - {type: fact, owner: agent, position: [80, 14], spawn_point: 0}
+        - {type: weap, owner: agent, position: [84, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [80, 10], spawn_point: 0}
+        - {type: proc, owner: agent, position: [80, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [85, 18], spawn_point: 0}
+        # ── spawn_point 1 — both bases on the SOUTH band (y≈24..32).
+        # `fix` at the OUTER (south) edge — same rationale.
+        - {type: fact, owner: agent, position: [10, 24], spawn_point: 1}
+        - {type: weap, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [15, 28], spawn_point: 1}
+        - {type: fact, owner: agent, position: [80, 24], spawn_point: 1}
+        - {type: weap, owner: agent, position: [84, 24], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [80, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [80, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [85, 28], spawn_point: 1}
+        # Inert enemy `fact` marker — duplicated across BOTH spawn
+        # groups (the per-owner spawn_point filter keeps only the
+        # chosen seed's enemy actors; a marker without spawn_point
+        # would be filtered out once any enemy actor declares one).
+        - {type: fact, owner: enemy, position: [122, 4], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [122, 36], spawn_point: 1}
+      # Raid bands. CRITICAL: `scheduled_events` SpawnActors are
+      # injected by `env.rs::apply_spawn_actors`, which does NOT
+      # apply the `spawn_point` filter (that filter only runs on
+      # the INITIAL actor list in `oramap.rs::expand_scenario_
+      # actors`). So a raid actor must NOT declare `spawn_point` —
+      # every actor in the event list spawns unconditionally. Each
+      # raid band therefore spawns at a single FIXED cell on the
+      # y=20 mid-band (between the NORTH y≈14 and SOUTH y≈24 base
+      # latitudes). The `hunt` bot routes each raider to its
+      # nearest foe — the actual base for this seed (north or
+      # south) — so the alternating raid pattern is identical on
+      # both spawn groups while the agent's base latitude varies.
+      scheduled_events:
+        - tick: 300
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [18, 20], stance: 3, count: 5}
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [88, 20], stance: 3, count: 5}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        - {building_count_gte: {type: weap, n: 2}}
+        - {building_count_gte: {type: fact, n: 2}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: weap, n: 2}}}
+        - {not: {building_count_gte: {type: fact, n: 2}}}
+    max_turns: 70

@@ -1198,6 +1198,8 @@ UPGRADED = [
     # central lane and converge on whichever latitude the seed
     # selected, so a memorised hold cell cannot generalise.
     "tp-survive-n-turns",
+    # Wave-10 multi-base pack — rotate set_primary with alternating raids; hard 2 spawn_point groups.
+    "mfb-rotating-production-pressure",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
