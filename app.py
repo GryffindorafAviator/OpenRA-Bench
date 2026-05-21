@@ -1055,15 +1055,25 @@ def _play_scenarios() -> list[str]:
         return []
 
 
+def _md_escape(text: str) -> str:
+    """Escape Markdown-significant characters so scenario prose renders
+    literally — e.g. the `~` in 'NE ~110,6' must not become strikethrough."""
+    text = text.replace("\\", "\\\\")
+    for ch in ("~", "*", "_", "`", "#"):
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
 def _play_minimap(render_state: dict):
     """PIL minimap image — the same view an LLM agent is shown,
-    upscaled 3x (nearest-neighbour) so individual units stay distinct
-    instead of merging into one blob at display size."""
+    upscaled 3x (nearest-neighbour) so individual units stay distinct,
+    with a coordinate grid + axis labels every 10 cells so a human can
+    locate the cell coordinates the objective refers to."""
     try:
         import base64
         import io
 
-        from PIL import Image
+        from PIL import Image, ImageDraw
 
         from openra_bench.minimap import render_png_b64
 
@@ -1071,8 +1081,29 @@ def _play_minimap(render_state: dict):
         if not b64:
             return None
         img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
-        w, h = img.size
-        return img.resize((w * 3, h * 3), Image.NEAREST)
+        bw, bh = img.size
+        img = img.resize((bw * 3, bh * 3), Image.NEAREST)
+        iw, ih = img.size
+        cell_px = 18  # minimap CELL(6) * 3x upscale
+        rows = [r for r in (render_state.get("minimap") or "").split("\n")
+                if r]
+        cols = max((len(r) for r in rows), default=bw // 6)
+        nrows = len(rows) or bh // 6
+        draw = ImageDraw.Draw(img)
+        grid = (110, 112, 122)
+        label = (235, 235, 245)
+        step = 10
+        for cx in range(0, cols + 1, step):
+            x = min(iw - 1, cx * cell_px)
+            draw.line([(x, 0), (x, ih)], fill=grid, width=1)
+            if cx < cols:
+                draw.text((x + 2, 1), str(cx), fill=label)
+        for cy in range(0, nrows + 1, step):
+            y = min(ih - 1, cy * cell_px)
+            draw.line([(0, y), (iw, y)], fill=grid, width=1)
+            if cy < nrows:
+                draw.text((2, y + 1), str(cy), fill=label)
+        return img
     except Exception:  # noqa: BLE001
         return None
 
@@ -1084,7 +1115,7 @@ def _play_objective_md(sess) -> str:
     obj = (getattr(sess, "objective", "") or "").strip()
     if not obj:
         return ""
-    return f"### 🎯 Objective\n{obj}"
+    return f"### 🎯 Objective\n{_md_escape(obj)}"
 
 
 def _play_units_df(sess, sel):
@@ -1127,7 +1158,7 @@ def _play_status_md(sess) -> str:
     return line
 
 
-def _play_briefing_md(sess, sel, queue) -> str:
+def _play_briefing_md(sess, sel, queue, note: str = "") -> str:
     if sess is None:
         return ""
     try:
@@ -1138,7 +1169,9 @@ def _play_briefing_md(sess, sel, queue) -> str:
         brief = ""
     sel_txt = ", ".join(sel) if sel else "(none)"
     q_txt = "; ".join(a.describe() for a in queue) if queue else "(none)"
+    head = f"{note}\n\n" if note else ""
     return (
+        f"{head}"
         f"```\n{brief}\n```\n\n"
         f"**Selected units:** {sel_txt}  \n"
         f"**Queued this turn:** {q_txt}"
@@ -1216,10 +1249,12 @@ def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
         # resolution, not the base CELL resolution.
         img_w, img_h = w * 6 * 3, h * 6 * 3
         cx, cy = minimap_click_to_cell(px, py, img_w, img_h, w, h)
+        note = f"🖱 Clicked cell **({cx}, {cy})**"
         if mode == "Move here" and sel:
             queue = queue + [
                 HumanAction(mode="move", units=list(sel), target=(cx, cy))
             ]
+            note += f" — queued **move** of {len(sel)} unit(s) here"
         elif mode == "Attack here" and sel:
             tid = enemy_at_cell(rs, cx, cy, radius=1)
             queue = queue + [
@@ -1228,12 +1263,20 @@ def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
                     target_id=tid, target=(cx, cy),
                 )
             ]
+            note += (
+                f" — queued **attack** ({'enemy ' + tid if tid else 'move-attack'})"
+            )
         else:  # "Select units"
             sel = own_units_at_cell(rs, cx, cy, radius=1)
+            note += (
+                f" — **selected {len(sel)} unit(s)**" if sel
+                else " — no units here"
+            )
     except Exception as e:  # noqa: BLE001
         logger.warning("play click failed: %s", e)
+        note = ""
     return (
-        sel, queue, _play_briefing_md(sess, sel, queue),
+        sel, queue, _play_briefing_md(sess, sel, queue, note),
         _play_units_df(sess, sel),
     )
 
