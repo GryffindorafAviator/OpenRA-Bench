@@ -16,15 +16,22 @@ policies:
     Manhattan 4; ≥3 tanks die before the column clears the gap →
     own_units_gte:3 fails / region bar unmet → LOSS).
 
-Engine note (verified 2026-05-20): the OpenRA-Rust combat numbers
-for 2tnk-vs-e3 trade favour tank cannon DPS by a wide margin, so
-the PREDICATE-level discrimination is strict (a play that loses ≥3
-of 5 tanks LOSES under own_units_gte:3 regardless of mechanism),
-and the column-vs-wedge geometry is the load-bearing decision
-encoded in the win predicate. The engine-driven scripted wedge
-policy WINS on easy and medium (lead-on-axis + flankers off-axis
-sequences the engagement so only 1-2 e3 fire on a given tank at
-once); the stall and brute LOSS bars hold on every level/seed.
+Engine note (recalibrated 2026-05-20, after the engine movement
+fixes — moving units take fire en route and attack_unit on an
+out-of-sight target closes at real speed): the OpenRA-Rust combat
+numbers for 2tnk-vs-e3 trade favour tank cannon DPS by a wide
+margin, so the PREDICATE-level discrimination is strict (a play
+that loses ≥3 of 5 tanks LOSES under own_units_gte:3 regardless of
+mechanism), and the column-vs-wedge geometry is the load-bearing
+decision encoded in the win predicate. The easy north bracket was
+widened from 3 to FIVE e3 because the post-fix column slipped past
+the old single 3-rocket bracket losing only one tank — the denser
+bracket makes a single-file column bleed ≥3 tanks while the off-
+axis wedge still loses zero. The engine-driven scripted wedge
+policy WINS on every level and seed (lead-on-axis + flankers
+off-axis sequences the engagement so only 1-2 e3 fire on a given
+tank at once); the stall and brute LOSS bars hold on every
+level/seed.
 """
 
 from __future__ import annotations
@@ -187,9 +194,10 @@ def _stall_policy(rs, Command):
 
 def _brute_column_policy(rs, Command):
     """Brute column attack_move east along y=20. The column squeezes
-    through the corridor on the engagement axis; cross-fire from
-    both brackets focuses on the lead, then inherits down the line
-    — the column busts the survival bar before reaching (80,20)."""
+    through the corridor on the engagement axis; rocket-soldier fire
+    from the bracket(s) focuses on the lead, then inherits down the
+    line — the column busts the survival bar before reaching
+    (80,20)."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
@@ -276,10 +284,11 @@ def test_stall_policy_loses(level, seed):
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_brute_column_attack_move_loses(level, seed):
     """Brute attack_move east on y=20 must LOSE on every level and
-    seed — the column on the engagement axis takes simultaneous
-    cross-fire from both brackets; tanks die before the column
-    clears the gap → own_units_gte:3 fails OR the region-at-objective
-    bar is unmet in time → LOSS (never a draw).
+    seed — the column on the engagement axis takes concentrated
+    rocket fire from the bracket(s) (both brackets on medium/hard);
+    ≥3 tanks die before the column clears the gap → own_units_gte:3
+    fails OR the region-at-objective bar is unmet in time → LOSS
+    (never a draw).
     """
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
@@ -300,11 +309,10 @@ def test_intended_wedge_wins(level, seed):
     the formation advances to the corridor mouth, turns onto the
     off-axis rocket-soldier brackets and dismantles them end-on, then
     drives the survivors uncontested to (80,20). Recalibrated
-    2026-05-20 after the engine balance fixes (armor-class weapon
-    selection / stance semantics) made the run-the-gauntlet column
-    bleed faster — engaging the brackets first keeps ≥4-of-5 (easy)
-    / 5-of-5 (medium, hard) tanks alive while the column busts the
-    survival bar."""
+    2026-05-20 after the engine movement fixes (moving units take
+    fire en route; attack_unit closes at real speed): engaging the
+    brackets end-on keeps 5-of-5 (easy, medium) / ≥4-of-5 (hard)
+    tanks alive while a single-file column busts the survival bar."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
