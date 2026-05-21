@@ -9,6 +9,15 @@ non-win is a real reachable timeout LOSS via the `after_ticks` fail
 clause (no own_units_gte:1 clause; total force loss is NOT a fail,
 this is the whole point of the sacrifice anchor).
 
+Recalibrated after the engine balance pass (armor-class weapon
+selection + stance fixes): the post-fix 4tnk co-located with the e3
+wall over-killed the strike force before it could reach the fact,
+collapsing the all-in commit to a DRAW on medium/hard. The picket
+was re-tuned — the e3 anti-armor wall sits forward of the objective
+(easy x=104 / medium x=102 / hard x=100, density 2/3/4 e3) and the
+4tnk HP-sponge is pulled back to x=108 to brawl only the survivors —
+restoring the all-in WIN while keeping stall + preserve-force LOSS.
+
 Validation is scripted (no model / network).
 """
 from __future__ import annotations

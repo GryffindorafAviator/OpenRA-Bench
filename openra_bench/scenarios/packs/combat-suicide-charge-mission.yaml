@@ -32,15 +32,25 @@ meta:
 base_map: rush-hour-arena
 
 # The discriminator: the enemy fact at (110,20) is guarded by an
-# anti-armor picket (e3 rocket infantry + 4tnk heavy tank). A
-# careful "preserve the force" approach (skirmish, retreat, regroup,
-# pick off targets) cannot land enough damage on the fact before the
-# deadline — the e3 cluster outranges and out-damages the 2tnk column
-# in a stand-off, and any retreat resets the clock. The intended
-# play commits ALL six tanks plus the four e3 escorts straight east,
-# absorbing fire and trading every attacker for the seconds of
-# face-time needed to raze the fact. Win is buildings-only; force
-# wipe is NOT a fail.
+# anti-armor picket — an e3 rocket-infantry WALL forward of the
+# objective plus a 4tnk heavy tank held back at x=108 guarding the
+# fact. A careful "preserve the force" approach (skirmish, retreat,
+# regroup, pick off targets) cannot land enough damage on the fact
+# before the deadline — the e3 wall outranges and out-damages the
+# 2tnk column in a stand-off, and any retreat resets the clock. The
+# intended play commits ALL six tanks plus the four e3 escorts
+# straight east, trading the column through the e3 wall and pushing
+# the survivors onto the fact. Win is buildings-only; force wipe is
+# NOT a fail.
+#
+# Engine balance pass (armor-class weapon selection + stance fixes):
+# the post-fix 4tnk co-located with the e3 wall right next to the
+# fact over-killed the strike force before it could reach the
+# objective (all-in DREW). Re-tuned: the e3 wall sits forward (easy
+# x=104 / medium x=102 / hard x=100) so the strike force trades
+# through it with push-room to spare, and the 4tnk is pulled back to
+# x=108 every tier so it brawls only the survivors. Picket density
+# graduates 2→3→4 e3 across easy→medium→hard.
 base:
   agent: {faction: allies, cash: 0}
   enemy: {faction: soviet, cash: 0, bot_type: guard}
@@ -73,13 +83,20 @@ base:
     - {type: e3,   owner: agent, position: [8, 22], stance: 1, count: 2}
     # ── Defender — `guard` bot, leashed (lunge then snap back). e3
     # rockets shred 2tnk armour at range 5; 4tnk heavy brawls close.
-    # Medium picket = 3 e3 (anti-armor wall) + 1 4tnk (HP sponge);
-    # spread vertically (y=16/20/24) to cover the west approach
-    # corridor — an all-in commit still cracks it but trades half
-    # the force in doing so. On EASY, lighter picket (see override).
-    - {type: e3,   owner: enemy, position: [104, 16], stance: 2}
-    - {type: e3,   owner: enemy, position: [104, 20], stance: 2}
-    - {type: e3,   owner: enemy, position: [104, 24], stance: 2}
+    # Medium picket = a 3-e3 anti-armor WALL at x=102 (forward of the
+    # objective so the strike force trades through it while it still
+    # has push-room) + 1 4tnk HP-sponge at x=108 guarding the fact.
+    # Spread the e3 wall vertically (y=16/20/24) to cover the west
+    # approach corridor — an all-in commit still cracks it but trades
+    # roughly half the force in doing so. On EASY, lighter picket
+    # (2 e3 at x=104); on HARD, denser (4 e3 at x=100). The 4tnk is
+    # held back at x=108 every tier so it brawls only what survives
+    # the e3 wall, not the whole column at once (engine balance pass:
+    # the post-armor-fix 4tnk co-located with the e3 wall over-killed
+    # the strike force before it could reach the fact).
+    - {type: e3,   owner: enemy, position: [102, 16], stance: 2}
+    - {type: e3,   owner: enemy, position: [102, 20], stance: 2}
+    - {type: e3,   owner: enemy, position: [102, 24], stance: 2}
     - {type: 4tnk, owner: enemy, position: [108, 20], stance: 2}
     # Objective: the high-value enemy fact at far east (110, 20).
     - {type: fact, owner: enemy, position: [110, 20]}
@@ -125,18 +142,19 @@ levels:
         - {after_ticks: 5401}
     max_turns: 62
 
-  # ── MEDIUM ── +1 controlled variable: heavier defender (3× e3 +
-  # 1× 4tnk — the base composition). The preserve-the-force trap
-  # tightens: any standoff loses ground; the all-in commit still
-  # wins but trades nearly the whole package.
+  # ── MEDIUM ── +1 controlled variable: heavier defender (3× e3
+  # wall + 1× 4tnk — the base composition). The preserve-the-force
+  # trap tightens: any standoff loses ground; the all-in commit
+  # still wins but trades roughly half the package through the wall.
   medium:
     description: >
-      Heavier picket (3 rocket infantry spread y=16/20/24 + 1
-      heavy tank) on the enemy fact at (110, 20). Same task: raze
-      the fact before the deadline; survival is NOT required. The
-      careful, preserve-the-force approach reliably times out —
-      the e3 outrange your tanks in any standoff. Commit
-      everything, all-in, straight at the objective.
+      Heavier picket (a 3-rocket-infantry wall spread y=16/20/24 at
+      x=102 + 1 heavy tank held back at x=108) guarding the enemy
+      fact at (110, 20). Same task: raze the fact before the
+      deadline; survival is NOT required. The careful,
+      preserve-the-force approach reliably times out — the e3
+      outrange your tanks in any standoff. Commit everything,
+      all-in, straight at the objective.
     overrides: {}
     win_condition:
       all_of:
@@ -177,11 +195,16 @@ levels:
         - {type: e3,   owner: agent, position: [8, 31], stance: 1, count: 2, spawn_point: 1}
         # Defender — symmetric picket on the objective fact (enemy
         # actors don't honour spawn_point — see CLAUDE.md; the same
-        # picket meets either spawn). Hard adds one e3 vs medium.
-        - {type: e3,   owner: enemy, position: [104, 16], stance: 2}
-        - {type: e3,   owner: enemy, position: [104, 20], stance: 2}
-        - {type: e3,   owner: enemy, position: [104, 24], stance: 2}
-        - {type: e3,   owner: enemy, position: [106, 20], stance: 2}
+        # picket meets either spawn). Hard's e3 anti-armor wall is the
+        # densest (4 e3, one per latitude y=14/18/22/26) and the
+        # furthest forward (x=100) so a flank-staged strike package
+        # still trades through it with push-room left for the fact.
+        # The 4tnk HP-sponge is held back at x=108 (guards the fact;
+        # brawls only the survivors) — same idiom as easy/medium.
+        - {type: e3,   owner: enemy, position: [100, 14], stance: 2}
+        - {type: e3,   owner: enemy, position: [100, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [100, 22], stance: 2}
+        - {type: e3,   owner: enemy, position: [100, 26], stance: 2}
         - {type: 4tnk, owner: enemy, position: [108, 20], stance: 2}
         - {type: fact, owner: enemy, position: [110, 20]}
         - {type: fact, owner: enemy, position: [122, 4]}
