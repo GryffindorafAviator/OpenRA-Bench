@@ -129,3 +129,231 @@ def render_png_b64(render_state: dict) -> str | None:
     except Exception as e:  # noqa: BLE001
         logger.debug("minimap encode failed: %s", e)
         return None
+
+
+# ── Tactical minimap: per-type shapes + overlap counts + legend ───────
+# A richer renderer than render_png_b64 — distinguishes unit TYPES by
+# shape, shows a COUNT when units stack on one cell (otherwise they
+# render as a single dot), draws a coordinate GRID, and an embedded
+# LEGEND. Used by the human Play tab; reusable for the model's view.
+
+_INFANTRY_TYPES = {"e1", "e2", "e3", "e4", "e6", "e7", "medi", "mech",
+                   "spy", "thf", "dog", "engineer"}
+
+
+def _unit_category(actor_type: str, is_building: bool) -> str:
+    """Coarse class for shape selection: infantry / harvester /
+    building / vehicle."""
+    t = (actor_type or "").strip().lower()
+    if is_building:
+        return "building"
+    if t.startswith("harv"):
+        return "harvester"
+    if t in _INFANTRY_TYPES or (
+        len(t) == 2 and t[0] == "e" and t[1].isdigit()
+    ):
+        return "infantry"
+    return "vehicle"
+
+
+def _minimap_font(size: int):
+    """A legible TrueType font (falls back to a scaled default)."""
+    from PIL import ImageFont
+
+    for path in (
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ):
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:  # noqa: BLE001
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except Exception:  # noqa: BLE001
+        return ImageFont.load_default()
+
+
+def _draw_unit_shape(draw, cx, cy, cp, category, color):
+    """Draw `category`'s shape, filling ~70% of the cp-pixel cell at
+    grid cell (cx, cy)."""
+    m = cp * 0.16
+    x0, y0 = cx * cp + m, cy * cp + m
+    x1, y1 = (cx + 1) * cp - m, (cy + 1) * cp - m
+    mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+    outline = (15, 15, 18)
+    if category == "infantry":
+        draw.ellipse([x0, y0, x1, y1], fill=color, outline=outline)
+    elif category == "harvester":
+        draw.polygon(
+            [(mx, y0), (x0, y1), (x1, y1)], fill=color, outline=outline
+        )
+    elif category == "building":
+        draw.polygon(
+            [(mx, y0), (x1, my), (mx, y1), (x0, my)],
+            fill=color, outline=outline,
+        )
+    else:  # vehicle
+        draw.rectangle([x0, y0, x1, y1], fill=color, outline=outline)
+
+
+def render_tactical_minimap(
+    render_state: dict,
+    scale: int = 4,
+    grid: bool = True,
+    legend: bool = True,
+):
+    """A legible tactical minimap as a PIL RGB image:
+
+    * per-type SHAPES — ● infantry, ■ vehicle, ▲ harvester, ◆ building;
+    * COUNT badge when >1 unit stacks on a cell (so overlapping units
+      are not silently rendered as one dot);
+    * colour by side — green = you, red = enemy;
+    * a coordinate GRID with axis labels every 10 cells, and a LEGEND
+      strip beneath the map.
+
+    `scale` multiplies the 6px base cell. Returns None if Pillow is
+    missing or there is nothing to draw."""
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:  # noqa: BLE001
+        return None
+    rows = [r for r in (render_state.get("minimap") or "").split("\n")
+            if r]
+    if not rows:
+        return None
+    h = len(rows)
+    w = max(len(r) for r in rows)
+    if w == 0 or w * h > 200_000:
+        return None
+    cp = max(1, CELL * scale)
+    legend_h = cp * 2 if legend else 0
+    img = Image.new("RGB", (w * cp, h * cp + legend_h), _BG_UNKNOWN)
+    draw = ImageDraw.Draw(img)
+
+    # Explored terrain.
+    for y, row in enumerate(rows):
+        for x, ch in enumerate(row):
+            if ch != "#":
+                draw.rectangle(
+                    [x * cp, y * cp, (x + 1) * cp - 1, (y + 1) * cp - 1],
+                    fill=_BG_EXPLORED,
+                )
+
+    # Collect every actor by cell so stacked units can be counted.
+    by_cell: dict = {}
+
+    def _collect(items, side, force_building):
+        for it in items or []:
+            if not isinstance(it, dict):
+                continue
+            cx = int(it.get("cell_x", -99))
+            cy = int(it.get("cell_y", -99))
+            if not (0 <= cx < w and 0 <= cy < h):
+                continue
+            is_b = force_building or bool(it.get("is_building"))
+            cat = _unit_category(
+                it.get("actor_type") or it.get("type") or "", is_b
+            )
+            by_cell.setdefault((cx, cy), []).append((side, cat))
+
+    _collect(render_state.get("units_summary"), "own", False)
+    _collect(render_state.get("own_buildings"), "own", True)
+    _collect(render_state.get("enemy_summary"), "enemy", False)
+    _collect(
+        render_state.get("enemy_buildings_summary")
+        or render_state.get("enemy_buildings"),
+        "enemy", True,
+    )
+
+    def _color(side, cat):
+        if side == "own":
+            return _OWN_BLD if cat == "building" else _OWN
+        return _ENEMY_BLD if cat == "building" else _ENEMY
+
+    badge_font = _minimap_font(max(9, int(cp * 0.62)))
+    for (cx, cy), occ in by_cell.items():
+        # Dominant occupant decides the shape; prefer a building.
+        side, cat = next(
+            (o for o in occ if o[1] == "building"), occ[0]
+        )
+        _draw_unit_shape(draw, cx, cy, cp, cat, _color(side, cat))
+        if len(occ) > 1:
+            tx, ty = (cx + 1) * cp - cp * 0.42, cy * cp + 1
+            draw.text(
+                (tx, ty), str(len(occ)), fill=(255, 255, 255),
+                font=badge_font, stroke_width=max(2, cp // 12),
+                stroke_fill=(0, 0, 0),
+            )
+
+    # Coordinate grid + axis labels.
+    if grid:
+        gcol = (120, 123, 135)
+        lcol = (255, 246, 120)
+        gfont = _minimap_font(max(12, int(cp * 0.85)))
+        map_h = h * cp
+        for gx in range(0, w + 1, 10):
+            x = min(w * cp - 1, gx * cp)
+            draw.line([(x, 0), (x, map_h)], fill=gcol, width=2)
+            if gx < w:
+                draw.text(
+                    (x + 3, 2), str(gx), fill=lcol, font=gfont,
+                    stroke_width=3, stroke_fill=(0, 0, 0),
+                )
+        for gy in range(0, h + 1, 10):
+            y = min(map_h - 1, gy * cp)
+            draw.line([(0, y), (w * cp, y)], fill=gcol, width=2)
+            if gy < h:
+                draw.text(
+                    (3, y + 2), str(gy), fill=lcol, font=gfont,
+                    stroke_width=3, stroke_fill=(0, 0, 0),
+                )
+
+    # Legend strip.
+    if legend:
+        ly = h * cp
+        draw.rectangle([0, ly, w * cp, ly + legend_h], fill=(24, 24, 30))
+        lfont = _minimap_font(max(11, int(cp * 0.7)))
+        sample = cp  # one-cell-sized sample swatch
+        items = [
+            ("infantry", "Infantry"),
+            ("vehicle", "Vehicle"),
+            ("harvester", "Harvester"),
+            ("building", "Building"),
+        ]
+        x = int(cp * 0.4)
+        row_y = ly + int(cp * 0.2)
+        for cat, name in items:
+            # Sample shape swatch drawn at pixel coords.
+            m = sample * 0.18
+            sx0, sy0 = x + m, row_y + m
+            sx1, sy1 = x + sample - m, row_y + sample - m
+            smx, smy = (sx0 + sx1) / 2, (sy0 + sy1) / 2
+            if cat == "infantry":
+                draw.ellipse([sx0, sy0, sx1, sy1], fill=_OWN)
+            elif cat == "harvester":
+                draw.polygon(
+                    [(smx, sy0), (sx0, sy1), (sx1, sy1)], fill=_OWN
+                )
+            elif cat == "building":
+                draw.polygon(
+                    [(smx, sy0), (sx1, smy), (smx, sy1), (sx0, smy)],
+                    fill=_OWN_BLD,
+                )
+            else:
+                draw.rectangle([sx0, sy0, sx1, sy1], fill=_OWN)
+            draw.text(
+                (x + sample + 4, row_y + sample * 0.18), name,
+                fill=(235, 235, 245), font=lfont,
+            )
+            x += sample + int(cp * 4.2)
+        draw.text(
+            (int(cp * 0.4), ly + int(cp * 1.05)),
+            "green = your forces    red/orange = enemy    "
+            "number = units stacked on that cell",
+            fill=(200, 202, 212), font=lfont,
+        )
+
+    return img

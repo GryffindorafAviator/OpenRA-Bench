@@ -493,6 +493,17 @@ class InteractiveSession:
         self.done = False
         self._closed = False
 
+    # A live engine session is a resource handle, not a value. Gradio's
+    # `gr.State` deep-copies whatever it holds — and the RustEnvPool
+    # carries an unpicklable `_thread.lock`, so a naive deepcopy raises
+    # and the Play tab's Start handler silently fails. Copying a session
+    # is meaningless anyway; return the same instance.
+    def __deepcopy__(self, memo):
+        return self
+
+    def __copy__(self):
+        return self
+
     @classmethod
     def from_pack(
         cls, pack_id: str, level: str = "easy", seed: int = 1

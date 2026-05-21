@@ -1033,29 +1033,7 @@ Then run `evaluate.py --agent custom` with your agent integrated.
 # human's run is scored by the identical rules as a model's.
 
 _PLAY_LEVELS = ["easy", "medium", "hard"]
-_PLAY_UPSCALE = 5  # nearest-neighbour minimap upscale for the Play tab
-
-
-def _play_grid_font(size: int):
-    """A large legible font for the minimap coordinate labels — tries
-    real TrueType fonts, falls back to a scaled default."""
-    from PIL import ImageFont
-
-    for path in (
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/Library/Fonts/Arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    ):
-        try:
-            return ImageFont.truetype(path, size)
-        except Exception:  # noqa: BLE001
-            continue
-    try:
-        return ImageFont.load_default(size=size)  # Pillow >= 10.1
-    except Exception:  # noqa: BLE001
-        return ImageFont.load_default()
+_PLAY_UPSCALE = 5  # tactical-minimap cell scale for the Play tab
 
 
 def _play_scenarios() -> list[str]:
@@ -1088,54 +1066,15 @@ def _md_escape(text: str) -> str:
 
 
 def _play_minimap(render_state: dict):
-    """PIL minimap image — the same view an LLM agent is shown, upscaled
-    `_PLAY_UPSCALE`x (nearest-neighbour) so individual units stay
-    distinct, with a coordinate grid + large outlined axis labels every
-    10 cells so a human can read off the cell coordinates the objective
-    refers to."""
+    """The Play-tab minimap — the shared `render_tactical_minimap`:
+    per-type shapes, overlap-count badges, coordinate grid + labels,
+    and a legend. The same renderer is reusable for the model's view."""
     try:
-        import base64
-        import io
+        from openra_bench.minimap import render_tactical_minimap
 
-        from PIL import Image, ImageDraw
-
-        from openra_bench.minimap import render_png_b64
-
-        b64 = render_png_b64(render_state)
-        if not b64:
-            return None
-        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
-        bw, bh = img.size
-        scale = _PLAY_UPSCALE
-        img = img.resize((bw * scale, bh * scale), Image.NEAREST)
-        iw, ih = img.size
-        cell_px = 6 * scale  # minimap CELL(6) * upscale
-        rows = [r for r in (render_state.get("minimap") or "").split("\n")
-                if r]
-        cols = max((len(r) for r in rows), default=bw // 6)
-        nrows = len(rows) or bh // 6
-        draw = ImageDraw.Draw(img)
-        grid = (120, 123, 135)
-        label = (255, 246, 120)  # bright yellow, readable over terrain
-        font = _play_grid_font(34)
-        step = 10
-        for cx in range(0, cols + 1, step):
-            x = min(iw - 1, cx * cell_px)
-            draw.line([(x, 0), (x, ih)], fill=grid, width=2)
-            if cx < cols:
-                draw.text(
-                    (x + 4, 2), str(cx), fill=label, font=font,
-                    stroke_width=3, stroke_fill=(0, 0, 0),
-                )
-        for cy in range(0, nrows + 1, step):
-            y = min(ih - 1, cy * cell_px)
-            draw.line([(0, y), (iw, y)], fill=grid, width=2)
-            if cy < nrows:
-                draw.text(
-                    (4, y + 2), str(cy), fill=label, font=font,
-                    stroke_width=3, stroke_fill=(0, 0, 0),
-                )
-        return img
+        return render_tactical_minimap(
+            render_state, scale=_PLAY_UPSCALE, grid=True, legend=True
+        )
     except Exception:  # noqa: BLE001
         return None
 
