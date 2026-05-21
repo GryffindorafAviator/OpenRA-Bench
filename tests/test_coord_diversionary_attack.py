@@ -12,6 +12,16 @@ and every hard seed. Non-win is a real reachable timeout LOSS via
 the `after_ticks` fail clause; `units_lost_lte` provides the second
 LOSS path (lazy/brute trades the strike force).
 
+Recalibrated after the engine movement fixes ((A) attack_unit on
+out-of-sight targets paths normally; (B) a moving unit fires AND
+takes fire en route). The `_bait_only` cheat policy must send the
+bait jeeps to a FIXED decoy target (the powr at (100, 30)) — the
+old policy recomputed the target each tick from the jeep's current
+latitude, and once the engine's en-route movement drifted a jeep
+across y=20 the latitude-keyed target flipped the jeep onto the
+REAL fact at (100, 10), so "bait only" accidentally razed the
+scoring objective and the cheat policy spuriously WON.
+
 Validation is scripted (no model / network).
 """
 from __future__ import annotations
@@ -359,16 +369,21 @@ def _lazy_nearest(rs, Command):
 
 
 def _bait_only(rs, Command):
-    """Jeeps slash toward the decoy region (pulls the heavy garrison
-    into pursuit), tanks stand still. The fact survives — clock runs
-    out → LOSS. Tests that the bait without the counter-attack does
-    not score."""
+    """Jeeps slash toward the FIXED decoy region (the powr at
+    (100, 30) — same decoy every tier / spawn), tanks stand still.
+    The bait pulls the heavy garrison into pursuit but the real fact
+    is never struck, so the clock runs out → LOSS. Tests that the
+    bait without the counter-attack does not score.
+
+    NB: the decoy target is FIXED at (100, 30) and must not be
+    recomputed per-tick from the jeep's current latitude — the
+    engine movement fix lets a moving jeep drift across y=20, and a
+    latitude-keyed target would ping-pong the jeep onto the REAL
+    fact at (100, 10), accidentally scoring the very objective this
+    cheat policy is meant to leave untouched."""
     cmds = []
     for j in _of_type(rs, {"jeep"}):
-        # If on north start, dive into south decoy region; mirror.
-        jy = j.get("cell_y", 20)
-        target_y = 30 if jy < 20 else 10
-        cmds.append(Command.move_units([str(j["id"])], 100, target_y))
+        cmds.append(Command.move_units([str(j["id"])], 100, 30))
     return cmds or [Command.observe()]
 
 
