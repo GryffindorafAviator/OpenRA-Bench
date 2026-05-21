@@ -1033,6 +1033,29 @@ Then run `evaluate.py --agent custom` with your agent integrated.
 # human's run is scored by the identical rules as a model's.
 
 _PLAY_LEVELS = ["easy", "medium", "hard"]
+_PLAY_UPSCALE = 5  # nearest-neighbour minimap upscale for the Play tab
+
+
+def _play_grid_font(size: int):
+    """A large legible font for the minimap coordinate labels — tries
+    real TrueType fonts, falls back to a scaled default."""
+    from PIL import ImageFont
+
+    for path in (
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ):
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:  # noqa: BLE001
+            continue
+    try:
+        return ImageFont.load_default(size=size)  # Pillow >= 10.1
+    except Exception:  # noqa: BLE001
+        return ImageFont.load_default()
 
 
 def _play_scenarios() -> list[str]:
@@ -1065,10 +1088,11 @@ def _md_escape(text: str) -> str:
 
 
 def _play_minimap(render_state: dict):
-    """PIL minimap image — the same view an LLM agent is shown,
-    upscaled 3x (nearest-neighbour) so individual units stay distinct,
-    with a coordinate grid + axis labels every 10 cells so a human can
-    locate the cell coordinates the objective refers to."""
+    """PIL minimap image — the same view an LLM agent is shown, upscaled
+    `_PLAY_UPSCALE`x (nearest-neighbour) so individual units stay
+    distinct, with a coordinate grid + large outlined axis labels every
+    10 cells so a human can read off the cell coordinates the objective
+    refers to."""
     try:
         import base64
         import io
@@ -1082,27 +1106,35 @@ def _play_minimap(render_state: dict):
             return None
         img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
         bw, bh = img.size
-        img = img.resize((bw * 3, bh * 3), Image.NEAREST)
+        scale = _PLAY_UPSCALE
+        img = img.resize((bw * scale, bh * scale), Image.NEAREST)
         iw, ih = img.size
-        cell_px = 18  # minimap CELL(6) * 3x upscale
+        cell_px = 6 * scale  # minimap CELL(6) * upscale
         rows = [r for r in (render_state.get("minimap") or "").split("\n")
                 if r]
         cols = max((len(r) for r in rows), default=bw // 6)
         nrows = len(rows) or bh // 6
         draw = ImageDraw.Draw(img)
-        grid = (110, 112, 122)
-        label = (235, 235, 245)
+        grid = (120, 123, 135)
+        label = (255, 246, 120)  # bright yellow, readable over terrain
+        font = _play_grid_font(34)
         step = 10
         for cx in range(0, cols + 1, step):
             x = min(iw - 1, cx * cell_px)
-            draw.line([(x, 0), (x, ih)], fill=grid, width=1)
+            draw.line([(x, 0), (x, ih)], fill=grid, width=2)
             if cx < cols:
-                draw.text((x + 2, 1), str(cx), fill=label)
+                draw.text(
+                    (x + 4, 2), str(cx), fill=label, font=font,
+                    stroke_width=3, stroke_fill=(0, 0, 0),
+                )
         for cy in range(0, nrows + 1, step):
             y = min(ih - 1, cy * cell_px)
-            draw.line([(0, y), (iw, y)], fill=grid, width=1)
+            draw.line([(0, y), (iw, y)], fill=grid, width=2)
             if cy < nrows:
-                draw.text((2, y + 1), str(cy), fill=label)
+                draw.text(
+                    (4, y + 2), str(cy), fill=label, font=font,
+                    stroke_width=3, stroke_fill=(0, 0, 0),
+                )
         return img
     except Exception:  # noqa: BLE001
         return None
@@ -1244,10 +1276,10 @@ def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
             )
         h = len(rows)
         w = max(len(r) for r in rows)
-        # _play_minimap renders at CELL(6) and upscales 3x → the image
-        # the user clicks is w*18 x h*18 px; map the click back at that
-        # resolution, not the base CELL resolution.
-        img_w, img_h = w * 6 * 3, h * 6 * 3
+        # _play_minimap renders at CELL(6) and upscales _PLAY_UPSCALE x →
+        # map the click back at that resolution, not the base CELL one.
+        img_w = w * 6 * _PLAY_UPSCALE
+        img_h = h * 6 * _PLAY_UPSCALE
         cx, cy = minimap_click_to_cell(px, py, img_w, img_h, w, h)
         note = f"🖱 Clicked cell **({cx}, {cy})**"
         if mode == "Move here" and sel:
@@ -1513,12 +1545,12 @@ def build_app() -> gr.Blocks:
                     play_start = gr.Button("▶ Start", scale=1)
                 play_objective = gr.Markdown()
                 play_status = gr.Markdown(_play_status_md(None))
-                with gr.Row():
-                    play_img = gr.Image(
-                        label="Minimap — click to select units / give orders",
-                        height=420, interactive=False, show_label=True,
-                    )
-                    play_brief = gr.Markdown()
+                # Minimap on its own full-width row so it renders large.
+                play_img = gr.Image(
+                    label="Minimap — click to select units / give orders",
+                    height=620, interactive=False, show_label=True,
+                )
+                play_brief = gr.Markdown()
                 play_units = gr.Dataframe(
                     label="Your units (✓ = selected)",
                     headers=["sel", "id", "type", "x", "y", "hp%",
