@@ -33,6 +33,17 @@ dropped (the win is a survival-band check), a `not proc:1` fail
 clause, a persistent unarmed enemy `fact` marker (anti auto-DRAW),
 the hard survival floor at tick 2400 and its attrition cap at 18.
 
+Spawn-spread recalibration (engine `count:` fix): the engine used
+to stack all N units of a `count:N` group on the single declared
+cell; it now SPREADS them across N distinct cells. On HARD the
+scattered 5-unit flex squad slightly improved the WEST garrison +
+HALF-flex trade, so split-defend (3 of 5 flex sent WEST) suddenly
+held the WEST base and WON — the "laziest play wins" inversion this
+pack had previously closed. Hard's WEST light push was raised
+20->26 to re-tighten that trade: the bare garrison + any partial
+flex (split / oscillate) is overrun, while the garrison + the FULL
+consolidated flex still clears it and holds past the 2400 floor.
+
 The capability stays load-bearing — stall / split / oscillate /
 wrong-side consolidate all LOSE; only consolidate-on-the-light-side
 AND attack-move into the push WINS.

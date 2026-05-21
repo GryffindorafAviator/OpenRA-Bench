@@ -181,7 +181,8 @@ def test_timeout_reachable_inside_max_turns():
 
 def test_hard_has_two_spawn_point_groups():
     """Hard-tier curation: ≥2 distinct agent spawn_point groups so the
-    seed round-robins the staging latitude (north y=10 / south y=30).
+    seed round-robins the staging DISTANCE from the yard (far west
+    x=6 / forward x=18, both on the north flank y=12).
     Engine-roundtrip is asserted by tests/test_hard_tier.py."""
     c = compile_level(load_pack(PACK_PATH), "hard")
     groups = {

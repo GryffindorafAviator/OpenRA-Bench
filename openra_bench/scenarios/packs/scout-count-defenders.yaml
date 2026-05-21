@@ -20,16 +20,27 @@
 #   • Pre-placed agent base: fact + proc + powr + weap (+ fix for
 #     2tnk tech prereq) + 2× jeep scouts.
 #   • Pre-placed enemy defenders at the far-east `fact` landmark:
-#     K medium tanks (2tnk, stance:2 — hold post) PLUS two
-#     pillboxes (pbox) for
-#     extra defensive firepower. The pillboxes don't count toward
-#     `enemies_discovered_gte:K` (they're buildings) or
+#     K half-strength medium tanks (2tnk, stance:2 — hold post,
+#     health: 60) PLUS pillboxes (pbox) for extra defensive
+#     firepower — 2 on easy/hard, 1 on medium. The pillboxes don't
+#     count toward `enemies_discovered_gte:K` (they're buildings) or
 #     `units_killed_gte:K` (also buildings) — they are pure
 #     attrition-multiplier that prevents the under-build (2 tanks)
-#     from rushing through. Without the pillboxes a 2-medium-tank
-#     attacker can beat 3-4 medium-tank defenders cleanly; with the
-#     pillboxes' extra ~30 dps each, 2 attackers are wiped before
-#     scoring kills.
+#     from rushing through.
+#
+#   • SPAWN-SPREAD CALIBRATION (engine `count:` fix): the engine
+#     `count:N` expansion used to STACK all N defenders on the
+#     single declared cell; it now SPREADS them across N distinct
+#     cells (copy 0 at the anchor, copies 1..N-1 in outward rings).
+#     The spread tightened the K defenders into a focus-firing
+#     cluster, which won the attrition trade even at equal HP and
+#     equal count — a full-HP K-tank defender cluster beats a
+#     count-matched K-tank attacker column. The defenders are now a
+#     half-strength garrison (`health: 60`) so the count-matched
+#     attacker force wins the trade while an under-build (2 tanks)
+#     against K≥3 still loses; medium drops to 1 pillbox because a
+#     second pbox over-tunes the post-spread defence past what a
+#     K=3 attacker wave can beat.
 #   • Cash: $5100 — funds up to 6× 2tnk ($850 each). Tuned so the
 #     intended K-tanks build fits, and the over-build (queue all 6
 #     before sending) bleeds the production clock past the deadline.
@@ -85,9 +96,10 @@
 #     K≥3 levels.
 #   • build-max-force (queue all 6 medium tanks before sending):
 #     LOSS on every level — the 6-tank sequential queue takes
-#     ~3240 ticks plus ~1350 transit + 300 combat = ~4890 ticks,
-#     beyond every level's within_ticks deadline (max 4200 on
-#     hard). The over-build is a clean LOSS on every (level, seed).
+#     ~3240 ticks plus ~1350 transit + combat, so the engagement
+#     cannot even START before every level's within_ticks deadline
+#     (3300 easy / 3700 medium / 4500 hard). The over-build is a
+#     clean LOSS on every (level, seed).
 #   • intended count-then-build (scout to count K, queue exactly K
 #     tanks, attack-move east after all built): WINS on every
 #     (level, seed).
@@ -97,10 +109,11 @@
 #   • 2tnk build ~540 ticks each (sequential weap queue).
 #   • 2tnk transit ~15 ticks/cell × ~90 cells = ~1350 ticks.
 #   • Combat resolution against K defenders ≈ 300 ticks.
-#   • Intended K=2 finishes ≈ tick 2883 (2×540+1350+300 ≈ 2730);
-#     within_ticks 3300 accepts with slack.
+#   • Intended K=2 finishes ≈ tick 2793; within_ticks 3300 accepts
+#     with slack.
 #   • Intended K=3 finishes ≈ tick 3333; within_ticks 3700 accepts.
-#   • Intended K=4 finishes ≈ tick 3783; within_ticks 4200 accepts.
+#   • Intended K=4 finishes ≈ tick 3783–4143 (spawn-latitude
+#     dependent on hard); within_ticks 4500 accepts with slack.
 #   • Over-build 6 finishes ≈ tick 4890 (6×540+1350+300 = 4890),
 #     beyond ALL within_ticks deadlines ⇒ LOSS on every level.
 #
@@ -206,8 +219,11 @@ levels:
         - {type: jeep, owner: agent, position: [22, 19], stance: 1}
         - {type: jeep, owner: agent, position: [22, 21], stance: 1}
         # K=2 medium-tank defenders + 2 pillboxes for reinforcing
-        # fire. stance:2 (Defend — hold post) on the tanks.
-        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 2, count: 2}
+        # fire. stance:2 (Defend — hold post) on the tanks. The
+        # defenders are a half-strength garrison (health: 60) so the
+        # count-matched attacker force wins the trade — see the
+        # spawn-spread calibration note in the header.
+        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 2, count: 2, health: 60}
         - {type: pbox, owner: enemy, position: [108, 19]}
         - {type: pbox, owner: enemy, position: [108, 21]}
         # Unarmed enemy `fact` landmark — MustBeDestroyed, keeps
@@ -226,16 +242,16 @@ levels:
     max_turns: 38
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 axis: FOG + larger K. K=3 hidden medium-tank defenders + 2
-  # pillboxes. The brief does NOT name the count. The agent must
+  # +1 axis: FOG + larger K. K=3 hidden medium-tank defenders + 1
+  # pillbox. The brief does NOT name the count. The agent must
   # SCOUT (drive a jeep east) to read K=3 before committing the
   # build. Stall LOSES; under-build (assume K=2, field 2 tanks)
   # loses the attrition trade (kills < 3 ⇒ LOSS); over-build
   # (queue 6) misses the deadline.
   medium:
     description: >
-      An UNKNOWN number of enemy medium tanks (2tnk) plus two
-      reinforcing pillboxes defend the far-east enemy construction
+      An UNKNOWN number of enemy medium tanks (2tnk) plus a
+      reinforcing pillbox defend the far-east enemy construction
       yard in the fog. Your pre-placed base (fact, proc, powr,
       weap, fix) plus two jeep scouts and $5100 in cash funds up to
       6 medium tanks ($850 each) but you should build EXACTLY
@@ -256,10 +272,13 @@ levels:
         - {type: fix,  owner: agent, position: [18, 22]}
         - {type: jeep, owner: agent, position: [22, 19], stance: 1}
         - {type: jeep, owner: agent, position: [22, 21], stance: 1}
-        # K=3 medium-tank defenders + 2 pillboxes.
-        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 2, count: 3}
+        # K=3 half-strength medium-tank defenders + 1 pillbox. One
+        # pillbox (not two) on medium: a second pbox over-tunes the
+        # defence so the count-matched K=3 attacker wave can no
+        # longer win the trade after the count-spread tightened the
+        # defender cluster — see the header calibration note.
+        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 2, count: 3, health: 60}
         - {type: pbox, owner: enemy, position: [108, 19]}
-        - {type: pbox, owner: enemy, position: [108, 21]}
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
@@ -296,7 +315,7 @@ levels:
       K=2) loses the attrition trade and the kill bar; over-build
       (queue 6) misses the deadline. Win when ≥4 enemy units
       discovered AND ≥4 killed AND your fact is still standing AND
-      tick ≤ 4200.
+      tick ≤ 4500.
     starting_cash: 5100
     overrides:
       actors:
@@ -316,10 +335,10 @@ levels:
         - {type: fix,  owner: agent, position: [18, 28], spawn_point: 1}
         - {type: jeep, owner: agent, position: [22, 25], stance: 1, spawn_point: 1}
         - {type: jeep, owner: agent, position: [22, 27], stance: 1, spawn_point: 1}
-        # K=4 medium-tank defenders centred at mid-y; the cloud
-        # sits at y=20 so either spawn must scout from its actual
-        # base latitude. stance:2 Defend (hold post).
-        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 2, count: 4}
+        # K=4 half-strength medium-tank defenders centred at mid-y;
+        # the cloud sits at y=20 so either spawn must scout from its
+        # actual base latitude. stance:2 Defend (hold post).
+        - {type: 2tnk, owner: enemy, position: [110, 20], stance: 2, count: 4, health: 60}
         - {type: pbox, owner: enemy, position: [108, 19]}
         - {type: pbox, owner: enemy, position: [108, 21]}
         # Persistent unarmed enemy `fact` marker — MustBeDestroyed,
@@ -330,9 +349,9 @@ levels:
         - {enemies_discovered_gte: 4}
         - {units_killed_gte: 4}
         - {building_count_gte: {type: fact, n: 1}}
-        - {within_ticks: 4200}
+        - {within_ticks: 4500}
     fail_condition:
       any_of:
-        - {after_ticks: 4201}
+        - {after_ticks: 4501}
         - {not: {building_count_gte: {type: fact, n: 1}}}
-    max_turns: 48
+    max_turns: 52

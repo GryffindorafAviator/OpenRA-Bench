@@ -1,25 +1,33 @@
 """scout-count-defenders pack — Wave-8 PERCEPTION exact-count force
 sizing.
 
-The agent scouts to count K medium-tank enemy defenders (2tnk),
-backed by 2 reinforcing pillboxes (pbox) for extra defensive DPS,
+The agent scouts to count K half-strength medium-tank enemy
+defenders (2tnk, health: 60), backed by reinforcing pillboxes
+(pbox — 2 on easy/hard, 1 on medium) for extra defensive DPS,
 then builds EXACTLY K medium tanks (2tnk) to defeat them. The
 pillboxes are STRUCTURES (counted as buildings, not units) so they
 do NOT count toward `enemies_discovered_gte:K` or
 `units_killed_gte:K`; they are pure attrition multiplier that
 prevents the under-build (2 tanks) from rushing through.
 
+The engine `count:` expansion now SPREADS the defender cluster
+across distinct cells (previously stacked on one cell); the spread
+tightened the defenders into a focus-firing cluster, so the
+defenders are a half-strength garrison (`health: 60`) to keep the
+count-matched attacker force winning the trade.
+
 Discriminations (CLAUDE.md bar):
 
   * stall (only observe): LOSS — after_ticks fail clause bites.
   * build-min-force (always assume K=2, build 2 tanks regardless of
     actual count): LOSS on medium (K=3) and hard (K=4) — the 2-tank
-    wave is wiped by the K-defender + 2-pbox combination before
+    wave is wiped by the K-defender + pbox combination before
     scoring K kills.
   * build-max-force (queue all OVER_BUILD_N=6 tanks then send):
     LOSS on every level — the 6-tank sequential queue takes ~3240
-    ticks plus ~1350 transit + ~300 combat = ~4890 ticks, beyond
-    every level's within_ticks deadline (max 4200 on hard).
+    ticks plus ~1350 transit + combat, so the engagement cannot
+    even start before every level's within_ticks deadline (max
+    4500 on hard).
   * intended count-then-build (scout to read K, build exactly K
     tanks, attack-move east): WINS on every (level, seed).
 
@@ -245,7 +253,7 @@ def _intended_policy(level: str):
 def _under_build_policy():
     """Always build exactly 2 tanks regardless of K. WINS on easy
     (K=2 — that's the matching amount) and LOSES on medium/hard
-    (K=3/K=4) — 2 medium tanks vs 3-4 defending tanks + 2 pillboxes
+    (K=3/K=4) — 2 medium tanks vs 3-4 defending tanks + pillboxes
     is an attrition trade the attackers lose."""
     state = {"queued": 0, "sent": False, "scouted": False}
 
