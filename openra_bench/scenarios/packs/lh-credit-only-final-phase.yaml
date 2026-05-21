@@ -1,0 +1,293 @@
+# lh-credit-only-final-phase.yaml
+#
+# REASONING capability — sparse-reward, long-horizon credit
+# assignment. The defining property of this pack: the ONLY thing that
+# scores is the destruction of the FAR enemy headquarters (`fact`)
+# inside a single late-tick deadline. There is NO intermediate
+# predicate — building a base, massing an army, scouting, killing a
+# picket, even reaching the far corner all earn ZERO credit on their
+# own. Reward arrives only at the terminal event, at a late tick.
+#
+# This is the delayed-gratification / sparse-reward RL problem stated
+# as an RTS scenario. The tension the model must resolve:
+#   * BUILD TOO LONG  → no time left to march the army ~120 cells
+#                       east and raze the far fact before T_late;
+#                       a "great base, never struck" play LOSES.
+#   * STRIKE TOO EARLY → the 2 starter tanks bounce off the picket,
+#                       never raze the fact, burn the clock; LOSES.
+#   * STALL (observe only) → the fact stands; LOSES on after_ticks.
+#   * COMMIT ON TIME → build a real army EARLY, then commit it on the
+#                       long trek so the far fact falls inside the
+#                       late window; only this WINS.
+# Because no intermediate activity is rewarded, a policy that cannot
+# plan across the whole horizon toward the one terminal payoff
+# (instead chasing locally-plausible "progress") never wins. That is
+# precisely sparse-reward long-horizon credit assignment.
+#
+# Why a SINGLE far objective (not the multi-front split of
+# `lh-build-army-coordinate-multifront-attack`): multi-front adds a
+# spatial-split axis; this pack isolates the *temporal* axis — one
+# objective, one deadline, the whole question is WHEN to stop
+# investing and commit so the only rewarded event happens in time.
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - `enemy_key_buildings_destroyed_in_region` matches the destroy
+#     RECORD on (type,x,y,radius); we pass `radius: 8`.
+#   - `after_ticks` belongs in the FAIL clause only (in a WIN clause
+#     it is structurally incompatible with ConquestVictoryConditions);
+#     here win = destruction + within_ticks, fail = after_ticks.
+#   - Engine auto-`done` fires when the last enemy MustBeDestroyed
+#     building falls; a persistent unarmed enemy `fact` MARKER sits
+#     deep in the far corner so razing the objective fact does not
+#     collapse the run to a DRAW.
+#   - tick/turn: max tick = 93 + 90·(max_turns-1). max_turns:80 →
+#     max tick 7203 ≥ within_ticks 7200 ✓; after_ticks 7201 bites.
+#   - hard tier declares TWO agent spawn_point groups (NORTH y=18 /
+#     SOUTH y=42) so the start latitude — and thus the exact march
+#     route to the fixed far objective — round-robins per seed.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-credit-only-final-phase.yaml
+
+meta:
+  id: lh-credit-only-final-phase
+  title: 'Credit Only at the Final Phase — Sparse Reward, One Late Objective'
+  capability: reasoning
+  real_world_meaning: >
+    A long-horizon plan where ONLY the terminal outcome is rewarded:
+    raze the far enemy headquarters inside a single late deadline.
+    Building the base, massing the army, marching across the map —
+    none of it scores on its own. The agent must invest early with no
+    feedback, then commit the force on a long trek so the one rewarded
+    event lands in time. Over-investing (building forever, never
+    striking) and under-investing (striking too early with too little)
+    both lose; only correctly-timed commitment toward the distant
+    payoff wins. This is delayed gratification under sparse reward.
+  robotics_analogue: >
+    A multi-stage autonomous mission where success is graded solely on
+    completing the final objective by a hard deadline (e.g. a long
+    traverse-then-deliver task): intermediate waypoints and subsystem
+    readiness earn no partial credit, so the planner must allocate the
+    whole time budget toward the single terminal payoff rather than
+    optimising locally-visible sub-progress.
+  benchmark_anchor:
+    - "sparse-reward RL (terminal-only reward, no reward shaping)"
+    - "delayed-gratification / temporal credit assignment"
+    - "long-horizon credit assignment (terminal-objective payoff)"
+    - "Montezuma's Revenge-style sparse terminal reward"
+  author: berta
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare sparse-reward skill: one far objective, generous-but-real
+  # clock, light picket. The ONLY scoring event is razing the far
+  # fact before tick 7200. Build a small army (the 2 starter tanks
+  # alone bounce off the 2-unit picket) then commit it east. Stalling
+  # or building-without-striking both LOSE on after_ticks 7201.
+  easy:
+    description: >
+      Pre-placed at the west base: fact + tent + powr + weap + fix +
+      two starter medium tanks (2tnk). ONE enemy construction yard
+      (the objective) sits in the far east at (130,30), ~120 cells
+      away, guarded by a 2-unit infantry picket. The ONLY thing that
+      wins is razing that enemy fact before tick 7200 — building the
+      base, massing tanks, marching east all earn ZERO credit on
+      their own. Build a real army first (the two starter tanks alone
+      bounce off the picket), THEN commit it on the long march so the
+      fact falls inside the deadline. Stalling loses on the clock;
+      building forever without ever striking loses on the clock;
+      striking too early with too few tanks loses on the clock.
+    starting_cash: 2500
+    overrides:
+      base_map: {generator: arena, width: 160, height: 60, cordon: 4}
+      actors:
+        # Agent base — fact + tent + powr + weap + fix at the west.
+        # weap is pre-placed so the test is force-buildup TIMING, not
+        # a tech race; fix is the 2tnk prereq.
+        - {type: fact, owner: agent, position: [10, 30]}
+        - {type: tent, owner: agent, position: [10, 33]}
+        - {type: powr, owner: agent, position: [13, 30]}
+        - {type: weap, owner: agent, position: [13, 33]}
+        - {type: fix,  owner: agent, position: [16, 33]}
+        # Two starter tanks: enough to be tempted into an early
+        # under-strength strike (which LOSES — they bounce off the
+        # picket and burn the clock), not enough to actually raze.
+        # stance:0 (HoldFire) — a scenario-declared combat unit with
+        # the default stance auto-HUNTS the whole map and would
+        # self-deliver to the objective, letting a stall policy win
+        # for free (CLAUDE.md auto-hunt footgun). stance:0 keeps them
+        # idle until the agent issues an explicit attack_move.
+        - {type: 2tnk, owner: agent, position: [16, 28], stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 30], stance: 0}
+        # Ore patches if the agent chooses to fund extra tanks via a
+        # proc; starting_cash + free weap already covers the army.
+        - {type: mine, owner: neutral, position: [22, 30]}
+        - {type: mine, owner: neutral, position: [22, 33]}
+        # ── Far objective: the ONLY scoring target ──
+        - {type: fact, owner: enemy, position: [130, 30]}
+        - {type: e1,   owner: enemy, position: [127, 29], stance: 2}
+        - {type: e1,   owner: enemy, position: [127, 31], stance: 2}
+        # Persistent unarmed enemy MARKER deep in the far SE corner —
+        # keeps the episode alive past engine auto-`done` when the
+        # objective fact falls (CLAUDE.md auto-done footgun). Placed
+        # far enough that no intended-play tank ever reaches it.
+        - {type: fact, owner: enemy, position: [155, 55]}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 130, y: 30, radius: 8, types: [fact]}
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 80
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: a heavier picket. The army threshold to break through
+  # the far base is larger, so the build phase must be longer — which
+  # makes the over-investing failure (build forever, no time to
+  # strike) and the under-investing failure (commit early, too few
+  # tanks) both sharper. Same single far objective, same clock.
+  medium:
+    description: >
+      Pre-placed at the west base: fact + tent + powr + weap + fix +
+      two starter medium tanks (2tnk). ONE enemy construction yard
+      (the objective) sits in the far east at (130,30), ~120 cells
+      away, guarded by a 4-unit picket (1 anti-vehicle e3 + 3 e1
+      riflemen). The ONLY thing that wins is razing that enemy fact
+      before tick 7200 — base-building, massing and marching earn
+      ZERO credit on their own. Build a real army first (a few tanks
+      bounce off this picket), THEN commit it on the long march so
+      the fact falls inside the deadline. Building forever without
+      striking loses on the clock; an early under-strength strike
+      bounces off the picket and loses on the clock; stalling loses.
+    starting_cash: 4000
+    overrides:
+      base_map: {generator: arena, width: 160, height: 60, cordon: 4}
+      actors:
+        - {type: fact, owner: agent, position: [10, 30]}
+        - {type: tent, owner: agent, position: [10, 33]}
+        - {type: powr, owner: agent, position: [13, 30]}
+        - {type: weap, owner: agent, position: [13, 33]}
+        - {type: fix,  owner: agent, position: [16, 33]}
+        # stance:0 starter tanks — see easy: prevents the default-
+        # stance auto-hunt that would self-deliver the army.
+        - {type: 2tnk, owner: agent, position: [16, 28], stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 30], stance: 0}
+        - {type: mine, owner: neutral, position: [22, 30]}
+        - {type: mine, owner: neutral, position: [22, 33]}
+        # Far objective + a heavier 4-unit picket — tuned so 3-4
+        # tanks bounce / 6+ tanks raze.
+        - {type: fact, owner: enemy, position: [130, 30]}
+        - {type: e3,   owner: enemy, position: [127, 29], stance: 2}
+        - {type: e1,   owner: enemy, position: [127, 31], stance: 2}
+        - {type: e1,   owner: enemy, position: [128, 28], stance: 2}
+        - {type: e1,   owner: enemy, position: [128, 32], stance: 2}
+        # Persistent unarmed enemy MARKER (auto-done mitigation).
+        - {type: fact, owner: enemy, position: [155, 55]}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 130, y: 30, radius: 8, types: [fact]}
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 80
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: TWO agent spawn_point groups. The agent base latitude
+  # round-robins between NORTH (y=18) and SOUTH (y=42) per seed; the
+  # single far objective stays fixed at (130,30), so the march route
+  # and its length shift per seed. A memorised "leave at turn K, head
+  # straight east" opening cannot generalise — the model must re-plan
+  # the commit timing against the seed's actual start. Picket is the
+  # medium 4-unit picket; the controlled new variable is the spawn.
+  hard:
+    description: >
+      Pre-placed at the west base (latitude round-robined between
+      NORTH y=18 and SOUTH y=42 per seed): fact + tent + powr + weap
+      + fix + two starter medium tanks (2tnk). ONE enemy construction
+      yard (the objective) sits at (130,30), guarded by a 4-unit
+      picket (1 e3 + 3 e1). The ONLY thing that wins is razing that
+      enemy fact before tick 7200 — base-building, massing and
+      marching earn ZERO credit on their own. Build a real army
+      first, THEN commit it on the long diagonal march so the fact
+      falls inside the deadline. Building forever without striking
+      loses on the clock; an early under-strength strike bounces off
+      the picket and loses; stalling loses. The seed-varied base
+      latitude means the march route and commit timing must be
+      re-planned per seed — a memorised opening cannot generalise.
+    starting_cash: 4000
+    overrides:
+      base_map: {generator: arena, width: 160, height: 60, cordon: 4}
+      actors:
+        # NORTH base spawn (spawn_point 0) — y=18.
+        - {type: fact, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 21], spawn_point: 0}
+        - {type: powr, owner: agent, position: [13, 18], spawn_point: 0}
+        - {type: weap, owner: agent, position: [13, 21], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [16, 21], spawn_point: 0}
+        # stance:0 starter tanks — prevent the default-stance
+        # auto-hunt (see easy/medium).
+        - {type: 2tnk, owner: agent, position: [16, 16], spawn_point: 0, stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 18], spawn_point: 0, stance: 0}
+        # SOUTH base spawn (spawn_point 1) — y=42.
+        - {type: fact, owner: agent, position: [10, 42], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 39], spawn_point: 1}
+        - {type: powr, owner: agent, position: [13, 42], spawn_point: 1}
+        - {type: weap, owner: agent, position: [13, 39], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [16, 39], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [16, 44], spawn_point: 1, stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 42], spawn_point: 1, stance: 0}
+        # Shared mid-map ore patches (no spawn_point → place for both
+        # agent spawn groups). Enemy actors ignore spawn_point so the
+        # objective + picket + marker always place regardless of seed.
+        - {type: mine, owner: neutral, position: [22, 30]}
+        - {type: mine, owner: neutral, position: [22, 33]}
+        # Far objective + 4-unit picket — fixed at (130,30) so the
+        # march route (NW→SE or SW→NE) flips per seed.
+        - {type: fact, owner: enemy, position: [130, 30]}
+        - {type: e3,   owner: enemy, position: [127, 29], stance: 2}
+        - {type: e1,   owner: enemy, position: [127, 31], stance: 2}
+        - {type: e1,   owner: enemy, position: [128, 28], stance: 2}
+        - {type: e1,   owner: enemy, position: [128, 32], stance: 2}
+        # Persistent unarmed enemy MARKER (auto-done mitigation).
+        - {type: fact, owner: enemy, position: [155, 55]}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 130, y: 30, radius: 8, types: [fact]}
+        - within_ticks: 7200
+    fail_condition:
+      any_of:
+        - {after_ticks: 7201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 80
