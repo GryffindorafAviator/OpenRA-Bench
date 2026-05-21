@@ -1,0 +1,332 @@
+# Validate: python -m openra_bench.scenarios.validate packs/power-budget-online.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# POWER-BUDGET-ONLINE (Wave-10 Group I REASONING: grid bring-up under a
+# live power budget — keep the grid POSITIVE while expanding production).
+#
+# Real-world anchor: electrical-grid bring-up / capacity planning. An
+# operator commissioning new powered loads (a refinery, a war factory,
+# an armour line) must bring generation ONLINE AHEAD of demand: each new
+# load must be covered by spare generation BEFORE it is energised, or
+# the whole grid browns out and every powered process runs slow. The
+# decision is not a one-shot "power first then everything" SOP (that is
+# the sibling pack `build-power-online-first`) — it is an ONGOING budget
+# discipline: bring Power Plants online ahead of the production
+# buildings so provided power always stays ahead of drained power.
+#
+# Benchmark anchor: SC2 power management / electrical-grid bring-up /
+# capacity planning.
+#
+# ── The decision ────────────────────────────────────────────────────
+# The agent starts with a working but TIGHT grid: a Construction Yard
+# (`fact`), ONE Power Plant (`powr`, +100) and three pre-existing loads
+# from the standing base — a Barracks (`tent`, -20), a Radar Dome
+# (`dome`, -40) and a Pillbox (`pbox`, -20). Provided 100, drained 80,
+# so net surplus at t=0 is +20: healthy, but with only +20 of headroom.
+#
+# The objective is to EXPAND production: build an Ore Refinery (`proc`,
+# -30), a War Factory (`weap`, -30), a Service Depot (`fix`, -30) and
+# 3 Medium Tanks (`2tnk`). The engine prerequisite chain is powr ->
+# proc -> weap -> fix -> 2tnk (gamerules.rs prereqs + the vendored Red
+# Alert ruleset: 2tnk requires `fix` and `vehicles.allies`). Each new
+# production building draws another 30 of load. With only +20 of
+# headroom, building EVEN THE FIRST one (`proc`) on the single starter
+# Power Plant takes the grid to a NEGATIVE surplus (100 - 80 - 30 =
+# -10), and the engine throttles ALL production queues to 50% speed
+# (`world.rs:3140-3146`, `is_low_power = drained > provided && provided
+# > 0`). The agent must therefore build ADDITIONAL Power Plants and
+# bring them online AHEAD of the production buildings so provided power
+# keeps pace with the expanding load.
+#
+# ── Why every lazy / wrong-order policy LOSES ───────────────────────
+#  * STALL (only `observe`): never builds anything, fails every
+#    building/unit clause, times out at `after_ticks` -> real LOSS.
+#  * PRODUCTION-FIRST (build proc/weap/fix/tanks, defer the extra Power
+#    Plants): the moment `proc` is placed the grid is at -10 surplus,
+#    and it only deepens as weap/fix come up. Every production queue —
+#    including the Vehicle queue building the three tanks — runs at 50%
+#    speed for the whole war-factory / depot / tank phase. The measured
+#    build-out does not finish before tick ~6900, well past the win
+#    window -> real LOSS.
+#  * NO-POWER-EVER: a policy that never builds a single extra Power
+#    Plant also fails the `power_provided_gte` floor (gross provided
+#    power stays at 100, below the required 200 / 300) -> real LOSS
+#    even independent of the clock.
+#  * POWER-FIRST (intended): bring the Power Plants online AHEAD of
+#    proc/weap/fix so provided power never falls below drained. Surplus
+#    stays >= 0 the whole run, production runs at full speed, the
+#    build-out finishes (measured) by tick ~5050 (easy) / ~5320
+#    (medium) — comfortably inside the window -> WIN.
+#
+# ── Engine facts used (verified against the installed openra_train
+#    wheel with the vendored Red Alert ruleset) ───────────────────────
+#  1. Power values (vendor/OpenRA/mods/ra/rules/structures.yaml):
+#       powr +100   apwr +200   proc -30   weap -30
+#       fix -30     tent -20    dome -40   pbox -20   fact 0
+#  2. Build costs (vendored ruleset):
+#       powr 300   proc 1400   weap 2000   fix 1200   2tnk 850
+#  3. Build time = cost * 60 / 100 ticks (ProductionItem::new,
+#     build_duration_modifier = 60 — world.rs:71-72, 832):
+#       powr 180   proc 840   weap 1200   fix 720   2tnk 510 (each)
+#  4. Prerequisite chain: proc requires powr; weap requires proc; fix
+#     requires weap; 2tnk requires fix + `vehicles.allies` (provided by
+#     weap). Pre-placed scenario buildings (the starter powr/tent/dome/
+#     pbox) bypass the prereq gate; agent-built ones do not.
+#  5. Low-power throttle (world.rs:3140-3146): when `drained > provided
+#     && provided > 0` the engine SKIPS every production-queue tick on
+#     even world ticks -> 50% production speed. The Building queue and
+#     the Vehicle queue throttle together (they share the gate).
+#  6. `power_provided` / `power_drained` reflect PRE-PLACED buildings
+#     (recompute-at-snapshot fix — CLAUDE.md historical pitfall;
+#     `tests/test_power_signals_python.py`). `power_provided_gte` reads
+#     gross provided power (ignores drains) and is the anti-cheat floor
+#     here — a policy that never builds power cannot satisfy it.
+#  7. Tick alignment (CLAUDE.md): engine advances ~90 ticks per
+#     decision turn, so `within_ticks <= 93 + 90*(max_turns - 1)` must
+#     hold. `fail_condition` uses `after_ticks = within_ticks + 1` so a
+#     non-finisher LOSES on the very next tick after the window closes.
+#  8. Anti-DRAW: a persistent unarmed enemy `fact` far east keeps the
+#     engine from auto-`done`-ing on enemy elimination. The agent has
+#     no offensive tools, so the enemy `fact` is unreachable and the
+#     episode always runs to the win/fail evaluation.
+#  9. The auto-spawned harvester (proc spawns a free `harv`) finds no
+#     ore within reach on this arena, so income is ~0 — the whole
+#     build-out is funded from `starting_cash`, sized to cover the
+#     chain (powr*N + proc + weap + fix + 3*2tnk) with slack.
+# 10. Hard tier: `spawn_point` applies ONLY to AGENT actors, and ANY
+#     agent actor with a spawn_point causes agent actors WITHOUT one to
+#     be filtered out (CLAUDE.md oramap.rs footgun). The whole agent
+#     base (fact + powr + tent + dome + pbox + the inert spawn-witness
+#     e1) is therefore DUPLICATED across both spawn_point groups; the
+#     enemy `fact` marker has no spawn_point and always places.
+# 11. The inert `e1` per hard spawn group satisfies the
+#     `tests/test_hard_tier.py` units_summary spawn-variation contract
+#     (a building-only base produces empty `units_summary` on every
+#     seed). HoldFire stance + no move/attack tools exposed makes it
+#     functionally inert for the grid-budget decision.
+
+meta:
+  id: power-budget-online
+  title: 'Power Budget Online — Keep the Grid Positive While Expanding'
+  capability: reasoning
+  real_world_meaning: >
+    Electrical-grid bring-up under a live capacity budget. The agent
+    runs a base whose single Power Plant only just covers its standing
+    load (+20 of headroom). The task is to EXPAND production — bring up
+    an Ore Refinery, a War Factory, a Service Depot and an armour line
+    — while keeping the grid in positive surplus the whole time. Each
+    new powered load must have generation brought online AHEAD of it:
+    build additional Power Plants and bring them up before the
+    production buildings. A model that energises the refinery on the
+    single starter plant drives the grid to negative surplus, the
+    engine throttles every production queue to 50% speed, and the
+    build-out overruns the deadline. A model that never builds power at
+    all also misses the required gross-provided-power floor. Only an
+    ongoing "generation ahead of demand" budget discipline wins.
+  robotics_analogue: >
+    Capacity planning for a commissioning operator energising a new
+    industrial site: each powered subsystem (the processing line, the
+    fabrication cell, the maintenance bay) must be matched by spare
+    generation BEFORE it is switched on, or the substation browns out
+    and every line on the bus runs slow. The operator must schedule
+    generator capacity ahead of load growth — not power everything
+    first, but bring generation online ahead of each new load —
+    exactly the build-Power-Plant / build-production interleave this
+    pack tests.
+  benchmark_anchor:
+    - "SC2 power management"
+    - "electrical grid bring-up"
+    - "capacity planning"
+  author: wave10-groupI-powerbudget
+
+base_map: rush-hour-arena
+starting_cash: 8200
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Pure grid-budget test: no deploy, no harvest, no move/attack tools.
+  # The decision is exclusively the INTERLEAVE of build + place_building
+  # for Power Plants vs production buildings.
+  tools: [observe, build, place_building, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 12000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare budget discipline: the standing base (fact + 1 powr + tent +
+  # dome + pbox) runs at provided 100, drained 80, surplus +20. The
+  # agent must expand to proc + weap + 3x 2tnk. The prerequisite chain
+  # is powr -> proc -> weap -> fix -> 2tnk (2tnk needs a Service Depot,
+  # `fix`). proc/weap/fix each draw -30; building any of them on the
+  # single starter plant drives the grid NEGATIVE (proc alone takes
+  # surplus to -10) and the engine throttles ALL production to 50%.
+  # The agent must build at least ONE more Power Plant (provided -> 200)
+  # AHEAD of proc so the grid never goes negative.
+  #   Intended power-first build-out (measured): all buildings + 3 tanks
+  #   complete by tick ~5050. A production-first policy eats the 50%
+  #   throttle across the war-factory / depot / tank phase and does not
+  #   finish before tick ~6900 — well past the window.
+  #   Cash: powr 300 + proc 1400 + weap 2000 + fix 1200 + 3x 2tnk
+  #   (3x850 = 2550) = 7450; starting_cash 8200 funds the chain with
+  #   slack (the auto-spawned harvester finds no ore on this arena, so
+  #   the whole build-out is paid from the opening bank).
+  #   max_turns 71 -> reachable tick 93 + 90*70 = 6393 > 6300 win
+  #   window; after_ticks 6301 bites as a real timeout LOSS.
+  easy:
+    description: >
+      Your base runs on a TIGHT grid: a Construction Yard ('fact'),
+      ONE Power Plant ('powr', +100 power) and three standing loads —
+      a Barracks ('tent', -20), a Radar Dome ('dome', -40) and a
+      Pillbox ('pbox', -20). Provided 100, drained 80, surplus +20.
+      Expand production: build an Ore Refinery ('proc', cost 1400,
+      -30 power), a War Factory ('weap', cost 2000, -30 power), a
+      Service Depot ('fix', cost 1200, -30 power — required for tanks)
+      and 3 Medium Tanks ('2tnk'). Each new production building draws
+      another 30 of power: building 'proc' on the single starter plant
+      ALONE drives the grid to NEGATIVE surplus and the engine
+      throttles ALL production to 50% speed. Build at least ONE more
+      Power Plant and bring it online AHEAD of 'proc' so power_provided
+      reaches >=200 and the grid never goes negative. Win =
+      power_provided >=200 AND own a 'proc' AND a 'weap' AND >=3 '2tnk',
+      before tick 6300. Stalling, or running production on too little
+      power (50% slowdown), misses the clock and LOSES.
+    starting_cash: 8200
+    overrides:
+      actors:
+        # Standing base: Construction Yard + one Power Plant + three
+        # pre-existing loads (Barracks -20, Radar Dome -40, Pillbox
+        # -20). Provided 100, drained 80, surplus +20.
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [16, 20]}
+        - {type: tent, owner: agent, position: [12, 24]}
+        - {type: dome, owner: agent, position: [16, 24]}
+        - {type: pbox, owner: agent, position: [20, 24]}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - power_provided_gte: 200
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - unit_type_count_gte: {type: 2tnk, n: 3}
+        - within_ticks: 6300
+    fail_condition:
+      any_of:
+        - after_ticks: 6301
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 71
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: HEAVIER GENERATION REQUIREMENT. The
+  # gross-provided floor rises to 300 (TWO additional Power Plants),
+  # so the generation-ahead-of-demand interleave is longer and the
+  # budget discipline must hold across more steps. Same standing base
+  # (provided 100, drained 80, surplus +20), same clock as easy — the
+  # extra Power Plant is the controlled difficulty bump (the intended
+  # build-out finishes ~270 ticks later than easy, so the same window
+  # is effectively tighter).
+  #   Intended power-first build-out (measured): completes by tick
+  #   ~5320. A production-first policy does not finish before tick
+  #   ~6900 (50% throttle across the post-proc phase). Cash: 2x powr
+  #   600 + proc 1400 + weap 2000 + fix 1200 + 3x 2tnk 2550 = 7750;
+  #   starting_cash 8500 funds it with slack.
+  #   max_turns 67 -> reachable tick 93 + 90*66 = 6033 > 6000 win
+  #   window; after_ticks 6001 bites.
+  medium:
+    description: >
+      Same standing base as easy (fact + 1 powr + tent + dome + pbox,
+      provided 100 / drained 80 / surplus +20), but a BIGGER armour
+      line demands a bigger grid. Expand to an Ore Refinery ('proc',
+      -30), a War Factory ('weap', -30), a Service Depot ('fix', -30,
+      required for tanks) and 3 Medium Tanks ('2tnk'), and bring gross
+      provided power up to >=300 — that is TWO additional Power Plants.
+      Bring the Power Plants online AHEAD of the production buildings
+      so the grid never goes negative; building production on too
+      little power throttles ALL production (including the tank line)
+      to 50% speed and busts the clock. Win = power_provided >=300 AND
+      own a 'proc' AND a 'weap' AND >=3 '2tnk', before tick 6000.
+      Stalling or under-powering production LOSES.
+    starting_cash: 8500
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [16, 20]}
+        - {type: tent, owner: agent, position: [12, 24]}
+        - {type: dome, owner: agent, position: [16, 24]}
+        - {type: pbox, owner: agent, position: [20, 24]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - power_provided_gte: 300
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - unit_type_count_gte: {type: 2tnk, n: 3}
+        - within_ticks: 6000
+    fail_condition:
+      any_of:
+        - after_ticks: 6001
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 67
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO `fact` spawn_point
+  # groups (NORTH y=12 / SOUTH y=28) round-robined by seed. The whole
+  # standing base flips per seed, so the placement coords for the new
+  # Power Plants / proc / weap / fix must be read from the actual base
+  # position — a memorised opening mis-places out of bounds on one
+  # spawn. Same generation requirement as medium (provided >=300) and
+  # same clock. max_turns 67 -> reachable tick 93 + 90*66 = 6033 >
+  # 6000 win window; after_ticks 6001 bites.
+  #
+  # CLAUDE.md footgun: spawn_point applies ONLY to AGENT actors, and
+  # ANY agent actor with spawn_point filters out agent actors WITHOUT
+  # one. The full agent base is DUPLICATED across both spawn groups;
+  # the enemy marker has no spawn_point and always places.
+  hard:
+    description: >
+      Same grid-budget task as medium (expand to proc + weap + fix +
+      3 '2tnk' and bring gross provided power to >=300 by building TWO
+      more Power Plants, brought online AHEAD of production so the grid
+      never goes negative), but your standing base may begin in the
+      NORTH band (y~=12) or the SOUTH band (y~=28) depending on the
+      seed. Read the base position from the observation and place the
+      new Power Plants and production buildings near it. Under-powering
+      production throttles every queue to 50% and busts the clock.
+      Win = power_provided >=300 AND own a 'proc' AND a 'weap' AND
+      >=3 '2tnk', before tick 6000. Stalling or under-powering LOSES.
+    starting_cash: 8500
+    overrides:
+      actors:
+        # ── NORTH (spawn_point 0) ─────────────────────────────────
+        - {type: fact, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [16, 12], spawn_point: 0}
+        - {type: tent, owner: agent, position: [12, 16], spawn_point: 0}
+        - {type: dome, owner: agent, position: [16, 16], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [20, 16], spawn_point: 0}
+        # Inert spawn-witness e1 (CLAUDE.md / test_hard_tier.py
+        # units_summary contract). HoldFire + no move/attack tools.
+        - {type: e1, owner: agent, position: [20, 12], spawn_point: 0, stance: 0}
+        # ── SOUTH (spawn_point 1) ─────────────────────────────────
+        - {type: fact, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [12, 32], spawn_point: 1}
+        - {type: dome, owner: agent, position: [16, 32], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [20, 32], spawn_point: 1}
+        - {type: e1, owner: agent, position: [20, 28], spawn_point: 1, stance: 0}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - power_provided_gte: 300
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - unit_type_count_gte: {type: 2tnk, n: 3}
+        - within_ticks: 6000
+    fail_condition:
+      any_of:
+        - after_ticks: 6001
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 67

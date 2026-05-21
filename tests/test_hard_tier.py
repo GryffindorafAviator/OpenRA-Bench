@@ -1137,6 +1137,17 @@ UPGRADED = [
     # CLAUDE.md), centred on y=20 so travel cost is symmetric across
     # the two spawns.
     "lh-progression-stage-locked",
+    # Wave-10 REASONING grid-budget pack (SC2 power management /
+    # electrical-grid bring-up / capacity-planning anchor). Hard tier
+    # defines two agent spawn_point groups (NORTH y=12 / SOUTH y=28)
+    # round-robined by seed; the whole standing base (fact + powr +
+    # tent + dome + pbox) is duplicated across both spawns so the
+    # power-budget interleave logic is identical, but the placement
+    # coords for the new Power Plants / proc / weap / fix are at
+    # spawn-specific positions — a memorised opening mis-places
+    # out of bounds on one spawn. Per-group inert HoldFire e1
+    # spawn-witness surfaces the variation via units_summary.
+    "power-budget-online",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
