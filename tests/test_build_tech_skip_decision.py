@@ -285,17 +285,17 @@ def test_predicates_enforce_capability():
     assert not evaluate(
         c.win_condition, _ctx(tick=900, kills=3, own_buildings=base_b)
     )
-    # 4 kills but past within_ticks -> not win
+    # 4 kills but past within_ticks (easy within_ticks 1600) -> not win
     assert not evaluate(
-        c.win_condition, _ctx(tick=1801, kills=4, own_buildings=base_b)
+        c.win_condition, _ctx(tick=1601, kills=4, own_buildings=base_b)
     )
     # 4 kills but fact destroyed -> not win
     assert not evaluate(
         c.win_condition, _ctx(tick=900, kills=4, own_buildings=base_b[1:])
     )
-    # Past after_ticks deadline -> fail
+    # Past after_ticks deadline (easy after_ticks 1601) -> fail
     assert evaluate(
-        c.fail_condition, _ctx(tick=1900, kills=0, own_buildings=base_b)
+        c.fail_condition, _ctx(tick=1700, kills=0, own_buildings=base_b)
     )
     # Fact destroyed -> fail
     assert evaluate(
