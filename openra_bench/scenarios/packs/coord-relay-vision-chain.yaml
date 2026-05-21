@@ -1,0 +1,337 @@
+# coord-relay-vision-chain.yaml
+#
+# ACTION capability — vision relay chain. To keep a distant objective
+# OBSERVED, the agent must SPACE its scouts in a CHAIN: a scout at each
+# intermediate relay region plus a scout pushed all the way to the far
+# objective, so the force is DISTRIBUTED across the corridor (each link
+# within vision range of the next) instead of bunched or sent solo.
+#
+# THE CAPABILITY
+# --------------
+# Real military relay / communications-chain doctrine and sensor-
+# network coverage: a single sensor far forward has no relay back to
+# base; a cluster of sensors at one spot has reach but no depth. Only
+# a SPACED chain — one node per leg of the corridor — propagates
+# coverage from the base out to the distant objective. The agent here
+# holds 4 jeep scouts and must place them so that intermediate relay
+# regions are each occupied AND the far objective is observed, all at
+# the same time.
+#
+# WHY THE PREDICATE IS LOAD-BEARING (anti-cheat)
+# ----------------------------------------------
+# The win is an `all_of` evaluated every tick — every clause must hold
+# SIMULTANEOUSLY. The clauses:
+#   * `units_in_region_gte` at each intermediate relay region (≥2 of
+#     them; medium/hard add a 3rd) — a jeep must be PARKED on each
+#     relay leg.
+#   * `units_in_region_gte` at the FAR objective region — a jeep must
+#     be PARKED on the objective. This is the "sustained vision" leg:
+#     `enemies_discovered_gte` alone is a STICKY latch (it never
+#     un-sets once an enemy id is seen), so without this clause a
+#     single jeep could tour out, glimpse the objective, drive back,
+#     and the team could then re-bunch — defeating the chain. The
+#     far-region occupancy clause forces a jeep to STAY on the
+#     objective at win-eval time.
+#   * `enemies_discovered_gte: K` — the far objective is genuinely
+#     OBSERVED (the far jeep has vision of the hidden enemy cluster;
+#     the FAR region radius 6 ≤ jeep sight 7 so a jeep in-region sees
+#     the cluster at the region centre).
+#   * `within_ticks: T` — finish on the clock.
+#   * `building_count_gte:{fact,n:1}` — the base construction yard
+#     still stands (and seeds the fail clause without the turn-1
+#     `not own_units_gte:1` footgun).
+#
+# Because `all_of` requires every region occupied at the SAME tick,
+# and a jeep can only be in one region at once, the ONLY way to
+# satisfy the win is to DISTRIBUTE the 4 jeeps across the chain.
+#
+# THE BAR (every lazy / brute / bunched play LOSES, only the spaced
+# relay chain WINS — non-win is a real reachable timeout LOSS):
+#
+#   • stall (observe only): no jeep moves → no relay region occupied,
+#     the far objective never observed → `within_ticks` never met →
+#     `after_ticks` fail bites → LOSS.
+#
+#   • one-scout-far (race one jeep to the objective, others idle):
+#     the far-region + `enemies_discovered` clauses latch, but the
+#     intermediate relay regions are EMPTY (the other 3 jeeps sat at
+#     base) → relay clauses fail → LOSS.
+#
+#   • bunched-scouts (drive all 4 jeeps together to one spot): they
+#     can occupy at most ONE region at a time — either a relay or the
+#     objective, never both relays AND the objective simultaneously →
+#     LOSS. Bunched at base: nothing observed. Bunched at the far
+#     objective: relays empty.
+#
+#   • intended spaced relay chain: jeep on relay R1, jeep on relay
+#     R2 (medium/hard: + jeep on relay R3), jeep parked on the FAR
+#     objective. All region clauses hold at once; the far jeep's
+#     vision discovers the hidden enemy cluster; finishes inside T →
+#     WIN.
+#
+# ENGINE FACTS USED (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - Tick budget ~90/turn; max tick ≈ 93 + 90·(max_turns−1). Each
+#     level's `within_ticks` and the fail `after_ticks` (= within+1)
+#     are both below that ceiling, so a non-win run reliably crosses
+#     the fail clause — a real LOSS, never a silent DRAW.
+#   - `units_in_region_gte:{x,y,radius,n}` — ≥n agent units within
+#     radius of (x,y); the load-bearing chain-spacing predicate.
+#   - `enemies_discovered_gte` counts UNIQUE enemy units ever given
+#     vision; the far jeep parked in the FAR region (radius 6 ≤ jeep
+#     sight 7) sees the hidden cluster at the region centre.
+#   - HIDDEN enemies use `stance:0` (HoldFire) so the cluster HOLDS
+#     at the far objective and does not deliver itself toward base —
+#     the relay test stays a relay test (CLAUDE.md "set HIDDEN
+#     actors to stance:0").
+#   - `e3` (not `e1`) for the hidden cluster — `e1` at some cells
+#     fails to surface in `enemy_positions` (CLAUDE.md footgun).
+#   - Agent jeeps are `stance:0` so a scenario-declared stance:3
+#     unit cannot auto-hunt the map; the agent must explicitly
+#     `move_units` each jeep onto its relay leg.
+#   - Inert enemy `fact` marker far east — anti-DRAW: a persistent
+#     enemy actor keeps the episode alive past the win/fail
+#     evaluation (engine auto-`done`s on enemy-elimination).
+#   - Enemy actors do NOT honour `spawn_point` (CLAUDE.md per-owner
+#     activation) — the hard tier's two spawn groups vary only the
+#     AGENT base/relay latitude; the hidden cluster + marker are
+#     placed once and shared.
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/coord-relay-vision-chain.yaml
+
+meta:
+  id: coord-relay-vision-chain
+  title: 'Vision Relay Chain — Space Scouts to Keep the Far Objective Observed'
+  capability: action
+  real_world_meaning: >
+    To keep a distant objective continuously observed, scouts must be
+    spaced in a CHAIN — one per leg of the corridor, each within
+    vision range of the next — so coverage propagates from the base
+    out to the far objective. Sending a single scout all the way
+    forward leaves the corridor uncovered behind it; bunching the
+    scouts together gives reach at one spot but no depth. Only the
+    distributed relay chain holds the whole corridor and the far
+    objective at once.
+  robotics_analogue: >
+    Multi-robot sensor-network coverage / communications relay: a
+    swarm tasked with maintaining situational awareness of a remote
+    site cannot send one robot out (it loses the relay back to the
+    operator) nor keep the swarm clustered (it cannot reach). The
+    robots must space themselves into a relay chain so each link
+    bridges to the next and the network spans base to objective —
+    the classic line-of-sight relay / mesh-coverage problem.
+  benchmark_anchor:
+    - "military relay chain"
+    - "sensor-network coverage"
+    - "communications relay"
+    - "SC2 scout-line map control"
+  author: "openra-bench"
+
+# rush-hour-arena: 128×40, playable bounds x∈[2..126], y∈[2..36].
+# Agent base + jeeps at the WEST (x≈10..16). Relay corridor runs east
+# along y=20: R1≈(45,20), R2≈(75,20), (medium/hard +R3≈(60,20)), far
+# objective ≈(108,20) where the hidden e3 cluster holds.
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  # Stance-only enemy: the hidden e3 cluster sits at its post
+  # (stance:0, per-actor below). No bot — a chase would drag the
+  # cluster off the far objective and break the vision-relay geometry.
+  enemy:
+    faction: soviet
+    cash: 0
+  # Pure positioning / perception toolset (NO attack / NO build):
+  # the test is SPACING the scout chain, not combat or production.
+  tools:
+    - observe
+    - move_units
+    - stop
+  planning: true
+  interrupts:
+    enemy_unit_spotted: true
+  termination:
+    max_ticks: 6000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare relay chain: TWO intermediate relay regions (R1, R2) plus the
+  # far objective. 4 jeeps → 3 regions need ≥1 each, 1 jeep is slack.
+  # Hidden cluster K=2 e3. Loose clock (max_turns 30 ⇒ ceiling 2703;
+  # within_ticks 2400). The intended chain forms in ~8 turns; stall /
+  # one-scout-far / bunched all miss a clause.
+  easy:
+    description: >
+      You hold 4 jeep scouts and a construction yard (fact) at your
+      WEST base. A hidden enemy cluster (2 rifle infantry) HOLDS a
+      far objective at the EAST end of the corridor near (108,20) —
+      it will not advance on you. To keep that objective observed you
+      must SPACE your jeeps in a relay chain: park one jeep on relay
+      region R1 near (45,20), one on relay region R2 near (75,20),
+      and push one jeep all the way onto the far objective near
+      (108,20) so it has vision of the cluster. Win requires, ALL AT
+      ONCE: a jeep in R1, a jeep in R2, a jeep on the far objective,
+      at least 2 enemies discovered, the fact still standing, and the
+      clock under tick 2400. Stalling loses on the deadline; sending
+      one jeep out alone leaves the relay regions empty; bunching all
+      jeeps together can occupy only one region at a time — all lose.
+    overrides:
+      actors:
+        # 4 jeep scouts at the WEST base, stance:0 (pure perception).
+        - {type: jeep, owner: agent, position: [14, 17], stance: 0}
+        - {type: jeep, owner: agent, position: [14, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [14, 23], stance: 0}
+        - {type: jeep, owner: agent, position: [16, 20], stance: 0}
+        # Construction yard — the building_count_gte:fact fail anchor.
+        - {type: fact, owner: agent, position: [10, 20]}
+        # Hidden enemy cluster HOLDS the far objective (stance:0).
+        - {type: e3, owner: enemy, position: [108, 20], stance: 0, count: 2}
+        # Inert enemy fact marker far east — anti-DRAW persistent actor.
+        - {type: fact, owner: enemy, position: [124, 5]}
+    win_condition:
+      all_of:
+        # Two intermediate relay legs — each needs a parked jeep.
+        - {units_in_region_gte: {x: 45, y: 20, radius: 6, n: 1}}
+        - {units_in_region_gte: {x: 75, y: 20, radius: 6, n: 1}}
+        # Far objective leg — sustained occupancy (defeats the sticky
+        # `enemies_discovered` latch + a re-bunch after a glimpse).
+        - {units_in_region_gte: {x: 108, y: 20, radius: 6, n: 1}}
+        # The far objective is genuinely OBSERVED.
+        - {enemies_discovered_gte: 2}
+        - {within_ticks: 2400}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        # within_ticks+1, below the ceiling (2703) ⇒ real LOSS not DRAW.
+        - {after_ticks: 2401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 30
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a THIRD intermediate relay region (R3 at
+  # (60,20)) — now 4 regions each need ≥1 jeep, so ALL 4 jeeps are
+  # committed to the chain (no slack). Hidden cluster K=3 e3. Clock
+  # tightened (max_turns 24 ⇒ ceiling 2163; within_ticks 1900).
+  medium:
+    description: >
+      You hold 4 jeep scouts and a construction yard (fact) at your
+      WEST base. A hidden enemy cluster (3 rifle infantry) HOLDS a
+      far objective near (108,20). Now there are THREE intermediate
+      relay regions to occupy — R1 near (45,20), R3 near (60,20),
+      R2 near (75,20) — plus the far objective near (108,20). With
+      exactly 4 jeeps, every jeep must hold one leg of the chain.
+      Win requires, ALL AT ONCE: a jeep in EACH of the three relay
+      regions, a jeep on the far objective, at least 3 enemies
+      discovered, the fact still standing, and the clock under tick
+      1900. Stalling, sending one jeep out alone, and bunching the
+      jeeps all lose.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [14, 17], stance: 0}
+        - {type: jeep, owner: agent, position: [14, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [14, 23], stance: 0}
+        - {type: jeep, owner: agent, position: [16, 20], stance: 0}
+        - {type: fact, owner: agent, position: [10, 20]}
+        # Larger hidden cluster — K=3.
+        - {type: e3, owner: enemy, position: [108, 20], stance: 0, count: 3}
+        - {type: fact, owner: enemy, position: [124, 5]}
+    win_condition:
+      all_of:
+        # THREE intermediate relay legs + the far objective leg.
+        - {units_in_region_gte: {x: 45, y: 20, radius: 6, n: 1}}
+        - {units_in_region_gte: {x: 60, y: 20, radius: 6, n: 1}}
+        - {units_in_region_gte: {x: 75, y: 20, radius: 6, n: 1}}
+        - {units_in_region_gte: {x: 108, y: 20, radius: 6, n: 1}}
+        - {enemies_discovered_gte: 3}
+        - {within_ticks: 1900}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        # within_ticks+1, below the ceiling (2163) ⇒ real LOSS not DRAW.
+        - {after_ticks: 1901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 24
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven agent
+  # spawn_point groups (base + relay chain shifted NORTH y=13 vs
+  # SOUTH y=27) round-robined by seed (CLAUDE.md hard-tier rule). The
+  # whole relay corridor moves with the base, and the win clauses
+  # reference the spawn-specific relay coords — so a memorised
+  # "(45,20)/(60,20)/(75,20)" chain cannot generalise; the spaced-
+  # relay-chain DOCTRINE must. The hidden cluster + marker are placed
+  # once (enemy actors don't honour spawn_point).
+  #
+  # The two spawn groups carry DISTINCT relay-corridor latitudes, so
+  # the win_condition is an `any_of` over the NORTH chain and the
+  # SOUTH chain: whichever base the seed picks, the corresponding
+  # corridor (and its hidden cluster) must be the one relayed.
+  hard:
+    description: >
+      You hold 4 jeep scouts and a construction yard (fact) at your
+      WEST base — the base and its relay corridor sit on a NORTH or
+      a SOUTH latitude depending on the seed. A hidden enemy cluster
+      (3 rifle infantry) HOLDS the far objective at the EAST end of
+      whichever corridor your base is on. Space your 4 jeeps into the
+      relay chain: one on each of the three intermediate relay
+      regions and one on the far objective. Win requires, ALL AT
+      ONCE: a jeep on each relay region, a jeep on the far
+      objective, at least 3 enemies discovered, the fact standing,
+      and the clock under tick 1900. Stalling, one-scout-far, and
+      bunched scouts all lose; a memorised corridor latitude does
+      not generalise across seeds.
+    overrides:
+      actors:
+        # spawn_point 0 — base + relay corridor on the NORTH latitude
+        # (y=13). 4 jeeps + fact.
+        - {type: jeep, owner: agent, position: [14, 10], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [14, 13], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [14, 16], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [16, 13], stance: 0, spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 13], spawn_point: 0}
+        # spawn_point 1 — base + relay corridor on the SOUTH latitude
+        # (y=27). Symmetric.
+        - {type: jeep, owner: agent, position: [14, 24], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [14, 27], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [14, 30], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [16, 27], stance: 0, spawn_point: 1}
+        - {type: fact, owner: agent, position: [10, 27], spawn_point: 1}
+        # Hidden clusters HOLD the far objective on BOTH corridor
+        # latitudes (enemy actors don't honour spawn_point, so both
+        # are always present; the agent relays the one its base sits
+        # on). Each is K=3 e3, stance:0.
+        - {type: e3, owner: enemy, position: [108, 13], stance: 0, count: 3}
+        - {type: e3, owner: enemy, position: [108, 27], stance: 0, count: 3}
+        # Inert enemy fact marker far east — anti-DRAW.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      any_of:
+        # NORTH corridor (spawn_point 0): relay chain along y=13.
+        - all_of:
+          - {units_in_region_gte: {x: 45, y: 13, radius: 6, n: 1}}
+          - {units_in_region_gte: {x: 60, y: 13, radius: 6, n: 1}}
+          - {units_in_region_gte: {x: 75, y: 13, radius: 6, n: 1}}
+          - {units_in_region_gte: {x: 108, y: 13, radius: 6, n: 1}}
+          - {enemies_discovered_gte: 3}
+          - {within_ticks: 1900}
+          - {building_count_gte: {type: fact, n: 1}}
+        # SOUTH corridor (spawn_point 1): relay chain along y=27.
+        - all_of:
+          - {units_in_region_gte: {x: 45, y: 27, radius: 6, n: 1}}
+          - {units_in_region_gte: {x: 60, y: 27, radius: 6, n: 1}}
+          - {units_in_region_gte: {x: 75, y: 27, radius: 6, n: 1}}
+          - {units_in_region_gte: {x: 108, y: 27, radius: 6, n: 1}}
+          - {enemies_discovered_gte: 3}
+          - {within_ticks: 1900}
+          - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        # within_ticks+1, below the ceiling (2163) ⇒ real LOSS not DRAW.
+        - {after_ticks: 1901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 24
