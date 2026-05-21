@@ -183,6 +183,28 @@ A scenario is defective if any of the following hold:
   defense and infantry are SEPARATE production queues so an
   efficient policy queues `build('pbox')` and `build('e1')` in
   parallel from turn 1.
+- **`pbox` is now an active direct-fire tower** (engine fix,
+  pinned by `OpenRA-Rust/openra-sim/tests/test_pbox_fires.rs` +
+  `tests/test_pbox_fires.py`). RA's `pbox` is an
+  `AttackGarrisoned` defense — in C# its fire comes from infantry
+  loaded into its `Cargo`, so the YAML carries NO direct
+  `Armament` trait. The engine does not model garrisoning, so a
+  BUILT `pbox` used to stand inert (the auto-target loop's
+  `weapons.first()` returned `None`). `GameRules::from_ruleset`
+  now assigns the canonical RA anti-infantry pillbox weapon
+  `M60mg` (Damage 1000 × Burst 5, ReloadDelay 30, Range 4c0,
+  anti-infantry `Versus None:150` — a burst one-shots an `e1`) to
+  garrison-only ground-turret defenses (`pbox`, `hbox`) when they
+  carry no explicit `Armament`. `M60mg` is weaker and shorter-
+  ranged than the `gun` turret's `TurretGun` (Damage 6000, Range
+  6c512), matching the pbox's role as the cheap anti-infantry
+  pillbox. Defense packs can now make the pbox load-bearing via a
+  `units_killed_gte` clause (a built pbox is the kill source). The
+  `def-walls-vs-towers` idiom — a `scheduled_events: spawn_actors`
+  rush injected AFTER the defense has time to build serially, with
+  NO pre-placed agent combat screen — is the way to make a
+  build-pbox policy genuinely WIN via pbox kills while stall /
+  wrong-placement still LOSE.
 - **Multiple production buildings of the same category produce IN
   PARALLEL** (engine fix, pinned by
   `OpenRA-Rust/openra-sim/tests/test_parallel_production.rs` +
