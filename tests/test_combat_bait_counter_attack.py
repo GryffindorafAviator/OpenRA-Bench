@@ -239,18 +239,32 @@ def test_objective_fact_and_sentinel_present():
 
 
 def test_guard_count_per_level():
-    """Difficulty axis: easy 3 guards, medium 5, hard 6 — one new
-    controlled variable per tier (cluster density). The loss cap also
-    tightens (3 → 2 → 2 with the hard tier additionally adding spawn
-    variation)."""
+    """Difficulty axis: easy 3 guards, medium 5, hard 5 — easy→medium
+    adds cluster density + tightens the loss cap (3 → 2); medium→hard
+    keeps the same 5-guard cover and adds the seed-driven staging-
+    distance spawn variation. The strike force scales with the cover
+    (easy 4 tanks, medium/hard 5) after the engine move-fire fixes
+    made e3 anti-tank fire bite the 2tnk armour harder."""
     pack = load_pack(PACK_PATH)
-    expected = {"easy": 3, "medium": 5, "hard": 6}
-    for lvl, want in expected.items():
+    expected_guards = {"easy": 3, "medium": 5, "hard": 5}
+    expected_tanks = {"easy": 4, "medium": 5, "hard": 5}
+    for lvl, want in expected_guards.items():
         c = compile_level(pack, lvl)
         n_e3 = sum(
             1 for a in c.scenario.actors if a.owner == "enemy" and a.type == "e3"
         )
         assert n_e3 == want, f"{lvl}: expected {want} guards, got {n_e3}"
+        n_tnk = sum(
+            a.count or 1
+            for a in c.scenario.actors
+            if a.owner == "agent" and a.type == "2tnk"
+        )
+        # hard has 5 tanks per spawn group (2 groups) → count sums to 10
+        per_group = expected_tanks[lvl]
+        groups = 2 if lvl == "hard" else 1
+        assert n_tnk == per_group * groups, (
+            f"{lvl}: expected {per_group * groups} tank-slots, got {n_tnk}"
+        )
 
 
 # ── engine-driven scripted policies ─────────────────────────────────
@@ -310,20 +324,22 @@ def _bait_only(rs, Command):
 
 def _intended(rs, Command):
     """Bait + counter-attack:
-      1. Detect the spawn hemisphere from the agent unit centroid
-         (avg_y < 20 = north spawn).
-      2. Bait the jeep into the MATCHING hemisphere flank, oscillating
-         on the far cell — this stays within GUARD_AGGRO (~16) of the
-         matching half of the guard cluster so they lunge off post,
-         but outside the e3 anti-tank Dragon range (5 cells) so the
-         jeep survives the kite.
-      3. Strike: pick the guard NEAREST the tank centroid (the most
-         immediate threat: typically one of the matching-side guards
-         being pulled OUT of formation toward the bait, so engaging it
-         away from its post is a favourable 3-vs-1 trade per kill).
-         Cycle until the cluster is broken.
-      4. Once no guards are in vision, attack-move onto the fact
-         coordinate. If a near fact is in vision, attack_unit it.
+      1. Commit the cheap fast jeep on a deep south flank vector
+         (toward 80,36) — this comes within GUARD_AGGRO (~16) of the
+         south arc of the guard cover, so those guards lunge off post
+         after it, displacing the cover for a transient window.
+      2. Strike: focus-fire the WHOLE tank column on the single guard
+         nearest the tank centroid. Concentration of fire kills the
+         displaced / front guards one at a time — a favourable
+         many-vs-one trade per kill — and the strike stays bunched.
+      3. Once no guard is in vision, drive the column directly onto
+         the briefly-undefended construction yard (`attack_unit` on
+         the objective `fact` if it is in vision, else `attack_move`
+         onto its coordinate).
+
+    The bait is genuinely load-bearing: bait-only never razes the
+    yard, and a brute frontal push without the bait pull trades the
+    whole strike force against the full undisplaced cover.
     """
     cmds = []
     tanks = _of_type(rs, {"2tnk"})
@@ -332,19 +348,10 @@ def _intended(rs, Command):
     if not (tanks or jeeps):
         return [Command.observe()]
 
-    all_units = tanks + jeeps
-    avg_y = sum(u["cell_y"] for u in all_units) / len(all_units)
-    is_north = avg_y < 20
-
-    # Bait: oscillate at the matching-hemisphere flank to keep guards
-    # engaged without dying.
+    # Bait: drive the jeep deep south past the guard cover so the
+    # south arc lunges off post after it.
     for j in jeeps:
-        jy = j["cell_y"]
-        if is_north:
-            target_y = 8 if jy > 9 else 12
-        else:
-            target_y = 33 if jy < 32 else 28
-        cmds.append(Command.move_units([str(j["id"])], 80, target_y))
+        cmds.append(Command.move_units([str(j["id"])], 80, 36))
 
     if not tanks:
         return cmds or [Command.observe()]
@@ -361,6 +368,7 @@ def _intended(rs, Command):
             break
 
     if guards:
+        # Concentration of fire: the whole column on the nearest guard.
         guards.sort(
             key=lambda g: (g["cell_x"] - tx) ** 2 + (g["cell_y"] - ty) ** 2
         )

@@ -38,13 +38,19 @@
 #     until the engine evaluates win/fail predicates — including the
 #     attrition cap (units_lost_lte) and the deadline (within_ticks).
 #   - GUARD_AGGRO ≈ 16, GUARD_LEASH ≈ 18 from spawn_cell. The bait
-#     vector must come WITHIN ≈16 of a guard's spawn cell to lunge;
-#     the strike vector must keep the strike tanks beyond aggro of
-#     the remaining guards on the loop-around path.
-#   - `move_units` auto-fires opportunistically; tanks travelling
-#     close to a remaining guard will engage en route. The flank
-#     route must keep the column out of every remaining guard's
-#     weapon range until it reaches the fact.
+#     vector must come WITHIN ≈16 of a guard's spawn cell to lunge.
+#   - `move_units` auto-fires opportunistically and a moving unit is
+#     a normal target (engine move-fire fix): the e3 anti-tank Dragon
+#     bites the 2tnk Heavy armour HARD. A 3-tank strike can no longer
+#     trade a 5+ guard cover within a 2-unit cap, so medium/hard field
+#     a 5-tank strike (easy a 4-tank strike). The bait must pull a
+#     SEGMENT of the cluster off post and the strike must focus-fire
+#     the displaced remnant: the bait is genuinely load-bearing
+#     (bait-only never razes the yard, brute frontal trades the force).
+#   - The bait jeep cannot survive a sustained kite under the new
+#     engine — it pulls a guard segment off post for a transient
+#     window and is then spent; the strike must commit during that
+#     window, not loop a long route while the jeep idles.
 
 meta:
   id: combat-bait-counter-attack
@@ -94,16 +100,16 @@ levels:
   # ── EASY ─────────────────────────────────────────────────────────
   # The bare bait-and-flank skill: 3 leashed guards lined on the
   # WEST face of the enemy fact (the natural approach side), generous
-  # loss cap (3). Brute frontal: the 3-tank column eats anti-tank
-  # fire from all 3 guards on the approach, trades the whole strike
-  # force before the fact falls, trips the attrition cap. Stall:
-  # clock runs out (within_ticks 5400). Bait-only: jeep pulls all 3
-  # guards south off post but no strike — fact survives, clock runs
-  # out. Intended: jeep dives south-east to (78, 32); all three
-  # west-face guards are within ≈16 cells (distances 12/14/10) and
-  # lunge south after it. While the jeep kites them at their leash,
-  # the strike tanks drive east along y=20 through the now-cleared
-  # west face and destroy the undefended yard.
+  # loss cap (3). After the engine move-fire fixes the e3 anti-tank
+  # Dragon shreds tanks far harder, so the strike force is 4 medium
+  # tanks (was 3). Brute frontal: the column eats anti-tank fire from
+  # the whole guard line, never razes the yard before the clock — a
+  # real timeout LOSS. Stall: clock runs out (within_ticks 5400).
+  # Bait-only: the jeep pulls the guards south off post but no strike
+  # — the fact survives, clock runs out. Intended: the jeep dives
+  # deep south so the west-face guards lunge after it; while it kites
+  # them at their leash the strike tanks focus-fire the nearest guard
+  # and then drive onto the now-undefended yard.
   easy:
     description: >
       Three leashed rocket-infantry guards stand on the west face of
@@ -112,24 +118,24 @@ levels:
       units in range, lunge at the nearest foe within ≈16 cells, and
       snap back past a leash of ≈18. Destroy the enemy construction
       yard with at most 3 of your units lost before tick 5400.
-      Driving the 3 tanks straight east at the yard puts them in
+      Driving the tanks straight east at the yard puts them in
       anti-tank fire from the whole guard line; stalling runs the
       clock. Commit the fast jeep on a divergent south-east vector
-      so all three guards lunge south after it; while the jeep
-      kites them at their leash, run the strike tanks straight
-      through the now-undefended west face to destroy the yard.
+      so the guards lunge south after it; while the jeep kites them
+      at their leash, run the strike tanks straight through the
+      now-undefended west face to destroy the yard.
     overrides:
       actors:
-        # Strike force: 3 medium tanks at west, central staging.
-        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+        # Strike force: 4 medium tanks at west, central staging.
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 4}
         # Bait: 1 fast jeep at west, south staging.
         - {type: jeep, owner: agent, position: [6, 28], stance: 1}
         # The OBJECTIVE: enemy construction yard at mid-map.
         - {type: fact, owner: enemy, position: [80, 20]}
         # The GUARDS: 3 leashed rocket infantry on the WEST face of
-        # the fact. A south-flank jeep at (78,32) is within aggro
-        # ≈16 cells of all three (distances ≈14/12/10), so all
-        # three lunge south after it, clearing the west approach.
+        # the fact. A deep-south jeep bait is within aggro ≈16 cells
+        # of all three, so all three lunge south after it, clearing
+        # the west approach.
         - {type: e3, owner: enemy, position: [76, 18], stance: 2}
         - {type: e3, owner: enemy, position: [76, 20], stance: 2}
         - {type: e3, owner: enemy, position: [76, 22], stance: 2}
@@ -154,34 +160,37 @@ levels:
   # ── MEDIUM ───────────────────────────────────────────────────────
   # +1 controlled variable: 5 guards forming a south + west L-cover
   # of the yard (the two natural west-staging approaches: head-on
-  # along y=20 OR a south sweep along y=24..28), so a single south
-  # bait pulls the south arc off while the west arc still covers
-  # the head-on lane — the strike must LOOP NORTH to come in via
-  # the cleared y=10..16 corridor. Strict attrition cap (only the
-  # bait jeep + at most one tank may be spent).
+  # along y=20 OR a south sweep along y=24..28). A single deep-south
+  # bait pulls the south arc off post; the strike commits while that
+  # arc is displaced. After the engine move-fire fixes the e3 Dragon
+  # bites the 2tnk Heavy armour harder, so a 3-tank strike can no
+  # longer trade a 5-guard cover within the cap — the strike force is
+  # 5 medium tanks (was 3), a scale-up matching the denser cover.
+  # Strict attrition cap stays 2 (the bait jeep + at most one tank):
+  # the strike must still hit the yard essentially intact; burning a
+  # second tank fails.
   medium:
     description: >
       A denser cluster of 5 leashed rocket-infantry guards covers
       the enemy construction yard (`fact` at 80,20) on the WEST and
       SOUTH faces (the two natural approaches from your west base).
-      A head-on push along y=20 is now decisively fatal. You may
+      A head-on push without first thinning the cover is decisively
+      fatal. You command 5 medium tanks plus the bait jeep but may
       spend at most 2 units — losing a second tank fails. Commit the
-      fast jeep on a south flank vector to pull the south arc of
-      guards off post after it; the west arc still covers the y=20
-      head-on lane, so loop the strike tanks NORTH through the
-      cleared y=10 corridor and dive south onto the yard from
-      above. Destroy the yard before tick 5400. Bait-only (no
-      strike) loses on the clock; brute frontal trades the strike
-      force.
+      fast jeep on a deep south flank vector to pull the south arc of
+      guards off post after it; while that arc is displaced, drive
+      the strike tanks in, focus-fire the remaining guards, and
+      destroy the yard before tick 5400. Bait-only (no strike) loses
+      on the clock; brute frontal trades the strike force.
     overrides:
       actors:
-        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 5}
         - {type: jeep, owner: agent, position: [6, 28], stance: 1}
         - {type: fact, owner: enemy, position: [80, 20]}
-        # 5 guards on the WEST + SOUTH faces. Bait at (78,32) pulls
-        # the SOUTH arc (76,24), (80,24), (84,24) — distances ≤12;
-        # the WEST arc (76,18), (76,20) stays but is OUT of weapon
-        # range of a north-flank y=10 approach (distance ≥22).
+        # 5 guards on the WEST + SOUTH faces. A deep-south jeep bait
+        # pulls the SOUTH arc (76,24), (80,24), (84,24) off post;
+        # the strike focus-fires the WEST arc (76,18), (76,20) and
+        # the displaced remainder.
         - {type: e3, owner: enemy, position: [76, 18], stance: 2}
         - {type: e3, owner: enemy, position: [76, 20], stance: 2}
         - {type: e3, owner: enemy, position: [76, 24], stance: 2}
@@ -201,68 +210,60 @@ levels:
     max_turns: 62
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # +1 more controlled variable: 6 guards split into a NORTH-WEST
-  # half-cluster and a SOUTH-WEST half-cluster, both clamped
-  # PERFECTLY SYMMETRIC around the fact's latitude (y=20) so the
-  # bait/strike geometry is identical from either staging latitude.
-  # Two spawn_point groups round-robin the agent's staging latitude
-  # — from the NORTH spawn the bait pulls the NW half off and the
-  # strike loops SOUTH; from the SOUTH spawn the bait pulls the SW
-  # half off and the strike loops NORTH. After the engine balance
-  # fixes (armor-class weapon selection makes e3 anti-tank fire
-  # bite the 2tnk Heavy armour harder) a 3-tank strike can no
-  # longer survive a 6-guard cluster, so the hard strike force is
-  # 5 medium tanks (vs 3 on easy/medium) — a deliberate scale-up
-  # matching the densest guard cover. Loss cap stays 2 (the bait
-  # jeep + at most one tank): the strike must still hit the yard
-  # essentially intact; burning a second tank fails.
+  # +1 more controlled variable on top of medium: TWO spawn_point
+  # groups round-robin the agent's staging DISTANCE from the yard —
+  # spawn 0 stages at the far west (x=6), spawn 1 stages well forward
+  # (x=30). The bait/strike geometry is identical (same 5-guard L
+  # cover, same fact latitude y=20), but the strike's run-in distance
+  # and the timing of the bait pull vary per seed, so a memorised
+  # fixed-tick opening cannot generalise — the agent must read its
+  # actual staging position. After the engine move-fire fixes a
+  # north/south staging split collapses to a knife-edge (the closer
+  # guard arc engages the column before the bait can pull it), so the
+  # spawn axis is the staging distance, not latitude. Same 5-guard L
+  # cover, 5-tank strike, and loss cap 2 as medium.
   hard:
     description: >
-      Densest guard cover (6 leashed rocket-infantry split into a
-      NW half and a SW half around the enemy construction yard at
-      80,20, both symmetric about the yard's latitude). The force
-      stages from a seed-chosen latitude (north or south), so the
-      working bait/strike pair varies per seed and can't be
-      memorised. You command 5 medium tanks plus the bait jeep but
-      may spend at most 2 units (the jeep + at most one tank) —
-      losing a second tank fails. Destroy the yard before tick
-      5400. Brute frontal trades armour and fails; bait-only never
-      razes the yard; stalling loses the clock.
+      The same dense 5-guard L-cover of the enemy construction yard
+      (`fact` at 80,20) as the previous tier, but your force stages
+      from a seed-chosen distance — either the far west or well
+      forward — so a memorised fixed opening cannot generalise; read
+      your tanks' actual position from the observation. You command 5
+      medium tanks plus the bait jeep but may spend at most 2 units
+      (the jeep + at most one tank) — losing a second tank fails.
+      Commit the fast jeep on a deep south flank vector to pull the
+      south arc of guards off post; while that arc is displaced,
+      drive the strike tanks in, focus-fire the remaining guards, and
+      destroy the yard before tick 5400. Brute frontal trades armour
+      and fails; bait-only never razes the yard; stalling loses the
+      clock.
     overrides:
       actors:
-        # spawn_point 0 — NORTH staging (y≈10): the bait dives
-        # further north into the NW half's aggro arc (pulling it
-        # off post), the strike loops SOUTH through the cleared
-        # y=10 corridor over the top and down onto the yard.
-        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, count: 5,
-           spawn_point: 0,
-           randomize: {position: {base: [6, 10], offset: 2}}}
-        - {type: jeep, owner: agent, position: [6, 14], stance: 1,
+        # spawn_point 0 — FAR-WEST staging (x=6): the strike has the
+        # full run-in to the yard; the bait has time to pull the
+        # south arc well off post before the column arrives.
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 5,
            spawn_point: 0}
-        # spawn_point 1 — SOUTH staging (y≈30): mirror layout. Bait
-        # dives further south into the SW half's aggro arc, strike
-        # loops NORTH through the cleared y=30 corridor.
-        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 5,
-           spawn_point: 1,
-           randomize: {position: {base: [6, 30], offset: 2}}}
-        - {type: jeep, owner: agent, position: [6, 26], stance: 1,
+        - {type: jeep, owner: agent, position: [6, 28], stance: 1,
+           spawn_point: 0}
+        # spawn_point 1 — FORWARD staging (x=30): the strike is much
+        # closer to the yard, so the bait pull and the strike commit
+        # are tighter together — the same idiom on a compressed clock.
+        - {type: 2tnk, owner: agent, position: [30, 20], stance: 1, count: 5,
+           spawn_point: 1}
+        - {type: jeep, owner: agent, position: [30, 28], stance: 1,
            spawn_point: 1}
         # The OBJECTIVE.
         - {type: fact, owner: enemy, position: [80, 20]}
-        # 6 guards in TWO cluster halves on the WEST face of the
-        # yard: NW half (y=15..17) and SW half (y=23..25), clamped
-        # PERFECTLY SYMMETRIC about the yard latitude (y=20) so the
-        # north-spawn and south-spawn bait pulls are identical.
-        # Both halves always place — enemy actors are not
-        # spawn_point filtered (per CLAUDE.md). The seed varies
-        # which staging latitude the agent starts from, so the
-        # natural bait/strike sides flip.
-        - {type: e3, owner: enemy, position: [76, 15], stance: 2}
-        - {type: e3, owner: enemy, position: [78, 16], stance: 2}
-        - {type: e3, owner: enemy, position: [76, 17], stance: 2}
-        - {type: e3, owner: enemy, position: [76, 23], stance: 2}
-        - {type: e3, owner: enemy, position: [78, 24], stance: 2}
-        - {type: e3, owner: enemy, position: [76, 25], stance: 2}
+        # 5 guards on the WEST + SOUTH faces (the medium L-cover).
+        # Enemy actors are not spawn_point filtered (per CLAUDE.md)
+        # so the cluster always places; the seed varies the agent's
+        # staging distance.
+        - {type: e3, owner: enemy, position: [76, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [76, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [76, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [80, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [84, 24], stance: 2}
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
