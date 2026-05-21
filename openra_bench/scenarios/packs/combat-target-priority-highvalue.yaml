@@ -1,0 +1,345 @@
+# combat-target-priority-highvalue — ACTION capability: threat-weighted
+# target prioritization. A 4-tank squad faces a MIXED enemy cluster:
+# cheap rifle chaff (e1) plus THREE high-threat anti-armour rocket
+# soldiers (e3). The squad must FOCUS THE THREE ROCKET SOLDIERS FIRST
+# — they out-damage the chaff and whittle the squad below the survival
+# cap if left alive. Killing the chaff first leaves the rockets firing
+# through the whole engagement and the squad LOSES.
+#
+# Sibling of combat-focus-fire-priority (same SC2 focus-fire idiom);
+# THIS pack encodes the capability via a SURVIVAL floor
+# (`own_units_gte`) plus an explicit non-combat building anchor
+# (`building_count_gte:fact:1`) — the "preserve the squad" framing
+# rather than the "attrition cap" (`units_lost_lte`) framing. Same
+# anchor family, different predicate idiom.
+#
+# Discrimination (the four script-policy bar — verified deterministic
+# across seeds 1-4 on every level):
+#   • stall (only observe): the tanks idle at the staging edge and
+#     never close; the kill bar (units_killed_gte:K) is never met and
+#     the after_ticks fail clause fires → LOSS.
+#   • brute attack_move (attack-move onto the cluster centroid): the
+#     engine auto-targets the NEAREST hostile — the e1 chaff screen is
+#     posted three columns closer than the rocket soldiers, so the
+#     squad chews the chaff first while the three e3s fire anti-armour
+#     rockets through the whole engagement; all four tanks are lost
+#     → busts `own_units_gte` → LOSS.
+#   • kill-chaff-first (attack_unit the e1 chaff one at a time): the
+#     three e3 rockets keep landing through the entire chaff mop-up;
+#     ~3 tanks die before the rockets are silenced → busts the
+#     survival floor → LOSS.
+#   • intended focus-threats-first: attack_unit ALL FOUR tanks onto
+#     ONE e3 at a time — 4 tank cannons concentrate ~400 HP of armour
+#     against ~50 HP of infantry, so each e3 dies in 1-2 decision
+#     turns before it can land more than ~1 rocket; with all three
+#     rockets silenced inside the first ~3 turns the chaff cannot
+#     scratch the squad → mop up the e1s → kill bar met, the squad
+#     stays above the survival floor → WIN.
+#
+# Why the spec works (verified against the engine combat sheet):
+#   • e3 = anti-tank rocket soldier (Dragon launcher, range ~5, high
+#     anti-armour DPS). THREE e3 firing unopposed wipe a 4-tank squad
+#     in ~540 ticks (~6 decision turns) — measured. Left firing
+#     through a chaff mop-up they reliably kill ~3 tanks.
+#   • e1 = basic rifle infantry. Per-shot damage vs 2tnk armour is
+#     low; the e1 chaff alone cannot drop the squad below the floor
+#     inside the budget once the three e3s are dead.
+#   • 4× 2tnk concentrated on a single e3 kill it in 1-2 decision
+#     turns; the same fire SPREAD across the cluster kills the first
+#     e3 in 4+ turns, granting all three rockets free anti-tank
+#     shots. That focus-vs-spread delta is the discrimination.
+#   • Measured (deterministic): chaff-first loses 3 tanks, focus-
+#     threats-first loses 0, brute loses all 4, on every level.
+#
+# Engine guardrails:
+#   • Map: rush-hour-arena (128 × 40, playable x in [2..126], y in
+#     [2..38]). Tanks stage at x=48; the enemy cluster holds at
+#     x=66-70 (stance:2 Defend — a stationary wall, auto-fires in
+#     range but never advances, so the screen+rocket geometry is
+#     stable and the rockets fire the moment a tank is in range).
+#     The e1 screen is a COMPACT contiguous column so the whole
+#     cluster stays inside the tank squad's vision (no straggler
+#     slips into the fog and starves the kill count).
+#   • Agent `fact` at the staging edge — satisfies the win clause
+#     `building_count_gte:fact:1` (a non-combat anchor: the squad
+#     must still own its base while it focus-fires) AND, being an
+#     agent actor, keeps the agent side alive for the evaluator.
+#   • Far-east enemy `fact` at (120,20) prevents engine auto-done
+#     when the last cluster unit falls — the kill bar is satisfied on
+#     units, not buildings, so the marker keeps the episode running
+#     until the win/fail evaluator sees the terminal frame (no DRAW).
+#   • after_ticks/within_ticks reachable within max_turns
+#     (tick ≤ 93 + 90·(max_turns-1)); within_ticks 2700 < 2703 at
+#     max_turns 30; a staller hits after_ticks 2701 and LOSES.
+
+meta:
+  id: combat-target-priority-highvalue
+  title: 'Target Priority — Kill the High-Threat Units FIRST'
+  capability: action
+  real_world_meaning: >
+    Four medium tanks face a mixed enemy cluster at close range:
+    a screen of cheap rifle infantry (e1 chaff) backed by THREE
+    high-threat anti-armour rocket soldiers (e3). The decision is
+    threat-weighted target prioritization: concentrate ALL FOUR
+    tanks' fire on the rocket soldiers FIRST (each dies in 1-2
+    decision turns to 4-vs-1 fire, before it can land more than a
+    couple of anti-tank rockets), THEN mop up the chaff. Engaging
+    the chaff first — via attack_move auto-targeting the nearer
+    rifle screen, or by explicitly attacking the cheap infantry —
+    leaves the three rocket soldiers firing through the entire
+    mop-up and they whittle the squad below the survival floor.
+    A brute attack-move play and a kill-chaff-first play both LOSE;
+    the threat-first focus play WINS.
+  robotics_analogue: >
+    Military target prioritization under fire — when engaging a
+    mixed force, the high-threat asset (anti-armour weapon, AA
+    battery, command vehicle) is neutralised FIRST, even when it is
+    not the nearest target, because it out-damages the cheap escort.
+    Killing the low-threat chaff first lets the priority threat keep
+    firing and attrits the friendly force. Threat-weighted
+    engagement — not nearest-first — preserves the squad.
+  benchmark_anchor:
+    - "SC2 focus-fire target priority"
+    - "threat-weighted engagement"
+    - "military target prioritization"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant contact happens or a tank is lost — combat
+  # micro is reactive; without these interrupts the focus policy only
+  # re-targets on the next turn boundary and the e3s get free shots.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare threat-priority skill: 4 tanks vs a cluster of 9 e1 chaff +
+  # 3 e3 high-threat. FORGIVING survival floor — the squad may lose
+  # one tank and still win (own_units_gte:3). A staller LOSES on the
+  # kill bar via after_ticks; a brute attack-move spreads onto the
+  # chaff and the three e3s wipe the squad; kill-chaff-first loses 3
+  # tanks to the rockets and busts the floor. Focus-threats-first
+  # keeps all four tanks → WIN.
+  easy:
+    description: >
+      Four medium tanks stage at x=48, y=18..21 with your
+      construction yard (fact) behind them at the west edge. To the
+      east is a mixed enemy cluster: a screen of NINE rifle infantry
+      (e1, cheap chaff) at x=66 backed by THREE rocket soldiers (e3,
+      anti-tank Dragon launcher — the high-threat units) at x=69.
+      Threat-priority doctrine: concentrate ALL FOUR tanks' fire on
+      ONE rocket soldier first (kill it in 1-2 decision turns), then
+      the second, then the third, THEN mop up the rifle chaff.
+      Engaging the chaff first leaves the rocket soldiers firing
+      anti-tank rockets through the whole mop-up and they pick off
+      your tanks. Win when 12 enemy units are killed AND at least 3
+      tanks survive AND your construction yard still stands, before
+      tick 2700.
+    overrides:
+      actors:
+        # Strike force — 4 medium tanks staging mid-west.
+        - {type: 2tnk, owner: agent, position: [48, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [48, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [48, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [48, 21], stance: 1}
+        # Agent construction yard — the non-combat win anchor
+        # (building_count_gte:fact:1); also keeps the agent side
+        # alive for the evaluator.
+        - {type: fact, owner: agent, position: [4, 20]}
+        # Enemy cluster — a COMPACT contiguous screen of NINE cheap
+        # rifle infantry along x=66, y=15..23 (the NEAREST hostiles
+        # ⇒ engine auto-target picks them under attack_move) backed
+        # by THREE rocket soldiers at x=69, inside Dragon range 5 of
+        # the front line. stance:2 (Defend) — the cluster holds as a
+        # stationary wall and auto-fires the moment a tank is in
+        # range. The column is compact so the whole cluster stays in
+        # the tank squad's vision (no straggler hides in the fog).
+        - {type: e1, owner: enemy, position: [66, 15], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 16], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 19], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 23], stance: 2}
+        # THREE rocket soldiers — the high-threat units. Tucked
+        # behind the chaff screen at x=69 (3 cells back ⇒ not the
+        # nearest target, so attack_move auto-picks the chaff) but
+        # still inside Dragon range 5 once the tanks reach contact.
+        - {type: e3, owner: enemy, position: [69, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [69, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [69, 21], stance: 2}
+        # Far persistent enemy marker — prevents engine auto-done
+        # when the cluster falls so the evaluator sees the terminal
+        # frame (no DRAW collapse).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 12}
+        - {own_units_gte: 3}
+        - {within_ticks: 2700}
+        - {building_count_gte: {type: fact, n: 1}}
+    # Fail floor aligned to the win floor (own_units_gte:3) — a squad
+    # at own=2 is a real LOSS, not a dead-zone DRAW. easy still
+    # FORGIVES one tank lost (own=3 wins); the kill-chaff-first play
+    # drops to own≤2 and LOSES here.
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 3}}
+    max_turns: 30
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis vs easy: a TIGHTER survival floor — the squad must keep
+  # ALL FOUR tanks alive (own_units_gte:4, zero loss). The cluster is
+  # the same 9 e1 + 3 e3; the controlled variable is purely the
+  # zero-loss floor. A brute and a kill-chaff-first play both LOSE:
+  # the three e3s firing through the chaff mop-up score ~3 tank kills
+  # and bust the zero-loss floor. The intended focus-threats-first
+  # WINS — concentrating all four tanks on each rocket soldier in
+  # turn ends it in 1-2 decision ticks before it can land more than
+  # ~1 rocket, preserving the whole squad.
+  medium:
+    description: >
+      Four medium tanks stage at x=48, y=18..21 with your
+      construction yard behind them. The eastern enemy cluster is a
+      compact screen of NINE rifle infantry (e1, cheap chaff) at
+      x=66 backed by THREE rocket soldiers (e3, anti-tank Dragon
+      launcher — the high-threat units) at x=69. Threat-priority
+      doctrine: concentrate ALL FOUR tanks' fire on ONE rocket
+      soldier first (kill in 1-2 decision turns), then the second,
+      then the third, THEN mop up the rifle chaff. Engaging the
+      chaff first — via attack_move auto-targeting the nearer rifle
+      screen, or by attacking the cheap infantry first — leaves the
+      rocket soldiers firing through the entire mop-up and they kill
+      your tanks. Win when 12 enemy units are killed AND all four
+      tanks survive AND your construction yard still stands, before
+      tick 2700.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [48, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [48, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [48, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [48, 21], stance: 1}
+        - {type: fact, owner: agent, position: [4, 20]}
+        # Compact contiguous screen of NINE cheap rifle infantry
+        # along x=66, y=15..23 (engine auto-target picks the nearest
+        # hostile under attack_move).
+        - {type: e1, owner: enemy, position: [66, 15], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 16], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 19], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 23], stance: 2}
+        # THREE rocket soldiers behind the chaff screen at x=69 —
+        # inside Dragon range 5 of the contact line, not the nearest
+        # target (e1s at x=66 are 3 cells closer ⇒ engine auto-
+        # target picks the chaff under attack_move). With 3 e3s
+        # firing through the chaff mop-up a brute or chaff-first
+        # play takes ~3 tank kills and busts the zero-loss floor.
+        - {type: e3, owner: enemy, position: [69, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [69, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [69, 21], stance: 2}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 12}
+        - {own_units_gte: 4}
+        - {within_ticks: 2700}
+        - {building_count_gte: {type: fact, n: 1}}
+    # Fail floor aligned to the zero-loss win floor (own_units_gte:4)
+    # — any tank lost (own≤3) is a real LOSS, not a dead-zone DRAW.
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 4}}
+    max_turns: 30
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis vs medium: the strike force (and its construction yard)
+  # stage from TWO seed-driven spawn_point groups (NORTH corridor
+  # y=10..13 OR SOUTH corridor y=27..30) so the engagement geometry
+  # varies per seed. The chaff screen (10 e1, y=15..24) + rocket trio
+  # is symmetric across y=20 — both spawns face the same priority
+  # decision (focus one e3 → next → next → mop up chaff). The
+  # zero-loss survival floor from medium is retained.
+  hard:
+    description: >
+      Four medium tanks stage at ONE of two corridors (NORTH
+      y=10..13 OR SOUTH y=27..30, chosen by seed, anti-
+      memorisation) with your construction yard behind them. The
+      eastern enemy cluster is a compact screen of TEN rifle
+      infantry (e1, cheap chaff) at x=66 backed by THREE rocket
+      soldiers (e3, anti-tank — the high-threat units) at x=69.
+      Threat-priority doctrine: concentrate ALL FOUR tanks on ONE
+      rocket soldier at a time — kill it cleanly, then the next,
+      then the third, THEN mop up the rifle chaff. Starting on the
+      rifle chaff leaves the rockets firing through the whole
+      engagement and they kill your tanks. Win when 13 enemy units
+      are killed AND all four tanks survive AND your construction
+      yard still stands, before tick 2700.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging corridor (y=10..13).
+        - {type: 2tnk, owner: agent, position: [48, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [48, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [48, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [48, 13], stance: 1, spawn_point: 0}
+        - {type: fact, owner: agent, position: [4, 11], spawn_point: 0}
+        # spawn_point 1 — SOUTH staging corridor (y=27..30).
+        - {type: 2tnk, owner: agent, position: [48, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [48, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [48, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [48, 30], stance: 1, spawn_point: 1}
+        - {type: fact, owner: agent, position: [4, 29], spawn_point: 1}
+        # Compact contiguous screen of TEN cheap rifle infantry along
+        # x=66, y=15..24 — symmetric across y=19.5 so either spawn
+        # faces an equivalent decision. Engine auto-target picks the
+        # nearest hostile under attack_move ⇒ this chaff line is what
+        # a brute engages first.
+        - {type: e1, owner: enemy, position: [66, 15], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 16], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 17], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 19], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 23], stance: 2}
+        - {type: e1, owner: enemy, position: [66, 24], stance: 2}
+        # THREE rocket soldiers behind the chaff screen at x=69 —
+        # inside Dragon range 5 of the contact line, symmetric across
+        # y=20 so either spawn faces an equivalent focus-fire
+        # decision. Starting on the chaff lets all three fire through
+        # the whole mop-up and bust the zero-loss floor.
+        - {type: e3, owner: enemy, position: [69, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [69, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [69, 21], stance: 2}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 13}
+        - {own_units_gte: 4}
+        - {within_ticks: 2700}
+        - {building_count_gte: {type: fact, n: 1}}
+    # Fail floor aligned to the zero-loss win floor (own_units_gte:4)
+    # — any tank lost (own≤3) is a real LOSS, not a dead-zone DRAW.
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 4}}
+    max_turns: 30
