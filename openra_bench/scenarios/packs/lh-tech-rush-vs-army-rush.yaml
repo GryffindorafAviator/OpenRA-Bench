@@ -1,0 +1,301 @@
+# lh-tech-rush-vs-army-rush.yaml
+#
+# REASONING capability — strategic commitment under a fast incoming
+# rush: CAPEX (tech investment) vs OPEX (buy army NOW).
+#
+# The agent's tech is ALREADY UP: fact + proc + powr + tent + weap are
+# pre-placed, so BOTH production queues (Infantry from tent, Vehicle
+# from weap) are open from turn 1. A FAST rusher band sits close to
+# the base and charges the agent centroid immediately.
+#
+# The starting cash funds EITHER:
+#   • OPEX / ARMY-RUSH  — a mass of cheap units NOW. e1 ($100, from
+#     the pre-placed tent) and 1tnk ($700, from the pre-placed weap —
+#     a `2tnk` would need a `fix` service depot, which is NOT
+#     pre-placed, so the affordable vehicle is the light tank). The
+#     cheapest, fastest play is to pump infantry: $1800 buys ~18
+#     riflemen, which stand up in ~3-5 turns and blunt the rush
+#     before it razes the fact.  → WINS.
+#   • CAPEX / TECH-RUSH — a SECOND war factory (weap, $2000) to
+#     double Vehicle throughput, OR an expensive tech upgrade. This
+#     consumes the entire budget and leaves no cash to feed EITHER
+#     queue; the throughput investment cannot pay off before the
+#     rush arrives — the base is razed first.  → LOSES.
+#
+# This is the SC2 tech-vs-army timing decision: under a fast all-in,
+# capex (a 2nd production building, an upgrade) is a trap because the
+# investment must SURVIVE long enough to amortise. The parallel-
+# production engine fix (2× weap ≈ 2× vehicle output — see CLAUDE.md
+# and build-production-throughput-multibuilding) is REAL, but it only
+# helps if there is cash to feed both queues AND time for the second
+# queue's output to matter; against a fast rush there is neither.
+#
+# Anchors: SC2 tech-vs-army timing; capex-vs-opex under threat;
+# strategic commitment (you cannot do both — the cash buys one).
+#
+# Bar (per CLAUDE.md "no defect, no cheat"):
+#   • stall (observe only)      → base razed → LOSS
+#   • tech-rush (buy 2nd weap)  → no army, base razed → LOSS
+#   • intended army-rush        → blunts rush, kills K, fact stands → WIN
+#   Non-win is a real reachable timeout LOSS (after_ticks T+1) or a
+#   fact-razed LOSS — never a draw.
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - `weap` costs 2000 (mfb-tech-base-vs-economy-base); e1 = 100,
+#     e3 = 300, 1tnk = 700 (gamerules.rs cost table). `2tnk` ($850)
+#     additionally needs a `fix` service depot — NOT pre-placed —
+#     so the buildable war-factory unit is the light tank `1tnk`. A
+#     2nd weap ($2000) is unaffordable on the 1800 budget, making
+#     the tech-rush a pure dead-end with NO army fielded.
+#   - rusher bot: relentless concentrated charge at the agent
+#     centroid, ~8-tick interval (defense-rush-survive ENGINE NOTE).
+#     Placed CLOSE (x≈48) so it arrives fast — a tech investment
+#     cannot amortise in time.
+#   - persistent unarmed enemy `fact` marker far east keeps the
+#     episode alive past the last rusher death (engine auto-`done`
+#     on all-enemies-eliminated footgun).
+#   - tick alignment: engine advances ~90 ticks/turn, max tick
+#     ≈ 93 + 90·(max_turns−1). within_ticks ≤ that; fail uses
+#     after_ticks T+1 so a non-finisher LOSES, never draws.
+#   - hard tier: 2 agent spawn_point groups (NORTH y=12 / SOUTH
+#     y=28) round-robined by seed; the full base is duplicated under
+#     each group, the enemy band has no spawn_point so it always
+#     places (back-compat).
+#
+# Validate (no engine / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-tech-rush-vs-army-rush.yaml
+
+meta:
+  id: lh-tech-rush-vs-army-rush
+  title: 'Army Over Tech — Commit to Units Under a Fast Rush'
+  capability: reasoning
+  real_world_meaning: >
+    A strategic-commitment decision under a hard time constraint: the
+    base infrastructure is already standing, and a fixed budget buys
+    EITHER an immediate fighting force (OPEX — cheap units fielded
+    now) OR a throughput investment (CAPEX — a second war factory, an
+    upgrade) that would pay off later. A fast incoming rush collapses
+    the time horizon: the capex investment cannot amortise before the
+    base is lost, so the only winning play is to commit the whole
+    budget to army NOW. Teching up under the rush — and stalling —
+    both lose the base before the investment returns; the intended
+    army-rush blunts the charge and survives.
+  robotics_analogue: >
+    Capex-vs-opex under an acute threat: with a live incident bearing
+    down (a DDoS spike, a competitor's fast launch, an incoming
+    assault), a fixed budget buys EITHER capacity that compounds over
+    months (a second production line, a platform rebuild) OR an
+    immediate response (surge staffing, off-the-shelf units). When
+    the threat clock is short the long-horizon investment never pays
+    back — it must be deferred and the budget spent on the response
+    that fields in time.
+  benchmark_anchor:
+    - 'SC2 tech-vs-army timing'
+    - 'capex-vs-opex under threat'
+    - 'strategic commitment'
+  author: openra-bench
+
+# rush-hour-arena (128×40). Agent base in the west (x≈10..18); the
+# rusher band spawns CLOSE (x≈48) on the base row so the charge
+# arrives fast — the defining feature of the fast-rush regime.
+base_map: rush-hour-arena
+# Pack-wide budget — funds EXACTLY ONE coherent play: 1800 buys an
+# army NOW (e.g. ~18× e1 at $100, or 2× 1tnk $1400 + 4× e1), OR it
+# is SHORT of a single 2nd war factory ($2000) / an expensive
+# upgrade — so the tech-rush is a pure dead-end with no army to
+# show for it. The tech investment leaves nothing to feed any
+# queue; only the army buy stands up in time.
+starting_cash: 1800
+
+base:
+  agent:
+    faction: allies
+  # Relentless concentrated charge at the agent centroid — the
+  # canonical fast-rush opponent.
+  enemy:
+    faction: soviet
+    bot_type: rusher
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Re-decide the instant a rusher unit is spotted or a unit is lost
+  # — opening tempo is reactive, not on fixed ticks.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+  actors:
+    # ── agent base (west) ── full tech pre-placed: fact + proc +
+    # powr + tent + weap. BOTH production queues open from turn 1
+    # (Infantry from tent, Vehicle from weap). No starting units —
+    # the army is bought from the budget.
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: proc, owner: agent, position: [12, 20]}
+    - {type: powr, owner: agent, position: [14, 22]}
+    - {type: tent, owner: agent, position: [10, 24]}
+    - {type: weap, owner: agent, position: [16, 20]}
+
+levels:
+  # ── EASY ── the bare commitment decision. ONE fast rusher band
+  # (5× e1) spawns close (x=48) and charges the fact. Spend the
+  # $1800 on army NOW (e1 at $100 / 1tnk at $700) — kill ≥4 of the
+  # rushers and keep the fact standing before tick 4800. Stall loses
+  # (fact razed); tech-rush (buy a 2nd weap) loses — the buy drains
+  # the budget, no army fields, the fact falls. The intended army
+  # buy stands up in ~3-5 turns, well before the rush lands.
+  # max_turns 60 → reachable tick ≥4848 in interrupt mode (each step
+  # ≤90 ticks; shorter on events), comfortably past the 4801
+  # after_ticks fail so a non-winner is a real reachable timeout
+  # LOSS, never a draw.
+  easy:
+    description: >
+      Your tech is already standing — construction yard (fact),
+      refinery (proc), power plant (powr), barracks (tent) and war
+      factory (weap) are all pre-placed, so BOTH production queues
+      are open. A fast rush of 5 rifle infantry is already bearing
+      down on your base. You have 1800 credits. Spend it on an army
+      NOW — train infantry (e1, $100 each) and/or light tanks
+      (1tnk, $700) — destroy at least 4 of the rushers and keep your
+      construction yard (fact) standing, before tick 4800. Teching
+      up instead (buying a second war factory or an upgrade) drains
+      the budget with no army to show for it and your base is razed.
+      Stalling loses the same way.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: tent, owner: agent, position: [10, 24]}
+        - {type: weap, owner: agent, position: [16, 20]}
+        # Fast rush band — 5× e1 close at x=48 on the base row.
+        # The rusher bot charges the agent centroid (the fact);
+        # ~30-cell gap means it lands in ~6-8 turns — a tech
+        # investment cannot amortise in that window.
+        - {type: e1, owner: enemy, position: [48, 20], stance: 3, count: 5}
+        # Unarmed high-HP enemy marker far east (anti-DRAW): keeps
+        # the episode alive past the last rusher death so the
+        # win/fail check actually runs.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - units_killed_gte: 4
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4800
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 controlled variable: a heavier, faster band
+  # (6× e1 + 2× e3, the canonical rusher composition) spawned even
+  # CLOSER (x=44). Kill bar raised to 6. Same clock. The capex trap
+  # is sharper: the extra rocket soldiers mean a slow / hedged spend
+  # cannot field enough force in time.
+  medium:
+    description: >
+      Your tech is already standing (fact + proc + powr + tent +
+      weap, both production queues open). A fast rush — 6 rifle
+      infantry plus 2 rocket soldiers — is already charging your
+      base. You have 1800 credits. Commit it to an army NOW (e1 at
+      $100, e3 at $300, 1tnk at $700), destroy at least 6 of the
+      rushers and keep your construction yard (fact) standing,
+      before tick 4800. Teching up (a second war factory, an
+      upgrade) drains the budget and fields no army before the rush
+      lands; stalling loses the same way.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [14, 22]}
+        - {type: tent, owner: agent, position: [10, 24]}
+        - {type: weap, owner: agent, position: [16, 20]}
+        # Heavier, faster band — 6× e1 + 2× e3 close at x=44.
+        - {type: e1, owner: enemy, position: [44, 20], stance: 3, count: 6}
+        - {type: e3, owner: enemy, position: [46, 20], stance: 3, count: 2}
+        # Unarmed high-HP enemy marker far east (anti-DRAW).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - units_killed_gte: 6
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4800
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── HARD ── +1 controlled variable: TWO fast rush bands from two
+  # different latitudes (north y=12 and south y=28), declared as two
+  # agent spawn_point groups so the base round-robins between the two
+  # latitudes by seed — the lane the rush comes down is seed-varied
+  # (a single memorised army-placement cell cannot generalise). Kill
+  # bar raised to 8 to match the larger total force. Same clock; same
+  # tick-aligned fail. Two distinct seed-driven spawns satisfy the
+  # hard-tier contract (test_hard_tier.py::UPGRADED).
+  hard:
+    description: >
+      Your tech is already standing (fact + proc + powr + tent +
+      weap), and your base stages from a seed-chosen latitude. Two
+      fast rush bands are already charging from two different
+      latitudes (north and south). You have 1800 credits. Commit it
+      to an army NOW (e1 $100, e3 $300, 1tnk $700), destroy at least
+      7 of the rushers and keep your construction yard (fact)
+      standing, before tick 4800. Teching up (a second war factory,
+      an upgrade) drains the budget with no army in time; stalling
+      loses the same way.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base (full tech duplicated).
+        - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [10, 16], spawn_point: 0}
+        - {type: weap, owner: agent, position: [16, 12], spawn_point: 0}
+        # One stance:2 (Defend) e1 spawn-witness next to the fact:
+        # gives the seed-driven start an observable unit so the
+        # hard-tier curation test (which reads units_summary) sees
+        # the two distinct latitudes. A single rifleman cannot carry
+        # the kill bar (8) and the fact still falls to the rush, so a
+        # stall/tech-rush play still LOSES.
+        - {type: e1,   owner: agent, position: [12, 14], stance: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH base (same formation, in-bounds).
+        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [14, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [10, 32], spawn_point: 1}
+        - {type: weap, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 26], stance: 2, spawn_point: 1}
+        # Two fast rush bands at distinct latitudes — both visible to
+        # rusher targeting (it always charges the agent centroid).
+        # Close at x=48 so both bands land fast regardless of which
+        # latitude the seed selected. Enemy actors carry no
+        # spawn_point → all enemies place every seed (back-compat).
+        - {type: e1, owner: enemy, position: [48, 12], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [50, 12], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [48, 28], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [50, 28], stance: 3, count: 1}
+        # Unarmed high-HP enemy marker far east (anti-DRAW).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        # Kill bar 7 of the 12-strong total force: an intended army
+        # buy clears 8-10; stall and tech-rush top out at ~2 (the
+        # lone stance:2 spawn-witness e1) before the fact falls.
+        - units_killed_gte: 7
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4800
+    fail_condition:
+      any_of:
+        - after_ticks: 4801
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
