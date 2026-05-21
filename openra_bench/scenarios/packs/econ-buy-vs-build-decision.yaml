@@ -65,10 +65,11 @@
 #     past the last rusher death (CLAUDE.md auto-done footgun).
 #   • Hard tier defines 2 agent spawn_point groups (NORTH base
 #     y=14 / SOUTH base y=26) — UPGRADED contract; the rusher band
-#     places at BOTH latitudes every seed (enemy actors don't honour
-#     spawn_point, CLAUDE.md) but the rusher targets the AGENT
-#     centroid so the active band is always the one in the agent's
-#     latitude.
+#     declares the matching spawn_point so exactly ONE concentrated
+#     band places at the seed-chosen base latitude (per-owner
+#     spawn_point filter — CLAUDE.md). The off-latitude band is
+#     filtered out, so the buy-now force faces a single
+#     concentrated wave it can clear inside the clock.
 #
 # Sibling pack candidate (not implemented here): the INVERSION —
 # slow enemy + sustained pressure ⇒ tech-up (build weap) WINS,
@@ -262,29 +263,42 @@ levels:
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 axis: seed-driven base latitude. TWO agent spawn_point groups
-  # (NORTH base y=14 / SOUTH base y=26) round-robined by seed; the
-  # rusher band places at BOTH latitudes every seed (enemy actors
-  # don't honour spawn_point — CLAUDE.md oramap.rs footgun), but
-  # the `rusher` bot always targets the agent centroid so the active
-  # threat axis flips per seed. The buy-vs-build decision is
-  # IDENTICAL across spawns (the cash, the war factory, the
-  # response shape are all symmetric) — a memorised "rush comes
-  # from y=14" opening cannot generalise, but the capability
-  # generalises cleanly. Kill bar 6, same clock.
+  # (NORTH base y=14 / SOUTH base y=26) round-robined by seed. The
+  # rusher band declares the SAME spawn_point so exactly ONE
+  # concentrated band places at the matching latitude (the
+  # per-owner spawn_point filter — CLAUDE.md — the chosen
+  # spawn_point keeps that owner's matching actors and drops the
+  # rest, for BOTH owners). The buy-vs-build decision is IDENTICAL
+  # across spawns (the cash, the war factory, the response shape
+  # are all symmetric) — a memorised "rush comes from y=14"
+  # opening cannot generalise, but the capability generalises
+  # cleanly.
+  #
+  # Engine recalibration note (movement fixes): the engine
+  # movement fixes (attack_unit no-teleport; moving units fire and
+  # take fire) shifted combat balance. The old hard tier staged a
+  # rush band at BOTH latitudes every seed (enemy actors then
+  # didn't honour spawn_point); the off-latitude band drifted in
+  # as a dispersed second wave and the intended 4-tank buy-now
+  # force could not clear the kill bar before the deadline → the
+  # intended play LOST every hard seed. The band is now ONE
+  # concentrated wave at the active latitude (5× e1 + 1× e3 —
+  # slightly heavier than medium's 5× e1, so hard stays harder),
+  # which the buy-now force clears inside the clock while
+  # stall / build-weap-first still LOSE.
   hard:
     description: >
-      Two rusher bands (one north y=14, one south y=26) are visible
-      at the lane mouth but the rusher bot always charges YOUR
-      construction yard (whichever latitude you spawned at). Your
-      starting cash ($3400) is exactly enough for EITHER 4 medium
-      tanks (build 2tnk × 4 from the pre-placed war factory) OR a
-      second war factory (build weap, residual $1400 = 1 tank).
-      The rush is incoming NOW. Win when ≥6 enemy units are killed
-      AND your fact is still standing AND the clock has not run out
-      (tick ≤ 3600). Stall, build-second-factory-first, or
-      under-spend all fail. The base latitude varies by seed so a
-      single memorised pre-pick cannot generalise — the buy-now
-      decision must be made from the live threat reading.
+      A rusher band (5 rifle infantry + 1 rocket soldier) is
+      charging your construction yard from the lane mouth — your
+      base stages from a seed-chosen latitude (north y=14 or
+      south y=26), so a single memorised pre-pick cannot
+      generalise. Your starting cash ($3400) is exactly enough for
+      EITHER 4 medium tanks (build 2tnk × 4 from the pre-placed
+      war factory) OR a second war factory (build weap, residual
+      $1400 = 1 tank). The rush is incoming NOW. Win when ≥5 enemy
+      units are killed AND your fact is still standing AND the
+      clock has not run out (tick ≤ 1499). Stall,
+      build-second-factory-first, or under-spend all fail.
     overrides:
       actors:
         # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
@@ -308,17 +322,23 @@ levels:
         - {type: weap, owner: agent, position: [18, 26], spawn_point: 1}
         - {type: fix,  owner: agent, position: [18, 28], spawn_point: 1}
         - {type: e1, owner: agent, position: [12, 26], spawn_point: 1, stance: 0}
-        # ── NORTH rusher band (y=14) — always places ──────────────
-        # Rusher targets agent centroid, so on a NORTH spawn this
-        # band charges the fact directly; on a SOUTH spawn it
-        # angles southward (the rusher's relentless charge always
-        # reorients to the centroid). Bands kept light (4× e1 each)
-        # so 4 medium tanks at the base auto-fire enough kills to
-        # clear the bar before fact damage compounds.
-        - {type: e1, owner: enemy, position: [70, 14], stance: 3, count: 4}
-        # ── SOUTH rusher band (y=26) — always places ──────────────
-        - {type: e1, owner: enemy, position: [70, 26], stance: 3, count: 4}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # ── Rusher band — one concentrated wave per latitude, each
+        # tagged with the matching spawn_point so exactly ONE band
+        # places at the active base latitude (per-owner
+        # spawn_point filter — CLAUDE.md). 5× e1 + 1× e3 — slightly
+        # heavier than medium so hard stays harder, but light
+        # enough that the 4-tank buy-now force clears the kill bar
+        # inside the clock.
+        - {type: e1, owner: enemy, position: [70, 14], stance: 3, count: 5, spawn_point: 0}
+        - {type: e3, owner: enemy, position: [72, 14], stance: 3, count: 1, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [70, 26], stance: 3, count: 5, spawn_point: 1}
+        - {type: e3, owner: enemy, position: [72, 26], stance: 3, count: 1, spawn_point: 1}
+        # Inert enemy `fact` marker far east (anti-DRAW) — must be
+        # duplicated per enemy spawn_point group (the per-owner
+        # filter would otherwise drop the unmatched one), one on
+        # each base latitude.
+        - {type: fact, owner: enemy, position: [120, 14], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [120, 26], spawn_point: 1}
     win_condition:
       all_of:
         - {units_killed_gte: 5}
