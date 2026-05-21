@@ -160,6 +160,7 @@ UPGRADED = [
     # main session.
     "lh-opening-to-tech-to-army",
     "lh-tech-pivot-attack",
+    "lh-credit-only-final-phase",
     "mfb-tech-base-vs-economy-base",
     "combat-harass-balanced-hit-and-run",
     "tech-aggro-all-in",
@@ -406,6 +407,18 @@ UPGRADED = [
     # tiers is the clock (loose easy → tight medium/hard) plus the
     # spawn variation on hard.
     "proc-strict-toolban-fidelity",
+    # Wave-10 tp-pressure-procedural — procedural compliance under
+    # TIME pressure (IFBench under stress / SOC runbook compliance /
+    # BFCL V4 anchor). A 4× 2tnk formation on stance:1 must clear an
+    # enemy band before a TIGHT clock using ONLY the sanctioned
+    # set_stance(3) hunt — attack_unit/attack_move are forbidden_tools
+    # and tripping tool_violations_gte:1 is an instant fail. Hard
+    # defines two agent spawn_point groups (NORTH formation y≈15 /
+    # SOUTH formation y≈25) round-robined by seed; the agent `fact`
+    # is duplicated at (5,20) in BOTH groups so building_count_gte:
+    # fact:1 is stable across seeds. The band is symmetric in y so
+    # each spawn group has an equivalent hunt vector.
+    "tp-pressure-procedural",
     # Wave-6 Group I procedural-compliance seed — τ²-bench distractor
     # handling / IFBench irrelevant-tool ignoring / BFCL V4 relevance
     # (refuse to call a tool that isn't needed) / operator discipline
@@ -627,6 +640,17 @@ UPGRADED = [
     # both staging latitudes face the same survive-then-strike
     # decision from a flipped approach axis.
     "tp-survive-and-strike-at-window",
+    # Wave-10 REASONING pack: operations-continuity — survive a
+    # string of light raid bands WHILE growing both the economy
+    # (economy_value_gte) and the army (unit_type_count_gte:2tnk,5),
+    # all with the fact kept alive. Pure defence never clears the
+    # growth bars; growth-only loses the un-screened fact. Hard tier
+    # defines two agent spawn_point groups (NORTH base y=14 / SOUTH
+    # base y=26) round-robined by seed; raid bands are staged at
+    # BOTH candidate latitudes (enemy actors don't honour
+    # spawn_point — CLAUDE.md) so the hunt bot converges on whichever
+    # base the seed spawned. SRE ops-continuity anchor.
+    "tp-survive-and-grow",
     # Wave-7 REASONING pack: concentrated-defense topology — build a
     # TIGHT CLUSTER of pillboxes around the high-value building (the
     # agent fact). Hard tier defines 2 agent spawn_point groups
@@ -879,6 +903,21 @@ UPGRADED = [
     # east) and a memorised "drive east on y=20" plan mis-targets
     # from both spawns.
     "tp-rush-objective-very-fast",
+    # Wave-10 ACTION parallel-scheduling pack — speedrun TWO
+    # objectives in parallel (speedrun parallel / parallel scheduling
+    # / SC2 multi-prong anchor). A single 6-unit force (4× 2tnk + 2×
+    # jeep) staged at the far west must raze TWO enemy `fact`s — one
+    # at the NE corner (115,8), one at the SE corner (115,32) — inside
+    # one tight shared clock. The intended play splits the force at
+    # t=0 and runs both prongs concurrently; serialising (raze one
+    # corner, then re-task survivors ~24 cells to the other) busts the
+    # clock. Hard defines TWO agent spawn_point groups (NORTH staging
+    # y≈10 vs SOUTH staging y≈30); the two enemy `fact`s + garrison
+    # are duplicated across both spawn groups so they place every seed
+    # (per-owner spawn_point filter — CLAUDE.md), while the agent
+    # staging latitude varies by seed so a memorised split plan cannot
+    # generalise.
+    "tp-rush-multi-objective",
     # Wave-8 REASONING sacrifice pack — forlorn hope / military
     # sacrifice doctrine / SC2 expendable strike package anchor.
     # 6× 2tnk + 4× e3 staged at the west must raze an enemy `fact`
@@ -1017,6 +1056,18 @@ UPGRADED = [
     # fixed so the perception-cycle doctrine is what generalises, not
     # a memorised base-latitude opening.
     "scout-cycle-keep-info-fresh",
+    # Wave-10 ACTION pack — corridor interdiction / supply-line
+    # protection. Two bases joined by a y=20 supply corridor; a
+    # mobile four-tank squad must be POSITIONED on the corridor
+    # midpoint to interdict hunt-bot raider bands before they raze
+    # a base. Hard tier defines two agent spawn_point groups (NORTH
+    # corridor y=12 / SOUTH corridor y=28) round-robined by seed;
+    # the corridor-midpoint region moves with the bases and the win
+    # clause is an `any_of` over the two candidate midpoints
+    # ((50,12) / (50,28)), so a memorised "(50,20)" patrol cannot
+    # generalise. Raider bands place at BOTH latitudes (enemy actors
+    # don't honour spawn_point — CLAUDE.md).
+    "mfb-supply-line-link-between-bases",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
