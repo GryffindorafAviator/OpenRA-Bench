@@ -22,9 +22,21 @@ relocated. The win predicate makes both axes load-bearing:
 * `has_building:powr` AND `has_building:tent` AND `own_units_gte:1`
   ⇒ the full bring-up chain (production queue re-enable after
   deploy, then powr + tent + train one defender) must complete;
-* `within_ticks:5400` paired with `after_ticks:5401` ⇒ a non-finisher
-  is a real reachable timeout LOSS (60 turns × ≤90 ticks/step reaches
-  ≥5400 in interrupt mode), never a draw.
+* `within_ticks:4800` paired with `after_ticks:4801` ⇒ a non-finisher
+  is a real reachable timeout LOSS, never a draw.
+
+Recalibration note (engine balance fixes — armor-class weapon
+selection, stance semantics, parallel production, pbox now fires):
+the combat-balance shift let an EXPOSED-sited fact SURVIVE the
+rusher bands on some hard seeds, so it no longer self-razes. The
+wrong-region win-predicate still rejected it, but with no fail
+clause biting, that run drew at the turn budget. Two fixes:
+  * a region-keyed fail clause — `all_of[after_ticks:2400,
+    has_building:fact, not building_in_region:SAFE]` — turns a
+    mis-sited deploy into a fast deterministic LOSS;
+  * hard `max_turns` 60 → 70, because hard runs in interrupt mode
+    with two rusher bands and the shorter per-turn tick advance
+    left tick 4801 unreachable inside 60 turns (draw degeneracy).
 
 These tests prove with deterministic scripted policies (no model,
 no network) that:
@@ -33,9 +45,7 @@ no network) that:
 * the stall policy LOSES every level + every hard seed (real LOSS,
   not a draw — MCV never deploys, no fact, after_ticks fires);
 * the deploy-exposed policy LOSES every level + every hard seed
-  (fact placed at the wrong cell fails the spatial check; on
-  medium/hard the rusher also razes it before the bring-up window
-  closes);
+  (fact placed at the wrong cell trips the region-keyed fail clause);
 * the `after_ticks` deadline is reachable inside `max_turns`;
 * the hard tier defines ≥2 spawn_point groups (so the agent must
   identify the safe corner from each start, not memorise one path).
@@ -176,10 +186,25 @@ def make_intended_safe():
 
 def make_deploy_exposed():
     """Defective choice: drive MCV to the EXPOSED central cell, deploy
-    there. Even if bring-up completes, the building_in_region check
-    fails (fact at wrong cell); on medium/hard the rusher also razes
-    the fact during bring-up. LOSES every level + every seed."""
+    there. The building_in_region win-check rejects the fact (wrong
+    cell) and the region-keyed fail clause turns it into a
+    deterministic LOSS. LOSES every level + every seed."""
     return _make_site_policy(EXPOSED_XY)
+
+
+def deploy_safe_then_stall(rs, C):
+    """Partial play: drive the MCV to the SAFE corner and deploy
+    there, but never run the bring-up chain (no powr / tent /
+    defender). The win predicate is unsatisfiable (missing powr +
+    tent + own unit) — this must end as a real LOSS (the deadline
+    or, on medium/hard, the rusher razing the undefended fact),
+    never a draw."""
+    mid, pos = _mcv_pos_id(rs)
+    if mid is not None:
+        if abs(pos[0] - SAFE_XY[0]) + abs(pos[1] - SAFE_XY[1]) <= 2:
+            return [C.deploy([mid])]
+        return [C.move_units([mid], target_x=SAFE_XY[0], target_y=SAFE_XY[1])]
+    return [C.observe()]
 
 
 # ── scenario-shape invariants ────────────────────────────────────────
@@ -268,6 +293,40 @@ def test_win_predicate_requires_safe_region_anchor():
         assert str(r.get("type")).lower() == "fact"
 
 
+def test_mis_sited_fail_clause_present_every_level():
+    """Recalibration teeth: every level's fail_condition carries the
+    region-keyed mis-sited-deploy clause — `all_of[after_ticks,
+    has_building:fact, not building_in_region:SAFE]`. This converts a
+    fact deployed outside the SAFE region into a deterministic LOSS
+    (the engine balance fixes let an exposed fact survive the
+    rushers, so without this clause the wrong-region run drew)."""
+    for lvl in LEVELS:
+        c = compile_level(load_pack(PACK), lvl)
+        fc = c.fail_condition.model_dump(exclude_none=True)
+        found = False
+        for clause in fc.get("any_of", []) or []:
+            inner = clause.get("all_of")
+            if not inner:
+                continue
+            has_fact = any("has_building" in cc for cc in inner)
+            neg_region = any(
+                "not" in cc
+                and isinstance(cc["not"], dict)
+                and "building_in_region" in cc["not"]
+                for cc in inner
+            )
+            if has_fact and neg_region:
+                found = True
+                # the negated region must be the SAFE anchor
+                for cc in inner:
+                    if "not" in cc and "building_in_region" in cc["not"]:
+                        reg = cc["not"]["building_in_region"]
+                        assert (int(reg["x"]), int(reg["y"])) == SAFE_XY, (
+                            lvl, reg
+                        )
+        assert found, f"{lvl}: missing region-keyed mis-sited fail clause"
+
+
 # ── solvency: intended WINS every level + every seed ─────────────────
 
 
@@ -305,13 +364,31 @@ def test_stall_loses_every_level_and_seed(level):
 @pytest.mark.parametrize("level", LEVELS)
 def test_deploy_exposed_loses_every_level_and_seed(level):
     """Deploy at the exposed central cell: the spatial win-check
-    rejects the fact (wrong region); on medium/hard the rusher also
-    razes the fact during bring-up. Real LOSS on every level + seed."""
+    rejects the fact (wrong region) and the region-keyed fail clause
+    converts it into a deterministic LOSS. Real LOSS on every level +
+    seed (no draw)."""
     c = compile_level(load_pack(PACK), level)
     for seed in SEEDS:
         r = run_level(c, make_deploy_exposed(), seed=seed)
         assert r.outcome == "loss", (
             f"{level} seed{seed} deploy-exposed: must LOSE; got "
             f"{r.outcome} (tick={r.signals.game_tick}, "
+            f"buildings={r.signals.own_buildings})"
+        )
+
+
+@pytest.mark.parametrize("level", LEVELS)
+def test_deploy_safe_then_stall_loses_every_level_and_seed(level):
+    """Deploy correctly at the SAFE corner but never run the bring-up
+    chain (no powr / tent / defender). The win is unsatisfiable; this
+    must end as a real LOSS (deadline, or the rusher razing the
+    undefended fact on medium/hard), never a draw. Guards against a
+    'site choice alone wins' inversion."""
+    c = compile_level(load_pack(PACK), level)
+    for seed in SEEDS:
+        r = run_level(c, deploy_safe_then_stall, seed=seed)
+        assert r.outcome == "loss", (
+            f"{level} seed{seed} deploy-safe-then-stall: must LOSE; "
+            f"got {r.outcome} (tick={r.signals.game_tick}, "
             f"buildings={r.signals.own_buildings})"
         )

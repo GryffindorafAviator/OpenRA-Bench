@@ -144,6 +144,21 @@ levels:
         - all_of:
             - after_ticks: 1500
             - not: {building_count_gte: {type: fact, n: 1}}
+        # Mis-sited deploy: past the bring-up grace the agent owns a
+        # fact but it is NOT inside the SAFE region. The exposed
+        # central deploy lands the fact at the wrong cell — this
+        # clause makes that a fast, deterministic LOSS instead of a
+        # silent draw (the engine balance fixes let the exposed fact
+        # SURVIVE the rushers on some hard seeds, so it no longer
+        # self-razes; without this clause the wrong-region run draws
+        # at the turn budget). A correct SAFE deploy lands the fact
+        # inside the region, so this clause never fires on it.
+        - all_of:
+            - after_ticks: 2400
+            - has_building: fact
+            - not:
+                building_in_region:
+                  {x: 8, y: 34, radius: 5, type: fact, count: 1}
     max_turns: 60
 
   # ── MEDIUM ── +1 controlled variable: the rusher bot now BITES.
@@ -213,6 +228,13 @@ levels:
         - all_of:
             - after_ticks: 1500
             - not: {building_count_gte: {type: fact, n: 1}}
+        # Mis-sited deploy ⇒ deterministic LOSS (see easy).
+        - all_of:
+            - after_ticks: 2400
+            - has_building: fact
+            - not:
+                building_in_region:
+                  {x: 8, y: 34, radius: 5, type: fact, count: 1}
     max_turns: 60
 
   # ── HARD ── +1 controlled variable: the AGENT MCV's starting
@@ -287,4 +309,19 @@ levels:
         - all_of:
             - after_ticks: 1500
             - not: {building_count_gte: {type: fact, n: 1}}
-    max_turns: 60
+        # Mis-sited deploy ⇒ deterministic LOSS (see easy).
+        - all_of:
+            - after_ticks: 2400
+            - has_building: fact
+            - not:
+                building_in_region:
+                  {x: 8, y: 34, radius: 5, type: fact, count: 1}
+    # max_turns 70 (was 60): hard runs in interrupt mode with two
+    # rusher bands, so the per-turn tick advance is shorter — at
+    # max_turns 60 the episode reached only tick ~4578, BELOW the
+    # after_ticks:4801 deadline, so a surviving-but-not-winning run
+    # drew instead of losing. 70 turns reaches tick ~4848 so the
+    # deadline reliably bites. within_ticks 4800 stays reachable
+    # (4800 < 93 + 90·69 = 6303) and the intended deploy wins by
+    # tick ~1000, far inside budget.
+    max_turns: 70
