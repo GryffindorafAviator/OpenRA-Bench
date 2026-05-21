@@ -192,6 +192,7 @@ _PHRASES: dict[str, Any] = {
     "resources_gte": lambda v: f"hold ≥{v} stored ore",
     "economy_value_gte": lambda v: f"reach economy value ≥{v} (cash+ore)",
     "power_surplus_gte": lambda v: f"keep power surplus ≥{v}",
+    "power_provided_gte": lambda v: f"keep gross power provided ≥{v}",
     "has_building": lambda v: f"own a '{v}'",
     "buildings_owned_gte": lambda v: f"own ≥{v} distinct building types",
     "building_total_gte": lambda v: f"own ≥{v} buildings total",

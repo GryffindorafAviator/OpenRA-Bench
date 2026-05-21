@@ -181,6 +181,11 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
         c.signals.power_provided - c.signals.power_drained
     )
     >= int(v),
+    # Raw provided power (gross, ignores drains). Lets a pack require
+    # the grid be SIZED — e.g. "≥200 power online" — independent of
+    # load. Wired to signals.power_provided which the engine recompute
+    # populates from live (not powered-down) buildings.
+    "power_provided_gte": lambda c, v: c.signals.power_provided >= int(v),
     "has_building": lambda c, v: str(v).lower() in c.signals.own_building_types,
     "buildings_owned_gte": lambda c, v: len(c.signals.own_building_types) >= int(v),
     # Total agent buildings (counts duplicates, unlike buildings_owned_gte
