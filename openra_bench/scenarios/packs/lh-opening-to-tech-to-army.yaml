@@ -184,24 +184,48 @@ levels:
     max_turns: 80
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # +1 controlled variable: 6 tanks + ≥2 spawn_point groups + tighter
-  # clock. The agent spawns NORTH (y=14) or SOUTH (y=22) by seed; a
-  # memorised opening cannot generalise because the build placement
-  # & harv geometry differ. Cash is similarly indivisible; the hunt
-  # bot's pressure scales with the longer chain (6 tanks vs 4).
+  # +1 controlled variable: a LONGER army phase (5 tanks vs medium's
+  # 4) + ≥2 spawn_point groups. The agent spawns NORTH (y=14) or
+  # SOUTH (y=26) by seed; a memorised opening cannot generalise
+  # because the build placement & harv geometry differ.
+  #
+  # RECALIBRATION (engine balance fixes — armor-class / stance /
+  # parallel-production / pbox): the prior hard tier ran a HUNT bot
+  # and a 6-tank chain. Two regressions surfaced:
+  #   (1) The stance-fix made the hunt bot's riflemen lethal enough
+  #       to raze the agent's `proc` (income) and `fix` (the 2tnk
+  #       tech-prereq) mid-chain, PERMANENTLY bricking tank
+  #       production before the army clause could latch — the
+  #       intended chain became unsolvable on the SOUTH spawn.
+  #   (2) The single enemy `fact` was the last enemy MustBeDestroyed
+  #       building, so the engine auto-`done`d the instant it fell;
+  #       when slow 6-tank production let the first tanks raze the
+  #       fact before the army clause latched, the run collapsed to
+  #       a DRAW (CLAUDE.md auto-terminate footgun).
+  # Fix: drop the hunt bot (the enemy is static — the `within_ticks`
+  # clock is the anti-stall teeth, exactly as on the EASY tier),
+  # shorten the army clause to 5 tanks (still a clean +1 over medium
+  # and well clear of the engine's ~10080-tick hard episode cap —
+  # the intended chain completes ~tick 8900), add a far sentinel
+  # enemy `fact` so razing the objective fact does not auto-`done`
+  # the engine, and pin the starting rifleman to stance:2 so it does
+  # not auto-hunt east and poke the objective prematurely.
   hard:
     description: >
-      Pre-placed: agent base (fact + tent + powr) at the west, round-
-      robined between a NORTH and SOUTH base by seed; an enemy fact
-      at the far east plus light defenders and a hunt bot dripping
-      pressure. Build a refinery (proc), then a war factory (weap),
-      then 6 medium tanks (2tnk), then destroy the enemy fact. Four
-      phases IN STRICT ORDER (`then:` composite). Pre-build / out-of-
-      order / skip-tech / pure-econ-no-attack all LOSE — only the
-      intended phased chain WINS. The seed-varied spawn means a
+      Pre-placed: agent base (fact + tent + powr + fix) at the west,
+      round-robined between a NORTH and SOUTH base by seed; a static
+      enemy fact at the far east plus a couple of passive defenders.
+      Build a refinery (proc), then a war factory (weap), then 5
+      medium tanks (2tnk), then destroy the enemy fact. Four phases
+      IN STRICT ORDER (`then:` composite). Pre-build / out-of-order /
+      skip-tech / pure-econ-no-attack all LOSE on the clock — only
+      the intended phased chain WINS. The seed-varied spawn means a
       single memorised opening cannot generalise.
     starting_cash: 5000
     overrides:
+      enemy:
+        faction: soviet
+        bot_type: ''
       actors:
         # NORTH base spawn (spawn_point 0)
         - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
@@ -211,25 +235,31 @@ levels:
         # One starting rifleman at this spawn — establishes a
         # non-building agent unit so the seed-driven start position
         # is detectable (and the hard_tier spawn-variation contract is
-        # satisfied with a real seed-varying unit).
-        - {type: e1,   owner: agent, position: [12, 14], spawn_point: 0}
+        # satisfied with a real seed-varying unit). stance:2 (Defend)
+        # — the stance fix made the default stance:3 auto-HUNT east
+        # and prematurely poke the enemy fact, which (with the engine
+        # auto-`done` on the objective fact falling) would collapse a
+        # half-built chain to a DRAW.
+        - {type: e1,   owner: agent, position: [12, 14], spawn_point: 0, stance: 2}
         # SOUTH base spawn (spawn_point 1)
         - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
         - {type: tent, owner: agent, position: [10, 22], spawn_point: 1}
         - {type: powr, owner: agent, position: [14, 26], spawn_point: 1}
         - {type: fix,  owner: agent, position: [14, 22], spawn_point: 1}
-        - {type: e1,   owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 26], spawn_point: 1, stance: 2}
         # Shared ore geography — two patches between the two bases
         # so harv income is symmetric whichever spawn is chosen.
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 22]}
-        # Enemy: fact + a couple of riflemen for the engage clause +
-        # hunt-bot pressure. Defenders placed close to the enemy
-        # fact (not the agent's base) so a stall loses on the clock,
-        # not on the agent base getting overrun first.
+        # Enemy: fact at far east (the engage target) + a couple of
+        # passive riflemen. Bot disabled — the clock is the teeth.
         - {type: fact, owner: enemy, position: [115, 30]}
         - {type: e1,   owner: enemy, position: [110, 30], stance: 2}
         - {type: e1,   owner: enemy, position: [110, 32], stance: 2}
+        # Sentinel: a far isolated enemy fact so razing the objective
+        # fact doesn't auto-`done` the engine before the `then:` chain
+        # finishes evaluating (CLAUDE.md auto-terminate footgun).
+        - {type: fact, owner: enemy, position: [120, 5]}
     win_condition:
       all_of:
         - then:
@@ -237,11 +267,11 @@ levels:
             clauses:
               - {has_building: proc}
               - {has_building: weap}
-              - {unit_type_count_gte: {type: 2tnk, n: 6}}
+              - {unit_type_count_gte: {type: 2tnk, n: 5}}
               - {enemy_key_buildings_destroyed: {types: [fact]}}
-        - within_ticks: 7200
+        - within_ticks: 9300
     fail_condition:
       any_of:
-        - {after_ticks: 7201}
+        - {after_ticks: 9301}
         - {not: {building_count_gte: {type: fact, n: 1}}}
-    max_turns: 80
+    max_turns: 110

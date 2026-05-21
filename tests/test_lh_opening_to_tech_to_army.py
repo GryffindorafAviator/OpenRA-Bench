@@ -19,7 +19,11 @@ Scenario shape:
   - rush-hour-arena, allies vs soviet.
   - easy: small army (2 tanks), no time pressure (bot disabled).
   - medium: 4 tanks, hunt bot, 80 turns / 7203 ticks.
-  - hard: 6 tanks + ≥2 spawn_point groups + 80 turns / 7203 ticks.
+  - hard: 5 tanks + ≥2 spawn_point groups, static enemy, 110 turns /
+    9300-tick clock. (Recalibrated: the engine balance fixes made the
+    prior 6-tank hunt-bot hard tier unsolvable — the hunt bot razed
+    the agent economy and a 6-tank single-queue chain overran the
+    engine's ~10080-tick hard episode cap.)
 """
 
 from __future__ import annotations
@@ -38,7 +42,12 @@ LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
 
 # Per-level army size (the n in unit_type_count_gte: {type: 2tnk, n: N}).
-_ARMY_N = {"easy": 2, "medium": 4, "hard": 6}
+# hard was 6 pre-recalibration; the engine balance fixes (hunt-bot
+# riflemen razing the agent economy + the engine's ~10080-tick hard
+# episode cap) made a 6-tank single-queue chain unsolvable, so hard
+# now runs a static enemy and a 5-tank army clause — still a clean
+# +1 over medium and comfortably inside the episode cap.
+_ARMY_N = {"easy": 2, "medium": 4, "hard": 5}
 
 
 # ── Policies ──────────────────────────────────────────────────────
