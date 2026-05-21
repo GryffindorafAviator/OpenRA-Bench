@@ -4,25 +4,36 @@ Real-world anchor: PlanBench replanning under exogenous loss (gold
 standard); SC2 rebuild-after-trade; military force-regen / unit
 replacement; ScienceWorld error recovery. The agent starts with 4
 combat heavy tanks (3tnk) + a production base (fact + powr + weap +
-fix) and a discrete reserve cash budget; an enemy 4tnk strike force
-staged at the lane mouth (stance:3 AttackAnything) lands its opening
-salvo on tick 0 and kills 1-4 agent tanks. The agent must
-   1. notice the establishment is below 4 (units_summary count drops),
-   2. build('3tnk') to commission replacements from the war factory
-      with the indivisible reserve cash, AND
+fix) and a discrete reserve cash budget; the standing column is BELOW
+the force structure the mission requires. The agent must
+   1. notice the establishment gap (units_summary shows fewer 3tnk
+      than the required quota N),
+   2. build('3tnk') to commission the missing tank(s) from the war
+      factory with the reserve cash, AND
    3. continue the eastward offensive to clear the e1 garrison
       defending the enemy fact at x=120,
-so the kill bar (5 enemy units) + the establishment bar (≥4 3tnks) +
+so the kill bar (5 enemy units) + the establishment bar (≥N 3tnk) +
 the construction-yard intact bar all pass before the tick deadline.
+
+Recalibrated (2026-05) after the engine movement fixes — the earlier
+design relied on the opening 4tnk strike shaving exactly one 3tnk off
+the column, but bench-wide combat rebalancing made that casualty
+unreliable (a moving heavy-tank column now out-trades the strikers
+without loss). The discriminator is now DETERMINISTIC and combat-RNG-
+free: the agent's starting column (4 3tnk) is BELOW the establishment
+quota N, so fielding the missing tank(s) is a mandatory build verb.
+The quota is 5 (easy/medium, one build) and 6 (hard, two builds).
 
 Bar (CLAUDE.md "no defect, no cheat"):
    - stall LOSES every tier / every hard seed (no attack, no kills →
-     kill bar unmet → after_ticks 5401 fires → timeout LOSS).
-   - no_rebuild LOSES every tier (the strike kills ≥1 agent 3tnk; the
-     surviving 3 tanks clear the kill bar but the type-count clause
-     `unit_type_count_gte: {type: 3tnk, n: 4}` is busted because the
-     dead tank was never replaced → LOSS even though kills ≥ 5).
-   - intended-rebuild-and-attack WINS every tier / seed.
+     kill bar unmet, and the stationary column is ground down by the
+     strikers → LOSS).
+   - no_rebuild LOSES every tier (the moving column out-trades the
+     strikers and clears the garrison so kills ≥5, but the starting
+     column is below the quota and a policy that never builds a 3tnk
+     can never satisfy `unit_type_count_gte: {type: 3tnk, n: N}` →
+     timeout LOSS even with kills ≥5).
+   - intended-build-and-attack WINS every tier / seed.
    - hard tier defines ≥2 agent spawn_point groups (NORTH-flank scout
      vs SOUTH-flank scout) so a memorised opening cannot generalise.
 """
@@ -43,22 +54,28 @@ from openra_bench.scenarios.win_conditions import WinContext, evaluate
 
 PACK = PACKS_DIR / "rob-unit-loss-recovery.yaml"
 
+# The establishment quota (`unit_type_count_gte: {type: 3tnk, n: N}`)
+# per tier. The agent starts a 4-tank column on every tier, so the
+# quota is the number of mandatory 3tnk builds + 4.
+_QUOTA = {"easy": 5, "medium": 5, "hard": 6}
+
 
 # ── policies ────────────────────────────────────────────────────────
 
 
 def _stall(rs, Command):
-    """Pure observe — no orders → no kills → kill bar unmet →
-    after_ticks 5401 fires → timeout LOSS."""
+    """Pure observe — no orders → no kills → kill bar unmet, and the
+    stationary column is ground down by the strikers → LOSS."""
     return [Command.observe()]
 
 
 def _no_rebuild(rs, Command):
-    """Attack-move east WITHOUT ever issuing build. The strike kills
-    ≥1 3tnk on the way past (the agent now has <4 of the combat type);
-    the surviving force reaches the garrison and clears the kill bar
-    BUT the `unit_type_count_gte: {type: 3tnk, n: 4}` clause is busted
-    → LOSS even though kills ≥ 5."""
+    """Attack-move east WITHOUT ever issuing build. The moving column
+    out-trades the strikers and clears the garrison so kills ≥5, BUT
+    the starting 4-tank column is below the establishment quota and a
+    policy that never builds a 3tnk can never satisfy
+    `unit_type_count_gte: {type: 3tnk, n: N}` → timeout LOSS even
+    though kills ≥ 5."""
     units = rs.get("units_summary", []) or []
     tanks = [u for u in units if u.get("type") == "3tnk"]
     if not tanks:
@@ -67,22 +84,24 @@ def _no_rebuild(rs, Command):
     return [Command.attack_move(ids, 80, 20)]
 
 
-def _intended(rs, Command):
-    """React to the loss: if 3tnk count drops below 4, commission a
-    replacement via build('3tnk'); always attack_move the live 3tnk
-    force toward the eastern garrison at (80,20). The replacement
-    budget covers the per-tier expected losses; the fresh-built tank
-    rejoins the column before the deadline; the type-count + kill-bar
-    + construction-yard bars all pass → WIN."""
-    units = rs.get("units_summary", []) or []
-    tanks = [u for u in units if u.get("type") == "3tnk"]
-    cmds = []
-    if len(tanks) < 4:
-        cmds.append(Command.build("3tnk"))
-    ids = [str(u["id"]) for u in tanks]
-    if ids:
-        cmds.append(Command.attack_move(ids, 80, 20))
-    return cmds or [Command.observe()]
+def _make_intended(quota):
+    """Build the 3tnk establishment UP to the quota, and always
+    attack_move the live 3tnk force toward the eastern garrison at
+    (80,20). The garrison falls; the type-count + kill-bar +
+    construction-yard bars all pass → WIN."""
+
+    def _intended(rs, Command):
+        units = rs.get("units_summary", []) or []
+        tanks = [u for u in units if u.get("type") == "3tnk"]
+        cmds = []
+        if len(tanks) < quota:
+            cmds.append(Command.build("3tnk"))
+        ids = [str(u["id"]) for u in tanks]
+        if ids:
+            cmds.append(Command.attack_move(ids, 80, 20))
+        return cmds or [Command.observe()]
+
+    return _intended
 
 
 # ── helpers ─────────────────────────────────────────────────────────
@@ -214,26 +233,34 @@ def _ctx(*, units=(), tick=1000, kills=0, lost=0, own_buildings=()):
 
 
 def test_predicates_enforce_capability():
-    """Win requires (≥4 3tnks AND ≥5 kills AND fact alive) AND in-time;
-    fail fires on timeout OR all-units-dead OR fact destroyed."""
+    """Win requires (≥N 3tnk AND ≥5 kills AND fact alive) AND in-time;
+    fail fires on timeout OR all-units-dead OR fact destroyed. N is
+    the per-tier establishment quota (5 for medium)."""
     c = compile_level(load_pack(PACK), "medium")
-    four_tanks = [{"cell_x": 22, "cell_y": 18 + 2 * i, "type": "3tnk"} for i in range(4)]
+    quota = _QUOTA["medium"]
+
+    def _tk(n):
+        return [
+            {"cell_x": 22, "cell_y": 18 + 2 * i, "type": "3tnk"}
+            for i in range(n)
+        ]
+
     fact = [("fact", 8, 18)]
 
-    # Intended: 4 3tnks, 5 kills, fact alive, in time → WIN
+    # Intended: N 3tnk, 5 kills, fact alive, in time → WIN
     assert evaluate(
         c.win_condition,
-        _ctx(units=four_tanks, tick=2000, kills=5, own_buildings=fact),
+        _ctx(units=_tk(quota), tick=2000, kills=5, own_buildings=fact),
     )
-    # Only 3 3tnks (didn't rebuild after a loss) → not a win
+    # Only N-1 3tnk (the starting column, never built up) → not a win
     assert not evaluate(
         c.win_condition,
-        _ctx(units=four_tanks[:3], tick=2000, kills=5, own_buildings=fact),
+        _ctx(units=_tk(quota - 1), tick=2000, kills=5, own_buildings=fact),
     )
     # Only 4 kills (didn't clear the garrison) → not a win
     assert not evaluate(
         c.win_condition,
-        _ctx(units=four_tanks, tick=2000, kills=4, own_buildings=fact),
+        _ctx(units=_tk(quota), tick=2000, kills=4, own_buildings=fact),
     )
     # All units dead → real fail (capability collapses)
     assert evaluate(
@@ -243,12 +270,12 @@ def test_predicates_enforce_capability():
     # Timeout (tick past after_ticks): bar unmet → fail
     assert evaluate(
         c.fail_condition,
-        _ctx(units=four_tanks, tick=5402, kills=0, own_buildings=fact),
+        _ctx(units=_tk(quota), tick=5402, kills=0, own_buildings=fact),
     )
     # Construction yard destroyed → fail
     assert evaluate(
         c.fail_condition,
-        _ctx(units=four_tanks, tick=2000, kills=5, own_buildings=[]),
+        _ctx(units=_tk(quota), tick=2000, kills=5, own_buildings=[]),
     )
 
 
@@ -273,15 +300,16 @@ def test_stall_loses_every_tier_and_seed(level, seed):
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_no_rebuild_loses(level, seed):
-    """Assault-without-rebuild: the strike kills ≥1 3tnk; the surviving
-    force clears the garrison so kills ≥ 5, but the type-count clause
-    busts because the dead tank was never replaced → LOSS even with a
-    cleared kill bar. This is the canonical 'forgot to replace the
-    casualty' failure mode the scenario is designed to catch."""
+    """Assault-without-build: the moving column clears the garrison so
+    kills ≥ 5, but the starting 4-tank column is below the
+    establishment quota and the type-count clause is never satisfied
+    because no 3tnk is ever built → timeout LOSS even with a cleared
+    kill bar. This is the canonical 'never built up to establishment'
+    failure mode the scenario is designed to catch."""
     _, r = _run(level, _no_rebuild, seed=seed)
     assert r.outcome == "loss", (
-        f"{level}/seed{seed}: no-rebuild must LOSE (type-count busted "
-        f"by unreplaced casualty); got {r.outcome} "
+        f"{level}/seed{seed}: no-rebuild must LOSE (establishment "
+        f"quota never reached); got {r.outcome} "
         f"kills={r.signals.units_killed} losses={r.signals.units_lost}"
     )
 
@@ -289,12 +317,12 @@ def test_no_rebuild_loses(level, seed):
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_intended_rebuild_and_attack_wins(level, seed):
-    """The intended capability — build replacements whenever the
-    establishment drops below 4 AND attack_move the live force east —
-    WINS every tier and every hard seed well inside the tick budget."""
-    _, r = _run(level, _intended, seed=seed)
+    """The intended capability — build the 3tnk establishment up to
+    the quota AND attack_move the live force east — WINS every tier
+    and every hard seed well inside the tick budget."""
+    _, r = _run(level, _make_intended(_QUOTA[level]), seed=seed)
     assert r.outcome == "win", (
-        f"{level}/seed{seed}: intended rebuild-and-attack should WIN; "
+        f"{level}/seed{seed}: intended build-and-attack should WIN; "
         f"got {r.outcome} kills={r.signals.units_killed} "
         f"losses={r.signals.units_lost} turns={r.turns}"
     )
@@ -303,8 +331,9 @@ def test_intended_rebuild_and_attack_wins(level, seed):
 def test_outcomes_are_deterministic_per_seed():
     """Same seed, same policy → identical outcome."""
     c = compile_level(load_pack(PACK), "medium")
-    a = run_level(c, _intended, seed=2)
-    b = run_level(c, _intended, seed=2)
+    pol = _make_intended(_QUOTA["medium"])
+    a = run_level(c, pol, seed=2)
+    b = run_level(c, pol, seed=2)
     assert (a.outcome, a.turns, a.signals.units_killed, a.signals.units_lost) == (
         b.outcome, b.turns, b.signals.units_killed, b.signals.units_lost
     )

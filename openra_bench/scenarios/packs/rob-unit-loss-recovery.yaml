@@ -11,33 +11,43 @@
 # replacement under mid-mission attrition; ScienceWorld error recovery.
 #
 # Discrimination (the four-script policy bar):
-#   • stall (only `observe`): the enemy strike force walks into the
-#     pre-placed agent column, kills 1-4 of the agent's combat tanks,
-#     and the enemy garrison at x=80 is never touched → kill bar (5)
-#     unmet → after_ticks 5401 fires → LOSS.
-#   • no-rebuild (attack_move east but skip `build`): the strike force
-#     kills ≥1 combat tank on the way past; the surviving 3tnks reach
-#     the garrison and clear the kill bar, BUT the type-count clause
-#     (`unit_type_count_gte: {type: 3tnk, n: 4}`) is busted because the
-#     dead tank was never replaced → LOSS.
-#   • intended (rebuild + attack_move east): build('3tnk') whenever the
-#     3tnk count drops below 4, attack_move the live force east. The
-#     replacement budget covers the per-tier expected losses; the
-#     fresh-built tank rejoins the column before the deadline, the
-#     garrison falls, and unit-type-count and kill-bar both pass → WIN.
+#   • stall (only `observe`): the enemy strike force grinds down the
+#     stationary agent column, the enemy garrison at x=80 is never
+#     touched → kill bar (5) unmet, or the column is wiped → LOSS.
+#   • no-rebuild (attack_move east but skip `build`): the moving
+#     column out-trades the strikers without loss and clears the
+#     garrison so kills ≥5, BUT the starting column (4 3tnk) is BELOW
+#     the establishment quota N and a policy that never builds a 3tnk
+#     can never satisfy `unit_type_count_gte: {type: 3tnk, n: N}` →
+#     timeout LOSS even with kills ≥5.
+#   • intended (build the 3tnk establishment up to N + attack_move
+#     east): build('3tnk') until the 3tnk count reaches N, attack_move
+#     the live force east. The garrison falls, unit-type-count and
+#     kill-bar both pass → WIN.
 #
-# ENGINE NOTES (verified 2026-05-20 with scripted run_level + raw smoke):
+# RECALIBRATED (2026-05) after the engine movement fixes — the earlier
+# design relied on the opening 4tnk strike shaving exactly one 3tnk
+# off the column, but bench-wide combat rebalancing made that casualty
+# unreliable (a moving heavy-tank column now out-trades the strikers
+# without loss). The discriminator is now DETERMINISTIC and combat-
+# RNG-free: the agent's starting column is BELOW the establishment
+# quota N, so fielding the missing tank(s) is a mandatory build verb
+# that does not depend on a casualty. The quota is 5 (easy/medium,
+# one build) and 6 (hard, two builds).
+#
+# ENGINE NOTES:
 #  - Combat unit is `3tnk` (heavy tank, Soviet faction). Production
 #    requires `fact + weap + fix`. Cost 1150 cr per replacement.
 #  - The enemy uses the `turtle` scripted bot (botgen.py / scripted_
 #    bot.rs) so the eastern e1 garrison HOLDS POSITION instead of
-#    surging west; this isolates the loss event to the pre-placed
-#    `4tnk` striker(s) at x=24 and keeps the kill bar reachable from
-#    a single east-bound assault.
+#    surging west; the kill bar is reachable from a single east-bound
+#    assault.
 #  - Strikers are stance:3 (AttackAnything) so they fire on the agent
-#    column from tick 0 — the loss event lands BEFORE the agent's
-#    first decision turn (~tick 90), so even a perfectly-timed flee
-#    cannot fully evade.
+#    column from tick 0 — they are anti-stall teeth (a stationary
+#    column is ground down) and kill fodder (a moving column kills
+#    them in passing, padding the kill count). They are NOT relied on
+#    to destroy an agent tank: the establishment quota, not a combat
+#    casualty, is the load-bearing build trigger.
 #  - The far enemy `fact` at (120,20) is the engine-auto-done guard
 #    (CLAUDE.md): without a persistent MustBeDestroyed enemy, the
 #    engine ends the episode the moment the last garrison e1 falls,
@@ -47,35 +57,36 @@
 #    within_ticks 5400 + after_ticks 5401 both reachable; a non-
 #    finisher LOSES (not draws).
 #  - `not own_units_gte: 1` mis-fires on turn 1 when the agent starts
-#    unit-less (CLAUDE.md footgun). This pack starts with 4 3tnks +
-#    fact, so `own_units_gte: 1` is safe.
+#    unit-less (CLAUDE.md footgun). This pack starts with a 4-tank
+#    3tnk column + fact, so `own_units_gte: 1` is safe.
 
 meta:
   id: rob-unit-loss-recovery
   title: 'Force-Regen After Attrition — Rebuild Combat Force Mid-Episode'
   capability: reasoning
   real_world_meaning: >
-    Reactive replan after an exogenous combat-unit loss. An ongoing
-    offensive operation has its force structure unexpectedly cut by an
-    enemy strike (2 units of 4 die in the opening); the agent has just
-    enough reserve cash to commission replacements from the war
-    factory; the offensive deadline is real. The model must notice the
-    loss (units_summary shows fewer combat tanks than the establishment
-    of 4), commit the reserve to rebuilding the combat type (not to a
-    different unit or to nothing), AND continue the original mission
-    (clear the eastern garrison defending the enemy construction yard)
-    fast enough that the deadline still bites.
+    Reactive replan to bring a force up to establishment. An ongoing
+    offensive operation begins UNDER-STRENGTH — the standing column is
+    below the force structure the mission requires; the agent has
+    reserve cash to commission the missing units from the war factory;
+    the offensive deadline is real. The model must notice the gap
+    (units_summary shows fewer combat tanks than the required
+    establishment), commit the reserve to building the combat type
+    (not to a different unit or to nothing), AND continue the original
+    mission (clear the eastern garrison defending the enemy
+    construction yard) fast enough that the deadline still bites.
   robotics_analogue: >
     Military force-regen / SC2 rebuild-after-trade. A theater operation
-    loses combat assets to an enemy strike mid-mission; the supervisor
-    has a discrete replacement budget for new units from the rear-area
-    production base; the operational objective and timeline are fixed.
-    The discrimination is whether the model recognises the gap in the
-    advertised force structure AND issues the production order in time
-    to keep the offensive on schedule; ignoring the loss (continuing
-    with a reduced force) under-strengths the assault and busts the
-    establishment bar; spending the budget on the wrong unit type
-    breaks the offensive composition; doing nothing busts the deadline.
+    is fielded below establishment and must build up to strength from
+    the rear-area production base mid-mission; the supervisor has a
+    discrete replacement budget; the operational objective and
+    timeline are fixed. The discrimination is whether the model
+    recognises the gap in the advertised force structure AND issues
+    the production order in time to keep the offensive on schedule;
+    ignoring the gap (assaulting with the reduced force) under-strengths
+    the assault and busts the establishment bar; spending the budget
+    on the wrong unit type breaks the offensive composition; doing
+    nothing busts the deadline.
   benchmark_anchor:
     - "PlanBench replanning under exogenous loss"
     - "ScienceWorld error recovery"
@@ -112,25 +123,25 @@ base:
 
 levels:
   # ── EASY ────────────────────────────────────────────────────────
-  # The bare skill: 1 expected loss (2 strikers land ~1 tank kill
-  # under stall; intended attack-move + rebuild restores the
-  # establishment of 4 3tnks well inside the budget). Generous
-  # garrison (5 e1) means the kill bar is easily reachable.
+  # The bare skill: the column starts at 4 3tnk, one below the
+  # establishment quota of 5 — fielding the 5th is one mandatory
+  # build. Generous garrison (5 e1) means the kill bar is easily
+  # reachable; the strikers ground a stalling column down.
   easy:
     description: >
       You command 4 heavy tanks (3tnk) at a forward staging area
       (x=22, y=18..24) with a production base (fact + powr + weap +
-      fix) behind you. Two enemy heavy tanks (4tnk) are staged at the
-      lane mouth (x=24) and will engage the moment the episode starts
-      — expect ONE of your tanks to die in the opening salvo. An
-      eastern garrison of 5 rifle infantry (e1) at x=80 defends the
-      enemy construction yard. Your reserve cash (1500 cr) covers ONE
-      replacement heavy tank (1150 cr); the intended play is to build
-      a replacement once your 3tnk count drops below 4 AND attack_move
-      east to clear the garrison. Win when you have killed ≥5 enemy
-      units AND you have ≥4 heavy tanks alive AND your construction
-      yard is intact, before tick 5400. Stalling, or assaulting
-      without replacing the loss, both LOSE.
+      fix) behind you. Two enemy heavy tanks (4tnk) picket the lane
+      mouth (x=24) and engage on contact — do NOT let the column sit
+      idle in their fire. An eastern garrison of 5 rifle infantry (e1)
+      at x=80 defends the enemy construction yard. Your column of 4 is
+      BELOW the required establishment of 5 heavy tanks: the intended
+      play is to build ONE more 3tnk (your reserve of 1500 cr covers
+      the 1150 cr tank) AND attack_move east to clear the garrison.
+      Win when you have killed ≥5 enemy units AND you have ≥5 heavy
+      tanks alive AND your construction yard is intact, before tick
+      5400. Stalling, or assaulting without building up to
+      establishment, both LOSE.
     starting_cash: 1500
     overrides:
       actors:
@@ -139,13 +150,16 @@ levels:
         - {type: powr, owner: agent, position: [10, 18]}
         - {type: weap, owner: agent, position: [12, 18]}
         - {type: fix,  owner: agent, position: [14, 18]}
-        # 4 combat tanks (3tnk) at the forward staging line.
+        # 4 combat tanks (3tnk) at the forward staging line — ONE
+        # below the establishment quota of 5; fielding the 5th is the
+        # mandatory build verb the intended policy must execute.
         - {type: '3tnk', owner: agent, position: [22, 18], stance: 2}
         - {type: '3tnk', owner: agent, position: [22, 20], stance: 2}
         - {type: '3tnk', owner: agent, position: [22, 22], stance: 2}
         - {type: '3tnk', owner: agent, position: [22, 24], stance: 2}
-        # Strike force: 2× 4tnk at the lane mouth (stance:3 fire on
-        # contact; range 5 covers the agent column at x=22).
+        # Lane-mouth pickets: 2× 4tnk at stance:3 (fire on contact;
+        # range covers the staging line at x=22). Anti-stall teeth +
+        # kill fodder — a moving column out-trades them.
         - {type: '4tnk', owner: enemy, position: [24, 19], stance: 3}
         - {type: '4tnk', owner: enemy, position: [24, 23], stance: 3}
         # Eastern garrison: 5 rifle infantry defending the enemy fact.
@@ -159,7 +173,7 @@ levels:
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: '3tnk', n: 4}}
+        - {unit_type_count_gte: {type: '3tnk', n: 5}}
         - {units_killed_gte: 5}
         - {has_building: fact}
         - {within_ticks: 5400}
@@ -172,22 +186,20 @@ levels:
 
   # ── MEDIUM ──────────────────────────────────────────────────────
   # +1 controlled variable: TIGHTER strike (3× 4tnk strikers instead
-  # of 2) AND larger garrison (6 e1 vs 5). The replacement budget is
-  # held at 1500 cr — STILL one replacement, so the agent must absorb
-  # the same expected single-tank loss but the strike is harder to
-  # outrun and the kill bar requires a longer dwell at the garrison.
+  # of 2) AND larger garrison (6 e1 vs 5). The establishment quota
+  # stays at 5 (one build); the difficulty axis is the heavier
+  # anti-stall pressure and the longer dwell at the garrison.
   medium:
     description: >
-      Tougher version: THREE enemy heavy tanks (4tnk) are staged at
-      the lane mouth (x=24, y=18..24) and will engage the moment the
-      episode starts — expect ONE of your tanks to die in the opening
-      salvo (the additional strikers spread fire, but still resolve to
-      ~1 lost agent tank against the same 4-tank establishment). The
-      eastern garrison is now 6 rifle infantry at x=80. Reserve cash
-      (1500 cr) still covers ONE replacement 3tnk. Win when you have
-      killed ≥5 enemy units AND you have ≥4 heavy tanks alive AND
-      your construction yard is intact, before tick 5400. Stalling
-      and assault-without-rebuild both LOSE.
+      Tougher version: THREE enemy heavy tanks (4tnk) picket the lane
+      mouth (x=24, y=18..24) and engage on contact — a stalling column
+      is ground down fast. The eastern garrison is now 6 rifle
+      infantry at x=80. Your column of 4 is BELOW the required
+      establishment of 5 heavy tanks; reserve cash (1500 cr) covers
+      the one 3tnk you must build. Win when you have killed ≥5 enemy
+      units AND you have ≥5 heavy tanks alive AND your construction
+      yard is intact, before tick 5400. Stalling, and assaulting
+      without building up to establishment, both LOSE.
     starting_cash: 1500
     overrides:
       actors:
@@ -195,12 +207,13 @@ levels:
         - {type: powr, owner: agent, position: [10, 18]}
         - {type: weap, owner: agent, position: [12, 18]}
         - {type: fix,  owner: agent, position: [14, 18]}
+        # 4 combat tanks — ONE below the establishment quota of 5.
         - {type: '3tnk', owner: agent, position: [28, 18], stance: 2}
         - {type: '3tnk', owner: agent, position: [28, 20], stance: 2}
         - {type: '3tnk', owner: agent, position: [28, 22], stance: 2}
         - {type: '3tnk', owner: agent, position: [28, 24], stance: 2}
-        # 3-tank strike: spreads fire across the agent column for a
-        # broader engagement footprint than easy.
+        # 3 lane-mouth pickets (4tnk, stance:3): broader anti-stall
+        # footprint than easy; kill fodder for a moving column.
         - {type: '4tnk', owner: enemy, position: [24, 18], stance: 3}
         - {type: '4tnk', owner: enemy, position: [24, 21], stance: 3}
         - {type: '4tnk', owner: enemy, position: [24, 24], stance: 3}
@@ -214,7 +227,7 @@ levels:
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: '3tnk', n: 4}}
+        - {unit_type_count_gte: {type: '3tnk', n: 5}}
         - {units_killed_gte: 5}
         - {has_building: fact}
         - {within_ticks: 5400}
@@ -238,24 +251,24 @@ levels:
   #      ANY agent actor with a spawn_point causes every agent
   #      actor WITHOUT one to be filtered out — so base buildings
   #      are duplicated across BOTH spawn groups at identical cells.)
-  #   2. Larger replacement budget (3450 cr ⇒ 3× 3tnk rebuilds) to
-  #      absorb the staggered strike (3 strikers spread fire across
-  #      the column for a broader engagement — empirically still
-  #      lands ~1 tank kill on intended-attack-move, but the budget
-  #      lets the agent rebuild aggressively if more are lost).
+  #   2. A higher establishment quota (6 ⇒ TWO mandatory builds) with
+  #      a 3450 cr reserve to cover them. The triage failure is
+  #      sharper at the higher quota — a single build is no longer
+  #      enough.
   hard:
     description: >
       Hard tier: TWO seed-driven base orientations (a NORTH-flank
       scout at (16,14) on spawn 0; a SOUTH-flank scout at (16,28) on
       spawn 1) keep the strike geometry symmetric but defeat a
-      memorised opening. Three enemy heavy tanks (4tnk) strike the
-      central column; the eastern garrison is 6 rifle infantry at
-      x=80. Reserve cash (3450 cr) covers up to THREE replacement
-      heavy tanks. Win when you have killed ≥5 enemy units AND you
-      have ≥4 heavy tanks alive AND your construction yard is intact,
-      before tick 5400. Stalling and assault-without-rebuild both
-      LOSE; the intended play is to rebuild every fallen tank AND
-      attack_move east in parallel.
+      memorised opening. Three enemy heavy tanks (4tnk) picket the
+      lane mouth; the eastern garrison is 6 rifle infantry at x=80.
+      Your column of 4 is BELOW the required establishment of 6 heavy
+      tanks; reserve cash (3450 cr) covers the two 3tnk you must
+      build. Win when you have killed ≥5 enemy units AND you have ≥6
+      heavy tanks alive AND your construction yard is intact, before
+      tick 5400. Stalling, and assaulting without building up to
+      establishment, both LOSE; the intended play is to build BOTH
+      missing tanks AND attack_move east in parallel.
     starting_cash: 3450
     overrides:
       actors:
@@ -284,7 +297,8 @@ levels:
         - {type: '3tnk', owner: agent, position: [28, 22], stance: 2, spawn_point: 1}
         - {type: '3tnk', owner: agent, position: [28, 24], stance: 2, spawn_point: 1}
         - {type: e1, owner: agent, position: [16, 28], stance: 0, spawn_point: 1}
-        # 3-tank strike (enemy actors place on every seed).
+        # 3 lane-mouth pickets (4tnk, stance:3; enemy actors place on
+        # every seed — enemy actors do NOT honour spawn_point).
         - {type: '4tnk', owner: enemy, position: [24, 18], stance: 3}
         - {type: '4tnk', owner: enemy, position: [24, 21], stance: 3}
         - {type: '4tnk', owner: enemy, position: [24, 24], stance: 3}
@@ -297,7 +311,7 @@ levels:
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: '3tnk', n: 4}}
+        - {unit_type_count_gte: {type: '3tnk', n: 6}}
         - {units_killed_gte: 5}
         - {has_building: fact}
         - {within_ticks: 5400}
