@@ -325,3 +325,65 @@ def test_run_human_session_scores_a_named_pack():
     assert res.outcome in ("win", "loss", "draw")
     assert res.scenario == f"{compiled.pack_id}:easy"
     assert res.seed == 1
+
+
+# ── InteractiveSession (GUI-driven turn stepping) ───────────────────
+
+
+def test_interactive_session_steps_turn_by_turn():
+    """The session inverts run_level's loop: the caller drives one turn
+    per submit_turn(), and it terminates with a scored outcome — the
+    backend the Gradio 'Play' tab wraps."""
+    from openra_bench.human_labeling import InteractiveSession
+
+    compiled = _smallest_easy_pack()
+    assert compiled is not None
+
+    sess = InteractiveSession(compiled, seed=1)
+    try:
+        # The observation is a real render_state — what the LLM sees.
+        rs = sess.render_state()
+        assert isinstance(rs, dict)
+        st = sess.status()
+        assert st["turn"] == 0 and not st["done"]
+        assert st["max_turns"] == compiled.max_turns
+
+        # Drive observe-only turns until the session ends.
+        guard = compiled.max_turns + 5
+        steps = 0
+        while not sess.done and steps < guard:
+            out = sess.submit_turn([HumanAction(mode="observe")])
+            steps += 1
+            assert out["turn"] == steps
+        assert sess.done
+        assert sess.outcome in ("win", "loss", "draw")
+        # A submit after termination is a no-op.
+        frozen = sess.turn
+        sess.submit_turn([HumanAction(mode="observe")])
+        assert sess.turn == frozen
+    finally:
+        sess.close()
+        sess.close()  # idempotent
+
+
+def test_interactive_session_from_pack():
+    """`InteractiveSession.from_pack` opens a session by pack id and
+    exposes the engine Command factory for click translation."""
+    from openra_bench.human_labeling import InteractiveSession
+
+    compiled = _smallest_easy_pack()
+    sess = InteractiveSession.from_pack(compiled.pack_id, "easy", seed=2)
+    try:
+        assert sess.seed == 2
+        assert sess.Command is not None
+        # A move gesture translates and applies without error.
+        rs = sess.render_state()
+        units = rs.get("units_summary") or []
+        if units:
+            uid = str(units[0]["id"])
+            sess.submit_turn(
+                [HumanAction(mode="move", units=[uid], target=(30, 18))]
+            )
+            assert sess.turn == 1
+    finally:
+        sess.close()

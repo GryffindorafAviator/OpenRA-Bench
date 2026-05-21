@@ -444,6 +444,153 @@ class HumanController(BaseController):
         return cmds
 
 
+# ── Interactive (GUI-driven) session ────────────────────────────────
+
+
+class InteractiveSession:
+    """A turn-steppable scenario session for GUI-driven human play.
+
+    `run_level` / `run_human_session` run the whole episode in one
+    synchronous call — fine when the policy is a function, impossible
+    when the policy is a human at a browser. `InteractiveSession`
+    inverts the loop: the UI holds control and calls `submit_turn()`
+    once per decision turn, exactly mirroring `run_level`'s per-turn
+    body (command translation, forbidden-tool accounting, win/fail
+    evaluation), so a human's run is scored by the identical rules as
+    an LLM's.
+
+    Lifecycle:
+
+        s = InteractiveSession.from_pack("defense-rush-survive", "easy")
+        s.render_state()                       # what the human sees
+        s.submit_turn([HumanAction(...), ...]) # advance one turn
+        ...                                    # repeat until s.done
+        s.close()
+    """
+
+    def __init__(self, compiled: Any, seed: int = 1):
+        from openra_rl_training.training.rust_env_pool import RustEnvPool
+
+        from .eval_core import _scenario_to_tmp_yaml
+        from .rust_adapter import RustObsAdapter
+
+        if not compiled.map_supported:
+            raise RuntimeError(
+                f"{compiled.pack_id}: base map not Rust-loadable"
+            )
+        self.compiled = compiled
+        self.seed = seed
+        self._tmp_path = _scenario_to_tmp_yaml(compiled)
+        self._pool = RustEnvPool(size=1, scenario_path=self._tmp_path)
+        self._env = self._pool.acquire()
+        self._adapter = RustObsAdapter()
+        self._adapter.observe(self._env.reset(seed=seed))
+        self._forbidden = {
+            str(t).lower() for t in (compiled.forbidden_tools or [])
+        }
+        self.turn = 0
+        self.outcome = "draw"
+        self.done = False
+        self._closed = False
+
+    @classmethod
+    def from_pack(
+        cls, pack_id: str, level: str = "easy", seed: int = 1
+    ) -> "InteractiveSession":
+        """Compile a pack by id and open a session on it."""
+        from .scenarios import load_pack
+        from .scenarios.loader import PACKS_DIR, compile_level
+
+        compiled = compile_level(
+            load_pack(PACKS_DIR / f"{pack_id}.yaml"), level
+        )
+        return cls(compiled, seed=seed)
+
+    @property
+    def Command(self) -> Any:
+        """The engine Command factory."""
+        return self._env.Command
+
+    @property
+    def max_turns(self) -> int:
+        return self.compiled.max_turns
+
+    def render_state(self) -> dict:
+        """The current observation — the SAME render_state an LLM agent
+        is shown for this scenario."""
+        return self._adapter.render_state()
+
+    def status(self) -> dict:
+        """Turn / outcome / done summary for the UI."""
+        return {
+            "turn": self.turn,
+            "max_turns": self.max_turns,
+            "outcome": self.outcome,
+            "done": self.done,
+            "tick": self._adapter.signals.game_tick,
+        }
+
+    def submit_turn(self, actions: "list[HumanAction]") -> dict:
+        """Advance one decision turn with the human's gestures. Mirrors
+        `run_level`'s per-turn body. Returns the updated `status()`."""
+        if self.done:
+            return self.status()
+        from .scenarios.win_conditions import WinContext, evaluate
+
+        Command = self._env.Command
+        calls = [
+            tc for a in (actions or []) if (tc := a.to_tool_call())
+            is not None
+        ]
+        cmds = human_actions_to_commands(actions or [], Command)
+        # Forbidden-tool accounting — identical rule to run_level.
+        for tc in calls:
+            tn = str(tc.get("name", "")).lower()
+            self._adapter.signals.tools_called[tn] = (
+                self._adapter.signals.tools_called.get(tn, 0) + 1
+            )
+            if tn in self._forbidden:
+                self._adapter.signals.tool_violations += 1
+        conceded = any(a.mode == "surrender" for a in (actions or []))
+        if not cmds:
+            cmds = [Command.observe()]
+
+        obs, _r, engine_done, _info = self._env.step(cmds)
+        self._adapter.observe(obs, done=engine_done)
+        self.turn += 1
+
+        ctx = WinContext(
+            signals=self._adapter.signals,
+            render_state=self._adapter.render_state(),
+        )
+        if evaluate(self.compiled.win_condition, ctx):
+            self.outcome = "win"
+        elif evaluate(self.compiled.fail_condition, ctx):
+            self.outcome = "loss"
+        if conceded:
+            self.outcome = "loss"
+        if (
+            self.outcome != "draw"
+            or engine_done
+            or self.turn >= self.max_turns
+        ):
+            self.done = True
+        return self.status()
+
+    def close(self) -> None:
+        """Release the engine env. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._pool.release(self._env)
+            self._pool.shutdown()
+        finally:
+            from pathlib import Path
+
+            Path(self._tmp_path).unlink(missing_ok=True)
+
+
 # ── Session harness ─────────────────────────────────────────────────
 
 
