@@ -6,18 +6,29 @@ seed; stall (only observe), retreat-only (never engage), brute
 commit-and-stay (charge deep into the guarded zone and hold) all LOSE
 on every level. Non-win is a real reachable timeout LOSS (not a draw).
 
-Recalibrated 2026-05-20 after the engine balance fixes (armour-class
-weapon selection, stance semantics). The previous design used
-harvesters as the score targets; post-fix the jeep's anti-infantry
-M60mg cannot dent a harvester's heavy armour (and harvesters crush
-jeeps), so the kill bar became unsatisfiable. The score targets are
-now soft e1 rifle workers (the jeep MG one-shots them, stance:0 so
-they are passive) and the leashed defender is a 3tnk heavy tank — the
+Recalibrated 2026-05-20 (engine balance fixes): the score targets are
+soft e1 rifle workers (the jeep MG one-shots them, stance:0 so they
+are passive) and the leashed defender is a 3tnk heavy tank — the
 genuine un-killable threat (jeep MG cannot scratch its heavy armour;
-its cannon one-shots a jeep). The load-bearing decision: strike the
-soft workers from MG range and disengage before the leashed tank
-bears; never charge deep into the guarded zone, and never waste fire
-on the un-killable tank.
+its cannon one-shots a jeep).
+
+Recalibrated AGAIN 2026-05-20 after the engine MOVEMENT fixes (moving
+units take fire en route — no sprint-invincibility — and an
+attack_unit chase closes at real Mobile speed). Both fixes broke the
+old geometry: (a) the old retreat-on-guard-VISIBLE intended policy
+was fatal because by the time the lunging tank entered the agent's
+vision the jeep was a shot from death, and (b) with the guard posted
+far off-lane it never reached the cluster, so a commit play grabbed
+the kill bar from the cluster's western edge and won for free. Fix:
+the guard is posted ONE bracket-row off the worker lane (5 cells) so
+a LINGERING jeep dies to the cannon within ~2 turns (commit / brute
+LOSE) while a PROACTIVE pulse — strike one worker then immediately
+retreat past the leash WITHOUT waiting to see the tank — clears the
+cannon envelope between strikes and scores the bar with zero losses.
+The easy attrition cap tightened from 1 to 0 (a one-jeep-loss commit
+still grabbed the old 2-kill bar with the survivor); the BALANCED
+zero-loss bar is now uniform across all three levels and easy stays
+the easy tier via a smaller 5-worker cluster and a single guard.
 
 Validation is scripted (no model / network): the policies below are
 the exhaustive proxies for the real strategies and exercise the
@@ -68,12 +79,13 @@ def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
     jeeps = [(6, 20), (6, 20)]
 
-    # Intended: 2 kills, no losses, in time → WIN
-    assert evaluate(c.win_condition, _ctx(jeeps, tick=3000, killed=2, lost=0))
-    # 1 loss still wins on easy (cap is 1)
-    assert evaluate(c.win_condition, _ctx(jeeps, tick=3000, killed=2, lost=1))
-    # 2 losses → fail (cap busted)
-    assert evaluate(c.fail_condition, _ctx(jeeps, tick=3000, killed=2, lost=2))
+    # Intended: 3 kills, ZERO losses, in time → WIN (BALANCED bar)
+    assert evaluate(c.win_condition, _ctx(jeeps, tick=3000, killed=3, lost=0))
+    # 3 kills but a jeep lost → fail (units_lost_lte:0, uniform bar)
+    assert evaluate(c.fail_condition, _ctx(jeeps, tick=3000, killed=3, lost=1))
+    assert not evaluate(c.win_condition, _ctx(jeeps, tick=3000, killed=3, lost=1))
+    # 2 kills, 0 losses → predicate fails (need ≥3)
+    assert not evaluate(c.win_condition, _ctx(jeeps, tick=3000, killed=2, lost=0))
     # Past deadline → real loss, reachable within max_turns
     assert evaluate(c.fail_condition, _ctx(jeeps, tick=5402, killed=0, lost=0))
     assert 5401 <= 93 + 90 * (c.max_turns - 1), (
@@ -154,11 +166,15 @@ def test_timeout_loss_is_reachable_on_every_level():
 # Constants from CLAUDE.md / openra-sim/src/scripted_bot.rs:
 #   GUARD_AGGRO = 16 cells (post-radius for lunge)
 #   GUARD_LEASH = 18 cells (post-radius for snap-back)
-# The intended hit-run-cycle retreats the instant the leashed tank is
-# within RETREAT_TRIGGER cells — the jeep MG out-ranges nothing on the
-# 3tnk and the cannon one-shots a jeep, so a single decision spent in
-# the tank's envelope is fatal.
-RETREAT_TRIGGER = 16
+# Engine MOVEMENT fixes (2026-05-20): a moving jeep takes fire en
+# route (no sprint-invincibility) and the lunging 3tnk closes at real
+# Mobile speed. A reactive "retreat when the tank is VISIBLE" policy
+# is therefore fatal — by the time the lunging tank surfaces in the
+# agent's vision the jeep is already a cannon-shot from death. The
+# intended pulse must be PROACTIVE: strike exactly one worker, then
+# immediately retreat past the leash without waiting to see the tank.
+PULSE_MG_RANGE = 4  # jeep M60mg engagement range to a soft worker
+PULSE_RETREAT_X = 50  # west rally line — comfortably past GUARD_LEASH
 
 
 def _workers(enemies):
@@ -176,73 +192,82 @@ def _guards(enemies):
     ]
 
 
-def _hit_run_cycle_policy(rs, Command):
-    """Pulsed hit-and-run — the intended BALANCED strategy.
+def _make_hit_run_cycle_policy():
+    """Build a fresh PROACTIVE pulsed hit-and-run policy — the intended
+    BALANCED strategy. A new instance must be created per episode
+    because the pulse is STATEFUL (each jeep latches an approach /
+    retreat phase).
 
-    Per-jeep, memoryless, derived each turn from geometry:
-      - Track the cluster latitude (the y of the nearest visible
-        worker) so the jeep advances and retreats along the worker
-        lane rather than drifting off it.
-      - If the leashed tank is within RETREAT_TRIGGER cells → RETREAT
-        west ~26 cells along the lane (cross the leash; the snap-back
-        triggers as the tank loses the jeep past LEASH=18).
-      - Else if a worker is visible → STRIKE the nearest one
-        (attack_unit; the jeep MG one-shots a soft e1 worker).
-      - Else (fog from the far-west start) → ADVANCE east along the
-        lane to acquire vision of the cluster.
+    Per jeep:
+      - APPROACH phase: drive east along the worker lane; when a
+        worker is within MG range, fire ONE volley (attack_unit — the
+        jeep MG one-shots the soft e1) and immediately latch RETREAT.
+      - RETREAT phase: drive west to the rally line past GUARD_LEASH;
+        the lunging 3tnk loses the jeep past the leash and snaps back
+        to its post. On reaching the rally line, latch APPROACH again.
 
-    The cycle is self-sustaining: strike → tank lunges into range →
-    retreat past the leash → tank snaps back → re-advance → strike
-    the next worker. The jeep never wastes fire on the un-killable
-    tank and never lingers in its cannon envelope.
+    The strike-then-retreat is PROACTIVE — the jeep does not wait to
+    see the lunging tank; it pulls back the turn after every strike,
+    clearing the cannon envelope before the 3tnk can bear. A commit
+    policy that stays for the 3rd kill is inside the cannon's reach
+    for ~3 decision turns and loses a jeep (the 3tnk one-shots a jeep
+    in ~2 turns).
     """
-    units = rs.get("units_summary", []) or []
-    enemies = rs.get("enemy_summary", []) or []
-    if not units:
-        return [Command.observe()]
-    workers = _workers(enemies)
-    guards = _guards(enemies)
-    cmds = []
-    for u in units:
-        ux, uy = u["cell_x"], u["cell_y"]
-        # Lane = latitude of the nearest visible worker (else hold y).
-        if workers:
-            nearest_w = min(
-                workers,
-                key=lambda e: (e["cell_x"] - ux) ** 2 + (e["cell_y"] - uy) ** 2,
-            )
-            lane = nearest_w["cell_y"]
-        else:
-            nearest_w = None
-            lane = uy
-        # Nearest leashed tank — the thing we must not linger near.
-        gd2 = 10 ** 9
-        if guards:
-            gd2 = min(
-                (g["cell_x"] - ux) ** 2 + (g["cell_y"] - uy) ** 2
-                for g in guards
-            )
-        # Inside the tank's reach → RETREAT west along the lane.
-        if gd2 <= RETREAT_TRIGGER ** 2:
-            cmds.append(
-                Command.move_units(
-                    [str(u["id"])], target_x=max(2, ux - 26), target_y=lane
+    phase: dict[str, str] = {}
+
+    def _policy(rs, Command):
+        units = rs.get("units_summary", []) or []
+        enemies = rs.get("enemy_summary", []) or []
+        if not units:
+            return [Command.observe()]
+        workers = _workers(enemies)
+        cmds = []
+        for u in units:
+            uid = str(u["id"])
+            ux, uy = u["cell_x"], u["cell_y"]
+            ph = phase.get(uid, "approach")
+            # RETREAT — rally west past the leash, then re-arm.
+            if ph == "retreat":
+                if ux <= PULSE_RETREAT_X + 1:
+                    phase[uid] = "approach"
+                    ph = "approach"
+                else:
+                    cmds.append(
+                        Command.move_units(
+                            [uid], target_x=PULSE_RETREAT_X, target_y=uy
+                        )
+                    )
+                    continue
+            # APPROACH — close to MG range, strike once, latch retreat.
+            if workers:
+                nw = min(
+                    workers,
+                    key=lambda e: (e["cell_x"] - ux) ** 2
+                    + (e["cell_y"] - uy) ** 2,
                 )
-            )
-            continue
-        # Safe: strike the nearest soft worker.
-        if nearest_w is not None:
-            cmds.append(
-                Command.attack_unit([str(u["id"])], str(nearest_w["id"]))
-            )
-            continue
-        # No worker in sight (fog): advance east along the lane.
-        cmds.append(
-            Command.move_units(
-                [str(u["id"])], target_x=min(64, ux + 10), target_y=lane
-            )
-        )
-    return cmds
+                d = abs(nw["cell_x"] - ux) + abs(nw["cell_y"] - uy)
+                if d <= PULSE_MG_RANGE:
+                    cmds.append(Command.attack_unit([uid], str(nw["id"])))
+                    phase[uid] = "retreat"
+                else:
+                    cmds.append(
+                        Command.move_units(
+                            [uid],
+                            target_x=nw["cell_x"] - 3,
+                            target_y=nw["cell_y"],
+                        )
+                    )
+            else:
+                # Fog from the far-west start — advance to acquire the
+                # cluster (capped short of the guard's aggro radius).
+                cmds.append(
+                    Command.move_units(
+                        [uid], target_x=min(64, ux + 10), target_y=uy
+                    )
+                )
+        return cmds
+
+    return _policy
 
 
 def _stall_policy(rs, Command):
@@ -328,15 +353,15 @@ def _retreat_only_policy(rs, Command):
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_intended_hit_run_cycle_wins(level, seed):
-    """Intended hit-and-run WINS on every level and every hard seed:
-    strike the soft workers from MG range, retreat past the leash when
-    the tank closes, re-engage — kill bar met with ZERO jeeps lost
-    (medium/hard) / ≤1 lost (easy)."""
+    """Intended PROACTIVE pulse WINS on every level and every hard
+    seed: strike one worker from MG range, immediately retreat past
+    the leash, re-engage — kill bar met with ZERO jeeps lost (the
+    uniform BALANCED bar)."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    res = run_level(c, _hit_run_cycle_policy, seed=seed)
+    res = run_level(c, _make_hit_run_cycle_policy(), seed=seed)
     assert res.outcome == "win", (
         f"{level} seed={seed}: intended hit-run-cycle should WIN, got "
         f"{res.outcome} after {res.turns} turns (killed="

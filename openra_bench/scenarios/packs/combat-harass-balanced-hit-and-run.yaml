@@ -35,20 +35,44 @@
 # (combat-harass-conservative); the pulse cadence is the controlled
 # variable.
 #
-# Bar (no defect / no cheat):
+# Bar (no defect / no cheat — units_lost_lte:0 on EVERY level):
 #   • stall (only observe)                → LOSS (kill bar unmet, clock)
-#   • commit-and-stay (charge & sit)      → LOSS (jeep dies to the tank)
-#   • brute (attack-nearest incl. guard)  → LOSS (jeep lost to the tank)
 #   • retreat-only (never engage)         → LOSS (kill bar unmet)
-#   • intended hit-run-cycle              → WIN
+#   • commit-and-stay (charge & sit)      → LOSS (jeep dies to the tank
+#     before the kill bar is met)
+#   • brute (attack-nearest incl. guard)  → LOSS (jeep lost to the tank)
+#   • intended hit-run-cycle (pulse)      → WIN (zero losses)
 #
-# Recalibrated 2026-05-20 after the engine balance fixes (armour-class
-# weapon selection, stance semantics): the previous design used
-# harvesters as score targets, but post-fix the jeep MG cannot damage
-# a harvester's heavy armour (and harvesters crush jeeps), so the kill
-# bar became unsatisfiable. Score targets are now soft e1 workers (the
-# jeep MG one-shots them); the leashed guard is a 3tnk heavy tank (the
-# genuine un-killable threat that mandates retreat).
+# Recalibrated 2026-05-20 (engine balance fixes): score targets are
+# soft e1 workers (the jeep MG one-shots them); the leashed guard is a
+# 3tnk heavy tank (the genuine un-killable threat that mandates
+# retreat).
+#
+# Recalibrated AGAIN 2026-05-20 after the engine MOVEMENT fixes
+# (moving units take fire en route — no sprint-invincibility — and an
+# attack_unit chase closes at real Mobile speed). Both fixes broke the
+# old geometry's bar:
+#   • A jeep can no longer cross the guard's envelope untouched on a
+#     long move order, so the OLD retreat-on-guard-VISIBLE policy was
+#     fatal — by the time the lunging tank entered the agent's vision
+#     the jeep was already a shot from death.
+#   • With the guard posted well off-lane (the old (83,22) / (84,14)
+#     posts) it never reached the cluster in time, so a commit policy
+#     killed the 3-worker bar from the cluster's western edge and won
+#     for free — the laziest-play inversion (CLAUDE.md defect class
+#     A1).
+# Fix: the guard is posted ONE bracket-row off the worker lane (5
+# cells: workers y=10, guard y=5) so a jeep that LINGERS at the
+# cluster is inside the 3tnk cannon's reach within ~2 decision turns
+# and dies before the kill bar is met (commit / brute LOSE), while a
+# PROACTIVE pulse — strike one worker, immediately retreat past the
+# leash without waiting to see the tank — clears the cannon envelope
+# between strikes and scores the bar with zero losses (WIN). The easy
+# attrition cap tightened from 1 to 0: post-fix a commit play that
+# loses one jeep still grabs the 2-kill bar with the survivor, so the
+# BALANCED "retreat actually worked" bar (zero losses) is now uniform
+# across all three levels; easy stays the easy tier via a smaller
+# 5-worker cluster and a single guard.
 #
 # Real-world anchor:
 #   SC2 muta-harass / sentry-harass (pulsed engagement with mandatory
@@ -94,13 +118,16 @@ base_map: rush-hour-arena
 
 # Topology (rush-hour-arena 128x40, playable x in [2..126], y in [2..38]):
 #   Raiders (jeeps) start at the west (x=6) on the worker-cluster
-#   latitude. The worker cluster (soft e1, stance:0) sits centre-east
-#   spread along the cluster latitude; the leashed 3tnk guard is posted
-#   a few cells off the cluster — close enough that a jeep at the
-#   cluster gets the guard LUNGING into cannon range within a decision
-#   turn (AGGRO=16) but offset enough to leave a one-strike window
-#   before the cannon bears. Retreating west past the leash (>18 from
-#   the post) triggers snap-back.
+#   latitude (y=10). The worker cluster (soft e1, stance:0) is spread
+#   along the lane centre-east (x=72..92, spaced 4). The leashed 3tnk
+#   guard is posted ONE bracket-row off the lane (y=5 — 5 cells north)
+#   roughly above the cluster centre: close enough that a jeep that
+#   LINGERS at the cluster is inside the 3tnk cannon's reach within
+#   ~2 decision turns (AGGRO=16 ⇒ the guard lunges the instant a jeep
+#   reaches the cluster), but one row off so a single strike-and-
+#   immediate-retreat clears the cannon envelope before the lunging
+#   tank bears. Retreating west past the leash (>18 from the post)
+#   triggers snap-back.
 #   Far-east `fact` keeps the episode alive past the kill moment so
 #   the win/fail evaluator sees the terminal state (no auto-done on
 #   enemy wipe collapsing to DRAW).
@@ -116,16 +143,19 @@ base:
     # reason retreat is mandatory against the heavy tank).
     - {type: jeep, owner: agent, position: [6, 10], stance: 1, count: 2}
     # SCORE TARGETS — soft e1 rifle workers, stance:0 (passive).
-    - {type: e1, owner: enemy, position: [74, 10], stance: 0}
+    - {type: e1, owner: enemy, position: [72, 10], stance: 0}
+    - {type: e1, owner: enemy, position: [76, 10], stance: 0}
     - {type: e1, owner: enemy, position: [80, 10], stance: 0}
-    - {type: e1, owner: enemy, position: [86, 10], stance: 0}
+    - {type: e1, owner: enemy, position: [84, 10], stance: 0}
+    - {type: e1, owner: enemy, position: [88, 10], stance: 0}
     - {type: e1, owner: enemy, position: [92, 10], stance: 0}
     # THE LEASHED GUARD — one 3tnk heavy tank (anti-vehicle cannon,
-    # heavy armour) posted off the cluster. AGGRO=16 ⇒ guard lunges at
-    # any foe within 16 of its post; LEASH=18 ⇒ snaps back past 18.
-    # The jeep MG cannot dent the 3tnk; the 3tnk cannon one-shots a
-    # jeep — so a lingering jeep dies, a retreating one survives.
-    - {type: 3tnk, owner: enemy, position: [83, 22], stance: 2}
+    # heavy armour) posted ONE bracket-row (5 cells) off the worker
+    # lane. AGGRO=16 ⇒ guard lunges at any foe within 16 of its post;
+    # LEASH=18 ⇒ snaps back past 18. The jeep MG cannot dent the
+    # 3tnk; the 3tnk cannon one-shots a jeep in ~2 decision turns —
+    # so a lingering jeep dies, a pulsing one survives.
+    - {type: 3tnk, owner: enemy, position: [82, 5], stance: 2}
     # Persistent enemy `fact` marker (far east, unarmed high-HP) keeps
     # the episode alive past the moment the last worker dies — the win/
     # fail evaluator must see the terminal units_killed=N + units_lost
@@ -134,72 +164,79 @@ base:
     - {type: fact, owner: enemy, position: [124, 20]}
 
 levels:
-  # ── EASY ── the bare hit-and-run skill: 4 soft workers (kill bar 2),
-  # 1 guard, attrition cap of 1 (allows ONE mistake — a single jeep
-  # loss is still winnable if the surviving jeep finishes the bar).
-  # Idle and retreat-only lose on the clock; brute (charge east into
-  # the guard / attack the lunging tank) loses both jeeps before the
-  # bar is met.
+  # ── EASY ── the bare hit-and-run skill: 5 soft workers (kill bar 3),
+  # 1 guard, the BALANCED zero-loss bar. Idle and retreat-only lose on
+  # the clock; commit-and-stay and brute both LOSE a jeep to the 3tnk
+  # cannon before the 3-kill bar is met. The intended pulse — strike
+  # one worker, retreat past the leash, re-engage — clears the bar
+  # with zero losses. Easy is the easy tier via a smaller 5-worker
+  # cluster (vs 6 on medium) and a single guard (vs two clusters on
+  # hard).
   easy:
     description: >
-      Two jeeps (RAIDERS) at the west (y=10) must kill TWO of FOUR soft
-      enemy workers (e1) spread along x=74..92 at y=10. One leashed
-      heavy tank (3tnk) posts off the cluster at (83,22): it lunges at
-      any foe within 16 cells of its post and snaps back past 18. The
-      jeep MG cannot dent the tank's heavy armour; the tank's cannon
-      one-shots a jeep. Pulse: approach east along y=10 to MG range of
-      a worker, strike, retreat west past x=58 so the guard snaps back,
-      re-approach. Lose at most 1 jeep — before tick 5400. Idling,
-      charge-into-the-guard, and retreat-only all LOSE.
+      Two jeeps (RAIDERS) at the west (y=10) must kill THREE of FIVE
+      soft enemy workers (e1) spread along x=72..88 at y=10. One
+      leashed heavy tank (3tnk) posts one bracket-row off the cluster
+      at (82,5): it lunges at any foe within 16 cells of its post and
+      snaps back past 18. The jeep MG cannot dent the tank's heavy
+      armour; the tank's cannon one-shots a jeep in ~2 decision turns.
+      Pulse: approach east along y=10 to MG range of a worker, strike,
+      retreat west past the leash so the guard snaps back, re-approach.
+      Lose ZERO jeeps — before tick 5400. Idling, retreat-only,
+      commit-and-stay, and brute-charge all LOSE.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [6, 10], stance: 1, count: 2}
-        - {type: e1, owner: enemy, position: [74, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [72, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [76, 10], stance: 0}
         - {type: e1, owner: enemy, position: [80, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [86, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [92, 10], stance: 0}
-        - {type: 3tnk, owner: enemy, position: [83, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [84, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [88, 10], stance: 0}
+        - {type: 3tnk, owner: enemy, position: [82, 5], stance: 2}
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
-        - {units_killed_gte: 2}
-        - {units_lost_lte: 1}
+        - {units_killed_gte: 3}
+        - {units_lost_lte: 0}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
         - {after_ticks: 5401}
-        - {not: {units_lost_lte: 1}}
+        - {not: {units_lost_lte: 0}}
         - {not: {own_units_gte: 1}}
     max_turns: 62
 
-  # ── MEDIUM ── +1 controlled variable: 6 workers (kill bar 3) and the
-  # BALANCED bar — units_lost_lte: 0 (perfect retreat). The guard is
-  # posted close to the cluster so it lunges into cannon range fast;
-  # committing is strictly fatal (the 3tnk will kill a jeep before the
-  # 3rd worker falls). The policy must pulse — strike, disengage past
-  # the leash, re-engage — without taking the cannon.
+  # ── MEDIUM ── +1 controlled variable vs easy: a larger 6-worker
+  # cluster (kill bar 3 of 6 — more soft targets to cherry-pick, so a
+  # commit play is tempted to grab the bar from the western edge).
+  # Same BALANCED zero-loss bar. The guard one bracket-row off the
+  # lane lunges into cannon range fast; committing is strictly fatal
+  # (the 3tnk kills a jeep before the 3rd worker falls). The policy
+  # must pulse — strike, disengage past the leash, re-engage — without
+  # taking the cannon.
   medium:
     description: >
       Two jeeps (RAIDERS) at the west (y=10) must kill THREE of SIX
-      soft enemy workers (e1) spread along x=74..94 at y=10. One
-      leashed heavy tank (3tnk) posts close off the cluster at (84,14):
-      aggro 16, leash 18. The BALANCED bar: lose ZERO jeeps — retreat
-      must actually work. The jeep MG cannot dent the tank; the tank
-      one-shots a jeep. Pulse: approach east along y=10 to MG range of
-      a worker, strike, retreat west past the leash so the guard snaps
-      back, re-engage. Idling, commit-and-stay (a jeep dies), brute
-      charge (attacks the un-killable tank and dies), and retreat-only
-      (kill bar unmet) all LOSE — before tick 5400.
+      soft enemy workers (e1) spread along x=72..92 at y=10. One
+      leashed heavy tank (3tnk) posts one bracket-row off the cluster
+      at (82,5): aggro 16, leash 18. The BALANCED bar: lose ZERO jeeps
+      — retreat must actually work. The jeep MG cannot dent the tank;
+      the tank one-shots a jeep in ~2 decision turns. Pulse: approach
+      east along y=10 to MG range of a worker, strike, retreat west
+      past the leash so the guard snaps back, re-engage. Idling,
+      commit-and-stay (a jeep dies), brute charge (attacks the
+      un-killable tank and dies), and retreat-only (kill bar unmet)
+      all LOSE — before tick 5400.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [6, 10], stance: 1, count: 2}
-        - {type: e1, owner: enemy, position: [74, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [78, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [82, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [86, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [90, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [94, 10], stance: 0}
-        - {type: 3tnk, owner: enemy, position: [84, 14], stance: 2}
+        - {type: e1, owner: enemy, position: [72, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [76, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [80, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [84, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [88, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [92, 10], stance: 0}
+        - {type: 3tnk, owner: enemy, position: [82, 5], stance: 2}
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
@@ -226,13 +263,13 @@ levels:
       Two jeeps must kill THREE soft enemy workers (e1). The worker
       cluster is mirrored across two latitudes (NORTH y=10 and SOUTH
       y=30), each cluster of SIX e1 overwatched by a leashed 3tnk heavy
-      tank posted close off it (aggro 16, leash 18). Raider start
-      latitude varies by seed (north y=10 or south y=30) — the raiders
-      face whichever cluster their spawn opens onto. The BALANCED bar:
-      lose ZERO jeeps. Pulse: approach east to MG range of a worker,
-      strike, retreat past the leash, re-engage. The jeep MG cannot
-      dent the tank — brute-charging it loses a jeep. Before tick 5400.
-      Idling, commit-and-stay, and retreat-only all LOSE.
+      tank posted one bracket-row off it (aggro 16, leash 18). Raider
+      start latitude varies by seed (north y=10 or south y=30) — the
+      raiders face whichever cluster their spawn opens onto. The
+      BALANCED bar: lose ZERO jeeps. Pulse: approach east to MG range
+      of a worker, strike, retreat past the leash, re-engage. The jeep
+      MG cannot dent the tank — brute-charging it loses a jeep. Before
+      tick 5400. Idling, commit-and-stay, and retreat-only all LOSE.
     overrides:
       actors:
         # spawn_point 0 — NORTHERN raider staging (y=10)
@@ -241,24 +278,26 @@ levels:
         # spawn_point 1 — SOUTHERN raider staging (y=30)
         - {type: jeep, owner: agent, position: [6, 30], stance: 1, count: 2,
            spawn_point: 1}
-        # NORTH cluster — 6 e1 at y=10, guard 3tnk at (84,14).
-        - {type: e1, owner: enemy, position: [74, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [78, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [82, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [86, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [90, 10], stance: 0}
-        - {type: e1, owner: enemy, position: [94, 10], stance: 0}
-        - {type: 3tnk, owner: enemy, position: [84, 14], stance: 2}
-        # SOUTH cluster — 6 e1 at y=30, guard 3tnk at (84,26). Mirror
-        # of the north cluster across y=20 so either raider spawn
-        # faces an equivalent leashed-guard pulse target.
-        - {type: e1, owner: enemy, position: [74, 30], stance: 0}
-        - {type: e1, owner: enemy, position: [78, 30], stance: 0}
-        - {type: e1, owner: enemy, position: [82, 30], stance: 0}
-        - {type: e1, owner: enemy, position: [86, 30], stance: 0}
-        - {type: e1, owner: enemy, position: [90, 30], stance: 0}
-        - {type: e1, owner: enemy, position: [94, 30], stance: 0}
-        - {type: 3tnk, owner: enemy, position: [84, 26], stance: 2}
+        # NORTH cluster — 6 e1 at y=10, guard 3tnk one row OUTSIDE
+        # (north of) the lane at (82,5).
+        - {type: e1, owner: enemy, position: [72, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [76, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [80, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [84, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [88, 10], stance: 0}
+        - {type: e1, owner: enemy, position: [92, 10], stance: 0}
+        - {type: 3tnk, owner: enemy, position: [82, 5], stance: 2}
+        # SOUTH cluster — 6 e1 at y=30, guard 3tnk one row OUTSIDE
+        # (south of) the lane at (82,35). Mirror of the north cluster
+        # across y=20 so either raider spawn faces an equivalent
+        # leashed-guard pulse target.
+        - {type: e1, owner: enemy, position: [72, 30], stance: 0}
+        - {type: e1, owner: enemy, position: [76, 30], stance: 0}
+        - {type: e1, owner: enemy, position: [80, 30], stance: 0}
+        - {type: e1, owner: enemy, position: [84, 30], stance: 0}
+        - {type: e1, owner: enemy, position: [88, 30], stance: 0}
+        - {type: e1, owner: enemy, position: [92, 30], stance: 0}
+        - {type: 3tnk, owner: enemy, position: [82, 35], stance: 2}
         # Far-east persistent marker (keeps episode alive past wipe).
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
