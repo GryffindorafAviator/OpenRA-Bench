@@ -1253,12 +1253,24 @@ def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
             note += (
                 f" — queued **attack** ({'enemy ' + tid if tid else 'move-attack'})"
             )
-        else:  # "Select units"
-            sel = own_units_at_cell(rs, cx, cy, radius=1)
-            note += (
-                f" — **selected {len(sel)} unit(s)**" if sel
-                else " — no units here"
-            )
+        else:  # "Select units" — toggle the unit on the EXACT cell
+            # radius=0: only the unit sitting on the clicked cell, so a
+            # click picks ONE unit (units now spawn on distinct cells).
+            # Each click toggles — click several cells to build a group.
+            hits = own_units_at_cell(rs, cx, cy, radius=0)
+            sel = list(sel)
+            for uid in hits:
+                if uid in sel:
+                    sel.remove(uid)
+                else:
+                    sel.append(uid)
+            if hits:
+                note += (
+                    f" — toggled unit {', '.join(hits)} · "
+                    f"**{len(sel)} selected**"
+                )
+            else:
+                note += " — no unit on that cell"
     except Exception as e:  # noqa: BLE001
         logger.warning("play click failed: %s", e)
         note = ""
@@ -1477,10 +1489,13 @@ def build_app() -> gr.Blocks:
                 gr.Markdown(
                     "Play a scenario yourself — the same scenarios LLM "
                     "agents are scored on. Pick a **scenario → level → "
-                    "seed**, click **Start**, then click the minimap to "
-                    "select units and give orders, and **End Turn** to "
-                    "advance. You are graded by the identical win/fail "
-                    "rules as the models."
+                    "seed**, click **Start**. With **Select units** "
+                    "mode, click a unit's cell to select it — click "
+                    "again to deselect, click several cells to build a "
+                    "group. Then switch to **Move here** / **Attack "
+                    "here** and click a destination, and **End Turn** "
+                    "to advance. You are graded by the identical "
+                    "win/fail rules as the models."
                 )
                 play_sess = gr.State(None)
                 play_sel = gr.State([])
