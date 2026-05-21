@@ -1,0 +1,380 @@
+# tp-decision-under-clock.yaml
+#
+# REASONING capability — a QUICK DECISION under a TIGHT clock. Two
+# enemy construction yards (`fact`) sit at the far corners of a long
+# arena: one NORTH-EAST, one SOUTH-EAST. One is lightly defended (a
+# 2-rifleman picket the agent's tank column razes for free); the
+# other is heavily defended (a 3× heavy-tank + 2× rocket-soldier
+# garrison that out-trades and WIPES the agent's column). The agent
+# must briefly SCOUT — dispatch the two fast jeeps to read which
+# corner is soft — then COMMIT the slow tank column to the EASIER
+# target and raze that yard before the clock runs out. Win is
+# razing EITHER enemy fact in time with ≥2 of the agent's own units
+# still alive.
+#
+# The decision is genuinely two-sided and seed-driven. Per ENEMY
+# `spawn_point` group the light/heavy assignment FLIPS:
+#   spawn_point=0 → NE fact LIGHT  / SE fact HEAVY
+#   spawn_point=1 → NE fact HEAVY  / SE fact LIGHT
+# `distinct_enemy_spawn_points` (Wave-9 per-owner spawn filter —
+# openra-data/src/oramap.rs) round-robins the seed over the two
+# groups, so seeds 1..4 → groups 1,0,1,0. A memorised "always
+# attack NE" (or "always SE") opener WINS half the seeds and LOSES
+# the other half — and the hard-tier contract (CLAUDE.md: "win on
+# every hard seed 1..4") makes any pre-committed corner a structural
+# LOSS. The agent CANNOT know which corner is soft without scouting.
+#
+# Real-world anchors:
+#   - Poker speed decision: a hand on the clock — read the cheap
+#     tells you can afford, then commit the stack to the +EV line.
+#     Tanking forever burns the timer; committing blind to the
+#     worse line stacks off.
+#   - Tense operations triage: two incident sites, a finite response
+#     window — send a quick recon, route the heavy crew to the one
+#     it can actually clear in time.
+#   - Decision under uncertainty: bounded information-gathering then
+#     irreversible commitment; both over- and under-investigating
+#     lose.
+#
+# Idiom (four-policy bar across all hard seeds 1..4):
+#   • stall (only observe)          → LOSS. No fact razed, the
+#     within_ticks teeth never met → after_ticks fires → clean
+#     clock LOSS (`turtle` enemies hold post — no force-wipe draw).
+#   • over-scout / dither (hold the tank column at base until the
+#     scout has FULLY confirmed both corners) → LOSS. The column
+#     must START rolling while the jeeps scout; holding it ~1500
+#     ticks pushes the raze past the tight within_ticks deadline.
+#   • commit-blind (send the column straight at a FIXED corner with
+#     no scout) → LOSS on the seed where that corner is HEAVY: the
+#     3× 3tnk + 2× e3 garrison out-trades the 4× 2tnk column and
+#     wipes it below the own_units_gte:2 floor (the heavy fact is
+#     never razed). WINS the seed the fixed corner happens to be
+#     light, but a one-of-two play is a hard-tier structural LOSS.
+#   • intended brief-scout-then-commit → WIN every seed. Send the 2
+#     jeeps ahead to read the corners (the jeep at the heavy corner
+#     is lost; the jeep at the light corner survives and reveals an
+#     e1 picket), then drive the 4× 2tnk column to the LIGHT corner
+#     and focus-fire its fact. The picket falls for free, the fact
+#     is razed inside the clock, ≥2 units survive.
+#
+# Topology (rush-hour-arena 128 × 40; playable x∈[2..126], y∈[2..38]):
+#   - Agent base at the WEST: fact at (10,20), 4× 2tnk column at x=6
+#     y=17..23, 2× jeep scouts at x=8 y=12/28. Identical across all
+#     seeds (no agent spawn_point — the per-owner agent filter stays
+#     inactive, every agent actor places every seed).
+#   - Enemy fact NORTH-EAST at (116, 6); enemy fact SOUTH-EAST at
+#     (116, 34) — 28 rows apart, so a column committed to and
+#     hugging one corner's latitude stays clear of the other
+#     garrison entirely (the choice is which defence to fight, not
+#     which is closer — both corners are ~equidistant from the
+#     west base).
+#   - The light/heavy garrisons are attached to the corner facts.
+#     On easy/medium a single fixed composition; on hard it FLIPS
+#     per enemy spawn_point group. When ANY enemy declares
+#     spawn_point the per-owner enemy filter activates, so on hard
+#     EVERY enemy actor (both facts + both garrisons) carries a
+#     spawn_point and is duplicated across BOTH groups (CLAUDE.md
+#     "duplicate across every spawn group at identical coords"
+#     idiom).
+#
+# Engine guardrails (CLAUDE.md):
+#   - `fact` IS a MustBeDestroyed building. With TWO enemy facts on
+#     the field the engine does NOT auto-`done` until BOTH fall, so
+#     razing one (the win) is recorded while the other fact + its
+#     garrison keep the episode live — the win/fail evaluator sees
+#     the terminal frame. No extra sentinel marker is needed (the
+#     un-attacked second fact IS the persistence anchor).
+#   - Enemy `bot_type: turtle` — every garrison HOLDS its corner and
+#     returns fire only; it does NOT lunge mid-map or roam to the
+#     agent base. So a stall is a clean clock LOSS (not a base-razed
+#     loss), and a column committed to one corner is never
+#     intercepted by the OTHER corner's garrison — the light/heavy
+#     choice is the sole combat variable.
+#   - Starter jeeps (×2) + tank column (×4) satisfy own_units_gte
+#     from t=0, so the unit-less mis-fire footgun (CLAUDE.md) never
+#     trips the fail clause before the model acts.
+#   - `within_ticks` puts the timing teeth on the win; `after_ticks`
+#     = within_ticks+1 in the fail tree makes a missed deadline a
+#     REAL reachable LOSS (no draw degeneracy). Each tier's
+#     after_ticks is ≤ 93 + 90·(max_turns-1) so the deadline bites.
+#   - `own_units_gte:2` in the win clause is the anti-commit-blind
+#     teeth: charging the HEAVY garrison wipes the column — fewer
+#     than 2 survivors fails the win even if a fact were razed.
+#
+# Tick math (CLAUDE.md: tick ≈ 93 + 90·(turn-1), ~90 ticks/turn):
+#   - 2tnk ≈ 17 ticks/cell; the ~106-cell west→corner traverse is
+#     ~1800 ticks; the column then FOCUS-FIRES the light fact
+#     (`attack_unit`, whole column on one target) — smoke-measured
+#     the straight focus-commit razing the light fact at ~tick
+#     2350. The brief-scout play rolls the column out at t=0 and
+#     diverts to the scouted light corner once the jeep recon lands
+#     (~t720), finishing well inside a ~2900-tick clock.
+#   - Holding the column at base until the scout fully confirms (the
+#     dither / over-scout play) adds ~1500 idle ticks → the raze
+#     lands past t3800, busting every tier's clock.
+#
+# Tier budgets:
+#   - EASY:   single fixed composition (NE light, SE heavy). The
+#     agent still must read which corner is soft and commit there —
+#     a blind charge at the SE heavy garrison wipes the column — but
+#     there is no seed flip and the clock is loose (T=3300) so a
+#     slow, careful scout still lands the commit. max_turns=40 →
+#     ceiling 93+90·39=3603 ≥ 3301 ✓
+#   - MEDIUM: single fixed composition, but the light/heavy corners
+#     are SWAPPED vs easy (NE heavy, SE light) AND the clock
+#     tightens to T=2900 — a model that memorised "attack NE" from
+#     easy now charges the heavy garrison and loses, and the clock
+#     no longer tolerates dithering the column at base. max_turns=35
+#     → ceiling 93+90·34=3153 ≥ 2901 ✓
+#   - HARD:   the light/heavy assignment FLIPS per ENEMY spawn_point
+#     group (the seed axis); same tight T=2900. A memorised corner
+#     loses on half the seeds; only a brief-scout-then-commit play
+#     wins every seed. max_turns=35 → ceiling 3153 ≥ 2901 ✓
+#
+# Bar (binding, all levels + hard seeds 1..4):
+#   - intended brief-scout-then-commit → WIN every level + seed;
+#   - stall (observe only)            → LOSS every level + seed
+#     (real reachable clock LOSS, no DRAW);
+#   - over-scout / dither (column held at base until scout fully
+#     confirms) → LOSS on medium + hard (busts the tight clock);
+#   - commit-blind to a fixed corner  → LOSS on the seed where that
+#     corner is heavy (column wiped below the own_units_gte:2 floor);
+#   - hard ships ≥2 enemy spawn_point groups (seed-driven variation).
+
+meta:
+  id: tp-decision-under-clock
+  title: 'Decision Under the Clock — Scout Briefly, Then Commit to the Easier Target'
+  capability: reasoning
+  real_world_meaning: >
+    Two enemy construction yards sit at opposite far corners of the
+    arena; one is lightly defended, the other heavily. A small armour
+    column (no economy, no build phase) and two fast scout jeeps are
+    staged at the west. The capability under test is a QUICK DECISION
+    under a tight clock: spend a brief, bounded scouting effort to
+    read which corner is soft, then COMMIT the slow column to it and
+    raze that yard before the deadline. Dithering — holding the
+    column back until the scout has fully confirmed everything —
+    burns the clock; committing the column blind to a fixed corner
+    loses outright when that corner is the heavily-defended one. The
+    intended play is one short recon, overlapped with the column
+    already rolling, followed by one irreversible commitment.
+  robotics_analogue: >
+    Bounded-information decision under a hard deadline: two candidate
+    task sites, a finite response window, and one heavy effector that
+    can only service one site in time. A cheap, fast sensor pass must
+    confirm which site is tractable BEFORE the heavy unit commits —
+    over-investigating (waiting for full certainty) and
+    under-investigating (committing blind) both miss the window.
+  benchmark_anchor:
+    - "poker speed decision"
+    - "tense ops triage"
+    - "decision under uncertainty"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy:
+    faction: soviet
+    cash: 0
+    # turtle: every garrison holds its corner and returns fire only;
+    # it does NOT lunge mid-map or roam to the agent base. A stall
+    # is a clean clock LOSS, and a column committed to one corner is
+    # never intercepted by the other corner's garrison.
+    bot_type: turtle
+  tools: [move_units, attack_unit, attack_move, stop_units]
+  planning: true
+  termination:
+    max_ticks: 12000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare skill: ONE fixed composition (NE light, SE heavy), loose
+  # clock. The agent still has to read which corner is soft and
+  # commit there — a blind charge at the SE heavy garrison wipes the
+  # column — but there is no seed flip and the clock tolerates a
+  # slow, careful scout.
+  easy:
+    description: >
+      Cash $0 — no economy, no build phase. A 4-tank column (4× 2tnk
+      at x=6, y=17..23) and 2 fast scout jeeps start at your west
+      base, with your construction yard (`fact`) at (10,20). Two
+      enemy construction yards sit at the far corners: one NORTH-EAST
+      at (116,6), one SOUTH-EAST at (116,34). One corner is lightly
+      held (2 riflemen), the other heavily held (3 heavy tanks + 2
+      rocket soldiers). Send the jeeps to scout the corners, identify
+      the LIGHTLY-defended yard, then drive your tank column straight
+      to it and focus-fire that yard, razing it before tick 3300 —
+      keeping at least 2 of your own units alive. Charging the heavy
+      garrison wipes your column; stalling loses on the clock.
+    overrides:
+      actors:
+        # ── AGENT base (no spawn_point — identical every seed) ──
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: 2tnk, owner: agent, position: [6, 17], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 23], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 12]}
+        - {type: jeep, owner: agent, position: [8, 28]}
+        # ── ENEMY — NE fact LIGHT (2× e1 picket) ──
+        - {type: fact, owner: enemy, position: [116, 6]}
+        - {type: e1,   owner: enemy, position: [112, 5],  stance: 2}
+        - {type: e1,   owner: enemy, position: [112, 7],  stance: 2}
+        # ── ENEMY — SE fact HEAVY (3× 3tnk + 2× e3 garrison) ──
+        - {type: fact, owner: enemy, position: [116, 34]}
+        - {type: 3tnk, owner: enemy, position: [112, 33], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [112, 35], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [114, 34], stance: 2}
+        - {type: e3,   owner: enemy, position: [110, 33], stance: 2}
+        - {type: e3,   owner: enemy, position: [110, 35], stance: 2}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 116, y: 6,  radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 116, y: 34, radius: 6, types: [fact]}
+        - {own_units_gte: 2}
+        - {within_ticks: 3300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3301}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 40   # ceiling 93 + 90·39 = 3603 ≥ 3301 ✓
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: the light/heavy corners are SWAPPED vs
+  # easy (NE heavy, SE light) AND the clock tightens to T=2900. A
+  # model that memorised "attack NE" from easy now charges the heavy
+  # garrison and loses; the tight clock no longer tolerates holding
+  # the column at base until the scout fully confirms. Still a single
+  # fixed composition (no seed flip) — the seed axis is introduced
+  # only at hard.
+  medium:
+    description: >
+      Cash $0. Same staging: a 4-tank column (4× 2tnk at x=6,
+      y=17..23) + 2 scout jeeps + base `fact` at (10,20). Two enemy
+      construction yards at the far corners — NORTH-EAST (116,6) and
+      SOUTH-EAST (116,34). One is lightly held (2 riflemen), the
+      other heavily held (3 heavy tanks + 2 rocket soldiers); which
+      is which is NOT given — scout the corners with the jeeps to
+      find out. The clock is TIGHT: roll the column out immediately,
+      and once the scout reads the soft corner, focus-fire that yard
+      and raze it before tick 2900, keeping ≥2 of your units alive.
+      Holding the column at base until you are certain, or charging
+      the heavy garrison, loses.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: 2tnk, owner: agent, position: [6, 17], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 23], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 12]}
+        - {type: jeep, owner: agent, position: [8, 28]}
+        # ── ENEMY — NE fact HEAVY (3× 3tnk + 2× e3 garrison) ──
+        - {type: fact, owner: enemy, position: [116, 6]}
+        - {type: 3tnk, owner: enemy, position: [112, 5],  stance: 2}
+        - {type: 3tnk, owner: enemy, position: [112, 7],  stance: 2}
+        - {type: 3tnk, owner: enemy, position: [114, 6],  stance: 2}
+        - {type: e3,   owner: enemy, position: [110, 5],  stance: 2}
+        - {type: e3,   owner: enemy, position: [110, 7],  stance: 2}
+        # ── ENEMY — SE fact LIGHT (2× e1 picket) ──
+        - {type: fact, owner: enemy, position: [116, 34]}
+        - {type: e1,   owner: enemy, position: [112, 33], stance: 2}
+        - {type: e1,   owner: enemy, position: [112, 35], stance: 2}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 116, y: 6,  radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 116, y: 34, radius: 6, types: [fact]}
+        - {own_units_gte: 2}
+        - {within_ticks: 2900}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 35   # ceiling 93 + 90·34 = 3153 ≥ 2901 ✓
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable (the seed axis): the light/heavy
+  # assignment FLIPS per ENEMY `spawn_point` group:
+  #   spawn_point=0 → NE LIGHT / SE HEAVY
+  #   spawn_point=1 → NE HEAVY / SE LIGHT
+  # `distinct_enemy_spawn_points` round-robins the seed over the two
+  # groups (seeds 1..4 → groups 1,0,1,0). When ANY enemy declares
+  # spawn_point the per-owner enemy filter activates, so EVERY enemy
+  # actor (both facts + both garrisons) carries a spawn_point and is
+  # duplicated across BOTH groups (CLAUDE.md "duplicate across every
+  # spawn group at identical coords" idiom). A memorised "attack NE"
+  # (or SE) opener wins half the seeds and loses the other half —
+  # only a brief-scout-then-commit play wins every seed.
+  hard:
+    description: >
+      Cash $0. Same staging: a 4-tank column (4× 2tnk at x=6,
+      y=17..23) + 2 scout jeeps + base `fact` at (10,20). Two enemy
+      construction yards at the far corners — NORTH-EAST (116,6) and
+      SOUTH-EAST (116,34). One corner is lightly held (2 riflemen),
+      the other heavily held (3 heavy tanks + 2 rocket soldiers) —
+      and WHICH corner is which CHANGES per seed. You cannot know in
+      advance: scout the corners with the jeeps, read which yard is
+      soft, then drive the tank column straight to it and focus-fire
+      that yard, razing it before tick 2900 and keeping ≥2 of your
+      units alive. A fixed "always go NE" (or SE) plan loses on the
+      seeds where that corner is the heavy one; holding the column
+      at base until you are certain busts the clock; stalling loses
+      on the clock.
+    overrides:
+      actors:
+        # ── AGENT base (no spawn_point — identical every seed) ──
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: 2tnk, owner: agent, position: [6, 17], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 23], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 12]}
+        - {type: jeep, owner: agent, position: [8, 28]}
+
+        # ── ENEMY spawn_point=0 — NE LIGHT / SE HEAVY ──
+        - {type: fact, owner: enemy, position: [116, 6],  spawn_point: 0}
+        - {type: e1,   owner: enemy, position: [112, 5],  stance: 2, spawn_point: 0}
+        - {type: e1,   owner: enemy, position: [112, 7],  stance: 2, spawn_point: 0}
+        - {type: fact, owner: enemy, position: [116, 34], spawn_point: 0}
+        - {type: 3tnk, owner: enemy, position: [112, 33], stance: 2, spawn_point: 0}
+        - {type: 3tnk, owner: enemy, position: [112, 35], stance: 2, spawn_point: 0}
+        - {type: 3tnk, owner: enemy, position: [114, 34], stance: 2, spawn_point: 0}
+        - {type: e3,   owner: enemy, position: [110, 33], stance: 2, spawn_point: 0}
+        - {type: e3,   owner: enemy, position: [110, 35], stance: 2, spawn_point: 0}
+
+        # ── ENEMY spawn_point=1 — NE HEAVY / SE LIGHT ──
+        - {type: fact, owner: enemy, position: [116, 6],  spawn_point: 1}
+        - {type: 3tnk, owner: enemy, position: [112, 5],  stance: 2, spawn_point: 1}
+        - {type: 3tnk, owner: enemy, position: [112, 7],  stance: 2, spawn_point: 1}
+        - {type: 3tnk, owner: enemy, position: [114, 6],  stance: 2, spawn_point: 1}
+        - {type: e3,   owner: enemy, position: [110, 5],  stance: 2, spawn_point: 1}
+        - {type: e3,   owner: enemy, position: [110, 7],  stance: 2, spawn_point: 1}
+        - {type: fact, owner: enemy, position: [116, 34], spawn_point: 1}
+        - {type: e1,   owner: enemy, position: [112, 33], stance: 2, spawn_point: 1}
+        - {type: e1,   owner: enemy, position: [112, 35], stance: 2, spawn_point: 1}
+    win_condition:
+      all_of:
+        - any_of:
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 116, y: 6,  radius: 6, types: [fact]}
+            - enemy_key_buildings_destroyed_in_region:
+                {x: 116, y: 34, radius: 6, types: [fact]}
+        - {own_units_gte: 2}
+        - {within_ticks: 2900}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 35   # ceiling 93 + 90·34 = 3153 ≥ 2901 ✓
