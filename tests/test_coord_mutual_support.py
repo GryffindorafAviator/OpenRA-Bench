@@ -22,10 +22,21 @@ seed (1-4): the whole squad enters each cluster's fire envelope
 together, concentrates its cannon fire, and erases the cluster before
 it can finish a tank — ≥5 of 6 survive, K kills, checkpoint cleared.
 
-Verified 2026-05-20:
-  easy   seed1 : stall LOSS / brute LOSS lost=3 / tightball WIN k=5 l=0
-  medium seed1 : stall LOSS / brute LOSS lost=3 / tightball WIN k=7 l=0
-  hard   seed1-4: stall LOSS / brute LOSS lost≥3 / tightball WIN k=9 l=0
+Recalibrated after the engine movement fixes ((A) attack_unit on
+out-of-sight targets paths normally; (B) a moving unit fires AND
+takes fire en route — no sprint-invincibility). The post-fix e3
+harasser belt is markedly more lethal: hard's original 3+3+2
+harasser + 6× e3 objective layout (14 e3) ground even a
+perfectly-cohesive tight ball down to FOUR losses (a LOSS). Hard
+now fields three 2× e3 harasser clusters + a 4× e3 objective
+cluster (10 e3 total) and a kill bar of 8; the tight ball clears
+the corridor losing 0-1 tanks, the brute strung-out column still
+bleeds ≥3 and the checkpoint latch never advances → LOSS.
+
+Verified 2026-05-20 (post engine-movement-fix recalibration):
+  easy   seed1  : stall LOSS / brute LOSS lost=2 / tightball WIN k=5 l=0
+  medium seed1  : stall LOSS / brute LOSS lost=4 / tightball WIN k=8 l=1
+  hard   seed1-4: stall LOSS / brute LOSS lost≥3 / tightball WIN k=9 l≤1
 """
 
 from __future__ import annotations
@@ -122,8 +133,8 @@ def test_fail_condition_easy():
 
 
 def test_kill_bar_scales_by_level():
-    """The kill bar tightens easy(5) → medium(7) → hard(9)."""
-    bars = {"easy": 5, "medium": 7, "hard": 9}
+    """The kill bar tightens easy(5) → medium(7) → hard(8)."""
+    bars = {"easy": 5, "medium": 7, "hard": 8}
     chk = [(39, 19), (40, 20), (41, 21), (40, 18), (41, 20), (6, 17)]
     obj = [(58, 19), (60, 20), (62, 21), (60, 18), (61, 20), (6, 17)]
     for lvl, k in bars.items():
