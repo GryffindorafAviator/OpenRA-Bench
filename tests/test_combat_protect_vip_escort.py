@@ -3,11 +3,16 @@
 The bar (binding, applied seeds 1..4 on every level):
 - intended escort-clears-path policy WINS;
 - stall / VIP-alone / VIP-leads-charge LOSE on every level + every
-  hard seed (easy may be forgiving for some failure modes given the
-  sparser hazard — see per-test docstrings);
+  hard seed;
 - non-win is a real reachable timeout / VIP-died LOSS (no DRAW
   degeneracy: after_ticks 4501 ≤ 93 + 90·(max_turns − 1));
 - hard ships ≥2 `spawn_point` groups (seed-driven start variation).
+
+The route threat is a `guard` bot interception force: exactly ONE
+Soviet heavy tank (3tnk) — which lunges at and destroys an
+unescorted harvester — plus e1 rifle filler. The escort must
+destroy the interceptors AHEAD of the VIP and hold the VIP back
+until the route is clear, then sprint it across.
 
 Validation is scripted (no model / network).
 """
@@ -198,23 +203,41 @@ def test_escort_is_four_medium_tanks_per_group():
     )
 
 
-def test_each_level_has_an_arty_anti_vip_threat():
-    """The VIP's fragility is enforced via ENEMY CHOICE — specifically
-    an artillery piece (arty, dps45 splash) along the route. The
-    engine ignores the `health` placement field (verified: health=10
-    vs health=100 give the same initial hp_ratio 1.0 and identical
-    decay under enemy fire), so the harv's hp600 + armour withstands
-    a rifle-only gauntlet. Without an arty the discrimination
-    collapses (VIP-alone outruns rifle fire entirely)."""
+def test_route_threat_is_a_guard_bot():
+    """The route interception force is a `guard` bot — it holds post
+    but lunges at the nearest foe within GUARD_AGGRO. A static
+    defender (omitted/Defend stance) would let the heavily-armoured
+    harv simply sprint past untouched; the mobile guard interceptor
+    is what runs down an unescorted VIP."""
+    pack = load_pack(PACK_PATH)
+    enemy = (
+        pack.base.get("enemy")
+        if isinstance(pack.base, dict)
+        else getattr(pack.base, "enemy", {})
+    ) or {}
+    assert enemy.get("bot_type") == "guard", (
+        f"enemy must be a `guard` bot interception force; "
+        f"got bot_type={enemy.get('bot_type')!r}"
+    )
+
+
+def test_exactly_one_guard_heavy_interceptor():
+    """The load-bearing anti-VIP threat is exactly ONE Soviet heavy
+    tank (3tnk) inside the guard force: a guard 3tnk catches and
+    destroys an unescorted harvester, but 4× 2tnk can focus it down
+    before crippling losses. A SECOND 3tnk would out-trade the
+    escort and break the intended-WINS half of the bar — so the
+    count is pinned at exactly 1 on every level."""
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
-        artys = [
+        heavies = [
             a for a in c.scenario.actors
-            if a.owner == "enemy" and a.type == "arty"
+            if a.owner == "enemy" and a.type == "3tnk"
         ]
-        assert len(artys) >= 1, (
-            f"{lvl}: must have ≥1 arty (anti-VIP threat); got {len(artys)}"
+        assert len(heavies) == 1, (
+            f"{lvl}: must have exactly ONE guard 3tnk interceptor; "
+            f"got {len(heavies)}"
         )
 
 
@@ -263,9 +286,9 @@ def _stall(rs, Command):
 
 def _vip_alone(rs, Command):
     """Only the harvester is moved east; escorts stay idle in the
-    west. The unarmed VIP enters the first rifle wall
-    unaccompanied → dies → `not unit_type_count_gte:{harv,1}` fail
-    clause fires → LOSS."""
+    west. The unarmed VIP enters the route unaccompanied → the
+    guard heavy tank lunges at it and runs it down → `not
+    unit_type_count_gte:{harv,1}` fail clause fires → LOSS."""
     units = _own_units(rs)
     if not units:
         return [Command.observe()]
@@ -280,9 +303,9 @@ def _vip_alone(rs, Command):
 
 def _vip_leads_charge(rs, Command):
     """Every unit (harv + tanks) charges east on the same y-band
-    with the harv at the front. The first rifle wall auto-targets
-    the NEAREST visible hostile — the harvester — and kills it
-    before the tanks finish suppressing the e1s. → LOSS."""
+    with the harv at the front. The guard interceptor + the e1
+    corridor focus the leading harvester and kill it before the
+    tanks finish clearing the route → LOSS."""
     units = _own_units(rs)
     if not units:
         return [Command.observe()]
@@ -292,48 +315,61 @@ def _vip_leads_charge(rs, Command):
     return cmds
 
 
+def _killable_enemies(rs):
+    """Live, non-building, non-marker enemies (the interception
+    force the escort must clear)."""
+    return [
+        e for e in (rs.get("enemy_summary") or [])
+        if not e.get("is_building")
+        and str(e.get("type", "")).lower() != "fact"
+    ]
+
+
 def _intended_escort_clears_path(rs, Command):
     """Escort-clears-path:
 
-      1. Tanks attack_move east AHEAD of the VIP, sweeping each
-         rifle wall (~x=35, ~x=55, ~x=75) until cleared. attack_move
-         auto-fires on the nearest hostile in range.
-      2. The VIP holds ~10 cells behind the rear-most tank so the
-         rifle walls auto-target the closer high-armour tanks.
-      3. Once the rear-most tank is at the extraction (x≥92), the
-         VIP completes the cross to (100,20).
-
-    The VIP target_x is clamped to never push it past the rear-most
-    tank — if the tanks haven't cleared the next wall, the VIP
-    waits.
+      1. The escort tanks attack the interception force AHEAD of
+         the VIP — each tank focus-fires (attack_unit) its nearest
+         live interceptor; once the route is clear they attack_move
+         on to the extraction.
+      2. The VIP HOLDS at the staging zone — it does NOT move while
+         any interceptor is alive OR the escort has not yet reached
+         the extraction latitude (rear-most tank past x≥82).
+      3. Once the route is confirmed clear (no live interceptors)
+         and the escort has pushed through, the VIP sprints across
+         to (100,20) uncontested.
     """
     units = _own_units(rs)
     if not units:
         return [Command.observe()]
     h = _harv(rs)
     tanks = _escorts(rs)
+    enemies = _killable_enemies(rs)
     cmds = []
 
-    # Escort tanks: attack_move east to the extraction, engaging
-    # anything in the way.
+    # Escort tanks: focus-fire the nearest interceptor; sweep to
+    # the extraction once nothing is left.
     for t in tanks:
-        cmds.append(Command.attack_move([str(t["id"])], 100, 20))
+        if enemies:
+            enemies.sort(
+                key=lambda e: (e["cell_x"] - t["cell_x"]) ** 2
+                + (e["cell_y"] - t["cell_y"]) ** 2
+            )
+            cmds.append(
+                Command.attack_unit([str(t["id"])], str(enemies[0]["id"]))
+            )
+        else:
+            cmds.append(Command.attack_move([str(t["id"])], 100, 20))
 
     if h is not None:
-        if tanks:
-            # The harv hangs 10 cells behind the rear-most tank.
-            rear_x = min(t["cell_x"] for t in tanks)
-            tx = min(rear_x - 10, 100)
-            # Never drive the harv backwards past its own start.
-            tx = max(tx, h["cell_x"])
-            # If tanks are already at the extraction (rear_x≥92), VIP
-            # finishes the cross.
-            if rear_x >= 92:
-                tx = 100
-            cmds.append(Command.move_units([str(h["id"])], int(tx), 20))
-        else:
-            # No escorts left — just sprint (best-effort).
+        rear_x = min((t["cell_x"] for t in tanks), default=0)
+        if tanks and rear_x >= 82 and not enemies:
+            # Route confirmed clear and the escort is through —
+            # sprint the VIP across.
             cmds.append(Command.move_units([str(h["id"])], 100, 20))
+        else:
+            # Hold the VIP at the staging zone.
+            cmds.append(Command.stop([str(h["id"])]))
     return cmds
 
 
@@ -370,11 +406,10 @@ def test_stall_loses(level, seed):
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_vip_alone_loses(level, seed):
-    """VIP sent alone enters the first rifle wall unaccompanied;
-    unarmed harv can't return fire and the rifle squad burns it
-    down (health:25 → ~150 effective hp dies in 2-3 turns of
-    standing exposure) → `not unit_type_count_gte:{harv,1}` fail
-    clause fires → LOSS."""
+    """VIP sent alone enters the route unaccompanied; the guard
+    heavy tank lunges at the lone harvester and destroys it →
+    `not unit_type_count_gte:{harv,1}` fail clause fires → LOSS
+    on every level and every seed."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
@@ -387,14 +422,13 @@ def test_vip_alone_loses(level, seed):
     )
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_vip_leads_charge_loses(level, seed):
-    """Harv + tanks charge in a single column with harv at the
-    front; rifle wall auto-targets the closer harv → VIP dies →
-    LOSS. Easy excluded (sparser hazard may let the tanks suppress
-    fast enough to keep the harv alive; SCENARIO_REVIEW_CHECKLIST.md
-    accepts inert anti-cheat teeth on easy for the bare-skill tier)."""
+    """Harv + tanks charge in a single column with the harv at the
+    front; the guard interceptor + the e1 corridor focus the
+    leading harvester → VIP dies → LOSS on every level and every
+    seed."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
@@ -402,6 +436,6 @@ def test_vip_leads_charge_loses(level, seed):
     r = run_level(c, _vip_leads_charge, seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed={seed}: VIP-leads-charge must LOSE (harv at "
-        f"the front of the column is the nearest target), got "
-        f"{r.outcome} (losses={r.signals.units_lost})"
+        f"the front of the column is run down by the interceptors), "
+        f"got {r.outcome} (losses={r.signals.units_lost})"
     )

@@ -4,16 +4,9 @@
 # its type on the map AND structurally unarmed (the harvester
 # carries no weapon: it can never return fire even on stance:3).
 # It must reach the east extraction point (~100, 20). Four 2tnk
-# escorts at the same west staging zone must clear a long-range
-# artillery threat AND the rifle infantry walls strung along the
-# route AND keep the VIP behind their advance, so the arty + e1
-# squads burn DPS into 400-HP tank armour rather than the fragile
-# harvester. The VIP cannot engage directly (no weapon). If the
-# agent drives it into the arty's range envelope without the
-# tanks suppressing the arty first, the arty (dps45) shreds the
-# VIP in two-three decision turns; the escort tanks must lead,
-# suppress the arty + the rifle walls, and only then does the
-# VIP cross safely.
+# escorts at the same west staging zone must clear the enemy
+# interception force strung along the route AND time the VIP's
+# crossing so the escort goes first.
 #
 # Real-world anchor: VIP-protection / diplomatic-escort detail —
 # the principal (POTUS limo, ambassador convoy, SecDef movement)
@@ -24,70 +17,54 @@
 # convoy doctrine all encode the same constraint: the high-value
 # unit is preserved by the escort's offence, not by its own fight.
 #
+# Mechanism (engine-load-bearing — verified by scripted-policy
+# smoke runs, all seeds 1–4 × every tier):
+#   • The route interception force is a `guard` bot (NOT static
+#     defenders). The `guard` bot holds post but LUNGES at the
+#     nearest foe within GUARD_AGGRO ~16 and snaps back past leash
+#     ~18. The load-bearing piece is exactly ONE Soviet heavy tank
+#     (3tnk) inside the guard force: a guard 3tnk catches and
+#     destroys an UNESCORTED harvester (it can keep pace with the
+#     harv and out-damages it), but when the escort tanks are
+#     present and forward the guard 3tnk lunges at the CLOSER tanks
+#     instead — the escort's body draws the interceptor off the VIP.
+#   • Why a single 3tnk and no more: 4× 2tnk can focus-fire ONE
+#     guard 3tnk down before taking crippling losses; a SECOND
+#     guard 3tnk out-trades the escort and even the intended play
+#     loses. The remaining route enemies are e1 rifle filler —
+#     cheap kills that make up the kill envelope and (on hard) form
+#     a tall corridor so a harv-led column charge takes real
+#     exposure.
+#   • The harvester is heavily armoured and, when SPRINTING (a
+#     long-distance move order), effectively outpaces fire from
+#     static threats — so the threat that makes "VIP alone" lose is
+#     the MOBILE guard interceptor, not a stationary gun line. The
+#     intended escort holds the VIP at the staging zone until the
+#     escort has cleared the route, THEN sprints it across.
+#
 # Discrimination (the four-script bar — scripted, no model):
 #   • stall (observe-only): nothing moves; the VIP never reaches
 #     the extraction → after_ticks 4501 LOSS (no draw degeneracy).
-#   • VIP-alone: only the harvester is moved; with no escort it
-#     enters the arty envelope (rng 7c) unaccompanied and is the
-#     only target the arty has — arty dps45 vs harv burns the
-#     harvester down in 2-3 decision turns → `not unit_type_count_
-#     gte:{harv,1}` fail clause fires → LOSS.
-#   • VIP-leads-charge: harv + tanks dispatched in a single column.
-#     On medium and hard the cumulative arty + rifle-wall fire
-#     onto the column kills the VIP before extraction → LOSS. On
-#     easy the single rifle wall isn't enough cumulative damage,
-#     so charge MAY squeak by — the forgiving bare-skill tier
-#     (SCENARIO_REVIEW_CHECKLIST.md: "inert anti-cheat teeth are
-#     acceptable on easy").
-#   • intended escort-clears-path: escort tanks attack_move east
-#     AHEAD of the harv (4× 2tnk dps22 = 88 dps focus on the arty
-#     first — arty hp75 dies in ~1 decision turn of concentrated
-#     fire; then the tanks pick off the e1 walls). The harv hangs
-#     ~10 cells behind the rear-most tank so the arty + rifle fire
-#     auto-target the closer tanks; once tanks have cleared the
-#     route, the harv crosses safely → harv arrives at extraction
-#     alive within budget → WIN.
-#
-# Why the spec works (engine combat sheet):
-#   • harv = ore harvester (hp600 nominal, heavily armoured, slow,
-#     UNARMED — game_knowledge: "ore harvester (gathers ore for
-#     credits; unarmed)"; prompt_v2: "$1100 hp600 unarmed sight4c
-#     tracked"). With no weapon it cannot return fire even on
-#     stance:3 — "the VIP must not engage" is enforced by the unit
-#     kit. The harv is reasonably tough vs rifle fire (e1 dps6 vs
-#     armour) but FRAGILE vs arty (dps45) — arty puts the harv to
-#     0 hp in ~2 decision turns of standing exposure.
-#   • e1 = basic rifle infantry (rng3c, dps6 vs armour, sight4c,
-#     hp50). Cheap to clear (one tank shot per e1). Their role
-#     here is to extend the fire envelope so a charge column
-#     accumulates attrition damage, AND so a focus-fire policy
-#     must pick the arty SPECIFICALLY rather than relying on
-#     attack_move auto-target (which spreads damage across all
-#     visible threats).
-#   • arty = artillery (rng7c, dps45 splash, hp75, sight5c). Long
-#     range (outranges 2tnk's 4.75c by 2.25c) — a stationary arty
-#     fires on closing tanks BEFORE they can return fire, so the
-#     escort takes attrition while approaching. Anti-armour DPS is
-#     high enough to kill the harv in ~2 decision turns of standing
-#     exposure. 4 tanks concentrating fire can kill 1 arty in ~1
-#     decision turn (88 dps vs hp75).
-#   • 2tnk = medium tank (rng4.75c, dps22, hp 400). Four tanks vs
-#     an e1 wall: combined dps 88 onto hp200 cleans a 4-e1 wall in
-#     ~2-3 decision turns.
-#   • Distance / time budget: extraction at (100,20), staging at
-#     (8,20) ⇒ ~92 cells. A 2tnk moves ~5-6 cells per decision turn
-#     uncontested, ~3-4 cells per turn while engaging. Escort
-#     timeline: ~5 turns to first contact (wall at x=30), ~3 turns
-#     to clear wall 1, ~2 turns to arty contact (x=49), ~2 turns
-#     focus-fire arty, ~5 turns to wall 2 (x=70), ~3 turns to
-#     clear it, ~5 turns final push — ~25 turns ⇒ ~2300 ticks,
-#     comfortably under within_ticks 4500.
+#   • VIP-alone: only the harvester is moved east; with no escort
+#     the guard 3tnk lunges at the lone harv and destroys it →
+#     `not unit_type_count_gte:{harv,1}` fail clause fires → LOSS
+#     on every level/seed.
+#   • VIP-leads-charge: harv + tanks dispatched in a single column
+#     with the harv at the front. The guard interceptor + the e1
+#     corridor focus the leading harv → VIP dies before extraction
+#     → LOSS on every level/seed.
+#   • intended escort-clears-path: the escort tanks attack the
+#     interception force AHEAD of the VIP (focus-firing the guard
+#     3tnk and the e1s); the VIP HOLDS at the staging zone until
+#     the escort has cleared the route AND reached the extraction
+#     latitude, then sprints across uncontested → harv arrives at
+#     the extraction alive within budget → WIN.
 #
 # Engine guardrails (per CLAUDE.md):
 #   • Map: rush-hour-arena (128 × 40 playable; x in [2..126], y in
 #     [2..38]). All actor / region cells are inside.
 #   • CLAUDE.md footgun: enemy clusters at (50,20) silently FAIL to
-#     place — every enemy y row avoids that exact cell.
+#     place — the interceptor sits at x=49, off that column.
 #   • A persistent far enemy `fact` at (120,20) keeps the episode
 #     alive past the route enemies being cleaned out (so the
 #     win/fail evaluator sees the terminal frame; no DRAW collapse).
@@ -101,25 +78,17 @@
 #     "VIP died" loss condition, distinct from total force wipe.
 #   • Interrupts are LEFT DISABLED in this pack: enemy_unit_spotted
 #     fires on each route enemy and step_until_event advances only
-#     ~5 ticks per interrupt — with 10+ enemies strung along the
-#     route the per-turn tick rate collapses and even the intended
-#     escort cannot reach the extraction inside the 4500-tick
-#     budget. Without interrupts each turn advances ~90 ticks
-#     uniformly and the escort completes in ~25 turns. The model
-#     still sees the full per-turn state every decision; reactive
-#     micro is not the controlled capability of this pack — escort
-#     LEADERSHIP (tanks-before-VIP) is.
-#   • The engine ignores the `health` placement field (verified by
-#     direct comparison: health=10/50/100 all give the same initial
-#     hp_ratio 1.0 and identical decay under enemy fire). The VIP's
-#     fragility is enforced via ENEMY CHOICE (arty dps45 vs harv's
-#     hp600 = ~13s to kill = ~2 decision turns) rather than reduced
-#     max-HP.
+#     ~5 ticks per interrupt — with a dozen route enemies the
+#     per-turn tick rate collapses and even the intended escort
+#     cannot reach the extraction inside the 4500-tick budget.
+#     Without interrupts each turn advances ~90 ticks uniformly and
+#     the escort completes well inside budget.
 #   • Spawn-driven hard tier: enemy actors don't honour spawn_point
 #     (CLAUDE.md), so the route enemies always place identically.
-#     Variation comes from AGENT staging row (NORTH y=14 / SOUTH
-#     y=26). The route enemies' y-band is widened (y=13..27 in hard)
-#     so both staging rows face an equivalent contested corridor.
+#     Variation comes from the AGENT staging row (NORTH y=14 /
+#     SOUTH y=26). The hard e1 corridor is vertically widened
+#     (y=14..26) so both staging rows face an equivalent contested
+#     route to the y=20 extraction.
 
 meta:
   id: combat-protect-vip-escort
@@ -130,12 +99,12 @@ meta:
     harvester, the only one of its kind on the map) must reach
     the east extraction point. Four medium tanks at the same west
     staging zone are the protective detail. The VIP cannot fight
-    (no weapon) and dies under sustained artillery fire, so the
-    escort must move AHEAD, clear the rifle infantry and the
-    long-range artillery strung along the route, and only then
-    let the VIP cross. Sending the VIP alone or at the head of
-    the column gets it killed; the escort's offence preserves
-    the VIP.
+    (no weapon); an enemy interception force — a Soviet heavy tank
+    backed by rifle infantry — patrols the route and runs the lone
+    VIP down. The escort must move AHEAD, destroy the interceptors,
+    and only then let the VIP cross. Sending the VIP alone or at
+    the head of the column gets it caught and killed; the escort's
+    offence preserves the VIP.
   robotics_analogue: >
     Protected-asset transit / VIP detail / diplomatic convoy: a
     high-value principal (unarmed, fragile) must traverse a
@@ -155,11 +124,11 @@ base_map: rush-hour-arena
 
 base:
   agent: {faction: allies, cash: 0}
-  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
   tools: [move_units, attack_unit, attack_move, stop]
   planning: true
-  # Interrupts DISABLED — enemy_unit_spotted on a route with 10+
-  # spread-out enemies collapses per-turn ticks (step_until_event
+  # Interrupts DISABLED — enemy_unit_spotted on a route with a
+  # dozen enemies collapses per-turn ticks (step_until_event
   # advances only ~5 ticks per interrupt) and the deadline becomes
   # unreachable even for the intended escort. The model still sees
   # the full per-turn state on every decision boundary; reactive
@@ -170,59 +139,48 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Bare VIP-escort skill: ONE rifle wall along the route (~x=70,
-  # 4× e1 across y=17..23) AND one long-range artillery piece at
-  # the centre (~x=49, off the (50,20) footgun column). The arty
-  # is what makes "VIP alone" a real death sentence — without it,
-  # the harv's 600 hp and rifle's dps6 vs armour lets the VIP
-  # outrun rifle fire entirely. Charge plays may squeak by on
-  # easy because there is only one rifle wall after the arty —
-  # the cumulative DPS into the VIP under charge isn't enough to
-  # kill it before extraction (forgiving bare-skill tier).
+  # Bare VIP-escort skill: a single guard interception clump at the
+  # route centre (x=49) — ONE Soviet heavy tank (3tnk) plus 4× e1
+  # rifle filler. The guard 3tnk is the load-bearing anti-VIP
+  # threat: it lunges at and destroys an unescorted harvester. The
+  # escort must lead, destroy the interceptors, then bring the VIP
+  # across. Generous tick budget.
   easy:
     description: >
-      A single ore harvester (the VIP — unique unit type, unarmed
-      and fragile under sustained heavy fire) is staged at (8,20)
-      with four medium tank escorts. The VIP must reach the EAST
-      extraction point (x ≈ 100, y ≈ 20, radius 6) before tick
-      4500, and MUST be alive on arrival (the harv is the only
-      one of its type; a destroyed harv fails the run). One rifle-
-      infantry wall (4× e1, vertically arrayed across y=17..23)
-      defends the route at x ≈ 70, and a single long-range
-      artillery piece (arty, range 7c, dps45) sits at the centre
-      (x ≈ 49). The escort tanks must move AHEAD of the VIP and
-      clear the artillery first; the unarmed VIP cannot return
-      fire and is shredded by the arty if it enters the envelope
-      unaccompanied.
+      A single ore harvester (the VIP — unique unit type, unarmed,
+      cannot fight) is staged at (8,20) with four medium tank
+      escorts. The VIP must reach the EAST extraction point
+      (x ≈ 100, y ≈ 20, radius 6) before tick 4500, and MUST be
+      alive on arrival (the harv is the only one of its type; a
+      destroyed harv fails the run). A guard interception force
+      holds the route centre at x ≈ 49: one Soviet heavy tank
+      (3tnk) and four rifle infantry (e1). The guard heavy tank
+      lunges at the nearest foe — it runs down a lone, unescorted
+      VIP. The escort tanks must move AHEAD, destroy the
+      interceptors, and only then send the VIP across.
     overrides:
       actors:
         # VIP — the single unique harvester at the west staging
         # zone. Unique-unit-type marker: the only harv on the map,
         # so the "VIP alive" check is exactly
-        # `unit_type_count_gte:{harv,1}`. stance:0 (HoldFire) is
-        # the convoy-discipline posture (the harv is unarmed
-        # anyway, but the stance documents intent).
+        # `unit_type_count_gte:{harv,1}`. stance:0 (HoldFire)
+        # documents convoy discipline (the harv is unarmed anyway).
         - {type: harv, owner: agent, position: [8, 20], stance: 0}
         # Escorts — 4 medium tanks at the same west staging zone,
-        # in a 2-wide formation around the VIP so the agent can
-        # spawn them in a leading wedge. stance:1 (return fire) so
-        # the escorts retaliate when contacted but don't wander.
+        # straddling the VIP. stance:1 (return fire) so the escorts
+        # retaliate when contacted but don't wander.
         - {type: 2tnk, owner: agent, position: [8, 18], stance: 1}
         - {type: 2tnk, owner: agent, position: [8, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [8, 21], stance: 1}
         - {type: 2tnk, owner: agent, position: [8, 22], stance: 1}
-        # Centre artillery — the load-bearing anti-VIP threat.
-        # arty rng 7c outranges 2tnk's 4.75c by 2.25c, so it gets
-        # opening shots while the escort closes. Off the (50,20)
-        # silently-failing column.
-        - {type: arty, owner: enemy, position: [49, 20], stance: 3}
-        # Rifle wall — extends the fire envelope and adds attrition
-        # damage to a charge play. 4× e1 across y=17..23 so the
-        # harv pathfinder cannot trivially detour around the wall.
-        - {type: e1, owner: enemy, position: [70, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 23], stance: 3}
+        # Guard interception force — ONE 3tnk (the load-bearing
+        # anti-VIP interceptor) + 4× e1 rifle filler at the route
+        # centre. Off the (50,20) silently-failing column.
+        - {type: 3tnk, owner: enemy, position: [49, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 17], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 23], stance: 3}
         # Persistent far enemy `fact` — keeps the episode alive
         # past the route enemies being cleaned out so the win/fail
         # evaluator sees the terminal frame (no DRAW collapse).
@@ -239,28 +197,24 @@ levels:
     max_turns: 50
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 axis: a SECOND rifle wall (x=30) extends the fire envelope
-  # both before AND after the central artillery, so a single
-  # charging column accumulates more attrition while crossing.
-  # VIP-leads-charge LOSES on medium (the cumulative arty + 2-wall
-  # rifle fire onto the harv is enough to kill it before extraction)
-  # while easy's single-wall configuration may let charge squeak
-  # by. Stall / VIP-alone LOSE; intended escort WINS.
+  # +1 axis vs easy: the guard interception clump gains two more e1
+  # rifle (6× e1, vertically widened to y=16..24 around the heavy
+  # tank). The taller corridor means a harv-led column charge takes
+  # more cumulative exposure before clearing. The single guard 3tnk
+  # is unchanged (a second would out-trade the escort). Stall /
+  # VIP-alone / VIP-leads-charge LOSE; intended escort WINS.
   medium:
     description: >
-      A single ore harvester (the VIP — unique unit type, unarmed
-      and fragile under sustained heavy fire) is staged at (8,20)
-      with four medium tank escorts. The VIP must reach the EAST
-      extraction point (x ≈ 100, y ≈ 20, radius 6) before tick
-      4500, and MUST be alive on arrival. TWO rifle-infantry walls
-      (4× e1 each, vertically arrayed across y=17..23) defend the
-      route at x ≈ 30 and x ≈ 70, AND a long-range artillery
-      piece (arty, range 7c, dps45) sits at the centre (x ≈ 49).
-      The escort tanks must lead — focus-fire the artillery first
-      (it is the anti-VIP threat), then clear each rifle wall —
-      because the unarmed VIP dies under the cumulative arty +
-      rifle fire if it enters either wall's envelope without
-      escort suppression.
+      A single ore harvester (the VIP — unique unit type, unarmed,
+      cannot fight) is staged at (8,20) with four medium tank
+      escorts. The VIP must reach the EAST extraction point
+      (x ≈ 100, y ≈ 20, radius 6) before tick 4500, alive. A guard
+      interception force holds the route centre at x ≈ 49: one
+      Soviet heavy tank (3tnk) and six rifle infantry (e1) arrayed
+      across y=16..24. The escort tanks must lead — destroy the
+      heavy interceptor and the rifle corridor — because the
+      unarmed VIP is caught and killed if it enters the route
+      unescorted or at the head of the column.
     overrides:
       actors:
         - {type: harv, owner: agent, position: [8, 20], stance: 0}
@@ -268,21 +222,14 @@ levels:
         - {type: 2tnk, owner: agent, position: [8, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [8, 21], stance: 1}
         - {type: 2tnk, owner: agent, position: [8, 22], stance: 1}
-        # Centre artillery — the load-bearing anti-VIP threat
-        # (same as easy).
-        - {type: arty, owner: enemy, position: [49, 20], stance: 3}
-        # Rifle wall 1 — x ≈ 30 (BEFORE the arty so the charge
-        # column takes attrition before reaching the arty kill
-        # zone).
-        - {type: e1, owner: enemy, position: [30, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [30, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [30, 21], stance: 3}
-        - {type: e1, owner: enemy, position: [30, 23], stance: 3}
-        # Rifle wall 2 — x ≈ 70 (AFTER the arty).
-        - {type: e1, owner: enemy, position: [70, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 23], stance: 3}
+        # Guard interception force — ONE 3tnk + 6× e1 corridor.
+        - {type: 3tnk, owner: enemy, position: [49, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 16], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 17], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 23], stance: 3}
+        - {type: e1, owner: enemy, position: [49, 24], stance: 3}
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
@@ -297,33 +244,26 @@ levels:
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 axis vs medium: TWO seed-driven spawn groups (NORTH staging
-  # y≈14 OR SOUTH staging y≈26 — round-robined per seed) AND a
-  # THIRD rifle wall (x=55) tightens the route lethality enough
-  # that VIP-leads-charge LOSES on BOTH spawn variants (the
-  # cumulative arty + 3-wall rifle fire is unsurvivable). The
-  # rifle walls are vertically widened to y=13..27 so BOTH spawns
-  # face an equivalent contested corridor — the harv from EITHER
-  # staging row must still traverse the artillery + 3-wall
-  # gauntlet. The artillery and extraction at (100,20) are on the
-  # symmetry axis, so both spawn variants face the same anti-VIP
-  # geometry but a single memorised staging-to-extraction vector
-  # cannot generalise across seeds.
+  # y≈14 OR SOUTH staging y≈26 — round-robined per seed). The guard
+  # heavy interceptor sits on the y=20 symmetry axis and the e1
+  # filler is widened into a TWO-column corridor (x=52 and x=58,
+  # y=14..26) so BOTH staging rows face an equivalent contested
+  # route to the y=20 extraction — a single memorised staging-to-
+  # extraction vector cannot generalise. The single guard 3tnk is
+  # unchanged.
   hard:
     description: >
-      A single ore harvester (the VIP — unique unit type, unarmed
-      and fragile under sustained heavy fire) is staged with four
-      medium tank escorts at the NORTH staging row (y ≈ 14) or
-      the SOUTH staging row (y ≈ 26), chosen by seed for anti-
-      memorisation. The VIP must reach the EAST extraction point
-      (x ≈ 100, y ≈ 20, radius 6) before tick 4500, alive. THREE
-      vertically-widened rifle-infantry walls (6× e1 each, across
-      y=13..27) defend the route at x ≈ 30, x ≈ 55, and x ≈ 75,
-      AND a long-range artillery piece (arty, range 7c, dps45)
-      sits at the centre (x ≈ 49) — both NORTH and SOUTH staging
-      rows face an equivalent contested corridor. The escort
-      tanks must lead the way; the unarmed VIP dies under
-      sustained arty + 3-wall rifle fire if it enters any wall's
-      envelope unaccompanied or at the head of the column.
+      A single ore harvester (the VIP — unique unit type, unarmed,
+      cannot fight) is staged with four medium tank escorts at the
+      NORTH staging row (y ≈ 14) or the SOUTH staging row (y ≈ 26),
+      chosen by seed for anti-memorisation. The VIP must reach the
+      EAST extraction point (x ≈ 100, y ≈ 20, radius 6) before tick
+      4500, alive. A guard interception force holds the route: one
+      Soviet heavy tank (3tnk) on the centre axis backed by a
+      two-column rifle-infantry corridor (e1 across y=14..26). The
+      escort tanks must lead and destroy the interceptors; the
+      unarmed VIP is caught and killed if it enters the route
+      unescorted or at the head of the column.
     overrides:
       actors:
         # spawn_point 0 — NORTH staging at y ≈ 14.
@@ -339,32 +279,20 @@ levels:
         - {type: 2tnk, owner: agent, position: [8, 25], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [8, 27], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [8, 28], stance: 1, spawn_point: 1}
-        # Centre artillery — same anti-VIP threat as medium, on
-        # the y=20 symmetry axis so both spawn variants face it.
-        - {type: arty, owner: enemy, position: [49, 20], stance: 3}
-        # Rifle wall 1 — x=30, vertically widened y=13..27 so both
-        # NORTH and SOUTH staging rows face an equivalent corridor.
-        - {type: e1, owner: enemy, position: [30, 13], stance: 3}
-        - {type: e1, owner: enemy, position: [30, 16], stance: 3}
-        - {type: e1, owner: enemy, position: [30, 18], stance: 3}
-        - {type: e1, owner: enemy, position: [30, 22], stance: 3}
-        - {type: e1, owner: enemy, position: [30, 24], stance: 3}
-        - {type: e1, owner: enemy, position: [30, 27], stance: 3}
-        # Rifle wall 2 — x=55, same vertical span (off the (50,20)
-        # footgun column).
-        - {type: e1, owner: enemy, position: [55, 13], stance: 3}
-        - {type: e1, owner: enemy, position: [55, 16], stance: 3}
-        - {type: e1, owner: enemy, position: [55, 18], stance: 3}
-        - {type: e1, owner: enemy, position: [55, 22], stance: 3}
-        - {type: e1, owner: enemy, position: [55, 24], stance: 3}
-        - {type: e1, owner: enemy, position: [55, 27], stance: 3}
-        # Rifle wall 3 — x=75, same vertical span.
-        - {type: e1, owner: enemy, position: [75, 13], stance: 3}
-        - {type: e1, owner: enemy, position: [75, 16], stance: 3}
-        - {type: e1, owner: enemy, position: [75, 18], stance: 3}
-        - {type: e1, owner: enemy, position: [75, 22], stance: 3}
-        - {type: e1, owner: enemy, position: [75, 24], stance: 3}
-        - {type: e1, owner: enemy, position: [75, 27], stance: 3}
+        # Guard interception force — ONE 3tnk on the y=20 symmetry
+        # axis + a two-column e1 corridor (x=52, x=58) spanning
+        # y=14..26 so both staging rows face an equivalent route.
+        - {type: 3tnk, owner: enemy, position: [49, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [52, 14], stance: 3}
+        - {type: e1, owner: enemy, position: [52, 17], stance: 3}
+        - {type: e1, owner: enemy, position: [52, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [52, 23], stance: 3}
+        - {type: e1, owner: enemy, position: [52, 26], stance: 3}
+        - {type: e1, owner: enemy, position: [58, 14], stance: 3}
+        - {type: e1, owner: enemy, position: [58, 17], stance: 3}
+        - {type: e1, owner: enemy, position: [58, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [58, 23], stance: 3}
+        - {type: e1, owner: enemy, position: [58, 26], stance: 3}
         # Persistent far enemy fact — engine auto-done mitigation.
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
