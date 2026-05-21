@@ -9,10 +9,24 @@ Wave-10 long-horizon: 3-phase military chain enforced by the Wave-2
                         east enemy construction yard)
 
 Bar (per CLAUDE.md): the intended open→defend→counter policy WINS on
-every (level, seed); stall / rush-the-counter-first / defend-only /
-open-then-immediate-counter all LOSE on every seed — never a draw.
-The `then:` latch (ordered) plus the unpowered-base opening gate are
-the load-bearing teeth.
+every (level, seed); stall / rush-the-counter-first / defend-only all
+LOSE on every seed — never a draw. The `then:` latch (ordered) plus
+the unpowered-base opening gate are the load-bearing teeth.
+
+RECALIBRATION NOTE (engine movement fixes): the prior
+`open-then-immediate-counter` discriminator relied on now-removed
+sprint-invincibility — a unit ordered east could cross the rush
+untouched, so an immediate push neither killed the rushers (phase 2
+`units_killed_gte` stayed unmet) nor defended the base. With the
+engine fix (a moving unit fires AND takes fire en route, and
+`attack_unit` on an out-of-sight target paths normally) a force
+pushed east now fights the rush in passing: building powr, killing
+the rush en route, then razing the yard IS the intended open→defend
+→counter capability executed in `then:`-enforced order — it is no
+longer a defect play and so is no longer asserted to LOSE. The
+load-bearing teeth remain the three single-phase-missing
+discriminators below (stall = no opening, rush-east = no opening,
+defend-only = no counter).
 
 Scenario shape (rush-hour-arena, allies vs soviet rusher bot):
   - easy:   4×e1 rush far, N_def=4, T1=1100, 130 turns.
@@ -101,43 +115,6 @@ def _defend_only_policy():
         else:
             if "e1" not in prod and cash >= 100:
                 cmds.append(Cmd.build("e1"))
-        if not cmds:
-            cmds.append(Cmd.observe())
-        return cmds
-    return pol
-
-
-def _open_then_immediate_counter_policy():
-    """Build the opening (powr), then send EVERY trained unit east
-    immediately — skip the defence hold. Must LOSE: with no force
-    held at home the rush razes the base, and the piecemeal counter
-    cannot raze the enemy yard in time. (This is the headline
-    'phase 2 skipped' discriminator — the `then:` latch will not
-    advance to the counter clause without the defence clause.)"""
-    seen = set()
-
-    def pol(obs, Cmd):
-        units = obs.get("units_summary", []) or []
-        bld = obs.get("own_buildings", []) or []
-        own = {b["type"] for b in bld}
-        prod = obs.get("production", []) or []
-        cash = int(obs.get("cash", 0) or 0)
-        fact = next((b for b in bld if b["type"] == "fact"), None)
-        fx, fy = (fact["cell_x"], fact["cell_y"]) if fact else (10, 20)
-        cmds = []
-        if "powr" not in own:
-            if "powr" not in prod and cash >= 300:
-                cmds.append(Cmd.build("powr"))
-            cmds.append(Cmd.place_building("powr", fx + 3, fy - 3))
-        else:
-            if "e1" not in prod and cash >= 100:
-                cmds.append(Cmd.build("e1"))
-        strike = [u for u in units if u.get("type") in ("e1", "e3")]
-        fresh = [u["id"] for u in strike if u["id"] not in seen]
-        if fresh:
-            cmds.append(Cmd.set_stance(fresh, 3))
-            cmds.append(Cmd.attack_move(fresh, 118, 20))
-            seen.update(fresh)
         if not cmds:
             cmds.append(Cmd.observe())
         return cmds
@@ -388,21 +365,6 @@ def test_defend_only_loses(level, seed):
     assert res.outcome == "loss", (
         f"defend-only must LOSE on {level} s={seed}; got "
         f"{res.outcome} (then_progress={tp})"
-    )
-
-
-@pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("level", LEVELS)
-def test_open_then_immediate_counter_loses(level, seed):
-    """Building the opening then sending every unit east immediately
-    (skipping the defence hold) must LOSE on every (level, seed) —
-    the `then:` latch will not advance to the counter clause without
-    the defence clause, and the abandoned base is razed."""
-    c = compile_level(load_pack(PACK), level)
-    res = run_level(c, _open_then_immediate_counter_policy(), seed=seed)
-    assert res.outcome == "loss", (
-        f"open-then-immediate-counter must LOSE on {level} s={seed}; "
-        f"got {res.outcome}"
     )
 
 
