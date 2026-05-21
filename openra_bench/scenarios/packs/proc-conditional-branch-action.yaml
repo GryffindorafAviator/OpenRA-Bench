@@ -1,0 +1,441 @@
+# proc-conditional-branch-action — Wave-11
+#
+# REASONING capability — CONDITIONAL PROCEDURE EXECUTION.
+# The brief is an explicit IF/ELSE runbook:
+#
+#     "Scout the map. IF the enemy outpost is on the NORTH flank,
+#      send your strike force NORTH and destroy it. ELSE (the enemy
+#      outpost is on the SOUTH flank) send your strike force SOUTH
+#      and destroy it."
+#
+# The agent does not know a priori which branch is live — it must
+# (1) SCOUT to observe the condition, (2) BRANCH on what it sees,
+# (3) EXECUTE the matching action. A fixed unconditional policy
+# ("always attack NORTH") is correct on the seeds where the
+# condition picks NORTH and wrong on the seeds where it picks
+# SOUTH — there it commits the army to an empty flank, never
+# reaches the live outpost, and times out. Only the
+# scout-then-branch discipline generalises across every seed.
+#
+# This is the conditional-tool-use / runbook-branching primitive:
+# read the runtime condition, dispatch to the matching procedure.
+# The win is encoded as an explicit two-branch `any_of` IF/ELSE —
+# exactly one branch is satisfiable per seed, selected by what the
+# scout reveals.
+#
+# ── Seed axis (the Wave-9 enemy-side `spawn_point` per-owner
+#    activation, CLAUDE.md): the ENEMY outpost + its guard cluster
+#    rotate FLANK per seed across TWO spawn_point groups —
+#      spawn_point=0 → enemy outpost NORTH → branch A (attack N)
+#      spawn_point=1 → enemy outpost SOUTH → branch B (attack S)
+#    The agent base is FIXED and identical every seed (no agent
+#    actor declares spawn_point → the per-owner agent filter is
+#    inactive → every agent actor passes through unconditionally).
+#    `distinct_enemy_spawn_points` exposes the two groups and the
+#    env round-robins the seed across them (seeds 1..4 → spawn
+#    groups 1,0,1,0 — seeds 1/3 SOUTH, seeds 2/4 NORTH).
+#
+# ── Win idiom — explicit IF/ELSE branch:
+#     any_of:
+#       # BRANCH A — outpost NORTH: scout, then raze the N outpost.
+#       - all_of:
+#           - then: [ buildings_discovered_gte:1,                # scout
+#                     enemy_key_buildings_destroyed_in_region{   # raze
+#                       tent, NORTH region } ]
+#           - building_count_gte:{fact,1}
+#           - within_ticks:T
+#       # BRANCH B — outpost SOUTH: scout, then raze the S outpost.
+#       - all_of:
+#           - then: [ buildings_discovered_gte:1,                # scout
+#                     enemy_key_buildings_destroyed_in_region{   # raze
+#                       tent, SOUTH region } ]
+#           - building_count_gte:{fact,1}
+#           - within_ticks:T
+#   Fail: after_ticks:T+1  OR  not building_count_gte:{fact,1}.
+#
+#   `enemy_key_buildings_destroyed_in_region` is region-scoped: it
+#   latches only when an enemy `tent` is destroyed WITHIN radius of
+#   the named region. The enemy outpost `tent` exists on ONLY ONE
+#   flank per seed (the seed-varying spawn group), so:
+#     - On a NORTH seed: only branch A is satisfiable — there is no
+#       SOUTH tent for branch B's clause 2 to ever latch.
+#     - On a SOUTH seed: only branch B is satisfiable — mirror.
+#   A fixed "always attack NORTH" policy on a SOUTH seed sends the
+#   strike force to the empty NORTH flank: it discovers nothing
+#   there (branch A clause 1 never latches — `buildings_discovered`
+#   only counts a building the agent has actually seen), it razes
+#   nothing (branch A clause 2 impossible — no NORTH tent), branch
+#   B clause 2 needs a SOUTH tent razed but the army is at the
+#   wrong end of the map → the deadline passes → `after_ticks`
+#   fires → real timeout LOSS (the enemy is `guard`, it holds post
+#   and never force-wipes the agent, so non-completion is a clean
+#   clock LOSS, never a draw).
+#
+# ── Four-policy bar (every seed 1..4):
+#   • stall (observe only)            → LOSS. No tent razed; the
+#     `after_ticks` deadline fires.
+#   • always-branch-A (attack N)      → LOSS on the SOUTH seeds
+#     (1, 3): the army crosses to an empty NORTH flank, no NORTH
+#     tent to raze, the SOUTH tent stays up → deadline LOSS. WINS
+#     the NORTH seeds (2, 4) — but the hard tier requires winning
+#     EVERY seed → a 2-of-4 play is a structural LOSS.
+#   • always-branch-B (attack S)      → mirror: LOSS on NORTH seeds.
+#   • intended scout-then-branch      → WIN every seed. Drive a
+#     jeep to the live flank, read which side the enemy outpost is
+#     on, send the strike force to THAT flank, raze the outpost.
+#
+# ── Engine guardrails (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - Enemy-side `spawn_point:` activates the per-owner filter
+#     (Wave-9, openra-data/src/oramap.rs). The persistent far-east
+#     enemy `fact` marker (anti-DRAW: prevents engine auto-`done`
+#     on enemy-elim before the win/fail evaluator runs, since
+#     razing the outpost `tent` would otherwise auto-`done` the
+#     episode) is duplicated across BOTH enemy spawn groups at
+#     identical coords so it lands every seed.
+#   - The pack-wide enemy `bot_type: guard` makes the enemy hold
+#     post: the outpost cluster does not roam, so a wrong-flank or
+#     stall play is a clean clock LOSS (deadline) rather than a
+#     force-wipe — and the agent base is never threatened, so
+#     `building_count_gte:fact` is a stable (always-true unless the
+#     agent itself loses the fact) clause that simply guards the
+#     anti-DRAW invariant.
+#   - `building_count_gte:{fact,1}` (NOT `has_building:fact`) for
+#     the "still standing" clause: `has_building` reads
+#     `own_building_types` which ACCUMULATES across the episode and
+#     stays true after the fact is razed; `building_count_gte`
+#     reads the live `own_buildings` list and bites correctly.
+#   - `after_ticks` lives only in the fail clause (it is
+#     structurally incompatible with a WIN clause under
+#     ConquestVictoryConditions — CLAUDE.md). Timed semantics are
+#     `within_ticks` in the win + `after_ticks` in the fail.
+#   - `enemy_key_buildings_destroyed_in_region` requires the agent
+#     to have SEEN the tent and then have a unit within ~6 cells
+#     when it falls — i.e. the strike force must physically reach
+#     and raze the outpost (`attack_move` reliably executes this;
+#     pinned by the smoke runs).
+#   - Tick budget: max_turns 66 → reachable tick 93 + 90·65 = 5943
+#     ≥ 5401 (deadline 5400 +1), so a non-finisher is a real
+#     reachable timeout LOSS, never a draw. The intended one-flank
+#     commit razes the outpost by tick ~2000 (smoke-verified),
+#     well inside 5400.
+#   - `enemy_building_spotted` / `enemy_unit_spotted` interrupts:
+#     re-decide the instant the scout reveals the live flank.
+#   - Starter combat units (`2tnk` strike force + `jeep` scouts)
+#     satisfy `own_units_gte:1` from t=0 so the unit-less mis-fire
+#     footgun does not trip.
+#   - `2tnk` / `jeep` scenario actors place from t=0 — this is a
+#     branch-SELECTION puzzle, not a build-order puzzle, so the
+#     whole strike force is pre-placed.
+#   - Map: rush-hour-arena (128×40, playable x∈[2..126], y∈[2..38];
+#     Rust-loadable, no map-gen needed).
+#
+# Real-world / benchmark anchors:
+#   - τ²-bench conditional tool-use: the correct tool call is
+#     gated on an observed runtime condition; a policy that fixes
+#     the call without reading the condition fails the branch.
+#   - IFBench conditional instruction: "IF <condition> THEN do X
+#     ELSE do Y" — compliance requires evaluating the antecedent.
+#   - Operational runbook branching: an incident runbook with an
+#     IF/ELSE fork (symptom A → procedure A, symptom B → procedure
+#     B); executing the wrong procedure is a misfire.
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/proc-conditional-branch-action.yaml
+
+meta:
+  id: proc-conditional-branch-action
+  title: 'Scout, Then Branch — Conditional IF/ELSE Procedure Execution'
+  capability: reasoning
+  real_world_meaning: >
+    Conditional procedure execution: the operator is handed an
+    explicit IF/ELSE runbook ("IF the enemy outpost is NORTH,
+    attack NORTH; ELSE attack SOUTH") but does not know which
+    antecedent is live. The capability under test is the
+    read-then-dispatch loop — scout to OBSERVE the condition,
+    BRANCH on what is seen, then EXECUTE the matching procedure. A
+    fixed unconditional policy executes one branch on faith and is
+    wrong on every seed where the other branch is correct.
+  robotics_analogue: >
+    Conditional tool-use / runbook branching under uncertainty: an
+    incident-response agent follows a decision tree whose fork is
+    gated on a sensor reading — symptom A dispatches procedure A,
+    symptom B dispatches procedure B. Skipping the diagnostic step
+    and committing to one procedure is correct half the time and a
+    misfire the other half. The robust doctrine is observe-the-
+    condition-then-branch, never branch-on-faith.
+  benchmark_anchor:
+    - 'τ²-bench conditional tool-use'
+    - 'IFBench conditional instruction'
+    - 'runbook branching'
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+starting_cash: 1500
+
+base:
+  agent:
+    faction: allies
+  # `guard` — the enemy outpost cluster holds post; it does not
+  # roam, so a wrong-flank or stall play is a clean clock LOSS and
+  # the agent base is never threatened.
+  enemy:
+    faction: soviet
+    bot_type: guard
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Re-decide the instant the scout reveals the live flank (enemy
+  # outpost or guard unit spotted).
+  interrupts:
+    enemy_building_spotted: true
+    enemy_unit_spotted: true
+  termination:
+    max_ticks: 12000
+  actors:
+    # Base-pack default (anti-empty-actors sanity for the loader);
+    # each level overrides with the level-specific layout.
+    - {type: fact, owner: agent, position: [20, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # The bare IF/ELSE skill, condition NORTH, condition pre-revealed.
+  # The two jeeps are pre-positioned FORWARD-NORTH (y=8) so a single
+  # passive observe on turn 1 already sees the enemy NORTH outpost.
+  # The model still has to BRANCH: read "outpost is NORTH", send the
+  # strike force NORTH, raze the outpost. The SOUTH branch is
+  # structurally dead (no SOUTH outpost) so an "always SOUTH" policy
+  # commits the army to an empty flank and times out even on easy.
+  # max_turns 66 → reachable tick 5943 ≥ 5401.
+  easy:
+    description: >
+      Runbook: scout the map, then BRANCH. IF the enemy outpost is
+      on the NORTH flank, send your strike force NORTH and destroy
+      it; ELSE (outpost on the SOUTH flank) send it SOUTH and
+      destroy it. On this level the enemy is on the NORTH flank and
+      your two scout jeeps are already forward-NORTH in sight of
+      the enemy outpost. Send your four medium tanks NORTH and
+      destroy the enemy outpost (a barracks at the north edge).
+      Keep your construction yard standing. Win before tick 5400.
+      Committing the tanks to the wrong (SOUTH) flank leaves them
+      stranded on an empty lane and you time out; stalling loses on
+      the clock.
+    overrides:
+      actors:
+        # Agent base — construction yard (the anti-DRAW / "still
+        # standing" anchor; no production needed, the strike force
+        # is pre-placed).
+        - {type: fact, owner: agent, position: [20, 20]}
+        # Strike force — four medium tanks at the base centroid.
+        - {type: 2tnk, owner: agent, position: [18, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [22, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [18, 22], stance: 1}
+        - {type: 2tnk, owner: agent, position: [22, 22], stance: 1}
+        # Two scout jeeps pre-positioned FORWARD-NORTH at y=8 —
+        # within vision (~7) of the enemy outpost. A turn-1 observe
+        # latches `buildings_discovered_gte:1`; easy teaches the
+        # BRANCH without requiring scout movement.
+        - {type: jeep, owner: agent, position: [20, 8], stance: 0}
+        - {type: jeep, owner: agent, position: [22, 8], stance: 0}
+        # Enemy NORTH outpost — a `tent` (barracks) at the playable
+        # edge (y=4) with a small guard cluster. `guard` bot holds
+        # post; the cluster does not roam.
+        - {type: tent, owner: enemy, position: [20, 4]}
+        - {type: e1, owner: enemy, position: [20, 6], stance: 2, count: 3}
+        # Inert enemy `fact` marker far east — anti-DRAW per
+        # CLAUDE.md (razing the outpost tent would otherwise
+        # auto-`done` the episode before the win/fail evaluator
+        # runs). No spawn_point on easy: single composition.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      any_of:
+        # BRANCH A — outpost NORTH: scout, then raze the N outpost.
+        - all_of:
+            - then:
+                id: branch-north-easy
+                clauses:
+                  - {buildings_discovered_gte: 1}
+                  - {enemy_key_buildings_destroyed_in_region: {types: [tent], x: 20, y: 4, radius: 12}}
+            - {building_count_gte: {type: fact, n: 1}}
+            - {within_ticks: 5400}
+        # BRANCH B — outpost SOUTH: scout, then raze the S outpost.
+        # Present so the win schema is the same explicit IF/ELSE
+        # every tier. On easy the enemy is NORTH, so there is no
+        # SOUTH tent — clause 2 of this branch can never latch, and
+        # an "always SOUTH" play strands its army and times out.
+        - all_of:
+            - then:
+                id: branch-south-easy
+                clauses:
+                  - {buildings_discovered_gte: 1}
+                  - {enemy_key_buildings_destroyed_in_region: {types: [tent], x: 20, y: 36, radius: 12}}
+            - {building_count_gte: {type: fact, n: 1}}
+            - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 66
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: the condition is FOGGED. The two jeeps
+  # now start AT the base (y=20), NOT forward — the NORTH outpost at
+  # (20, 4) is 16 cells away, well outside passive vision (~7). A
+  # no-scout play cannot latch `buildings_discovered_gte:1`. The
+  # intended play is `move_units([jeep1, jeep2], 20, 8)` to enter
+  # outpost sight, read "outpost is NORTH", THEN commit the strike
+  # force NORTH. Condition is still NORTH (medium adds only the
+  # SCOUT requirement; hard adds the per-seed flip).
+  # max_turns 66 → reachable tick 5943 ≥ 5401.
+  medium:
+    description: >
+      Runbook: scout, then BRANCH. IF the enemy outpost is NORTH,
+      send your strike force NORTH and destroy it; ELSE send it
+      SOUTH. The enemy flank is NOT given — you must SCOUT to find
+      it. You start with a construction yard, four medium tanks,
+      and TWO scout jeeps at the base. Drive a jeep to discover the
+      enemy outpost, read which flank it is on, then send the four
+      tanks to THAT flank and destroy the outpost (a barracks at
+      the map edge). Keep your construction yard standing. Win
+      before tick 5400. Skipping the scout leaves the branch chain
+      stuck at clause 1; committing the tanks to the wrong flank
+      strands them on an empty lane and you time out.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [20, 20]}
+        - {type: 2tnk, owner: agent, position: [18, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [22, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [18, 22], stance: 1}
+        - {type: 2tnk, owner: agent, position: [22, 22], stance: 1}
+        # Jeeps AT the base — must drive to scout. Distance from
+        # (24, 20) to the NORTH outpost (20, 4) is √(16+256)≈16,
+        # far out of jeep vision (~7).
+        - {type: jeep, owner: agent, position: [24, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [26, 20], stance: 0}
+        # Enemy NORTH outpost — outside passive vision; the scout
+        # MUST drive a jeep north to see it.
+        - {type: tent, owner: enemy, position: [20, 4]}
+        - {type: e1, owner: enemy, position: [20, 6], stance: 2, count: 3}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      any_of:
+        - all_of:
+            - then:
+                id: branch-north-medium
+                clauses:
+                  - {buildings_discovered_gte: 1}
+                  - {enemy_key_buildings_destroyed_in_region: {types: [tent], x: 20, y: 4, radius: 12}}
+            - {building_count_gte: {type: fact, n: 1}}
+            - {within_ticks: 5400}
+        - all_of:
+            - then:
+                id: branch-south-medium
+                clauses:
+                  - {buildings_discovered_gte: 1}
+                  - {enemy_key_buildings_destroyed_in_region: {types: [tent], x: 20, y: 36, radius: 12}}
+            - {building_count_gte: {type: fact, n: 1}}
+            - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 66
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable (the Wave-9 enemy-side `spawn_point`
+  # axis): the enemy outpost ROTATES FLANK per seed across TWO
+  # enemy spawn_point groups —
+  #   spawn_point=0 → outpost NORTH (tent (20, 4))  → branch A live.
+  #   spawn_point=1 → outpost SOUTH (tent (20, 36)) → branch B live.
+  # The agent base is FIXED at (20, 20) every seed (no agent
+  # spawn_point). `distinct_enemy_spawn_points` exposes the two
+  # groups; the env round-robins the seed (seeds 1..4 → groups
+  # 1,0,1,0 — seeds 1/3 SOUTH, seeds 2/4 NORTH).
+  #
+  # A memorised "always attack NORTH" opener WINS the NORTH seeds
+  # (2, 4) and LOSES the SOUTH seeds (1, 3): the strike force
+  # crosses to an empty NORTH flank, branch A clause 1 never
+  # latches (nothing to discover NORTH), branch A clause 2 is
+  # impossible (no NORTH tent), branch B clause 2 needs the SOUTH
+  # tent razed but the army is at the wrong end of the map → the
+  # deadline passes → real timeout LOSS. Mirror for "always SOUTH".
+  # Only the scout-then-branch policy wins every seed.
+  #
+  # The persistent far-east enemy `fact` marker is duplicated
+  # across BOTH enemy spawn groups (CLAUDE.md per-owner filter: an
+  # enemy actor without spawn_point would be filtered out once any
+  # enemy declares one).
+  # max_turns 66 → reachable tick 5943 ≥ 5401.
+  hard:
+    description: >
+      Runbook: scout, then BRANCH. The enemy outpost could be on
+      the NORTH flank OR the SOUTH flank — chosen by seed, and NOT
+      given to you. Drive a scout jeep to discover which flank the
+      enemy outpost is on. IF it is NORTH, send your four medium
+      tanks NORTH and destroy it; ELSE (outpost SOUTH) send them
+      SOUTH and destroy it (the outpost is a barracks at the map
+      edge). Keep your construction yard standing. Win before tick
+      5400. A memorised "always attack NORTH" (or "always SOUTH")
+      opener loses on the seeds where the outpost is on the other
+      flank — the strike force is stranded on an empty lane and the
+      live outpost is never razed.
+    overrides:
+      actors:
+        # ── AGENT BASE — fixed every seed (no spawn_point).
+        - {type: fact, owner: agent, position: [20, 20]}
+        - {type: 2tnk, owner: agent, position: [18, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [22, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [18, 22], stance: 1}
+        - {type: 2tnk, owner: agent, position: [22, 22], stance: 1}
+        # Two scout jeeps AT the base — must drive to whichever
+        # flank to read the condition.
+        - {type: jeep, owner: agent, position: [24, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [26, 20], stance: 0}
+
+        # ── ENEMY spawn_point=0 — outpost massing NORTH ──
+        # Branch A is the live branch.
+        - {type: tent, owner: enemy, position: [20, 4], spawn_point: 0}
+        - {type: e1, owner: enemy, position: [20, 6], stance: 2, count: 3, spawn_point: 0}
+
+        # ── ENEMY spawn_point=1 — outpost massing SOUTH ──
+        # Branch B is the live branch.
+        - {type: tent, owner: enemy, position: [20, 36], spawn_point: 1}
+        - {type: e1, owner: enemy, position: [20, 34], stance: 2, count: 3, spawn_point: 1}
+
+        # ── Persistent far-east enemy `fact` marker (anti-DRAW).
+        # Duplicated across BOTH enemy spawn groups at identical
+        # coords — once any enemy declares spawn_point the per-owner
+        # filter activates and an unmarked enemy actor would be
+        # dropped (CLAUDE.md).
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 1}
+    win_condition:
+      any_of:
+        # BRANCH A — outpost NORTH: scout, then raze the N outpost.
+        - all_of:
+            - then:
+                id: branch-north-hard
+                clauses:
+                  - {buildings_discovered_gte: 1}
+                  - {enemy_key_buildings_destroyed_in_region: {types: [tent], x: 20, y: 4, radius: 12}}
+            - {building_count_gte: {type: fact, n: 1}}
+            - {within_ticks: 5400}
+        # BRANCH B — outpost SOUTH: scout, then raze the S outpost.
+        - all_of:
+            - then:
+                id: branch-south-hard
+                clauses:
+                  - {buildings_discovered_gte: 1}
+                  - {enemy_key_buildings_destroyed_in_region: {types: [tent], x: 20, y: 36, radius: 12}}
+            - {building_count_gte: {type: fact, n: 1}}
+            - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 66
