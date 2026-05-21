@@ -25,17 +25,28 @@ parallelises both wins.
 The scripted-policy validations prove deterministically that:
 
 * the intended CONCURRENT policy (queue pbox + attack_unit tanks
-  on the e3 rocket soldier every turn from t=0) WINS every
-  level + every hard seed (1..4);
+  on the heavy 3tnk every turn from t=0) WINS every level +
+  every hard seed (1..4);
 * stall / build-only (queue pbox but never command tanks — the
-  close-staged rush razes the fact before the serial pbox
-  cluster can fire) / defend-only (attack_unit tanks but never
-  build pbox — on easy the pbox bar is unmet ⇒ clock LOSS, on
-  medium/hard the heavier band out-attritions the un-reinforced
-  tank line ⇒ fact-razed LOSS) ALL LOSE every level + every
-  hard seed — a real LOSS, not a draw;
+  anti-infantry pillbox cannot kill the rush's heavy 3tnk, which
+  raze the fact un-countered) / defend-only (attack_unit tanks
+  but never build pbox — the pbox count bar is never met ⇒
+  `within_ticks` unmet ⇒ clock LOSS) ALL LOSE every level +
+  every hard seed — a real LOSS, not a draw;
 * the hard tier defines ≥2 spawn_point groups (north fact y=14 /
   south fact y=26) so a memorised opening cannot generalise.
+
+Recalibration note (engine movement+combat fixes): with the
+pbox-fires + moving-units-take-fire changes, an all-infantry rush
+was fully countered by the 3-pillbox cluster alone, so a
+BUILD-ONLY play that never commanded the HoldFire tanks won for
+free (the "laziest play wins" inversion). The rush now carries
+two armoured heavy tanks (`3tnk`); the anti-infantry pillbox
+(`M60mg`) cannot kill them in time, so stopping the armour
+genuinely requires commanding the agent's medium tanks (`2tnk`,
+anti-armour). The concurrent-streams capability is restored as
+structurally load-bearing — the discrimination no longer hangs
+on a knife-edge build-vs-rush timing race.
 """
 
 from __future__ import annotations
@@ -87,14 +98,15 @@ def _visible_enemy_units(rs):
 
 
 def _focus_target(rs):
-    """Focus the e3 (anti-armour rocket soldier) first — without
-    focus, the e3 attrites the tanks faster than they kill it.
-    Fall back to the nearest enemy if no e3 is visible."""
+    """Focus the heavy tank (3tnk) first — the armoured 3tnk is the
+    threat the anti-infantry pillbox cannot kill, so the medium
+    tanks MUST clear it. Fall back to the nearest enemy if no 3tnk
+    is visible."""
     enemies = _visible_enemy_units(rs)
     if not enemies:
         return None
-    e3s = [e for e in enemies if e.get("type") == "e3"]
-    return e3s[0] if e3s else enemies[0]
+    heavies = [e for e in enemies if e.get("type") == "3tnk"]
+    return heavies[0] if heavies else enemies[0]
 
 
 def _queue_and_place(rs, C, target_cells):
@@ -114,12 +126,12 @@ def _queue_and_place(rs, C, target_cells):
 def make_intended_concurrent():
     """Intended: every turn (a) queue pbox + place at the next
     cell of a 3-cell cluster around the active fact AND (b)
-    attack_unit the tanks at the rocket soldier (e3) — the
-    anti-armour threat. Both streams advance from t=0; the
-    pbox cluster comes online while the commanded tanks shred
-    the rush. The cluster cells are read from the OBSERVED fact
-    so the cluster centre flips with the spawn-driven hard
-    latitude."""
+    attack_unit the tanks at the heavy tank (3tnk) — the threat
+    the anti-infantry pillbox cannot kill. Both streams advance
+    from t=0; the pbox cluster comes online to mop the infantry
+    while the commanded medium tanks kill the heavy armour. The
+    cluster cells are read from the OBSERVED fact so the cluster
+    centre flips with the spawn-driven hard latitude."""
     state = {"cells": None}
 
     def policy(rs, C):
@@ -149,9 +161,9 @@ def make_intended_concurrent():
 def make_build_only():
     """BUILD-ONLY: queue + place pbox every turn but NEVER command
     the tanks. The HoldFire tanks stay idle even when shot at;
-    the close-staged rush hits the fact in ~4 turns, before the
-    serial 3-pbox cluster (~9-12 turns) can come online and
-    fire. LOSS via fact-alive fail clause."""
+    the anti-infantry pillbox cluster mops the rush's e1 but
+    cannot kill the two armoured 3tnk, which raze the fact
+    un-countered. LOSS via the fact-alive fail clause."""
     state = {"cells": None}
 
     def policy(rs, C):
@@ -170,12 +182,11 @@ def make_build_only():
 
 
 def make_defend_only():
-    """DEFEND-ONLY: attack_unit the tanks at the e3 every turn but
-    NEVER call build('pbox'). On easy the commanded tanks hold
-    the fact but the pbox count bar (≥3) is never satisfied ⇒
-    `within_ticks` unmet ⇒ `after_ticks` fires → LOSS; on
-    medium/hard the heavier band out-attritions the un-
-    reinforced tank line and razes the fact → LOSS."""
+    """DEFEND-ONLY: attack_unit the tanks at the heavy 3tnk every
+    turn but NEVER call build('pbox'). The commanded tanks kill
+    the heavy armour and hold the fact, but the pbox count bar
+    (≥3) is never satisfied ⇒ `within_ticks` unmet ⇒
+    `after_ticks` fires → real timeout LOSS."""
     def policy(rs, C):
         cmds = []
         tnks = _own_2tnk_ids(rs)
@@ -239,6 +250,30 @@ def test_tank_defenders_are_holdfire_stance_zero():
             assert a.stance == 0, (
                 f"{lvl}: 2tnk @ {a.position} stance must be 0 "
                 f"(HoldFire); got {a.stance}"
+            )
+
+
+def test_rush_carries_load_bearing_heavy_tanks():
+    """The rush must include heavy tanks (3tnk) on every level.
+    The 3tnk are the load-bearing element: the anti-infantry
+    pillbox the agent builds cannot kill them, so stopping the
+    rush genuinely requires commanding the agent's medium tanks.
+    Without the 3tnk, a build-only play (pillbox cluster vs an
+    all-infantry rush) would win for free."""
+    for lvl in LEVELS:
+        c = compile_level(load_pack(PACK), lvl)
+        heavies = [a for a in c.scenario.actors
+                   if a.owner == "enemy" and a.type == "3tnk"]
+        # hard duplicates nothing — a single band on the symmetry
+        # axis; easy/medium one band. Expect ≥2 heavy tanks.
+        assert len(heavies) >= 2, (
+            f"{lvl}: rush must carry ≥2 heavy 3tnk (the load-bearing "
+            f"un-pbox-counterable threat); got {len(heavies)}"
+        )
+        for a in heavies:
+            assert a.stance == 3, (
+                f"{lvl}: rush 3tnk must be stance:3 (AttackAnything), "
+                f"got {a.stance}"
             )
 
 
@@ -347,11 +382,10 @@ def test_intended_concurrent_wins_every_level_and_seed(level):
 def test_single_stream_policies_lose_every_level_and_seed(
     level, policy_name, policy_factory
 ):
-    """Stall (HoldFire tanks idle, fact razed), build-only (rush
-    razes fact before cluster online), defend-only (pbox bar
-    unmet on easy → clock LOSS; out-attritioned on medium/hard →
-    fact-razed LOSS) — ALL must LOSE every level + every seed,
-    no draw."""
+    """Stall (HoldFire tanks idle, fact razed), build-only
+    (anti-infantry pbox cannot kill the heavy 3tnk → fact razed),
+    defend-only (pbox count bar never met → clock LOSS) — ALL
+    must LOSE every level + every seed, no draw."""
     c = compile_level(load_pack(PACK), level)
     fn = policy_factory()
     for seed in SEEDS:

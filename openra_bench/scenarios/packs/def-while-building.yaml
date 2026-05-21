@@ -25,28 +25,33 @@
 #     advance in parallel; serialising them busts the deadline.
 #
 # Discrimination (four-script bar — scripted, no model needed):
+#   The rush carries TWO heavy tanks (3tnk, armoured). The pillbox
+#   the agent builds is an ANTI-INFANTRY defence (M60mg) and cannot
+#   kill a 3tnk in time — only the agent's pre-placed medium tanks
+#   (2tnk, anti-armour TurretGun) can. This makes the "command the
+#   defenders" stream structurally load-bearing: no amount of pbox
+#   stops the heavy tanks.
 #   • stall (observe-only): builds nothing, never moves the tanks.
 #     The HoldFire 2tnk do NOT auto-engage; the rush reaches the
 #     fact and razes it ⇒ `not building_count_gte:fact:1` fail
 #     fires → LOSS.
 #   • build-only (queue pbox, NEVER command the tanks): tanks sit
-#     idle on stance:0 (HoldFire); the rush — staged CLOSE at
-#     x=45 — reaches the fact in ~4 turns, well before a serial
-#     3-pbox build (~9-12 turns) can come online and fire. LOSS
-#     via fact-alive fail clause. (The pbox is now an active
-#     direct-fire tower per the engine fix, so the band must be
-#     staged close enough that the cluster cannot assemble in
-#     time — otherwise build-only would coincidentally win.)
+#     idle on stance:0 (HoldFire); the pillbox cluster mops the
+#     rush's e1 infantry but CANNOT kill the two armoured 3tnk,
+#     which raze the fact un-countered → LOSS via fact-alive fail
+#     clause. (Staging distance no longer matters — the armour is
+#     un-counterable by the pbox at any range, so the
+#     discrimination is structural, not a knife-edge timing race.)
 #   • defend-only (attack_unit the tanks on the rush every turn,
-#     NEVER build): on easy the commanded tanks hold but
-#     `building_count_gte:{pbox,3}` is never satisfied ⇒
-#     `within_ticks` unmet ⇒ `after_ticks` fires → LOSS; on
-#     medium/hard the heavier band out-attritions the un-
-#     reinforced tank line and razes the fact → LOSS.
+#     NEVER build): the commanded tanks kill the heavy armour and
+#     hold the fact, but `building_count_gte:{pbox,3}` is never
+#     satisfied ⇒ `within_ticks` unmet ⇒ `after_ticks` fires →
+#     LOSS.
 #   • intended CONCURRENT (queue pbox AND attack_unit tanks every
-#     turn from t=0): pbox cluster comes online while tanks shred
-#     the rush; pbox count + fact-alive + kill bar all satisfied
-#     before the deadline → WIN.
+#     turn from t=0): commanded tanks kill the heavy armour while
+#     the pbox cluster comes online to mop the infantry; pbox
+#     count + fact-alive + kill bar all satisfied before the
+#     deadline → WIN.
 #
 # Why the spec works (engine combat sheet, per CLAUDE.md):
 #   • `pbox` (pillbox, anti-infantry base defence) costs 600cr; the
@@ -57,20 +62,22 @@
 #     placing fact + powr + tent + proc keeps the Defense queue
 #     hot from turn 1 — the model only needs to call
 #     `build('pbox')` + `place_building` chains.
-#   • `2tnk` (medium tank) is the agent's defender. stance:0 means
-#     the tank will NOT return fire when shot — only an explicit
-#     `attack_unit` / `attack_move` order makes it engage. This is
-#     what makes the "command the defenders" half of the concurrent
-#     test load-bearing: a model that only builds and never issues
-#     a tank command sees idle tanks while the rush razes the fact.
-#   • The rush band (6× e1 + 2× e3 on easy; 7× e1 + 3× e3 on
-#     medium; 6× e1 + 2× e3 on hard) charges the agent centroid
-#     (the fact) on stance:3 (AttackAnything). The rusher bot
-#     concentrates and pushes hard from t=0 — even commanded
-#     tanks need to attack the rocket soldier (e3, anti-armour)
-#     immediately or get bled. Easy/medium bands are staged
-#     CLOSE (x=45) so build-only cannot serial-assemble the pbox
-#     cluster before the fact falls.
+#   • `2tnk` (medium tank, anti-armour TurretGun) is the agent's
+#     defender — and the ONLY counter to the rush's heavy tanks.
+#     stance:0 means the tank will NOT return fire when shot —
+#     only an explicit `attack_unit` / `attack_move` order makes
+#     it engage. This is what makes the "command the defenders"
+#     half of the concurrent test load-bearing: a model that only
+#     builds and never issues a tank command sees idle 2tnk while
+#     the un-counterable heavy tanks raze the fact.
+#   • The rush band (2× 3tnk + 3× e1 on easy; 2× 3tnk + 6× e1 on
+#     medium; 2× 3tnk + 5× e1 on hard) charges the agent fact on
+#     stance:3 (AttackAnything). The two `3tnk` (Soviet heavy
+#     tank, hp450, armoured) are the load-bearing element: the
+#     anti-infantry pillbox cannot kill them, so only a commanded
+#     2tnk line stops them. The e1 component is what the pillbox
+#     cluster mops up, keeping the BUILD stream load-bearing on
+#     the WIN path and supplying the kill floor.
 #   • `building_count_gte:{type:fact,n:1}` is the PRESENT-TENSE
 #     fact-alive check (NOT `has_building:fact`, which is a one-
 #     shot ever-seen set that stays true after the fact is razed —
@@ -191,26 +198,35 @@ levels:
         - {type: tent, owner: agent, position: [6,  18]}
         - {type: powr, owner: agent, position: [6,  22]}
         - {type: proc, owner: agent, position: [4,  20]}
-        # 3 pre-placed 2tnk defenders flanking the fact at x=14
+        # 4 pre-placed 2tnk defenders flanking the fact at x=14
         # (between fact and rush). stance:0 = HOLDFIRE; they do
         # NOT auto-engage even when shot at. The agent MUST issue
         # an attack_unit (or attack_move) to make them fight —
         # otherwise they sit idle while the rush walks past.
+        # The medium 2tnk (anti-armour TurretGun) are the ONLY
+        # thing that can stop the rush's heavy tanks: the pillbox's
+        # anti-infantry M60mg barely scratches a 3tnk.
+        - {type: 2tnk, owner: agent, position: [14, 18], stance: 0}
         - {type: 2tnk, owner: agent, position: [14, 19], stance: 0}
-        - {type: 2tnk, owner: agent, position: [14, 20], stance: 0}
         - {type: 2tnk, owner: agent, position: [14, 21], stance: 0}
-        # Rush band staged CLOSE at mid-map (x=45, y=20) — forced
-        # through the y=20 lane toward the agent centroid (the
-        # fact). 6× e1 + 2× e3 staged close enough that the rush
-        # reaches the fact in ~4 turns: faster than a serial
-        # 3-pbox build (~9-12 turns) can come online, so a
-        # BUILD-ONLY play that never commands the HoldFire tanks
-        # loses the fact before the pbox cluster fires. The
-        # commanded tanks must engage from t=0 to delay the rush
-        # long enough for the pbox cluster to assemble. Off the
-        # (50,20) silently-failing column (CLAUDE.md footgun).
-        - {type: e1, owner: enemy, position: [45, 20], stance: 3, count: 6}
-        - {type: e3, owner: enemy, position: [47, 20], stance: 3, count: 2}
+        - {type: 2tnk, owner: agent, position: [14, 22], stance: 0}
+        # Rush band — 2× 3tnk (Soviet HEAVY tank, hp450, armoured)
+        # + 3× e1 rifle infantry on stance:3 (AttackAnything),
+        # charging the agent fact down the y=20 lane. The 2 heavy
+        # tanks are the load-bearing element: the pillbox the agent
+        # builds is an ANTI-INFANTRY defence (M60mg, Versus armour
+        # ≪ Versus infantry) and CANNOT kill a 3tnk in time — only
+        # the agent's pre-placed 2tnk (anti-armour TurretGun) can.
+        # So a BUILD-ONLY play (queue pbox, never command the
+        # HoldFire tanks) watches its idle 2tnk stand by while the
+        # un-counterable heavy tanks raze the fact; the pillbox
+        # cluster mops the e1 but never the armour. The 3 e1 give
+        # the kill-floor and keep the pillbox load-bearing on the
+        # WIN path. Staged off the (50,20) silently-failing column
+        # (CLAUDE.md footgun).
+        - {type: 3tnk, owner: enemy, position: [45, 19], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [45, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [47, 20], stance: 3, count: 3}
         # Anti-DRAW marker: unarmed high-HP enemy fact at the far
         # east keeps the episode alive past full rusher
         # elimination so the win/fail check fires (engine
@@ -220,7 +236,7 @@ levels:
       all_of:
         - {building_count_gte: {type: pbox, n: 3}}
         - {building_count_gte: {type: fact, n: 1}}
-        - {units_killed_gte: 3}
+        - {units_killed_gte: 4}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
@@ -228,31 +244,32 @@ levels:
         - {not: {building_count_gte: {type: fact, n: 1}}}
     max_turns: 60
 
-  # ── MEDIUM ── +1 axis: HEAVIER rush (7× e1 + 3× e3 band,
-  # staged close at x=45) AND tighter clock (within_ticks 4500
-  # vs easy's 5400). Same base; same 3-pbox bar (1800cr, no
+  # ── MEDIUM ── +1 axis: HEAVIER rush (2× 3tnk + 6× e1, double
+  # the easy infantry) AND tighter clock (within_ticks 4500 vs
+  # easy's 5400). Same base; same 3-pbox bar (1800cr, no
   # slack — model that spends on extras starves the bar). The
-  # heavier band means commanded tanks need to focus-fire the e3
-  # rocket soldiers IMMEDIATELY or get attrited; the tighter
-  # clock means build-
-  # only that ignores tank dispatch lets the rush raze the fact
-  # before the first pbox is even placed. max_turns 60 ⇒
+  # heavier band means the commanded tanks need to grind the two
+  # heavy 3tnk down WHILE the pillbox cluster assembles to mop the
+  # six e1; the tighter clock means a build-only play that ignores
+  # tank dispatch lets the un-counterable heavy tanks raze the
+  # fact before the pillbox cluster matters. max_turns 60 ⇒
   # reachable tick 5403; deadline 4500.
   medium:
     description: >
-      The full rush band — 7 rifle infantry + 3 rocket soldiers —
-      is already attacking your base at (10,20), staged close so
-      it reaches the construction yard in ~4 turns. Your fact,
-      proc, powr, tent, and 3 medium tanks (2tnk) on HOLDFIRE
-      are pre-placed. Build 3 pillboxes (1800cr — 3 pbox at 600
-      each) CONCURRENTLY while commanding the tanks to attack
-      the rush. Kill ≥5 enemy units, build 3 pbox, AND keep the
-      fact alive — all before tick 4500. The heavier band razes
-      the fact before a serial pbox build comes online, so
-      build-only loses fact-alive; defend-only (tanks commanded,
-      no pbox) is itself out-attritioned by the heavier band and
-      loses the fact too. Only concurrent streaming — commanded
-      tanks buying time while the pbox cluster assembles — wins.
+      The full rush band — 2 heavy tanks + 6 rifle infantry — is
+      already attacking your base at (10,20). Your fact, proc,
+      powr, tent, and 4 medium tanks (2tnk) on HOLDFIRE are
+      pre-placed. Build 3 pillboxes (1800cr — 3 pbox at 600 each)
+      CONCURRENTLY while commanding the tanks to attack the rush.
+      Kill ≥7 enemy units, build 3 pbox, AND keep the fact alive
+      — all before tick 4500. The pillbox is an ANTI-INFANTRY
+      defence and cannot kill the heavy tanks — only your medium
+      tanks can; so build-only (idle HoldFire tanks) loses the
+      fact to the un-counterable armour, while defend-only (tanks
+      commanded, no pbox) never satisfies the pillbox count bar.
+      Only concurrent streaming — commanded tanks killing the
+      armour while the pbox cluster assembles to mop the infantry
+      — wins.
     starting_cash: 1800
     overrides:
       actors:
@@ -260,24 +277,27 @@ levels:
         - {type: tent, owner: agent, position: [6,  18]}
         - {type: powr, owner: agent, position: [6,  22]}
         - {type: proc, owner: agent, position: [4,  20]}
+        - {type: 2tnk, owner: agent, position: [14, 18], stance: 0}
         - {type: 2tnk, owner: agent, position: [14, 19], stance: 0}
-        - {type: 2tnk, owner: agent, position: [14, 20], stance: 0}
         - {type: 2tnk, owner: agent, position: [14, 21], stance: 0}
-        # Heavy rush staged CLOSE: 7× e1 + 3× e3 at mid-map
-        # (x=45, y=20). Heavier than easy AND staged close, so a
-        # build-only play loses the fact in ~4 turns and a
-        # defend-only play (tanks commanded, no pbox) is itself
-        # out-attritioned by the heavier band. Only concurrent
-        # streaming — commanded tanks buying time while the pbox
-        # cluster assembles — keeps the fact alive.
-        - {type: e1, owner: enemy, position: [45, 20], stance: 3, count: 7}
-        - {type: e3, owner: enemy, position: [47, 20], stance: 3, count: 3}
+        - {type: 2tnk, owner: agent, position: [14, 22], stance: 0}
+        # Heavy rush: 2× 3tnk (Soviet heavy tank, armoured) + 6× e1
+        # at mid-map (x=45, y=20). Heavier than easy (double the
+        # infantry). The 2 heavy tanks are un-counterable by the
+        # anti-infantry pillbox, so a build-only play loses the
+        # fact to the armour; a defend-only play (tanks commanded,
+        # no pbox) never satisfies the pillbox count bar. Only
+        # concurrent streaming keeps the fact alive AND meets the
+        # bar.
+        - {type: 3tnk, owner: enemy, position: [45, 19], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [45, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [47, 20], stance: 3, count: 6}
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
         - {building_count_gte: {type: pbox, n: 3}}
         - {building_count_gte: {type: fact, n: 1}}
-        - {units_killed_gte: 5}
+        - {units_killed_gte: 7}
         - {within_ticks: 4500}
     fail_condition:
       any_of:
@@ -289,30 +309,29 @@ levels:
   # so the base (fact/tent/powr/proc/defenders) flips between
   # NORTH (y=14) and SOUTH (y=26) per seed. Enemies don't honour
   # spawn_point (engine: oramap.rs::expand_scenario_actors per
-  # CLAUDE.md) so two rush GROUPS are staged at BOTH candidate
-  # latitudes — the matching one converges on the active fact,
-  # the off-latitude one wanders harmlessly toward the empty
-  # latitude. The agent must READ its fact's latitude from
-  # observation and place pboxes NEAR the active fact AND focus
-  # tank commands on the active-latitude band (the band whose
-  # units appear in enemy_summary near the active fact).
-  # A memorised "build at (10,20)" plan misses the active
-  # cluster region.
+  # CLAUDE.md) so a single rush band is staged on the SYMMETRY
+  # axis (y=20); the rusher bot concentrates on the agent
+  # centroid, so the band converges on whichever latitude this
+  # seed spawned. The agent must READ its fact's latitude from
+  # observation and place pboxes NEAR the active fact AND command
+  # its medium tanks onto the heavy-tank rush. A memorised "build
+  # at (10,20)" plan misses the active cluster region.
   # max_turns 60 ⇒ reachable tick 5403; deadline 4500.
   hard:
     description: >
-      The agent construction yard (fact) and its 3 HoldFire tank
+      The agent construction yard (fact) and its 4 HoldFire tank
       defenders flip between NORTH (y=14) and SOUTH (y=26) per
       seed; the pbox cluster must follow. A heavy rush
-      (6 rifle infantry + 2 rocket soldiers) is staged at BOTH
-      candidate latitudes; the band on the active latitude
-      converges on the fact. Build 3 pillboxes (budget 1800cr =
-      3 pbox at 600 each) CONCURRENTLY while commanding the
-      tanks to attack the active-latitude rush. Kill ≥5 enemy
-      units, build 3 pbox, AND keep the fact alive — all before
-      tick 4500. A memorised "build at (10,20)" plan misses the
-      active cluster region; pausing either stream loses; only
-      concurrent streaming at the correct latitude wins.
+      (2 heavy tanks + 5 rifle infantry) converges on the active
+      fact. Build 3 pillboxes (budget 1800cr = 3 pbox at 600
+      each) CONCURRENTLY while commanding the tanks to attack
+      the rush. Kill ≥5 enemy units, build 3 pbox, AND keep the
+      fact alive — all before tick 4500. The pillbox is an
+      anti-infantry defence and cannot kill the heavy tanks —
+      only your medium tanks can; a memorised "build at (10,20)"
+      plan misses the active cluster region; pausing either
+      stream loses; only concurrent streaming at the correct
+      latitude wins.
     starting_cash: 1800
     overrides:
       actors:
@@ -322,31 +341,32 @@ levels:
         - {type: tent, owner: agent, position: [6,  12], spawn_point: 0}
         - {type: powr, owner: agent, position: [6,  16], spawn_point: 0}
         - {type: proc, owner: agent, position: [4,  14], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 12], stance: 0, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [14, 13], stance: 0, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [14, 14], stance: 0, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [14, 15], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 16], stance: 0, spawn_point: 0}
         # spawn_point 1 — SOUTH base (y=26, mirror across y=20).
         - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
         - {type: tent, owner: agent, position: [6,  24], spawn_point: 1}
         - {type: powr, owner: agent, position: [6,  28], spawn_point: 1}
         - {type: proc, owner: agent, position: [4,  26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 24], stance: 0, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [14, 25], stance: 0, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [14, 26], stance: 0, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [14, 27], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 28], stance: 0, spawn_point: 1}
         # Enemies don't honour spawn_point (CLAUDE.md). A single
         # heavy rush band staged at the SYMMETRY-AXIS latitude
-        # (y=20); the rusher bot concentrates on the agent
-        # centroid (the active fact at y=14 OR y=26 per seed), so
-        # the band turns toward whichever latitude this seed
-        # spawned. A dual band (one at each latitude) would
-        # over-pressure the active fact (both bands' rushers
-        # converge regardless of spawn) and collapse the timing
-        # discrimination — the fact dies in <4 turns before the
-        # first pbox can be queued. Single band on the symmetry
-        # axis preserves the same concurrent-streams test from a
+        # (y=20): 2× 3tnk (armoured heavy tanks) + 5× e1. The
+        # rusher bot concentrates on the agent centroid (the
+        # active fact at y=14 OR y=26 per seed), so the band turns
+        # toward whichever latitude this seed spawned. The two
+        # heavy tanks are un-counterable by the anti-infantry
+        # pillbox — only the agent's medium tanks can kill them,
+        # so the concurrent-streams discrimination holds from a
         # flipped approach axis per seed.
-        - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 6}
-        - {type: e3, owner: enemy, position: [62, 20], stance: 3, count: 2}
+        - {type: 3tnk, owner: enemy, position: [60, 19], stance: 3}
+        - {type: 3tnk, owner: enemy, position: [60, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [62, 20], stance: 3, count: 5}
         # Anti-DRAW marker on the symmetry axis.
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
