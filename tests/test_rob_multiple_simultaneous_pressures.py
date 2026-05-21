@@ -8,6 +8,23 @@ the intended multi-handle keeps all three loops running in parallel.
 Bar (per CLAUDE.md): the intended multi-handle policy must WIN on
 every (level, seed); stall / focus-defence-skip-tech / focus-tech-
 lose-econ must LOSE on every (level, seed). No draws.
+
+Recalibration note (engine MOVEMENT fixes — `attack_unit` on an
+out-of-sight target paths normally instead of teleporting, and a
+moving unit both fires and takes fire en route, respecting stance):
+the combat shift made the 4-defender Defend-stance ring strong
+enough to WIPE the old 2-raider / 2-hunter raid outright. Once the
+raid was dead the episode went quiet and the engine's inactivity
+auto-`done` ended a STALL run as a DRAW (the `after_ticks` deadline
+never bit, and with the base intact neither `not has_building:fact`
+nor the harv-count clause fired). The raid was scaled up — easy
+4 raiders + 3 hunters, medium 5 + 4, hard 4 + 3 — so the larger
+force genuinely overruns an un-commanded ring: a stall razes a harv
+/ the fact and LOSES for real, while the intended ring, actively
+attack-moved onto the nearest raider each turn, still clears the
+raid and holds. Hard keeps the easy 4+3 force (its escalation is
+the tighter 4500-tick clock + the seed-varied base latitude — on
+that clock a 5-raider raid leaves the intended play no margin).
 """
 
 from __future__ import annotations
@@ -233,9 +250,10 @@ def _base_xy(rs):
 
 def _stall(rs, Command):
     """Idle every turn — no harvest, no build, no defence orders.
-    Defenders auto-engage but harvs never harvest (no income) and
-    weap is never built ⇒ has_building:weap never latches ⇒ timeout
-    LOSS via after_ticks."""
+    The un-commanded Defend-stance tank ring cannot hold the scaled
+    raid: a harvester is razed (and the base buildings follow) ⇒
+    real raze LOSS via the harv-count / has_building:fact fail
+    clauses, well before the after_ticks deadline."""
     return [Command.observe()]
 
 
