@@ -721,6 +721,20 @@ UPGRADED = [
     # selected. MicroRTS pillbox placement / military quadrant
     # doctrine anchor.
     "build-defensive-skirt-corners",
+    # Wave-11 REASONING pack: passive-obstacle vs active-defense
+    # mitigation — one budget (3200cr) funds EITHER ~16 inert brik
+    # walls OR 4 active gun turrets. The win predicate requires a kill
+    # quota (units_killed_gte) only the gun turrets can deliver, so a
+    # walls-only spend (0 kills) and a stall both LOSE while the
+    # intended turret build WINS. Hard tier defines two agent
+    # spawn_point groups (NORTH fact y=14 / SOUTH fact y=26) round-
+    # robined by seed; the scheduled rush wave is staged at BOTH
+    # candidate latitudes (spawn_actors lists are not spawn_point-
+    # filtered) so the rusher converges on whichever fact the seed
+    # selected, and a memorised "turrets near (10,20)" plan cannot
+    # generalise. Security architecture passive-vs-active mitigation /
+    # military fortification anchor.
+    "def-walls-vs-towers",
     # Wave-7 REASONING asymmetric-underdog pack — SC2 asymmetric /
     # guerrilla tactics / asymmetric warfare anchor. 2× 2tnk vs 4× e1
     # + 1× 3tnk; head-on loses, off-axis flank-pick (outside the
@@ -1111,6 +1125,17 @@ UPGRADED = [
     # declares no spawn_points (see openra-train/src/env.rs
     # `new_with_spawn_point`).
     "adv-rps-counter-pick",
+    # Wave-11 conditional-procedure pack (τ²-bench conditional
+    # tool-use / IFBench conditional instruction / runbook
+    # branching). Hard tier defines TWO ENEMY-side spawn_point
+    # groups: the enemy outpost rotates FLANK per seed (NORTH
+    # spawn_point=0 / SOUTH spawn_point=1) while the agent base
+    # stays fixed at (20,20). The win is an explicit IF/ELSE
+    # `any_of` over a north branch and a south branch; exactly one
+    # branch is satisfiable per seed, selected by what the scout
+    # reveals. A fixed unconditional opener wins one flank and
+    # loses the other → only scout-then-branch generalises.
+    "proc-conditional-branch-action",
     # Engine-fix pack (power_down + power_provided_gte). Hard tier
     # defines two agent spawn_point groups (NORTH y≈12 / SOUTH y≈28)
     # round-robined by seed; the base composition (powr + 7 drainers)
@@ -1340,6 +1365,18 @@ UPGRADED = [
     # identical per spawn — a memorised "build at (8,18)" opening
     # cannot generalise across seeds.
     "econ-expansion-timing",
+    # Wave-11 REASONING pack — skip an unnecessary tech tier (PlanBench
+    # unnecessary-step pruning / lean process / YAGNI anchor). The
+    # objective only needs basic infantry; the agent starts with a
+    # pre-placed fact + tent so e1 is trainable from turn 1, and the
+    # trap is to climb the full tech chain (powr → proc → weap → fix →
+    # 2tnk) which busts the clock. Hard tier defines two agent
+    # spawn_point groups (NORTH base y=14 / SOUTH base y=26) round-
+    # robined by seed; the base (fact + tent) is duplicated under each
+    # group and the stance:3 garrison is duplicated at both latitudes
+    # (enemy actors don't honour spawn_point — CLAUDE.md), so a
+    # memorised base-latitude opening cannot generalise.
+    "build-tech-skip-decision",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
