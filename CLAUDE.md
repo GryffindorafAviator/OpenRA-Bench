@@ -123,11 +123,27 @@ A scenario is defective if any of the following hold:
   `after_ticks` window opens, collapsing the run to DRAW. `after_ticks`
   belongs in `fail_condition`. Encode timed-arrival semantics via
   distance/landmark positioning instead.
-- **`move_units` auto-fires opportunistically en route** regardless
-  of agent stance (even `stance:0` HoldFire). For perception packs
-  with hidden enemies that must be discovered without combat, set
-  the HIDDEN actors to `stance:0` themselves (defender side, not
-  scout side).
+- **`move_units` auto-fires opportunistically en route, and a
+  moving unit is a normal target** (engine fix, pinned by
+  `OpenRA-Rust/openra-sim/tests/test_moving_unit_takes_fire.rs`).
+  A unit executing a `Move` activity now shoots in-range hostiles in
+  passing WITHOUT abandoning its move, and is itself hittable by
+  in-range enemies — there is no "sprint-invincibility" any more (a
+  unit can no longer cross a kill zone untouched on a long move
+  order). The opportunistic move-fire RESPECTS stance: `stance:0`
+  HoldFire never fires while moving; `stance:1` ReturnFire fires
+  only after taking recent hostile fire; `stance:2`/`stance:3` fire
+  on the nearest in-range enemy. For perception packs with hidden
+  enemies that must be discovered without combat, set the HIDDEN
+  actors to `stance:0` themselves (defender side, not scout side).
+- **`attack_unit` on an out-of-sight target paths normally** (engine
+  fix, pinned by
+  `OpenRA-Rust/openra-sim/tests/test_attack_unit_no_teleport.rs`).
+  An explicit `Attack` order against an enemy beyond weapon range
+  now closes distance at the attacker's real `Mobile` speed
+  (identical to a plain `move`); the chase used to warp a full cell
+  per tick (~24x for infantry), teleporting the unit dozens of
+  cells in one decision frame.
 - **Stance semantics are now four behaviourally-distinct gates**
   (engine fix, pinned by
   `OpenRA-Rust/openra-sim/tests/test_stance_semantics.rs` +
