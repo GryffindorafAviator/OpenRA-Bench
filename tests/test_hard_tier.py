@@ -754,6 +754,18 @@ UPGRADED = [
     # (14,22)" opening cannot generalise — placement must be computed
     # relative to the actual fact each seed.
     "build-sequence-tech-fastest",
+    # Wave-11 REASONING pack — cost-MINIMAL build-order (powr → proc →
+    # weap) under a fixed, non-replenishing budget (PlanBench cost-
+    # optimal / BOM cost minimization / budget-constrained planning
+    # anchor). Sibling of build-sequence-tech-fastest (time axis); here
+    # money is the teeth — no ore, no income, starting cash tuned to
+    # exactly the minimal-path cost. Hard tier defines two agent
+    # spawn_point groups (NORTH base y=14 / SOUTH base y=26) round-
+    # robined by seed; no ore at either latitude (the budget is fixed
+    # regardless of spawn). A memorised "place powr at (14,22)" opening
+    # cannot generalise — placement must be computed relative to the
+    # actual fact each seed.
+    "build-sequence-tech-cheapest",
     # Wave-7 REASONING econ pack — SC2 silo management / working-capital
     # allocation / FIFO perishable inventory cap anchor. Cash starts NEAR
     # the proc-only storage cap (1800 vs 2000); income accrues; the

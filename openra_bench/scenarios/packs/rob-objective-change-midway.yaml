@@ -1,0 +1,350 @@
+# rob-objective-change-midway.yaml
+#
+# REASONING capability — Wave-11 Group "robustness" pack.
+# GOAL-CONDITIONAL ADAPTATION: the objective effectively SHIFTS
+# MID-EPISODE. The win is a `then:` chain of TWO DIFFERENT goals that
+# must latch IN ORDER:
+#   Phase 1 (clause A) — an EARLY goal: get the tank squad into the
+#     forward staging region A (a scout / reach objective).
+#   Phase 2 (clause B) — a DIFFERENT goal, revealed only AFTER phase 1
+#     is met: drive on and RAZE the enemy construction yard at the FAR
+#     region B.
+# The agent must pursue A FIRST, then PIVOT to B. A policy that
+# commits straight to B from the start NEVER latches phase 1 (the
+# `then` chain only counts clause B AFTER clause A has gone true);
+# a policy that only reaches A and parks there never satisfies phase
+# 2. Only the intended A-then-B order wins.
+#
+# This is distinct from the sibling `rob-objective-shift-with-or-
+# clause` (an `any_of` over two ACCEPTABLE end-goals — pick the
+# feasible one). HERE the two goals are SEQUENTIAL and BOTH mandatory
+# in a fixed order: the objective genuinely CHANGES underneath the
+# agent rather than offering a choice.
+#
+# Four canonical policies (the no-cheat bar):
+#   1. STALL (observe only)        → LOSS on after_ticks every tier
+#      (clause A never latches; the deadline bites).
+#   2. COMMIT-B-ONLY (beeline the  → LOSS every tier. The `then` chain
+#      far enemy fact from t=0)       requires clause A to latch FIRST.
+#      A squad that drives straight past region A to B may raze the
+#      fact, but `then` only begins counting clause B once clause A
+#      is satisfied — if the squad never had ≥3 tanks inside region A
+#      the chain is stuck at clause 1 and the win predicate is false.
+#   3. DO-A-ONLY (reach region A   → LOSS every tier. Phase 1 latches
+#      and park)                      but phase 2 (raze the far fact)
+#      is never met; the deadline expires with the chain at clause 2.
+#   4. INTENDED A-then-B           → WIN every tier. Move the squad
+#      into region A first (phase 1 latches), THEN pivot east and
+#      raze the enemy fact at region B (phase 2 latches) — all
+#      inside `within_ticks`.
+#
+# Because `then` latches are STICKY (an early clause that stopped
+# being true still counts), the intended play can leave region A
+# after phase 1 latches and push on to B — exactly the "pivot when
+# the goal shifts" behaviour.
+#
+# Real-world anchor (spec):
+#   - goal-conditional RL (the reward function's goal vector is
+#     swapped mid-episode; the policy must re-condition on the new
+#     goal without discarding the progress toward the old one)
+#   - ALFWorld mid-episode goal change (the household task is
+#     re-specified partway through; the agent must finish the new
+#     subtask after completing the prerequisite)
+#   - changing requirements (a project's deliverable is revised after
+#     a milestone ships; the team pivots to the new requirement
+#     without redoing the milestone work)
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - Phase 1 predicate is `units_in_region_gte` ({x,y,radius,n}):
+#     ≥3 agent tanks inside radius 6 of region A. ≥3 (not ≥1) so a
+#     single touring scout that brushes A en route to B cannot latch
+#     phase 1 for free — the whole squad must genuinely stage at A.
+#   - Phase 2 predicate is `enemy_key_buildings_destroyed_in_region`
+#     ({x,y,radius,types}): the enemy `fact` at B razed within radius
+#     6. fact (not silo) is the landmark anchor — `silo` is NOT
+#     MustBeDestroyed (CLAUDE.md) and would let the engine auto-`done`
+#     early.
+#   - The `then:` composite (Wave-2 happened-before) latches its
+#     clauses IN ORDER and STICKILY: clause B only starts counting
+#     after clause A has gone true at least once.
+#   - The fact at B is MustBeDestroyed. To stop the engine's conquest
+#     auto-`done` from collapsing the run to DRAW the instant the
+#     objective fact falls, a SENTINEL unarmed enemy `fact` sits at
+#     the far north corner — always alive, never on any intended
+#     tank path, keeps the conquest check from firing before the
+#     win/fail predicate evaluates.
+#   - The fail clause `not building_count_gte:{type:fact,n:1}` fires
+#     if the agent ever loses its own construction yard (it is given
+#     a `fact` at the west base purely as the persistence anchor for
+#     this fail clause — there is no economy phase). Paired with
+#     `after_ticks` so a stall is a real LOSS, never a draw.
+#   - Tick math: within_ticks 5400 needs max_turns ≥ 60 (tick at
+#     turn 60 = 93 + 90·59 = 5403 ≥ 5400). max_turns: 65 (max tick
+#     5853) so the deadline bites comfortably inside the turn budget.
+#   - Enemy actors don't honour spawn_point (CLAUDE.md /
+#     expand_scenario_actors): region A's defence and region B's
+#     fact always place; only the AGENT spawn round-robins (hard).
+#   - Cell footgun list (CLAUDE.md): (60,20)/(100,30) are NOT in the
+#     failing set; defenders are offset ±1 from landmark cells so a
+#     single-cell placement hiccup cannot empty a cluster.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/rob-objective-change-midway.yaml
+
+meta:
+  id: rob-objective-change-midway
+  title: 'Objective Change Midway — Pivot When the Goal Shifts'
+  capability: reasoning
+  real_world_meaning: >
+    The mission objective changes mid-episode. Phase 1 is an early
+    goal — stage the force at a forward region; once that is achieved
+    a DIFFERENT phase-2 goal is revealed — raze the enemy
+    construction yard at a far region. The agent must pursue the
+    early goal first and only then pivot to the new one. A policy
+    that commits to the phase-2 goal from the start fails phase 1
+    (the ordered chain never latches its first clause); a policy
+    that only completes phase 1 and stops fails phase 2. The win is
+    the ordered `then` chain over both goals AND a deadline — only a
+    genuine goal-conditional pivot satisfies it.
+  robotics_analogue: >
+    Goal-conditional task execution with a mid-task re-spec: a mobile
+    robot is dispatched to reach a staging waypoint; on arrival the
+    operator updates the task — now also clear a target at a second,
+    further site. The robot must complete the original navigation
+    goal first and then re-condition its policy on the new goal,
+    finishing the revised task inside the same energy budget rather
+    than either ignoring the update or abandoning the first leg.
+  benchmark_anchor:
+    - "goal-conditional RL"
+    - "ALFWorld goal change"
+    - "changing requirements"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop_units
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # The bare goal-conditional skill: phase 1 (stage at region A) then
+  # phase 2 (raze the far enemy fact at region B). Region A sits
+  # NORTH of the direct base→B line so a straight beeline to B never
+  # enters A's radius — even on easy a commit-B-only play cannot
+  # free-latch phase 1 in passing. The intended play detours up to A
+  # to stage the squad, then pivots south-east to B. Region B is
+  # lightly defended (2× e1) so phase 2 is winnable for any squad
+  # that actually arrives in time. Stall loses on the clock;
+  # commit-B-only never latches phase 1; do-A-only never latches
+  # phase 2.
+  easy:
+    description: >
+      Five medium tanks (2tnk) sit at the western edge. PHASE 1:
+      move at least 3 tanks into the forward staging region A
+      around (55,8), to the north. Once phase 1 is complete the
+      objective shifts — PHASE 2: drive south-east and destroy the
+      enemy construction yard at region B around (100,30), guarded
+      by 2 riflemen (e1). You must complete BOTH phases IN ORDER
+      inside 5400 ticks. Stalling loses on the clock. Beelining
+      straight to B never enters region A, so phase 1 never
+      registers and the win never registers. Reaching A and
+      stopping never satisfies phase 2. Only staging at A first
+      and THEN pivoting to B wins.
+    starting_cash: 500
+    overrides:
+      actors:
+        # Agent: 5× 2tnk at the west, stance:1 (ReturnFire) so they
+        # don't path-find on their own — the agent must commit.
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        # Agent construction yard — purely the persistence anchor for
+        # the `not building_count_gte:{fact,1}` fail clause. No
+        # economy phase; it just must survive (nothing threatens it).
+        - {type: fact, owner: agent, position: [6, 20]}
+        # Region A — the PHASE-1 staging objective, NORTH of the
+        # direct base→B line so a beeline to B never enters it. A
+        # landmark enemy `proc` (refinery, not MustBeDestroyed → no
+        # auto-`done`) marks the region so a coordinate-light reading
+        # still finds it; 1× e1 picket so the region is "live"
+        # without blocking a 3-tank stage. The squad does NOT need
+        # to destroy A — it only needs ≥3 tanks inside radius 6 of
+        # (55,8).
+        - {type: proc, owner: enemy, position: [55, 8]}
+        - {type: e1,   owner: enemy, position: [53, 8], stance: 2}
+        # Region B — the PHASE-2 objective: enemy fact + 2× e1.
+        # 2tnk eats e1 alive; the only cost of B is the drive.
+        - {type: fact, owner: enemy, position: [100, 30]}
+        - {type: e1,   owner: enemy, position: [98, 30], stance: 2}
+        - {type: e1,   owner: enemy, position: [99, 31], stance: 2}
+        # SENTINEL: persistent unarmed enemy fact at the far north
+        # corner — keeps the conquest auto-`done` from firing the
+        # instant the region-B fact falls, before the win/fail
+        # predicate evaluates (CLAUDE.md ConquestVictoryConditions
+        # footgun). Well outside any intended tank path.
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: stage-then-raze-easy
+            clauses:
+              # Phase 1 — the EARLY goal.
+              - units_in_region_gte: {x: 55, y: 8, radius: 6, n: 3}
+              # Phase 2 — the REVEALED goal (DIFFERENT objective).
+              - enemy_key_buildings_destroyed_in_region:
+                  {x: 100, y: 30, radius: 6, types: [fact]}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 65
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: region A and region B are LATERALLY
+  # OFFSET. A sits north-of-centre at (55,12); B sits south-east at
+  # (105,34). A straight beeline to B no longer passes through A, so
+  # the goal-change pivot is a real DIRECTION change — the squad must
+  # detour up to A, latch phase 1, then turn south-east to B. A
+  # commit-B-only beeline cannot accidentally satisfy phase 1 in
+  # passing. Region B keeps a light 2× e1 picket so phase 2 stays
+  # winnable for a squad that arrives in time; the discrimination is
+  # the ordered pivot, not B's defence.
+  medium:
+    description: >
+      Five medium tanks (2tnk) sit at the western edge. PHASE 1:
+      move at least 3 tanks into the forward staging region A
+      around (55,12), north of the direct line east. Once phase 1
+      is complete the objective shifts — PHASE 2: drive south-east
+      and destroy the enemy construction yard at region B around
+      (105,34), guarded by 2 riflemen (e1). Complete BOTH phases
+      IN ORDER inside 5400 ticks. Region A and region B are NOT on
+      the same line — a straight drive to B never enters A and so
+      never satisfies phase 1; staging at A and stopping never
+      satisfies phase 2. Only the staged A-then-B pivot wins;
+      stalling loses on the clock.
+    starting_cash: 500
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        - {type: fact, owner: agent, position: [6, 20]}
+        # Region A — north-of-centre staging objective.
+        - {type: proc, owner: enemy, position: [55, 12]}
+        - {type: e1,   owner: enemy, position: [53, 12], stance: 2}
+        # Region B — south-east phase-2 objective: fact + 2× e1.
+        - {type: fact, owner: enemy, position: [105, 34]}
+        - {type: e1,   owner: enemy, position: [103, 34], stance: 2}
+        - {type: e1,   owner: enemy, position: [104, 35], stance: 2}
+        # Sentinel.
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: stage-then-raze-medium
+            clauses:
+              - units_in_region_gte: {x: 55, y: 12, radius: 6, n: 3}
+              - enemy_key_buildings_destroyed_in_region:
+                  {x: 105, y: 34, radius: 6, types: [fact]}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 65
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +1 axis: TWO agent spawn_point groups (NORTH staging y=10..14 vs
+  # SOUTH staging y=26..30) round-robined by seed, so the lateral
+  # approach to region A flips per seed and a memorised opening
+  # cannot generalise. Region A sits CENTRE-MAP at (55,20) so it is
+  # roughly equidistant from both spawn bands — the squad must
+  # genuinely navigate to it from whichever band the seed picks.
+  # Region B keeps a light 2× e1 picket; the +1 axis on hard is the
+  # spawn variation, not enemy power-creep. The goal-change pivot is
+  # still the load-bearing capability: phase 1 then phase 2, in
+  # order, from a seed-varied start.
+  # Satisfies `tests/test_hard_tier.py::UPGRADED` (≥2 spawn groups).
+  hard:
+    description: >
+      Five medium tanks (2tnk) sit at the western edge — round-
+      robined between a NORTH staging row and a SOUTH staging row
+      by seed. PHASE 1: move at least 3 tanks into the central
+      staging region A around (55,20). Once phase 1 is complete the
+      objective shifts — PHASE 2: drive on east and destroy the
+      enemy construction yard at region B around (100,30), guarded
+      by 2 riflemen (e1). Complete BOTH phases IN ORDER inside 5400
+      ticks. Beelining straight to B never satisfies phase 1;
+      staging at A and stopping never satisfies phase 2; stalling
+      loses on the clock. Only the staged A-then-B pivot wins —
+      and the start position varies by seed, so the route to A
+      must be planned, not memorised.
+    starting_cash: 500
+    overrides:
+      actors:
+        # NORTH staging spawn (spawn_point 0) — y=10..14 row.
+        - {type: 2tnk, owner: agent, position: [10, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 13], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 14], stance: 1, spawn_point: 0}
+        # SOUTH staging spawn (spawn_point 1) — y=26..30 row.
+        - {type: 2tnk, owner: agent, position: [10, 26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 30], stance: 1, spawn_point: 1}
+        # Agent construction yard — persistence anchor for the
+        # `not building_count_gte:{fact,1}` fail clause. Duplicated
+        # across BOTH spawn groups at the matching latitude so the
+        # anchor exists on every seed (CLAUDE.md spawn_point idiom).
+        - {type: fact, owner: agent, position: [6, 12], spawn_point: 0}
+        - {type: fact, owner: agent, position: [6, 28], spawn_point: 1}
+        # Enemy actors place unconditionally (CLAUDE.md: enemies
+        # don't honour spawn_point). Region A and region B always
+        # on the map.
+        # Region A — central staging objective.
+        - {type: proc, owner: enemy, position: [55, 20]}
+        - {type: e1,   owner: enemy, position: [53, 20], stance: 2}
+        # Region B — phase-2 objective: fact + 2× e1.
+        - {type: fact, owner: enemy, position: [100, 30]}
+        - {type: e1,   owner: enemy, position: [98, 30], stance: 2}
+        - {type: e1,   owner: enemy, position: [99, 31], stance: 2}
+        # Sentinel.
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: stage-then-raze-hard
+            clauses:
+              - units_in_region_gte: {x: 55, y: 20, radius: 6, n: 3}
+              - enemy_key_buildings_destroyed_in_region:
+                  {x: 100, y: 30, radius: 6, types: [fact]}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 65
