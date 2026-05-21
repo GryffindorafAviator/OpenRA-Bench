@@ -12,6 +12,15 @@ vs corridor-width approach).
 Anchors: ERQA spatial commit / MicroRTS defense placement / military
 perimeter (firewall rule placement).
 
+The pbox is the load-bearing weapon. After the engine pbox-weapon fix
+(`fix(engine): pbox gets a direct-fire Armament`) a BUILT pbox is an
+active direct-fire anti-infantry tower. The rush arrives as a
+`scheduled_events: spawn_actors` wave EAST of the corridor at tick 1800
+— AFTER the agent has had time to build all 4 pillboxes serially — and
+the `rusher` bot charges the agent fact on the west, so the wave is
+forced WEST through the x=60 corridor. There are NO pre-placed agent
+defenders, so the pbox LINE is the sole source of kill output.
+
 The win predicate makes the LINE topology load-bearing — total pbox
 count alone is not enough:
 
@@ -21,6 +30,8 @@ count alone is not enough:
   row across the corridor (a tiny radius 0.5 means only the exact cell
   counts, so a cluster on (60,20) misses ALL FOUR rungs and a scatter
   near the base misses all four);
+* `units_killed_gte:K` ⇒ the pbox LINE must actively KILL the rush
+  funnelled through the corridor (a stall / pure-army layout kills 0);
 * `building_count_gte:{fact,n:1}` (present-tense — `has_building` is
   the one-shot "ever-seen" set, see CLAUDE.md footgun);
 * `within_ticks` paired with `after_ticks` in the fail clause ⇒ a
@@ -34,7 +45,7 @@ The scripted-policy validations prove deterministically that:
   cells) WINS every level + every hard seed (1..4);
 * stall / random-4-pbox (4 pboxes placed near the base, away from the
   corridor) both LOSE every level + every hard seed — a real LOSS,
-  not a draw;
+  not a draw (the rung clauses are never satisfied);
 * the hard tier defines ≥2 spawn_point groups (NORTH base y=12 / SOUTH
   base y=28) so a memorised base-relative placement cannot generalise.
 """
@@ -219,6 +230,56 @@ def test_win_requires_one_pbox_per_corridor_rung():
         assert rungs_seen == {18, 19, 21, 22}, (
             f"{lvl}: corridor rungs y∈{{18,19,21,22}} required, got {sorted(rungs_seen)}"
         )
+
+
+def test_win_requires_a_kill_quota():
+    """The pbox LINE must actively KILL the rush, not merely stand: every
+    level's win clause carries a `units_killed_gte` quota. With no
+    pre-placed agent defenders the pbox LINE is the sole source of kills,
+    so this clause makes the pbox weapon load-bearing."""
+    for lvl in LEVELS:
+        c = compile_level(load_pack(PACK), lvl)
+        wc = c.win_condition.model_dump(exclude_none=True)
+        kill_clauses = [
+            clause for clause in wc.get("all_of", []) or []
+            if isinstance(clause, dict) and "units_killed_gte" in clause
+        ]
+        assert kill_clauses, f"{lvl}: missing units_killed_gte kill quota"
+        assert int(kill_clauses[0]["units_killed_gte"]) >= 4, (lvl, kill_clauses)
+
+
+def test_rush_arrives_as_a_scheduled_event():
+    """The rush is injected via `scheduled_events: spawn_actors` AFTER the
+    LINE has time to assemble — there is no t=0 enemy band racing the
+    build. This is what makes the build/rush race fair."""
+    for lvl in LEVELS:
+        pack = load_pack(PACK)
+        raw = pack.levels[lvl]
+        ov = getattr(raw, "overrides", None) or {}
+        if hasattr(ov, "model_dump"):
+            ov = ov.model_dump(exclude_none=True)
+        evts = ov.get("scheduled_events") or []
+        assert evts, f"{lvl}: expected a scheduled rush wave"
+        assert any(e.get("type") == "spawn_actors" for e in evts), (lvl, evts)
+
+
+def test_no_pre_placed_agent_combat_screen():
+    """The pbox LINE must be the sole kill source — there is no
+    pre-placed agent combat screen ringing the base. Only ONE
+    non-combatant agent e1 is parked in a far corner (so units_summary
+    is non-empty for the hard-tier env-reset check); it never fights."""
+    for lvl in LEVELS:
+        c = compile_level(load_pack(PACK), lvl)
+        agent_units = [
+            a for a in c.scenario.actors
+            if a.owner == "agent" and a.type == "e1"
+        ]
+        # At most one non-combatant marker per active spawn group.
+        assert len(agent_units) <= 2, (lvl, [a.position for a in agent_units])
+        for a in agent_units:
+            x, y = a.position
+            # Parked in a far corner, well clear of the y=18..22 lane.
+            assert x <= 6 and (y <= 6 or y >= 34), (lvl, a.position)
 
 
 def test_hard_has_two_spawn_point_groups():
