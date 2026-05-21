@@ -261,6 +261,26 @@ def _own_units(rs):
     return rs.get("units_summary") or []
 
 
+def _corner_fact(rs, corner):
+    """Return the enemy `fact` actor near ``corner`` from the
+    observation's ``enemy_buildings_summary`` (engine surfaces a
+    visible corner fact there with its real actor id), else None.
+
+    A bare ``attack_move`` to the corner cell no longer auto-engages
+    the building (post engine-balance armour-class weapon-selection
+    fix); the strike must ``attack_unit`` the fact by id to raze it.
+    """
+    for b in rs.get("enemy_buildings_summary") or []:
+        if str(b.get("type", "")).lower() != "fact":
+            continue
+        bx, by = b.get("cell_x"), b.get("cell_y")
+        if bx is None or by is None:
+            continue
+        if abs(int(bx) - corner[0]) <= 8 and abs(int(by) - corner[1]) <= 8:
+            return b
+    return None
+
+
 def stall(rs, C):
     """Observe-only — every unit sits at the staging cell. No corner
     fact ever destroyed; after_ticks fires → LOSS."""
@@ -293,25 +313,25 @@ def scout_but_no_commit(rs, C):
 
 
 def _make_blind(corner):
-    """Beeline ALL tanks to a fixed corner on turn 1 — no scout,
-    no spawn-aware corner choice. Used by the always-NE and
-    always-SE LOSS policies on hard."""
-    state = {"sent": False}
-
+    """Competent blind attacker: beeline ALL tanks to a FIXED corner
+    — no scout, no spawn-aware corner choice — and ``attack_unit``
+    the corner fact the instant it surfaces so the strike actually
+    razes. On easy/medium (single spawn, no curtain) this WINS; on
+    hard it LOSES on the seeds where the fixed corner is the
+    cross-axis target (the column traverses the x=85 e3 curtain and
+    bleeds ≥2 tanks past the units_lost_lte:1 cap)."""
     def policy(rs, C):
         units = _own_units(rs)
         if not units:
             return [C.observe()]
         tanks = [u for u in units if str(u.get("type", "")).lower() == "2tnk"]
-        if state["sent"]:
+        if not tanks:
             return [C.observe()]
-        if tanks:
-            state["sent"] = True
-            return [C.attack_move(
-                [str(t["id"]) for t in tanks],
-                target_x=corner[0], target_y=corner[1],
-            )]
-        return [C.observe()]
+        tids = [str(t["id"]) for t in tanks]
+        fact = _corner_fact(rs, corner)
+        if fact is not None:
+            return [C.attack_unit(tids, str(fact["id"]))]
+        return [C.attack_move(tids, target_x=corner[0], target_y=corner[1])]
     return policy
 
 
@@ -321,13 +341,18 @@ def make_intended():
       1. Turn 1: push BOTH jeeps to the two candidate corners (one
          NE, one SE) to confirm each corner has a fact.
       2. Read the tank centroid's y-band to identify the staging
-         latitude (NORTH y<15 / SOUTH y>25 / centre otherwise).
-      3. Commit the tank column on the LATITUDE-MATCHING corner
-         (NORTH → NE, SOUTH → SE, centre → NE by default). This
-         keeps the column on-axis (along the staging y-band) and
-         AWAY from the mid-lane e3 curtain on hard.
-      4. Attack-move at the chosen corner — the corner fact falls
-         to 4× 2tnk cannon fire well inside the deadline.
+         latitude (NORTH y<=20 → NE, SOUTH y>20 → SE).
+      3. Commit the tank column on the LATITUDE-MATCHING corner.
+         This keeps the column on-axis (along the staging y-band)
+         and AWAY from the mid-lane e3 curtain on hard, so the
+         tank column itself loses zero units; the only attrition
+         is the single cross-axis SCOUT jeep that crosses the
+         curtain — exactly the 1-unit cost the units_lost_lte:1
+         cap is calibrated to admit.
+      4. Once the chosen corner's fact surfaces, ``attack_unit``
+         it by id — the corner fact falls to 4× 2tnk cannon fire
+         well inside the deadline. (A bare attack_move no longer
+         razes a building post engine-balance fix.)
     """
     state = {"turn": 0, "commit": None}
 
@@ -344,12 +369,7 @@ def make_intended():
         else:
             ty = 20
         if state["commit"] is None:
-            if ty <= 15:
-                state["commit"] = NE
-            elif ty >= 25:
-                state["commit"] = SE
-            else:
-                state["commit"] = NE  # centre default
+            state["commit"] = NE if ty <= 20 else SE
         if state["turn"] == 1 and jeeps:
             if len(jeeps) >= 1:
                 cmds.append(C.move_units(
@@ -361,9 +381,14 @@ def make_intended():
                 ))
         if tanks and state["turn"] >= 2:
             tids = [str(t["id"]) for t in tanks]
-            cmds.append(C.attack_move(
-                tids, target_x=state["commit"][0], target_y=state["commit"][1],
-            ))
+            fact = _corner_fact(rs, state["commit"])
+            if fact is not None:
+                cmds.append(C.attack_unit(tids, str(fact["id"])))
+            else:
+                cmds.append(C.attack_move(
+                    tids, target_x=state["commit"][0],
+                    target_y=state["commit"][1],
+                ))
         if not cmds:
             cmds.append(C.observe())
         return cmds

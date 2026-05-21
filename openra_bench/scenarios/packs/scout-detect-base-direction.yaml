@@ -20,7 +20,7 @@
 # CLOCK / DISTANCE / ATTRITION penalty — on hard the agent's
 # spawn flips between a NORTH-leaning and a SOUTH-leaning stage
 # so the CLOSE corner alternates by seed; a mid-lane e3 picket
-# curtain at x=85, y=14..26 makes cross-axis commits attritionally
+# curtain at x=85, y=16..24 makes cross-axis commits attritionally
 # infeasible (the column traverses the rocket envelope and bleeds
 # past the units_lost_lte:1 cap).
 #
@@ -98,8 +98,12 @@
 #   - Decoy infantry at each corner are stance:0 (HoldFire) so a
 #     passing jeep at corner-vision range is not auto-killed; the
 #     scout step is a clean PERCEPTION task, not a combat task.
-#     The hard-tier curtain at x=85 is stance:3 (AttackAnything)
-#     — that picket IS the attrition tooth, not a decoy.
+#     The hard-tier curtain at x=85 is stance:2 (Defend — holds
+#     post, auto-fires on any agent unit IN RANGE but never
+#     advances) — that picket IS the attrition tooth, not a
+#     decoy. stance:2 (not stance:3) so the curtain only bites a
+#     column that drives INTO its rocket envelope; a stance:3
+#     hunter would chase the tanks map-wide and bite every route.
 #   - The `then:` happened-before composite is NOT used here per
 #     the spec — `any_of(corner_destroy_A, corner_destroy_B) +
 #     within_ticks + units_lost_lte` is the predicate idiom and
@@ -325,16 +329,16 @@ levels:
   # between NORTH (y=8 row) and SOUTH (y=32 row). The corner facts
   # are unchanged (both always place per engine semantics), but the
   # CLOSE corner alternates per seed AND a mid-lane e3 picket
-  # CURTAIN at x=85, y=14..26 makes cross-axis commits
-  # attritionally infeasible:
+  # CURTAIN at x=85, y=16..24 (stance:2 — hold post) makes
+  # cross-axis commits attritionally infeasible:
   #   - NORTH spawn (y=8): on-axis to NE (110, 8) keeps the tank
-  #     column at y=8 (≥6 cells north of the curtain's northern
-  #     end at y=14), safe ON-AXIS commit.
+  #     column at y≈8 (≥8 cells north of the curtain's northern
+  #     end at y=16), safe ON-AXIS commit — zero attrition.
   #   - SOUTH spawn (y=32): on-axis to SE (110, 32) keeps the
-  #     column at y=32 (≥6 cells south of curtain's southern end
-  #     at y=26), safe ON-AXIS commit.
+  #     column at y≈32 (≥8 cells south of curtain's southern end
+  #     at y=24), safe ON-AXIS commit — zero attrition.
   #   - Cross-axis (NORTH → SE or SOUTH → NE): the diagonal path
-  #     crosses x=85 inside the y=14..26 curtain envelope,
+  #     crosses x=85 inside the y=16..24 curtain envelope,
   #     engages 2+ e3 at rocket range, and bleeds past the
   #     units_lost_lte:1 cap → LOSS.
   # The deadline is loosened slightly to 2700 ticks (vs 2500 on
@@ -359,7 +363,7 @@ levels:
       reach. Push BOTH jeeps to confirm BOTH corners, then commit
       the tanks on the corner that is ON the same latitude band
       as your own staging. A row of enemy rocket infantry holds
-      the middle (x≈85, y≈14..26) — the on-axis route bypasses
+      the middle (x≈85, y≈16..24) — the on-axis route bypasses
       them, but a cross-axis commit (NORTH spawn → SE corner,
       SOUTH spawn → NE corner) drives the tank column through
       the rocket envelope and bleeds past the attrition cap.
@@ -372,7 +376,7 @@ levels:
         # ── spawn_point 0: NORTH-LEANING staging at y=8. NE
         # corner (110, 8) is the ON-AXIS reach (tank column
         # travels along y=6..10, never enters the x=85 e3 curtain
-        # envelope at y=14..26). SE corner (110, 32) is the
+        # envelope at y=16..24). SE corner (110, 32) is the
         # CROSS-AXIS reach (must descend through curtain or route
         # around at heavy time/attrition cost).
         - {type: 2tnk, owner: agent, position: [10, 6], stance: 1, spawn_point: 0}
@@ -402,22 +406,28 @@ levels:
         - {type: e1,   owner: enemy, position: [108, 31], stance: 0}
         - {type: fact, owner: enemy, position: [124, 20]}
         # ── MID-LANE INTERCEPTOR CURTAIN — hard-tier-only.
-        # A VERTICAL line of 7× e3 rocket infantry at x=85
-        # spanning y=14..26 stance:3 (AttackAnything). This is
-        # the GEOMETRIC tooth that makes the seed-driven near-
+        # A VERTICAL line of 5× e3 rocket infantry at x=85
+        # spanning y=16..24 stance:2 (Defend — hold post, auto-
+        # fire on any agent unit IN RANGE but never advance).
+        # stance:2 (NOT stance:3) is load-bearing: a stance:3
+        # AttackAnything curtain HUNTS the tank column across the
+        # whole map and bites every route, collapsing the
+        # geometric discrimination; a stance:2 curtain only fires
+        # on a column that drives INTO its rocket envelope. This
+        # is the GEOMETRIC tooth that makes the seed-driven near-
         # corner choice load-bearing on hard:
         #   - NORTH spawn → NE corner: tanks travel along y=8,
-        #     pass x=85 at y=8 (≥6 cells north of the curtain's
-        #     northern end at y=14), never inside the e3 rocket
-        #     envelope (~5 cells). Safe ON-AXIS commit.
+        #     pass x=85 at y≈8 (≥8 cells north of the curtain's
+        #     northern end at y=16), outside the e3 rocket
+        #     envelope. Safe ON-AXIS commit — zero attrition.
         #   - SOUTH spawn → SE corner: tanks travel along y=32,
-        #     pass x=85 at y=32 (≥6 cells south of curtain's
-        #     southern end at y=26). Safe ON-AXIS commit.
+        #     pass x=85 at y≈32 (≥8 cells south of the curtain's
+        #     southern end at y=24). Safe ON-AXIS commit.
         #   - NORTH spawn → SE corner OR SOUTH spawn → NE corner
         #     (the CROSS-AXIS commit): the diagonal path crosses
-        #     x=85 inside the y=14..26 curtain or attempts to
-        #     route around — engages 2+ e3 at close rocket range
-        #     and busts the `units_lost_lte:1` cap. Without this
+        #     x=85 inside the y=16..24 curtain envelope, engages
+        #     2+ e3 at close rocket range and busts the
+        #     `units_lost_lte:1` cap (≥2 tanks lost). Without this
         #     curtain both corners are reachable from either
         #     spawn with no attrition cost and a memorised
         #     "always strike NE" wins half the seeds without a
@@ -425,13 +435,11 @@ levels:
         #     must IDENTIFY its OWN spawn latitude (from
         #     observation) and commit to the LATITUDE-MATCHING
         #     corner.
-        - {type: e3, owner: enemy, position: [85, 14], stance: 3}
-        - {type: e3, owner: enemy, position: [85, 16], stance: 3}
-        - {type: e3, owner: enemy, position: [85, 18], stance: 3}
-        - {type: e3, owner: enemy, position: [85, 20], stance: 3}
-        - {type: e3, owner: enemy, position: [85, 22], stance: 3}
-        - {type: e3, owner: enemy, position: [85, 24], stance: 3}
-        - {type: e3, owner: enemy, position: [85, 26], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [85, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [85, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [85, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [85, 24], stance: 2}
     win_condition:
       all_of:
         - any_of:
