@@ -1,0 +1,323 @@
+# combat-stance-mgmt-attack.yaml
+#
+# ACTION capability — the HUNT-side counterpart to
+# `def-stance-mgmt-hold-then-attack`. The agent starts with a 4×2tnk
+# formation pre-staged at the west edge on **stance:1 (ReturnFire)**.
+# Enemy units (e1 + 1tnk) are SCATTERED across the eastern half of
+# the map at coordinates that are OUT of the agents' starting
+# return-fire range (i.e. far enough that even if a tank wandered
+# into one's rifle, the e1 doesn't see / reach the tank). On
+# stance:1 with no incoming fire, the tanks IDLE FOREVER — they
+# never open fire because (a) return-fire requires having been hit
+# and (b) the scattered enemies aren't shooting at them. The agent
+# MUST call `set_stance(units, 3)` to lift the tanks to AttackAnything
+# so the engine's stance:3 hunt path advances them to each scattered
+# enemy and kills them on contact.
+#
+# This pack is the engagement-authority MIRROR of
+# `def-stance-mgmt-hold-then-attack`:
+#   - The HOLD pack tests "stance:0 → flip to :3" so a pre-staged
+#     overwatch can engage an inbound rush at the choke. The win
+#     idiom is "raze incoming column at the kill zone".
+#   - THIS pack tests "stance:1 → flip to :3" so a pre-staged
+#     formation can HUNT scattered enemies that don't bring the
+#     fight to them. The win idiom is "advance & wipe a dispersed
+#     enemy force". Without the flip, stance:1 keeps the formation
+#     in place (no incoming fire ⇒ no return fire) AND blocks the
+#     hunt path, so the deadline bites as a real LOSS on
+#     `not units_killed_gte:K`.
+#
+# Real-world / benchmark anchors:
+#   - Military rules-of-engagement (ROE) — escalation from a
+#     defensive posture ("weapons hold / weapons tight, fire on
+#     contact") to an offensive posture ("weapons free, advance
+#     and engage"). The decision to ESCALATE the engagement
+#     authority is itself the load-bearing operator command.
+#   - SC2 stance micro — flipping from Hold Position / Attack Stance
+#     to Move + Attack (a-move) so the army hunts down the
+#     opponent's scattered worker/army instead of sitting on the
+#     ramp. The decision to commit to the hunt IS the verb.
+#
+# DISCRIMINATIONS (the bar — stall LOSES on every level / seed; the
+# intended set_stance(3) play WINS on every level / seed):
+#
+#   • stall (only `observe()`): defenders stay on stance:1
+#     (ReturnFire) the entire run. The scattered enemies don't
+#     attack first (they're configured stance:0 / non-aggressive
+#     positioning), so the tanks never receive fire ⇒ never return
+#     fire ⇒ never advance ⇒ kills stay at 0 ⇒ `units_killed_gte:K`
+#     fails ⇒ deadline bites ⇒ LOSS. Independently the persistent
+#     enemy `fact` marker keeps the episode alive past the inert
+#     scatter so the timeout is the real losing edge.
+#
+#   • intended (set_stance(unit_ids, 3) once tanks are visible):
+#     the tanks become hunters; the stance:3 auto-engage scan
+#     finds the nearest scattered enemy and ADVANCES toward it
+#     (engine's hunt path — see `world.rs` stance:3 + best_hunt).
+#     On arrival the next-tick scan promotes the encounter into
+#     an Attack and the tank one-shots the e1 / kills the 1tnk.
+#     ≥K kills logged, fact intact (no enemy ever closes on the
+#     agent's fact — they're scattered), well under the tick
+#     deadline ⇒ WIN every level and every hard seed.
+#
+# ENGINE FACTS used (CLAUDE.md / world.rs):
+#   - stance:1 (ReturnFire) requires the unit to have received
+#     hostile damage within RETURN_FIRE_WINDOW=60 inner-ticks before
+#     the auto-engage scan licenses a counter-attack. Without a
+#     fresh hit, a stance:1 unit holds fire even on enemies inside
+#     its weapon range — the load-bearing distinction this pack
+#     exploits (and that `test_stance_semantics.rs::
+#     test_stance_1_return_fire_only_against_passive_enemy` pins).
+#   - stance:3 (AttackAnything) extends the auto-engage scan with
+#     a HUNT path: if no enemy is in weapon range, the unit issues
+#     a Move toward the nearest visible enemy within sight+bonus
+#     (HUNT_SIGHT_BONUS=20 cells). On arrival the next scan kicks
+#     in the in-range attack branch. Pinned by
+#     `test_stance_semantics.rs::test_stance_3_hunts_visible_enemy`.
+#   - 2tnk vs e1: ~1-shot kill (combat-focus-fire-priority);
+#     2tnk vs 1tnk: ~6 shots, well under 100 inner-ticks per duel.
+#   - Tick budget: ~90 ticks/turn ⇒ max_tick ≤ 93 + 90·(max_turns-1).
+#     after_ticks 4501 with max_turns 60 ⇒ 4501 ≤ 5403 ✓ (deadline
+#     bites; non-win is a real LOSS, not a draw).
+#   - Inert enemy `fact` marker keeps the episode alive past full
+#     enemy-elim, so the timeout/win predicate is what decides.
+#   - Enemy actors with NO spawn_point ALWAYS place regardless of
+#     the agent's spawn group (CLAUDE.md). Hard varies the AGENT
+#     formation latitude per seed (NORTH y=14..16 vs SOUTH y=24..26)
+#     so a memorised "hunt vector (10,20)→(60,20)" doesn't
+#     generalise — the formation's start y is seed-driven.
+#
+# Hard-tier curation: this pack IS spawn-varied on hard (formation
+# latitude rotates by seed). Registered in tests/test_hard_tier.py::
+# UPGRADED.
+#
+# Benchmark anchor: military ROE escalation (defensive → offensive);
+# SC2 stance micro (a-move commit to the hunt).
+
+meta:
+  id: combat-stance-mgmt-attack
+  title: 'Hunt Authorisation — Lift Stance to Pursue Scattered Enemies'
+  capability: action
+  real_world_meaning: >
+    An engagement-authority escalation drill: four medium tanks are
+    pre-staged at the west edge of the arena on RETURN-FIRE
+    (stance:1) — they will not open fire unless attacked. A
+    scattered enemy force (riflemen + a light tank) is spread
+    across the eastern half of the map at positions that don't
+    bring the fight to the agents. The mission is to call
+    `set_stance(units, 3)` to escalate the formation to
+    AttackAnything so the engine's stance:3 hunt path advances each
+    tank to the nearest scattered enemy and wipes them out. Without
+    the escalation the formation idles (return-fire never
+    triggered, hunt never licensed) and the deadline bites as a
+    real LOSS.
+  robotics_analogue: >
+    A patrol-vs-pursuit authority switch: a perimeter defence team
+    is on weapons-tight standing orders (return fire only). The
+    operator detects scattered hostiles deep in the perimeter that
+    aren't engaging the defenders. The operator must issue the
+    "weapons free, hunt and clear" command to escalate the team
+    from defensive return-fire to active pursuit. The skill is the
+    operator's decision to ESCALATE the engagement-authority at
+    all — not the precise moment within the engagement window.
+  benchmark_anchor:
+    - "military ROE escalation"
+    - "SC2 stance micro"
+  author: openra-bench
+
+# rush-hour-arena: 128×40 playable. Agents at west edge; scattered
+# enemies in the eastern half.
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    # No bot_type: the enemies are STATIC scattered pre-placements.
+    # A rusher would bring the fight to the agents, which lets
+    # stance:1 fire back via the return-fire path and breaks the
+    # stance:3 hunt discriminator.
+  # Combat-only toolset (NO build / NO harvest). `set_stance` is the
+  # load-bearing verb. `attack_unit`/`attack_move`/`move_units` are
+  # also available; a brute "attack_move east on turn 1" can win
+  # too — that's fine, the bar only requires the intended policy
+  # (set_stance(3)) to win cleanly; stall must lose.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+    - set_stance
+  planning: true
+  termination:
+    max_ticks: 6000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare hunt-authorisation skill: 4× 2tnk at (10,18..22) on
+  # stance:1; 4× e1 scattered at (40,15), (60,25), (80,18), (95,22)
+  # all on stance:0. The agent must call set_stance(units, 3) so
+  # the tanks hunt down each e1. Stall (never flip) ⇒ tanks never
+  # receive fire (e1s are stance:0, won't shoot) ⇒ return-fire
+  # gate never opens ⇒ tanks never advance ⇒ kills stay at 0 ⇒
+  # `units_killed_gte:3` fails ⇒ after_ticks fires ⇒ LOSS.
+  # max_turns 60 → reachable tick ≈ 5403; after_ticks 4501 bites.
+  easy:
+    description: >
+      HUNT AUTHORISATION: four medium tanks (2tnk) are pre-staged
+      at the west edge (x=10) on RETURN-FIRE (stance:1). Four
+      enemy riflemen (e1) are SCATTERED across the eastern half of
+      the map at positions that don't engage you. On stance:1 the
+      tanks idle (no incoming fire ⇒ no return fire ⇒ no advance).
+      Call `set_stance(units, 3)` to escalate the formation to
+      AttackAnything so it hunts each scattered enemy and wipes
+      them out. Win when ≥3 enemies are killed AND your fact is
+      intact AND ≥3 of 4 tanks survive, before tick 4500. Stalling
+      (never flipping) and timeout both LOSE.
+    overrides:
+      actors:
+        # Agent construction yard — west edge, never under threat
+        # because the enemies are scattered and non-aggressive.
+        - {type: fact, owner: agent, position: [5, 20]}
+        # 4× 2tnk at the west on stance:1 (ReturnFire). They will
+        # NOT fire on their own; the scattered enemies never shoot
+        # at them so return-fire never triggers either.
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [11, 20], stance: 1}
+        # 4× e1 scattered across the eastern half, all on stance:0
+        # so they never fire first — denies the return-fire path.
+        # Spread in both x and y so a stance:3 hunter picks the
+        # nearest and ADVANCES; the in-range branch alone can't
+        # win because no e1 is in cannon range of any tank.
+        - {type: e1, owner: enemy, position: [40, 15], stance: 0}
+        - {type: e1, owner: enemy, position: [60, 25], stance: 0}
+        - {type: e1, owner: enemy, position: [80, 18], stance: 0}
+        - {type: e1, owner: enemy, position: [95, 22], stance: 0}
+        # Inert enemy `fact` marker far east (anti-DRAW): without
+        # a persistent enemy actor the engine auto-`done`s on
+        # enemy-elim before the win/fail evaluator runs.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {units_killed_gte: 3}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: harder enemy mix (3× e1 + 1× 1tnk). The
+  # 1tnk has more HP (23000) so the cannon duel takes ~6 shots
+  # instead of 1; still well under the tick budget for the intended
+  # hunt-and-engage play. Same stance discrimination: stance:1 idles,
+  # stance:3 hunts.
+  medium:
+    description: >
+      HUNT AUTHORISATION: four medium tanks (2tnk) are pre-staged
+      at the west edge on RETURN-FIRE (stance:1). A scattered enemy
+      force (3 e1 + 1 1tnk) is spread across the eastern half. The
+      enemies are non-aggressive (stance:0) — they won't bring the
+      fight to you. Call `set_stance(units, 3)` to escalate the
+      formation to AttackAnything so the tanks hunt the scatter
+      down. Win when ≥4 enemies are killed AND your fact is intact
+      AND ≥3 of 4 tanks survive, before tick 4500. Stall and
+      timeout both LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [5, 20]}
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [11, 20], stance: 1}
+        # 3× e1 + 1× 1tnk, scattered and passive.
+        - {type: e1, owner: enemy, position: [40, 15], stance: 0}
+        - {type: e1, owner: enemy, position: [60, 28], stance: 0}
+        - {type: e1, owner: enemy, position: [80, 12], stance: 0}
+        - {type: 1tnk, owner: enemy, position: [95, 22], stance: 0}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {units_killed_gte: 4}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: ≥2 agent spawn_point groups so the
+  # formation latitude varies per seed (NORTH y=14..16 vs SOUTH
+  # y=24..26). The enemy scatter is the same composition
+  # (3 e1 + 1 1tnk) but distributed symmetrically in y across the
+  # eastern half so the hunt vectors differ per spawn group.
+  # CLAUDE.md: enemy actors don't honour spawn_point so the
+  # scatter ALWAYS places — vary the agent start instead. Same
+  # tick-aligned deadline; same kill bar (≥4).
+  hard:
+    description: >
+      HUNT AUTHORISATION: four medium tanks (2tnk) are pre-staged
+      at the west edge (~10, seed-chosen latitude — NORTH y≈15 or
+      SOUTH y≈25) on RETURN-FIRE (stance:1). A scattered enemy
+      force (3 e1 + 1 1tnk) is spread across the eastern half at
+      non-aggressive positions (stance:0). Escalate via
+      `set_stance(units, 3)` so the tanks hunt the scatter; the
+      formation latitude is seed-driven so a memorised hunt
+      vector does not generalise — only the DOCTRINE (escalate
+      the stance, let the engine hunt) wins on every seed. Win
+      when ≥4 enemies are killed AND your fact is intact AND ≥3
+      of 4 tanks survive, before tick 4500.
+    overrides:
+      actors:
+        # Duplicate the fact across BOTH spawn groups at the same
+        # cell so it places regardless of which group seeds in
+        # (CLAUDE.md: if ANY agent actor declares spawn_point, every
+        # agent actor WITHOUT spawn_point is filtered OUT).
+        - {type: fact, owner: agent, position: [5, 20], spawn_point: 0}
+        - {type: fact, owner: agent, position: [5, 20], spawn_point: 1}
+        # spawn_point 0 — NORTH formation at y=14..16 (centroid y=15).
+        - {type: 2tnk, owner: agent, position: [10, 14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 15], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [11, 15], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH formation at y=24..26 (centroid y=25).
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 25], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [11, 25], stance: 1, spawn_point: 1}
+        # Scatter — same composition; enemy actors don't honour
+        # spawn_point so this places every seed. Spread in y so
+        # either spawn group has a hunt vector for each target.
+        - {type: e1, owner: enemy, position: [40, 18], stance: 0}
+        - {type: e1, owner: enemy, position: [60, 22], stance: 0}
+        - {type: e1, owner: enemy, position: [80, 14], stance: 0}
+        - {type: 1tnk, owner: enemy, position: [95, 26], stance: 0}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {has_building: fact}
+        - {units_killed_gte: 4}
+        - {own_units_gte: 3}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 60
