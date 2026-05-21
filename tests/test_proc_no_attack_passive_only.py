@@ -10,6 +10,18 @@ Validation is scripted (no model / network). The four policies below
 are exhaustive proxies for the failure modes the pack discriminates:
 they exercise the predicate teeth (tool_violations_gte, units_lost_lte,
 after_ticks, reach_region) directly through eval_core.run_level.
+
+Recalibrated after the engine balance fixes (armor-class weapon
+selection, stance semantics, parallel production, pbox-fires): the
+sentry posts were e3 rocket-soldiers, but post-fix a fast jeep column
+(~13 cells/turn) crosses an infantry post in one decision turn and
+the rifles' single fire window does not connect — the wrong-path
+policy then drove straight through the kill lane unscathed and WON.
+The posts are now `gun` turret emplacements: a fixed turret with the
+long-range anti-armour TurretGun tracks and brackets the crossing
+jeep column. The wrong-path policy now loses the column on every
+level + seed, and (the turrets being immobile) a stall loses purely
+on the timeout rather than to a hunting infantry sentry.
 """
 
 from __future__ import annotations
@@ -235,8 +247,9 @@ def _stall_policy(rs, Command):
 def _wrong_path_policy(rs, Command):
     """Drive straight east along y=20 — through the sentry kill-zone.
     Move-only (no forbidden tool calls); jeeps are stance:0 so they
-    don't auto-return-fire. The sentries (stance:3 e3 bracketing
-    y=18..22) bleed the column past the attrition cap on every tier."""
+    don't auto-return-fire. The sentries (stance:3 `gun` turret
+    nests bracketing y=18..22) bracket the jeep column as it crosses
+    and down it past the attrition cap on every tier."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
