@@ -28,10 +28,12 @@ The scripted-policy validations prove deterministically that:
   on the e3 rocket soldier every turn from t=0) WINS every
   level + every hard seed (1..4);
 * stall / build-only (queue pbox but never command tanks — the
-  HoldFire tanks stay idle, rush razes fact) / defend-only
-  (attack_unit tanks but never build pbox — pbox bar unmet ⇒
-  clock LOSS) ALL LOSE every level + every hard seed — a real
-  LOSS, not a draw;
+  close-staged rush razes the fact before the serial pbox
+  cluster can fire) / defend-only (attack_unit tanks but never
+  build pbox — on easy the pbox bar is unmet ⇒ clock LOSS, on
+  medium/hard the heavier band out-attritions the un-reinforced
+  tank line ⇒ fact-razed LOSS) ALL LOSE every level + every
+  hard seed — a real LOSS, not a draw;
 * the hard tier defines ≥2 spawn_point groups (north fact y=14 /
   south fact y=26) so a memorised opening cannot generalise.
 """
@@ -147,10 +149,9 @@ def make_intended_concurrent():
 def make_build_only():
     """BUILD-ONLY: queue + place pbox every turn but NEVER command
     the tanks. The HoldFire tanks stay idle even when shot at;
-    the rush walks past them and hits the fact before the pbox
-    cluster comes online (3 pbox needs ~9-12 turns to serial-
-    build; the rush arrives in <8 turns). LOSS via fact-alive
-    fail clause."""
+    the close-staged rush hits the fact in ~4 turns, before the
+    serial 3-pbox cluster (~9-12 turns) can come online and
+    fire. LOSS via fact-alive fail clause."""
     state = {"cells": None}
 
     def policy(rs, C):
@@ -170,10 +171,11 @@ def make_build_only():
 
 def make_defend_only():
     """DEFEND-ONLY: attack_unit the tanks at the e3 every turn but
-    NEVER call build('pbox'). Commanded tanks engage and may even
-    clear the rush, but the pbox count bar (≥3) is never
-    satisfied ⇒ `within_ticks` unmet ⇒ `after_ticks` fires →
-    LOSS."""
+    NEVER call build('pbox'). On easy the commanded tanks hold
+    the fact but the pbox count bar (≥3) is never satisfied ⇒
+    `within_ticks` unmet ⇒ `after_ticks` fires → LOSS; on
+    medium/hard the heavier band out-attritions the un-
+    reinforced tank line and razes the fact → LOSS."""
     def policy(rs, C):
         cmds = []
         tnks = _own_2tnk_ids(rs)
@@ -347,7 +349,8 @@ def test_single_stream_policies_lose_every_level_and_seed(
 ):
     """Stall (HoldFire tanks idle, fact razed), build-only (rush
     razes fact before cluster online), defend-only (pbox bar
-    unmet → clock LOSS) — ALL must LOSE every level + every seed,
+    unmet on easy → clock LOSS; out-attritioned on medium/hard →
+    fact-razed LOSS) — ALL must LOSE every level + every seed,
     no draw."""
     c = compile_level(load_pack(PACK), level)
     fn = policy_factory()
