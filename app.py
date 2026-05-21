@@ -1026,6 +1026,163 @@ Then run `evaluate.py --agent custom` with your agent integrated.
 """
 
 
+# ── Play tab (human-labeling machine) ─────────────────────────────────────────
+# Lets a human play the exact scenarios LLM agents are scored on, by
+# clicking the minimap — the Phase 2 human-labeling machine. Backed by
+# openra_bench.human_labeling.InteractiveSession (turn-steppable) so a
+# human's run is scored by the identical rules as a model's.
+
+_PLAY_LEVELS = ["easy", "medium", "hard"]
+
+
+def _play_scenarios() -> list[str]:
+    """Active pack ids playable in the Play tab."""
+    try:
+        from openra_bench.scenarios import load_pack
+        from openra_bench.scenarios.loader import PACKS_DIR
+
+        out = []
+        for f in sorted(PACKS_DIR.glob("*.yaml")):
+            if f.name.startswith(("_", "TEMPLATE")):
+                continue
+            try:
+                if load_pack(f).meta.status == "active":
+                    out.append(f.stem)
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _play_minimap(render_state: dict):
+    """PIL minimap image — the same view an LLM agent is shown."""
+    try:
+        import base64
+        import io
+
+        from PIL import Image
+
+        from openra_bench.minimap import render_png_b64
+
+        b64 = render_png_b64(render_state)
+        if not b64:
+            return None
+        return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _play_status_md(sess) -> str:
+    if sess is None:
+        return "_No active session — pick a scenario and click **Start**._"
+    st = sess.status()
+    line = f"**Turn {st['turn']}/{st['max_turns']}** · tick {st['tick']}"
+    if st["done"]:
+        line += f" · **{st['outcome'].upper()}** — game over"
+    return line
+
+
+def _play_briefing_md(sess, sel, queue) -> str:
+    if sess is None:
+        return ""
+    try:
+        from openra_bench.human_labeling import HumanController
+
+        brief = HumanController._briefing(sess.render_state())
+    except Exception:  # noqa: BLE001
+        brief = ""
+    sel_txt = ", ".join(sel) if sel else "(none)"
+    q_txt = "; ".join(a.describe() for a in queue) if queue else "(none)"
+    return (
+        f"```\n{brief}\n```\n\n"
+        f"**Selected units:** {sel_txt}  \n"
+        f"**Queued this turn:** {q_txt}"
+    )
+
+
+def _play_render(sess, sel, queue):
+    img = _play_minimap(sess.render_state()) if sess is not None else None
+    return img, _play_briefing_md(sess, sel, queue), _play_status_md(sess)
+
+
+def _play_start(prev_sess, pack, level, seed):
+    # Release any prior session's engine env before opening a new one.
+    if prev_sess is not None:
+        try:
+            prev_sess.close()
+        except Exception:  # noqa: BLE001
+            pass
+    if not pack:
+        return None, [], [], None, "", "_pick a scenario first_"
+    try:
+        from openra_bench.human_labeling import InteractiveSession
+
+        sess = InteractiveSession.from_pack(
+            pack, level or "easy", int(seed or 1)
+        )
+    except Exception as e:  # noqa: BLE001
+        return None, [], [], None, f"⚠️ {e}", "_start failed_"
+    img, brief, status = _play_render(sess, [], [])
+    return sess, [], [], img, brief, status
+
+
+def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
+    """Translate a minimap click into a selection or a queued order."""
+    if sess is None or evt is None or evt.index is None:
+        return sel, queue, _play_briefing_md(sess, sel, queue)
+    try:
+        from openra_bench.human_labeling import (
+            HumanAction,
+            enemy_at_cell,
+            minimap_click_to_cell,
+            own_units_at_cell,
+        )
+
+        px, py = evt.index  # native image pixels
+        rs = sess.render_state()
+        rows = [r for r in (rs.get("minimap") or "").split("\n") if r]
+        if not rows:
+            return sel, queue, _play_briefing_md(sess, sel, queue)
+        h = len(rows)
+        w = max(len(r) for r in rows)
+        cell = 6  # openra_bench.minimap.CELL
+        cx, cy = minimap_click_to_cell(
+            px, py, w * cell, h * cell, w, h
+        )
+        if mode == "Move here" and sel:
+            queue = queue + [
+                HumanAction(mode="move", units=list(sel), target=(cx, cy))
+            ]
+        elif mode == "Attack here" and sel:
+            tid = enemy_at_cell(rs, cx, cy, radius=1)
+            queue = queue + [
+                HumanAction(
+                    mode="attack", units=list(sel),
+                    target_id=tid, target=(cx, cy),
+                )
+            ]
+        else:  # "Select units"
+            sel = own_units_at_cell(rs, cx, cy, radius=1)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("play click failed: %s", e)
+    return sel, queue, _play_briefing_md(sess, sel, queue)
+
+
+def _play_end_turn(sess, sel, queue):
+    if sess is not None and not sess.done:
+        try:
+            sess.submit_turn(list(queue))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("play submit_turn failed: %s", e)
+    img, brief, status = _play_render(sess, [], [])
+    return sess, [], [], img, brief, status
+
+
+def _play_clear(sess):
+    return [], [], _play_briefing_md(sess, [], [])
+
+
 def build_app() -> gr.Blocks:
     """Build the Gradio leaderboard app."""
     initial_df = add_type_badges(load_data())
@@ -1210,6 +1367,82 @@ def build_app() -> gr.Blocks:
                     bv_on_run, [bv_idx, bv_run], bv_model
                 ).then(
                     bv_on_model, [bv_idx, bv_run, bv_model], bv_scen
+                )
+
+            # ── Play Tab (human-labeling machine) ─────────────────────────
+            # Play the exact scenarios LLM agents are scored on, by
+            # clicking the minimap. Backed by InteractiveSession so a
+            # human's run is graded by the identical win/fail rules —
+            # human-vs-LLM comparison on one bench.
+            with gr.Tab("Play"):
+                gr.Markdown(
+                    "Play a scenario yourself — the same scenarios LLM "
+                    "agents are scored on. Pick a **scenario → level → "
+                    "seed**, click **Start**, then click the minimap to "
+                    "select units and give orders, and **End Turn** to "
+                    "advance. You are graded by the identical win/fail "
+                    "rules as the models."
+                )
+                play_sess = gr.State(None)
+                play_sel = gr.State([])
+                play_queue = gr.State([])
+                with gr.Row():
+                    play_scen = gr.Dropdown(
+                        choices=_play_scenarios(), label="Scenario",
+                        scale=3,
+                    )
+                    play_level = gr.Dropdown(
+                        choices=_PLAY_LEVELS, value="easy",
+                        label="Level", scale=1,
+                    )
+                    play_seed = gr.Number(
+                        value=1, label="Seed", precision=0, scale=1,
+                    )
+                    play_start = gr.Button("▶ Start", scale=1)
+                play_status = gr.Markdown(_play_status_md(None))
+                with gr.Row():
+                    play_img = gr.Image(
+                        label="Minimap — click to select units / give orders",
+                        height=360, interactive=False, show_label=True,
+                    )
+                    play_brief = gr.Markdown()
+                with gr.Row():
+                    play_mode = gr.Radio(
+                        choices=[
+                            "Select units", "Move here", "Attack here",
+                        ],
+                        value="Select units", label="Click mode", scale=3,
+                    )
+                    play_clear_btn = gr.Button("Clear queued", scale=1)
+                    play_end_btn = gr.Button(
+                        "End Turn ▶", variant="primary", scale=1,
+                    )
+
+                play_start.click(
+                    _play_start,
+                    inputs=[play_sess, play_scen, play_level, play_seed],
+                    outputs=[
+                        play_sess, play_sel, play_queue,
+                        play_img, play_brief, play_status,
+                    ],
+                )
+                play_img.select(
+                    _play_click,
+                    inputs=[play_sess, play_sel, play_queue, play_mode],
+                    outputs=[play_sel, play_queue, play_brief],
+                )
+                play_end_btn.click(
+                    _play_end_turn,
+                    inputs=[play_sess, play_sel, play_queue],
+                    outputs=[
+                        play_sess, play_sel, play_queue,
+                        play_img, play_brief, play_status,
+                    ],
+                )
+                play_clear_btn.click(
+                    _play_clear,
+                    inputs=[play_sess],
+                    outputs=[play_sel, play_queue, play_brief],
                 )
 
             # ── About Tab ─────────────────────────────────────────────────

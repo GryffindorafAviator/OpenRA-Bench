@@ -1280,3 +1280,46 @@ class TestBuildResponse:
             msg = _build_response("Bot", "RL", "Normal", "alice", "")
         assert "2/5" in msg
         assert "Play 3 more" in msg
+
+
+# ── Play tab (human-labeling machine) ───────────────────────────────
+
+
+class TestPlayTab:
+    """The Phase 2 'Play' tab helpers — humans play the same scenarios
+    LLM agents are scored on, by clicking the minimap."""
+
+    def test_play_scenarios_lists_active_packs(self):
+        from app import _play_scenarios
+
+        scen = _play_scenarios()
+        assert isinstance(scen, list)
+        # The bench has 200 active packs; a non-empty list of ids.
+        assert len(scen) > 10
+        assert all(isinstance(s, str) for s in scen)
+
+    def test_play_status_md_no_session(self):
+        from app import _play_status_md
+
+        assert "pick a scenario" in _play_status_md(None).lower()
+
+    def test_play_briefing_md_no_session_is_empty(self):
+        from app import _play_briefing_md
+
+        assert _play_briefing_md(None, [], []) == ""
+
+    def test_play_start_rejects_empty_pack(self):
+        from app import _play_start
+
+        sess, sel, queue, img, brief, status = _play_start(
+            None, "", "easy", 1
+        )
+        assert sess is None
+        assert sel == [] and queue == []
+        assert "scenario" in status.lower()
+
+    def test_play_clear_resets_selection_and_queue(self):
+        from app import _play_clear
+
+        sel, queue, _brief = _play_clear(None)
+        assert sel == [] and queue == []
