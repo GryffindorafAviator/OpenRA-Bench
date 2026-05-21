@@ -1577,11 +1577,13 @@ def build_app() -> gr.Blocks:
                     play_start = gr.Button("▶ Start", scale=1)
                 play_objective = gr.Markdown()
                 play_status = gr.Markdown(_play_status_md(None))
-                # Minimap on its own full-width row so it renders large.
+                # Minimap on its own full-width row. No fixed height —
+                # it renders at its natural aspect so there is no
+                # letterbox band wasting space.
                 play_img = gr.Image(
                     label="Minimap — click your unit, then click where "
                     "to send it",
-                    height=620, interactive=False, show_label=True,
+                    interactive=False, show_label=True,
                 )
                 play_brief = gr.Markdown()
                 play_units = gr.Dataframe(
