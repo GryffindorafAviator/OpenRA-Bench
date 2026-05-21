@@ -21,8 +21,10 @@
 # system failures at once. SC2 multi-front simultaneous pressure. DR
 # multi-system failure response. The discriminating policies:
 #
-#   • stall (only observe): LOSS — no weap built, harvs don't deliver
-#     (`harvest` order needed each turn), eventually clock expires.
+#   • stall (only observe): LOSS — the un-commanded Defend-stance
+#     tank ring cannot kill both raiders before a harvester falls
+#     (`harvest` order needed each turn too), so the harv-count fail
+#     clause bites ⇒ real raze LOSS, never a stalemate DRAW.
 #   • focus-defence-skip-tech (queue defenders, hold the line, never
 #     start weap): LOSS — weap never appears ⇒ the has_building:weap
 #     clause never latches ⇒ timeout LOSS via after_ticks.
@@ -33,9 +35,11 @@
 #     the idle harvs add no income ⇒ timeout LOSS via after_ticks.
 #     (Lose-the-harv mode is also possible if the raiders reach
 #     the unprotected harvs, but the EV teeth bite first.)
-#   • intended multi-handle (keep harv ring on the patch, defenders
-#     intercept raiders, queue weap from turn 1, fund it with the
-#     harv income that keeps flowing): WIN.
+#   • intended multi-handle (keep harvs in `harvest` mode, ACTIVELY
+#     command the tank ring to intercept the nearest raider/hunter,
+#     queue weap from turn 1, fund it with the harv income that keeps
+#     flowing): WIN. The defenders must be commanded — passive Defend
+#     stance is not enough to kill both raiders before a harv dies.
 #
 # DESIGN
 # ──────
@@ -43,11 +47,14 @@
 #   target (Infantry / Vehicle / MCV / Building per scripted_bot.rs
 #   `foes()`). The TANK raiders are lined up directly east of the
 #   harv lane (their nearest agent target is the harv at the patch
-#   ⇒ economy harassment); the INFANTRY hunters are staged on
-#   FLANKING latitudes where the nearest agent target is the fact /
-#   proc / powr (⇒ base-hunt pressure). Same bot, two threat axes
-#   driven by geometry — the "raider for econ + hunt for base" of
-#   the spec is realised by positioning, not by two bot types.
+#   ⇒ economy harassment); the INFANTRY hunters (rifle e1 only —
+#   after the engine combat-balance pass the rocket e3 vs 1tnk
+#   match-up is too lopsided to leave the agent's tank ring a
+#   survivable fight) are staged on FLANKING latitudes where the
+#   nearest agent target is the fact / proc / powr (⇒ base-hunt
+#   pressure). Same bot, two threat axes driven by geometry — the
+#   "raider for econ + hunt for base" of the spec is realised by
+#   positioning, not by two bot types.
 # - starting_cash: 2000 — exactly the weap cost. The intended play
 #   queues weap immediately and tops up cash from the running harv
 #   loop while the defenders intercept the raiders. Stalling lets
@@ -166,12 +173,15 @@ levels:
       the proc (mines at 24,16 and 24,22). Four light tank defenders
       ring the patch at x=18. You start with $2000 — exactly enough
       for a war factory. THREE pressures are live AT THE SAME TIME:
-      (1) DEFEND — a single hunt squad of 3 rifle infantry is staged
+      (1) DEFEND — a hunt squad of 2 rifle infantry is staged
           NORTH of the base; they charge whatever agent target is
           nearest, including the fact.
-      (2) ECONOMY — one enemy tank (raider) is at the lane mouth
-          east of the patch; under the hunt bot it targets the
-          harvester nearest to it. If the harvs die the win breaks.
+      (2) ECONOMY — two enemy tanks (raiders) sit at the lane mouth
+          east of the patch, one on each harv latitude; under the
+          hunt bot each targets the harvester nearest to it. The
+          un-commanded tank ring cannot kill both before a harv
+          falls — you must actively command the defenders. If the
+          harvs die the win breaks.
       (3) TECH — you must have a war factory (weap, cost 2000, prereq
           proc) standing by tick 5400.
       Win = `weap` AND `proc` AND ≥1 harvester AND `fact` still
@@ -197,15 +207,19 @@ levels:
         - {type: '1tnk', owner: agent, position: [18, 22]}
         - {type: '1tnk', owner: agent, position: [22, 18]}
         - {type: '1tnk', owner: agent, position: [22, 20]}
-        # ECONOMY-RAID PRESSURE — 1 raider tank at the lane mouth.
-        # Its nearest agent target is the harv at (14,16) ⇒ raids the
-        # economy under hunt semantics.
-        - {type: '1tnk', owner: enemy, position: [60, 18]}
-        # BASE-HUNT PRESSURE — 3 e1 infantry staged on the NORTHERN
+        # ECONOMY-RAID PRESSURE — 2 raider tanks at the lane mouth,
+        # one per harv latitude. Under hunt each targets the nearest
+        # harvester ⇒ economy raid. An UN-COMMANDED Defend-stance
+        # tank ring cannot kill both raiders before a harv falls, so
+        # the harv-count fail clause bites a stall ⇒ real timeout/raze
+        # LOSS, never the engine's stalemate auto-`done` DRAW.
+        - {type: '1tnk', owner: enemy, position: [60, 16]}
+        - {type: '1tnk', owner: enemy, position: [60, 22]}
+        # BASE-HUNT PRESSURE — 2 e1 infantry staged on the NORTHERN
         # flank. Their nearest agent target is fact/powr (no harv
         # between them and the base from y=4), so under hunt the
         # group charges the base buildings directly.
-        - {type: e1, owner: enemy, position: [40, 4], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [40, 4], stance: 3, count: 2}
         # Anti-DRAW: persistent unarmed enemy `fact` marker far east.
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
@@ -233,18 +247,18 @@ levels:
     max_turns: 61
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 controlled variable vs easy: the raid axis now has TWO raider
-  # tanks (one at each patch latitude — the harv ring can't ignore
-  # either) AND the hunt squad is heavier (4× e1 + 1× e3). Same
-  # clock; the budget is still 2000 ⇒ no slack on the cash side.
+  # +1 controlled variable vs easy: the hunt squad is heavier (3× e1,
+  # +1 vs easy's 2). The raid axis keeps the two raider tanks (one
+  # per patch latitude). Same clock; budget still 2000 ⇒ no slack on
+  # the cash side.
   medium:
     description: >
-      The same compound incident, scaled up on both pressure axes.
+      The same compound incident, scaled up on the defence axis.
       Base layout unchanged (fact+proc+powr at the west, 2 harvs on
       the patch east of proc, 4 light tank defenders on the ring).
       Pressures:
-      (1) DEFEND — a heavier hunt squad of 4 rifle infantry + 1
-          rocket soldier (e3) on the northern flank charges the base.
+      (1) DEFEND — a heavier hunt squad of 3 rifle infantry (+1 vs
+          easy) on the northern flank charges the base.
       (2) ECONOMY — TWO raider tanks are staged at the patch lane
           mouth, one on each harv latitude (y=16 and y=22) — the
           harv ring can't ignore either.
@@ -268,9 +282,9 @@ levels:
         # ECONOMY-RAID — two raiders, one per harv latitude.
         - {type: '1tnk', owner: enemy, position: [60, 16]}
         - {type: '1tnk', owner: enemy, position: [60, 22]}
-        # BASE-HUNT — 4 e1 + 1 e3 on the northern flank.
-        - {type: e1, owner: enemy, position: [40, 4], stance: 3, count: 4}
-        - {type: e3, owner: enemy, position: [42, 4], stance: 3, count: 1}
+        # BASE-HUNT — 3 e1 on the northern flank (+1 vs easy: the
+        # single controlled escalation on the defence axis).
+        - {type: e1, owner: enemy, position: [40, 4], stance: 3, count: 3}
         # Anti-DRAW marker.
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
@@ -300,23 +314,19 @@ levels:
   #      — the BASE LATITUDE flips by seed, so a single memorised
   #      ring / weap placement cannot generalise. Both spawns face
   #      the SAME enemy composition (enemy actors are not spawn-
-  #      filtered, per oramap.rs): the medium pack's 2 raider tanks
-  #      and one heavy hunt squad, plus a mirrored off-axis hunt
-  #      squad so the seed that lands on the off-axis flank still
-  #      gets a same-latitude charge (otherwise the off-axis flank
-  #      would have noticeably lighter pressure than the on-axis
-  #      one). Same composition as medium per axis — the discriminator
-  #      is clock-tightness + spawn variation, not enemy-count
-  #      escalation.
+  #      filtered, per oramap.rs): 2 raider tanks plus one hunt squad
+  #      of 4 e1 (+1 vs medium's 3 — the single defence-axis
+  #      escalation), staged on the centre-line so whichever base
+  #      latitude the seed picks gets the charge.
   hard:
     description: >
       The compound incident on a tighter clock and a seed-varied
       start. Your base stages from a seed-chosen latitude (NORTH
       y=14 or SOUTH y=26) — both formations cover the same patch
       column (mines at x=24, two per latitude). Pressures:
-      (1) DEFEND — a hunt squad of 4 rifle infantry + 1 rocket
-          soldier charges from the centre-line; whichever base
-          latitude you got is the one it heads for.
+      (1) DEFEND — a hunt squad of 4 rifle infantry charges from
+          the centre-line; whichever base latitude you got is the
+          one it heads for.
       (2) ECONOMY — TWO raider tanks at the patch lane mouth on
           the centre-line; they hunt the nearest harv (which is
           always the active spawn's, since the off-axis spawn
@@ -366,13 +376,13 @@ levels:
         # currently nearest. (Enemy actors are not spawn-filtered.)
         - {type: '1tnk', owner: enemy, position: [60, 18]}
         - {type: '1tnk', owner: enemy, position: [60, 22]}
-        # BASE-HUNT — one heavy hunt squad (matching medium: 4 e1 +
-        # 1 e3) at the centre-line so it charges the nearest base
-        # buildings whichever latitude the agent is on (the e1 at
-        # the centre is ≤12 cells from either spawn's fact, and the
-        # rotation between spawns is the seed-driven variation).
+        # BASE-HUNT — one hunt squad of 4 e1 (+1 vs medium: the
+        # single controlled escalation on the defence axis) at the
+        # centre-line so it charges the nearest base buildings
+        # whichever latitude the agent is on (the e1 at the centre
+        # is ≤12 cells from either spawn's fact, and the rotation
+        # between spawns is the seed-driven variation).
         - {type: e1, owner: enemy, position: [40, 20], stance: 3, count: 4}
-        - {type: e3, owner: enemy, position: [42, 20], stance: 3, count: 1}
         # Anti-DRAW marker.
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:

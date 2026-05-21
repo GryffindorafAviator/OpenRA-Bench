@@ -311,19 +311,19 @@ def _intended_multi_handle_policy():
 
        PRESSURE A (economy/raid): keep both harvesters in `harvest`
          mode every turn — they cycle between proc and the local
-         mine; income accrues to top up the tech buy. The pre-placed
-         tank ring is on Defend stance and auto-fires on incoming
-         raiders at the patch lane mouth (no explicit move orders
-         needed — moving the defenders OFF the ring would abandon
-         the patch and lose).
-       PRESSURE B (defence/hunt): the ring tanks ALSO catch any
-         flanking hunter that crosses the patch column on its way to
-         the fact (Defend stance auto-engage). For close-in hunters
-         the harv proximity is enough to make them targets too.
+         mine; income accrues to top up the tech buy.
+       PRESSURE B (defence): ACTIVELY command the tank ring. Each
+         turn the squad attack-moves onto the nearest visible enemy
+         (raider tank or flanking hunter) so it concentrates fire
+         and kills the raiders before a harvester falls. Passive
+         Defend stance is NOT enough — the two raiders out-trade an
+         un-commanded ring and a harv dies (the harv-count fail
+         clause then bites).
        PRESSURE C (tech): queue `weap` on turn 1 with the starting
-         cash, place it immediately in a safe slot west of the base
-         (between fact and proc, away from the hunt approach).
+         cash, place it immediately in a safe slot west of the base.
     """
+    import math
+
     state = {"weap_queued": False, "weap_attempts": 0}
 
     def pol(rs, Command):
@@ -336,6 +336,7 @@ def _intended_multi_handle_policy():
         by = base["cell_y"] if base else 18
         cmds = []
 
+        # PRESSURE C — tech.
         if (
             "weap" not in own_b
             and "weap" not in prod
@@ -352,6 +353,7 @@ def _intended_multi_handle_policy():
             )
             state["weap_attempts"] += 1
 
+        # PRESSURE A — keep both harvesters working the patch.
         harvs = _find_units(rs, "harv")
         patch_xs = [24, 24, 24, 24]
         patch_ys = [by - 2, by + 2, by - 4, by + 4]
@@ -359,6 +361,27 @@ def _intended_multi_handle_policy():
             mx = patch_xs[i % len(patch_xs)]
             my = patch_ys[i % len(patch_ys)]
             cmds.append(Command.harvest([str(h["id"])], mx, my))
+
+        # PRESSURE B — actively command the tank ring onto the
+        # nearest visible enemy (raider or hunter).
+        raw = rs.get("_raw", {}) or {}
+        ep = raw.get("enemy_positions") or []
+        tnks = _find_units(rs, "1tnk")
+        if ep and tnks:
+            pts = [
+                (int(e.get("cell_x", 0)), int(e.get("cell_y", 0)))
+                for e in ep
+                if isinstance(e, dict)
+            ]
+            if pts:
+                tx, ty = min(
+                    pts, key=lambda p: math.hypot(p[0] - bx, p[1] - by)
+                )
+                cmds.append(
+                    Command.attack_move(
+                        [str(t["id"]) for t in tnks], tx, ty
+                    )
+                )
 
         if not cmds:
             cmds.append(Command.observe())
