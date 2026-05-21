@@ -212,6 +212,19 @@ def test_tick_budget_aligned_with_max_turns():
                 f"{lvl} fail after_ticks={at} > reachable={reachable} — "
                 f"timeout fail never fires ⇒ draw"
             )
+        # Interrupt-mode budget (this pack enables enemy_unit_spotted +
+        # own_unit_destroyed, so step_until_event cuts each turn short
+        # to ~60 ticks). The after_ticks timeout must also fit inside
+        # the interrupt-mode budget — the fixed-step bound above is too
+        # loose and let a stale max_turns silently degenerate hard to a
+        # DRAW after the engine balance pass. ~60 ticks/turn lower bound.
+        interrupt_budget = 60 * max_turns
+        for at in ats_fail:
+            assert at <= interrupt_budget, (
+                f"{lvl} fail after_ticks={at} > interrupt-mode budget "
+                f"~{interrupt_budget} (max_turns={max_turns}) — the "
+                f"timeout fail never bites in interrupt mode ⇒ draw"
+            )
 
 
 def test_hard_tier_has_seed_driven_spawn_groups():
