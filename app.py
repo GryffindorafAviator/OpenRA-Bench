@@ -1237,13 +1237,20 @@ def _play_start(prev_sess, pack, level, seed):
     )
 
 
-def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
-    """Translate a minimap click into a selection or a queued order."""
+def _play_click(sess, sel, queue, evt: gr.SelectData):
+    """Contextual minimap click — classic RTS interaction, no mode:
+
+    * click a cell holding YOUR unit(s)  → select/deselect them (toggle);
+    * click an enemy with units selected → queue an ATTACK on it;
+    * click empty ground with a selection → queue a MOVE there.
+
+    So 'select a unit, then click where to send it' just works."""
     if sess is None or evt is None or evt.index is None:
         return (
             sel, queue, _play_briefing_md(sess, sel, queue),
             _play_units_df(sess, sel),
         )
+    note = ""
     try:
         from openra_bench.human_labeling import (
             HumanAction,
@@ -1262,46 +1269,44 @@ def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
             )
         h = len(rows)
         w = max(len(r) for r in rows)
-        # _play_minimap renders at CELL(6) and upscales _PLAY_UPSCALE x →
-        # map the click back at that resolution, not the base CELL one.
         img_w = w * 6 * _PLAY_UPSCALE
         img_h = h * 6 * _PLAY_UPSCALE
         cx, cy = minimap_click_to_cell(px, py, img_w, img_h, w, h)
-        note = f"🖱 Clicked cell **({cx}, {cy})**"
-        if mode == "Move here" and sel:
-            queue = queue + [
-                HumanAction(mode="move", units=list(sel), target=(cx, cy))
-            ]
-            note += f" — queued **move** of {len(sel)} unit(s) here"
-        elif mode == "Attack here" and sel:
-            tid = enemy_at_cell(rs, cx, cy, radius=1)
-            queue = queue + [
-                HumanAction(
-                    mode="attack", units=list(sel),
-                    target_id=tid, target=(cx, cy),
-                )
-            ]
-            note += (
-                f" — queued **attack** ({'enemy ' + tid if tid else 'move-attack'})"
-            )
-        else:  # "Select units" — toggle the unit on the EXACT cell
-            # radius=0: only the unit sitting on the clicked cell, so a
-            # click picks ONE unit (units now spawn on distinct cells).
-            # Each click toggles — click several cells to build a group.
-            hits = own_units_at_cell(rs, cx, cy, radius=0)
-            sel = list(sel)
-            for uid in hits:
+        note = f"🖱 Cell **({cx}, {cy})**"
+
+        own_here = own_units_at_cell(rs, cx, cy, radius=0)
+        enemy_here = enemy_at_cell(rs, cx, cy, radius=0)
+        sel = list(sel)
+
+        if own_here:
+            # Toggle-select your own unit(s) on this cell.
+            for uid in own_here:
                 if uid in sel:
                     sel.remove(uid)
                 else:
                     sel.append(uid)
-            if hits:
-                note += (
-                    f" — toggled unit {', '.join(hits)} · "
-                    f"**{len(sel)} selected**"
+            note += (
+                f" — selected unit {', '.join(own_here)} · "
+                f"**{len(sel)} selected**"
+            )
+        elif sel and enemy_here:
+            queue = queue + [
+                HumanAction(
+                    mode="attack", units=list(sel),
+                    target_id=enemy_here, target=(cx, cy),
                 )
-            else:
-                note += " — no unit on that cell"
+            ]
+            note += (
+                f" — queued **attack** on enemy {enemy_here} "
+                f"({len(sel)} unit(s))"
+            )
+        elif sel:
+            queue = queue + [
+                HumanAction(mode="move", units=list(sel), target=(cx, cy))
+            ]
+            note += f" — queued **move** of {len(sel)} unit(s) here"
+        else:
+            note += " — empty (select one of your units first)"
     except Exception as e:  # noqa: BLE001
         logger.warning("play click failed: %s", e)
         note = ""
@@ -1546,13 +1551,13 @@ def build_app() -> gr.Blocks:
                 gr.Markdown(
                     "Play a scenario yourself — the same scenarios LLM "
                     "agents are scored on. Pick a **scenario → level → "
-                    "seed**, click **Start**. With **Select units** "
-                    "mode, click a unit's cell to select it — click "
-                    "again to deselect, click several cells to build a "
-                    "group. Then switch to **Move here** / **Attack "
-                    "here** and click a destination, and **End Turn** "
-                    "to advance. You are graded by the identical "
-                    "win/fail rules as the models."
+                    "seed**, click **Start**. Then, on the minimap: "
+                    "**click your own unit** to select it (click again "
+                    "to deselect, click several to build a group); with "
+                    "units selected, **click empty ground to move** "
+                    "them there, or **click an enemy to attack** it. "
+                    "**End Turn** advances. You are graded by the "
+                    "identical win/fail rules as the models."
                 )
                 play_sess = gr.State(None)
                 play_sel = gr.State([])
@@ -1574,7 +1579,8 @@ def build_app() -> gr.Blocks:
                 play_status = gr.Markdown(_play_status_md(None))
                 # Minimap on its own full-width row so it renders large.
                 play_img = gr.Image(
-                    label="Minimap — click to select units / give orders",
+                    label="Minimap — click your unit, then click where "
+                    "to send it",
                     height=620, interactive=False, show_label=True,
                 )
                 play_brief = gr.Markdown()
@@ -1584,18 +1590,12 @@ def build_app() -> gr.Blocks:
                     interactive=False, wrap=True,
                 )
                 with gr.Row():
-                    play_mode = gr.Radio(
-                        choices=[
-                            "Select units", "Move here", "Attack here",
-                        ],
-                        value="Select units", label="Click mode", scale=3,
-                    )
                     play_clearsel_btn = gr.Button(
                         "✖ Clear selection", scale=1
                     )
                     play_clear_btn = gr.Button("Clear queued", scale=1)
                     play_end_btn = gr.Button(
-                        "End Turn ▶", variant="primary", scale=1,
+                        "End Turn ▶", variant="primary", scale=2,
                     )
 
                 play_start.click(
@@ -1608,7 +1608,7 @@ def build_app() -> gr.Blocks:
                 )
                 play_img.select(
                     _play_click,
-                    inputs=[play_sess, play_sel, play_queue, play_mode],
+                    inputs=[play_sess, play_sel, play_queue],
                     outputs=[
                         play_sel, play_queue, play_brief, play_units,
                         play_img,

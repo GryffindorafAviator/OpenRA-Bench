@@ -176,27 +176,85 @@ def _minimap_font(size: int):
         return ImageFont.load_default()
 
 
-def _draw_unit_shape(draw, cx, cy, cp, category, color):
-    """Draw `category`'s shape, filling ~70% of the cp-pixel cell at
-    grid cell (cx, cy)."""
-    m = cp * 0.16
-    x0, y0 = cx * cp + m, cy * cp + m
-    x1, y1 = (cx + 1) * cp - m, (cy + 1) * cp - m
+# Distinct SHAPE per unit TYPE — so e.g. 1tnk and 2tnk are visually
+# different on the minimap, not both "a vehicle". Types not listed fall
+# back by category (infantry→circle, harvester→tridown, else→square).
+_TYPE_SHAPE = {
+    "e1": "circle", "e2": "circle", "e3": "circle", "e4": "circle",
+    "e6": "circle", "e7": "circle", "medi": "circle", "mech": "circle",
+    "spy": "circle", "thf": "circle", "dog": "circle", "engineer": "circle",
+    "1tnk": "square", "2tnk": "diamond", "3tnk": "hexagon",
+    "4tnk": "triangle", "harv": "tridown",
+    "jeep": "pentagon", "apc": "pentagon", "mcv": "pentagon",
+    "arty": "star", "v2rl": "star", "ftrk": "star",
+}
+
+
+def _unit_shape(actor_type: str, is_building: bool) -> str:
+    """Shape key for a unit/building — distinct per unit TYPE."""
+    if is_building:
+        return "building"
+    t = (actor_type or "").strip().lower()
+    if t in _TYPE_SHAPE:
+        return _TYPE_SHAPE[t]
+    cat = _unit_category(t, False)
+    if cat == "infantry":
+        return "circle"
+    if cat == "harvester":
+        return "tridown"
+    return "square"
+
+
+def _shape_points(shape, x0, y0, x1, y1):
+    """Polygon vertices for `shape` in the box; None for an ellipse."""
+    import math
+
     mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+    rx, ry = (x1 - x0) / 2, (y1 - y0) / 2
+    if shape == "circle":
+        return None
+    if shape == "diamond":
+        return [(mx, y0), (x1, my), (mx, y1), (x0, my)]
+    if shape == "triangle":
+        return [(mx, y0), (x1, y1), (x0, y1)]
+    if shape == "tridown":
+        return [(x0, y0), (x1, y0), (mx, y1)]
+    if shape in ("hexagon", "pentagon", "star"):
+        n = {"hexagon": 6, "pentagon": 5, "star": 5}[shape]
+        pts = []
+        if shape == "star":
+            for i in range(2 * n):
+                ang = -math.pi / 2 + i * math.pi / n
+                r = 1.0 if i % 2 == 0 else 0.42
+                pts.append((mx + r * rx * math.cos(ang),
+                            my + r * ry * math.sin(ang)))
+        else:
+            for i in range(n):
+                ang = -math.pi / 2 + i * 2 * math.pi / n
+                pts.append((mx + rx * math.cos(ang),
+                            my + ry * math.sin(ang)))
+        return pts
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]  # square / building
+
+
+def _draw_shape(draw, x0, y0, x1, y1, shape, color):
+    """Draw `shape` filling the box (x0,y0)-(x1,y1) in `color`."""
     outline = (15, 15, 18)
-    if category == "infantry":
+    if shape == "circle":
         draw.ellipse([x0, y0, x1, y1], fill=color, outline=outline)
-    elif category == "harvester":
-        draw.polygon(
-            [(mx, y0), (x0, y1), (x1, y1)], fill=color, outline=outline
-        )
-    elif category == "building":
-        draw.polygon(
-            [(mx, y0), (x1, my), (mx, y1), (x0, my)],
-            fill=color, outline=outline,
-        )
-    else:  # vehicle
-        draw.rectangle([x0, y0, x1, y1], fill=color, outline=outline)
+    elif shape == "building":
+        draw.rectangle([x0, y0, x1, y1], fill=color,
+                       outline=outline, width=2)
+    else:
+        draw.polygon(_shape_points(shape, x0, y0, x1, y1),
+                     fill=color, outline=outline)
+
+
+def _draw_unit_shape(draw, cx, cy, cp, shape, color):
+    """Draw `shape` filling ~70% of the cp-px cell at grid (cx, cy)."""
+    m = cp * 0.16
+    _draw_shape(draw, cx * cp + m, cy * cp + m,
+                (cx + 1) * cp - m, (cy + 1) * cp - m, shape, color)
 
 
 def _draw_move_arrow(draw, fx, fy, tx, ty, cp, color):
@@ -266,6 +324,11 @@ def render_tactical_minimap(
 
     # Collect every actor by cell so stacked units can be counted.
     by_cell: dict = {}
+    # Distinct (type, shape) of OWN units seen — drives the legend.
+    own_types: dict = {}
+
+    def _is_bld(shape):
+        return shape == "building"
 
     def _collect(items, side, force_building):
         for it in items or []:
@@ -276,10 +339,11 @@ def render_tactical_minimap(
             if not (0 <= cx < w and 0 <= cy < h):
                 continue
             is_b = force_building or bool(it.get("is_building"))
-            cat = _unit_category(
-                it.get("actor_type") or it.get("type") or "", is_b
-            )
-            by_cell.setdefault((cx, cy), []).append((side, cat))
+            atype = (it.get("actor_type") or it.get("type") or "?")
+            shape = _unit_shape(atype, is_b)
+            by_cell.setdefault((cx, cy), []).append((side, shape))
+            if side == "own" and atype != "?":
+                own_types.setdefault(str(atype).lower(), shape)
 
     _collect(render_state.get("units_summary"), "own", False)
     _collect(render_state.get("own_buildings"), "own", True)
@@ -290,18 +354,18 @@ def render_tactical_minimap(
         "enemy", True,
     )
 
-    def _color(side, cat):
+    def _color(side, shape):
         if side == "own":
-            return _OWN_BLD if cat == "building" else _OWN
-        return _ENEMY_BLD if cat == "building" else _ENEMY
+            return _OWN_BLD if _is_bld(shape) else _OWN
+        return _ENEMY_BLD if _is_bld(shape) else _ENEMY
 
     badge_font = _minimap_font(max(9, int(cp * 0.62)))
     for (cx, cy), occ in by_cell.items():
         # Dominant occupant decides the shape; prefer a building.
-        side, cat = next(
-            (o for o in occ if o[1] == "building"), occ[0]
+        side, shape = next(
+            (o for o in occ if _is_bld(o[1])), occ[0]
         )
-        _draw_unit_shape(draw, cx, cy, cp, cat, _color(side, cat))
+        _draw_unit_shape(draw, cx, cy, cp, shape, _color(side, shape))
         if len(occ) > 1:
             tx, ty = (cx + 1) * cp - cp * 0.42, cy * cp + 1
             draw.text(
@@ -362,48 +426,33 @@ def render_tactical_minimap(
                     stroke_width=3, stroke_fill=(0, 0, 0),
                 )
 
-    # Legend strip.
+    # Legend strip — the unit TYPES actually present, each with its
+    # own shape, so the player can read 1tnk vs 2tnk vs e3 etc.
     if legend:
         ly = h * cp
         draw.rectangle([0, ly, w * cp, ly + legend_h], fill=(24, 24, 30))
         lfont = _minimap_font(max(11, int(cp * 0.7)))
-        sample = cp  # one-cell-sized sample swatch
-        items = [
-            ("infantry", "Infantry"),
-            ("vehicle", "Vehicle"),
-            ("harvester", "Harvester"),
-            ("building", "Building"),
-        ]
+        sample = cp
+        m = sample * 0.16
         x = int(cp * 0.4)
-        row_y = ly + int(cp * 0.2)
-        for cat, name in items:
-            # Sample shape swatch drawn at pixel coords.
-            m = sample * 0.18
-            sx0, sy0 = x + m, row_y + m
-            sx1, sy1 = x + sample - m, row_y + sample - m
-            smx, smy = (sx0 + sx1) / 2, (sy0 + sy1) / 2
-            if cat == "infantry":
-                draw.ellipse([sx0, sy0, sx1, sy1], fill=_OWN)
-            elif cat == "harvester":
-                draw.polygon(
-                    [(smx, sy0), (sx0, sy1), (sx1, sy1)], fill=_OWN
-                )
-            elif cat == "building":
-                draw.polygon(
-                    [(smx, sy0), (sx1, smy), (smx, sy1), (sx0, smy)],
-                    fill=_OWN_BLD,
-                )
-            else:
-                draw.rectangle([sx0, sy0, sx1, sy1], fill=_OWN)
-            draw.text(
-                (x + sample + 4, row_y + sample * 0.18), name,
-                fill=(235, 235, 245), font=lfont,
-            )
-            x += sample + int(cp * 4.2)
+        row_y = ly + int(cp * 0.16)
+        shown = sorted(own_types.items())[:8] or [("unit", "square")]
+        for tname, shape in shown:
+            col = _OWN_BLD if _is_bld(shape) else _OWN
+            _draw_shape(draw, x + m, row_y + m,
+                        x + sample - m, row_y + sample - m, shape, col)
+            tx = x + sample + int(cp * 0.18)
+            draw.text((tx, row_y + sample * 0.2), tname,
+                      fill=(235, 235, 245), font=lfont)
+            try:
+                tw = draw.textlength(tname, font=lfont)
+            except Exception:  # noqa: BLE001
+                tw = len(tname) * cp * 0.5
+            x = int(tx + tw + cp * 0.7)
         draw.text(
             (int(cp * 0.4), ly + int(cp * 1.05)),
-            "green = your forces    red/orange = enemy    "
-            "number = units stacked on that cell",
+            "green = you   red/orange = enemy   number = units stacked  "
+            " white box = selected   arrow = move/attack order",
             fill=(200, 202, 212), font=lfont,
         )
 
