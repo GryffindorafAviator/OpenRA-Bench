@@ -52,6 +52,12 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     # Curated packs declare their own actors, so default it OFF; a pack
     # may still opt in via base.spawn_mcvs / a scenario-declared `mcv`.
     data.setdefault("spawn_mcvs", bool(data.get("spawn_mcvs", False)))
+    # Wave-9 `scheduled_events:` — preserved on CompiledLevel because
+    # the training ScenarioDefinition silently drops the field. Re-emit
+    # here so the Rust engine's scenario parser sees it.
+    sched = getattr(compiled, "scheduled_events", None) or []
+    if sched:
+        data["scheduled_events"] = sched
     fd = tempfile.NamedTemporaryFile(
         "w", suffix=f"_{compiled.pack_id}_{compiled.level}.yaml", delete=False
     )

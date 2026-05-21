@@ -162,6 +162,14 @@ class CompiledLevel(BaseModel):
     config_name: str | None = None
     objective_coords: Literal["exact", "relative"] = "exact"
     forbidden_tools: list[str] = Field(default_factory=list)
+    # Wave-9 mid-episode scripted events (spawn reinforcements,
+    # destroy actors, shorten the deadline). Parsed straight-through
+    # to the Rust scenario YAML by `_scenario_to_tmp_yaml` — the
+    # engine's `oramap::parse_scenario_yaml` handles the schema.
+    # `ScenarioDefinition` (training) doesn't know about this field
+    # so it's preserved on the CompiledLevel instead of the inner
+    # scenario, and re-attached at YAML-write time.
+    scheduled_events: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ScenarioPack(BaseModel):
@@ -216,6 +224,11 @@ class ScenarioPack(BaseModel):
         # Validate against the real engine model so a broken level fails
         # at load time, not mid-eval.
         scenario = ScenarioDefinition(**merged)
+        # Wave-9: lift the merged `scheduled_events:` (if any) so
+        # `_scenario_to_tmp_yaml` can reattach it to the engine YAML.
+        # ScenarioDefinition ignores the field (extra='ignore') so
+        # without this step the events would be silently dropped.
+        sched_events = list(merged.get("scheduled_events") or [])
         return CompiledLevel(
             pack_id=self.meta.id,
             level=level,
@@ -230,6 +243,7 @@ class ScenarioPack(BaseModel):
             map_supported=map_supported,
             objective_coords=lvl.objective_coords,
             forbidden_tools=list(lvl.forbidden_tools or []),
+            scheduled_events=sched_events,
         )
 
     def config_names(self) -> list[str]:

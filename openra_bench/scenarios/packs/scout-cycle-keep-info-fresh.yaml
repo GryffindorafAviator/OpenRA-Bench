@@ -1,0 +1,418 @@
+# scout-cycle-keep-info-fresh.yaml
+#
+# PERCEPTION capability — Wave-9 "scout cycle". The classical
+# observation-isn't-a-one-shot drill: the agent scouts once at the
+# start, locates the visible enemy swarm, then — CRUCIALLY — must
+# CYCLE the scout back into the fog AFTER the first detection,
+# because mid-episode reinforcement arrives in the previously-
+# observed area and the stale shroud no longer reflects ground
+# truth. A one-shot perception policy (scout once, then commit)
+# meets the FIRST detection bar but misses the SECOND, post-
+# reinforcement detection bar.
+#
+# This is the cell that uniquely needs the Wave-9 engine feature
+# `scheduled_events:` (oramap.rs::ScheduledEventKind::SpawnActors):
+# without mid-episode actor spawn, no scenario could test the
+# information-freshness perception loop — the scout would only ever
+# see what was placed at t=0.
+#
+# DESIGN
+# ------
+# Pre-place (agent side, WEST base):
+#   * 2× jeep (scouts, stance:0 HoldFire) — pure perception tools
+#   * 3× 2tnk (stance:0 HoldFire) — the combat arm. CRITICAL: the
+#     tanks are stance:0 so they DON'T auto-hunt the map (a
+#     scenario-declared stance:3 ground unit auto-hunts every
+#     enemy it can path to — verified on the live engine — which
+#     would let a STALL policy win for free by self-delivering the
+#     tanks). The agent must EXPLICITLY commit them via
+#     `attack_move` / `attack_unit` to meet the kill bar.
+#   * 1× fact + 1× proc + 1× powr + 1× tent + 1× weap — partial
+#     base. `fact` anchors the `building_count_gte:fact:1` fail
+#     clause (CLAUDE.md `not own_units_gte:1` footgun — a fact at
+#     t=0 means the fail clause doesn't misfire on turn 1).
+#
+# Pre-place (enemy side, EAST half):
+#   * `e3` swarm at (60,20) — stance:0 HoldFire. CRITICAL: the
+#     swarm must NOT walk toward the agent base; if it did
+#     (stance:3), it would auto-deliver itself into the agent's
+#     vision + tank range and the perception test would collapse
+#     (a stall policy would "discover" + kill it for free). With
+#     stance:0 the swarm holds its post at (60,20) and the agent
+#     MUST send a scout east to discover it.
+#   * inert `fact` MARKER far east at (122,4) — anti-DRAW per
+#     CLAUDE.md (without a persistent enemy actor the engine
+#     auto-`done`s on enemy-elim before the win evaluator runs).
+#
+# Scheduled event (the load-bearing feature):
+#   * at tick 1500: spawn 3× 2tnk reinforcements, stance:0, at
+#     (78,20) — a DEEP-fog cell ~18 east of the swarm. The agent's
+#     first scout sweep naturally passes through (78,20) and finds
+#     it EMPTY; the combat tanks commit only to the swarm at
+#     (60,20) and never path to (78,20). So at tick 1500 nothing
+#     the agent has on the field covers (78,20) — UNLESS a scout
+#     was cycled back out there. The reinforcement cell is
+#     deliberately PAST the kill objective so a tank commit gives
+#     the agent zero free vision of it.
+#
+# WIN PREDICATE
+#   `then: [enemies_discovered_gte: N_initial,
+#           after_ticks: 1500,
+#           enemies_discovered_gte: N_total]`
+#     — ordered: SEE the swarm FIRST, then PAST the reinforce
+#     event, SEE total ≥ initial + reinforce.
+#   AND `units_killed_gte: K`   — must destroy ≥K enemy units
+#     (rules out perception-only no-engagement).
+#   AND `within_ticks: T`       — finish on the clock.
+#
+# FAIL PREDICATE
+#   `any_of: [after_ticks: T+1,
+#             not building_count_gte:fact:1,
+#             (after_ticks:300 AND not own_units_gte:1)]`
+#
+# DISCRIMINATIONS (the bar — every lazy / one-shot / stall policy
+# LOSES, only the intended re-scout policy WINS):
+#
+#   • stall (observe only): no jeep ever pushes east → the
+#     stance:0 swarm holds at (60,20) and is never discovered →
+#     first `enemies_discovered_gte:N_initial` never latches → the
+#     `then:` chain never starts → after_ticks bites → LOSS.
+#
+#   • scout-once-then-commit: jeeps sweep east ONCE (through the
+#     swarm at (60,20) and the empty deep-fog cell (78,20)), see
+#     the e3 swarm (initial detection bar met), then the jeeps
+#     retreat / sit still while the tanks commit to the swarm.
+#     After tick 1500 the 3× 2tnk reinforcements spawn at (78,20)
+#     — a cell NOTHING on the agent's field still covers (the
+#     tanks fight at (60,20), the jeeps pulled back). The SECOND
+#     detection bar is never met → the `then:` chain stalls on its
+#     third clause → after_ticks bites → LOSS.
+#
+#   • intended scout-cycle: jeeps sweep east, see the swarm, then
+#     KEEP cycling — RE-PUSH a jeep out to (78,20) around tick
+#     1300 so it has vision when the reinforcements spawn at tick
+#     1500. Tanks commit to the (60,20) swarm and kill ≥K. All
+#     three `then:` clauses latch in order; within_ticks met. WIN.
+#
+# ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
+#   - Tick budget ~90/turn; max_turns 50 → reachable tick
+#     93+90·49 = 4503. Every level uses within_ticks:4000 +
+#     fail after_ticks:4001 — the episode reliably crosses 4001
+#     before it caps at ~4503, so a non-win is a real LOSS (not a
+#     silent DRAW) and the win/fail windows don't overlap.
+#   - The `then:` composite latches each clause once true and
+#     advances IN ORDER. A one-shot scout latches clause 1 but
+#     never clauses 2/3.
+#   - `enemies_discovered_gte` counts UNIQUE enemy units ever
+#     observed; freshly-spawned reinforcements have NEW ids so
+#     they are additive — but only if the agent's shroud covers
+#     the spawn cell when (or shortly after) they spawn.
+#   - HIDDEN enemies use `stance:0` (HoldFire) so they don't
+#     walk into the agent's base on their own — the perception
+#     test stays a perception test (CLAUDE.md `move_units
+#     auto-fires` / "set HIDDEN actors to stance:0").
+#   - AGENT combat units also use `stance:0`: a scenario-declared
+#     `stance:3` ground unit AUTO-HUNTS the whole map on the live
+#     engine (the agent tank walks coast-to-coast unaided),
+#     which would let a stall policy win for free. stance:0 keeps
+#     the kill bar load-bearing — the agent must issue an explicit
+#     `attack_move` / `attack_unit` to engage.
+#   - `e3` (not `e1`) for hidden clusters — `e1` at some cells
+#     fails to surface in `enemy_positions` (CLAUDE.md footgun).
+#   - `scheduled_events:` is the Wave-9 engine feature:
+#     oramap.rs::read_scheduled_events parses the block;
+#     env.rs::fire_scheduled_events fires it on the frame the
+#     world-tick reaches the event's `tick`. Spawned actors get
+#     fresh ids past every existing actor id.
+#   - Enemy actors don't honour spawn_point (CLAUDE.md) — both
+#     hard spawn groups share the SAME enemy placement; the
+#     spawn variation is purely the agent's base latitude.
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/scout-cycle-keep-info-fresh.yaml
+
+meta:
+  id: scout-cycle-keep-info-fresh
+  title: 'Scout Cycle — Keep Information Fresh as the Battlefield Changes'
+  capability: perception
+  real_world_meaning: >
+    Observation is not a one-shot. The agent scouts the
+    battlefield, sees the visible enemy force, and commits a
+    plan; mid-engagement, the battlefield changes (reinforcements
+    arrive, the enemy maneuvers behind fog) and a stale picture
+    is wrong. The intended policy CYCLES the scout — keeps
+    pushing perception probes back into the previously-observed
+    area to detect the change before the plan is invalidated.
+    This is the perception cell that uniquely tests information
+    FRESHNESS, not just initial reading.
+  robotics_analogue: >
+    Continuous SLAM / re-localisation: a robot that maps the room
+    once and then drives by dead-reckoning crashes the instant a
+    chair moves. A re-perceiving robot loops the lidar back across
+    seen-but-stale regions. Similarly, an autonomous-vehicle
+    perception stack cannot rely on a single frame — it must
+    continually re-observe to detect lane changes, new
+    pedestrians, and obstacles that appeared since the last
+    glance.
+  benchmark_anchor:
+    - "SC2 information refresh (scout cycling for army-position updates)"
+    - "continuous-SLAM re-localisation under environmental change"
+    - "autonomous-vehicle perception (per-frame re-detection of dynamic obstacles)"
+    - "wargame intelligence cycle — collection → analysis → re-collection"
+  author: "openra-bench"
+
+# rush-hour-arena: 128×40, playable bounds (2,2,124,36). Agent base
+# at the WEST (x≈10..16). e3 swarm holds at (60,20). Mid-episode
+# reinforcement spawns at (78,20) — a deep-fog cell ~18 east of the
+# swarm — at tick 1500. The agent's tank commit reaches the (60,20)
+# swarm but never the (78,20) cell, so only a re-cycled scout sees
+# the reinforcement.
+base_map: rush-hour-arena
+starting_cash: 1000
+
+base:
+  agent:
+    faction: allies
+    cash: 1000
+  # Stance-only enemy: the e3 swarm sits at its post (stance:0,
+  # set per-actor below). No `hunt` bot — a chase would drag the
+  # swarm out of the (60,20) cell and break the reinforce-vs-
+  # coverage geometry the perception teeth depend on.
+  enemy:
+    faction: soviet
+    cash: 0
+  # Pure-perception + combat toolset (NO build / NO harvest):
+  # the test is the SCOUT CYCLE pattern, not production.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 6000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Minimum-viable scout-cycle drill. Initial swarm of 4× e3 at
+  # (60,20), stance:0; reinforcement: 3× 2tnk at (78,20) at tick
+  # 1500. N_initial = 3 (<=4 keeps it solvable under shroud jitter);
+  # N_total = 6 = 4 swarm + 3 tanks − 1 grace — and CRITICALLY > 4,
+  # so the 4-member swarm latches clause 1 but is short of clause 3:
+  # a one-shot scout cannot complete the chain. K=2 kills. T=4000.
+  easy:
+    description: >
+      An enemy swarm (4 rifle infantry) HOLDS the centre at
+      (60,20) — it will not advance on you. You have 2 jeep
+      scouts and 3 medium tanks at your WEST base, plus a partial
+      base (fact + proc + powr + tent + weap). Scout east to
+      LOCATE the swarm (push a jeep to (58,20)). CRUCIALLY: at
+      tick 1500 enemy REINFORCEMENTS arrive — 3 medium tanks
+      spawn DEEP in the fog at (78,20), well past the swarm. A
+      one-shot scout that pulled back will MISS the arrival; only
+      a CYCLING scout (re-push a jeep out to (78,20) around tick
+      1300) sees the tanks in time. Win requires: SEE >=3 initial
+      enemies AND (after tick 1500) SEE >=6 total enemies AND
+      destroy >=2 of them AND finish before tick 4000. Stalling
+      loses on the deadline; scouting once loses because the
+      post-reinforce detection bar is never met.
+    overrides:
+      actors:
+        # 2 jeep scouts — stance:0 (HoldFire), pure perception.
+        - {type: jeep, owner: agent, position: [15, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [15, 22], stance: 0}
+        # 3 medium tanks — stance:0 (no auto-hunt); the combat
+        # arm, committed via attack_unit/attack_move (K=2).
+        - {type: 2tnk, owner: agent, position: [14, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [14, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 20], stance: 0}
+        # Partial agent base — required for the
+        # `building_count_gte:fact:1` fail clause.
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [10, 16]}
+        - {type: powr, owner: agent, position: [10, 24]}
+        - {type: tent, owner: agent, position: [12, 17]}
+        - {type: weap, owner: agent, position: [12, 23]}
+        # Initial e3 swarm — stance:0 HOLDS at (60,20). Must be
+        # scouted; will not deliver itself to the agent.
+        - {type: e3, owner: enemy, position: [60, 20], stance: 0, count: 4}
+        # Inert enemy `fact` marker far east. Anti-DRAW per CLAUDE.md.
+        - {type: fact, owner: enemy, position: [122, 4]}
+      # Wave-9 scheduled reinforcement. 3× 2tnk spawn in the deep
+      # fog at (78,20) at tick 1500, stance:0. The agent's tank
+      # commit reaches the (60,20) swarm but never (78,20), so a
+      # one-shot scout that pulled back has zero vision of (78,20)
+      # at tick 1500 → the post-reinforce detection bar fails.
+      scheduled_events:
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [78, 20], stance: 0, count: 3}
+    win_condition:
+      all_of:
+        # Ordered: see swarm FIRST, then past the reinforce event,
+        # see the new total. The post-reinforce clause is ONLY
+        # reachable if a scout has vision of (78,20) at tick >=1500.
+        - then:
+            id: scout-cycle-keep-info-fresh-easy
+            clauses:
+              - {enemies_discovered_gte: 3}
+              - {after_ticks: 1500}
+              - {enemies_discovered_gte: 6}
+        - {units_killed_gte: 2}
+        - {within_ticks: 4000}
+    fail_condition:
+      any_of:
+        # `after_ticks: 4001` < the episode's reachable end-tick
+        # (max_turns 50 ⇒ ~4503): so a non-win run definitely
+        # CROSSES this clause before the episode caps out — a
+        # real LOSS, never a silent DRAW. (within_ticks 4000 is
+        # one tick below it so the win/fail windows don't overlap.)
+        - {after_ticks: 4001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        # After warmup window (past the turn-1 own_units_gte
+        # footgun), a full combat-unit wipe is a real LOSS.
+        - all_of:
+          - {after_ticks: 300}
+          - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: tighter clock (within_ticks: 4000) and
+  # a larger initial swarm (6 e3) so the kill bar K=3 forces the
+  # agent to commit tanks AFTER cycling the scout. Same reinforce
+  # schedule (3× 2tnk at tick 1500, (78,20)).
+  medium:
+    description: >
+      An enemy swarm (6 rifle infantry) HOLDS the centre at
+      (60,20). You have 2 jeep scouts and 3 medium tanks at your
+      WEST base, plus a partial base. Scout east to LOCATE the
+      swarm. At tick 1500 enemy REINFORCEMENTS arrive — 3 medium
+      tanks spawn DEEP in the fog at (78,20), past the swarm. Win
+      requires: SEE >=3 initial enemies AND (after tick 1500) SEE
+      >=6 total enemies AND destroy >=3 of them AND finish before
+      tick 4000. Stalling, one-shot scouting, and scout-only-no-
+      engage all LOSE.
+    overrides:
+      actors:
+        - {type: jeep, owner: agent, position: [15, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [15, 22], stance: 0}
+        - {type: 2tnk, owner: agent, position: [14, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [14, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 20], stance: 0}
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [10, 16]}
+        - {type: powr, owner: agent, position: [10, 24]}
+        - {type: tent, owner: agent, position: [12, 17]}
+        - {type: weap, owner: agent, position: [12, 23]}
+        # Larger initial swarm — kill bar K=3 forces engagement.
+        - {type: e3, owner: enemy, position: [60, 20], stance: 0, count: 6}
+        - {type: fact, owner: enemy, position: [122, 4]}
+      scheduled_events:
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [78, 20], stance: 0, count: 3}
+    win_condition:
+      all_of:
+        # N_total = 8 (6 swarm + 3 reinforce tanks − 1 grace). The
+        # initial swarm alone is 6 — it latches clause 1 (>=3) but
+        # is one SHORT of clause 3 (>=8), so clause 3 is reachable
+        # ONLY by also seeing >=2 of the 3 reinforcement tanks at
+        # (78,20). This is the medium/hard fix for the "the swarm
+        # already satisfies the post-reinforce bar" inversion.
+        - then:
+            id: scout-cycle-keep-info-fresh-medium
+            clauses:
+              - {enemies_discovered_gte: 3}
+              - {after_ticks: 1500}
+              - {enemies_discovered_gte: 8}
+        - {units_killed_gte: 3}
+        - {within_ticks: 4000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - all_of:
+          - {after_ticks: 300}
+          - {not: {own_units_gte: 1}}
+    max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven agent
+  # spawn_point groups (base at y=14 vs y=26) round-robined by
+  # seed (CLAUDE.md hard-tier requirement). Same initial swarm +
+  # reinforce schedule; the agent's base latitude varies so a
+  # memorised opening cannot generalise — the scout-cycle DOCTRINE
+  # still does.
+  hard:
+    description: >
+      An enemy swarm (6 rifle infantry) HOLDS the centre at
+      (60,20). You have 2 jeep scouts and 3 medium tanks at your
+      WEST base — the base's exact LATITUDE varies per seed. At
+      tick 1500 enemy REINFORCEMENTS arrive — 3 medium tanks
+      spawn DEEP in the fog at (78,20), past the swarm. Win
+      requires: SEE >=3 initial enemies AND (after tick 1500) SEE
+      >=6 total enemies AND destroy >=3 of them AND finish before
+      tick 4000. Stalling, one-shot scouting, and base-latitude-
+      memorised openings all LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — base shifted NORTH (y=14).
+        - {type: jeep, owner: agent, position: [15, 12], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [15, 16], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 15], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [16, 14], stance: 0, spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: tent, owner: agent, position: [12, 11], spawn_point: 0}
+        - {type: weap, owner: agent, position: [12, 17], spawn_point: 0}
+        # spawn_point 1 — base shifted SOUTH (y=26). Symmetric.
+        - {type: jeep, owner: agent, position: [15, 24], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [15, 28], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 27], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [16, 26], stance: 0, spawn_point: 1}
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [10, 22], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [12, 23], spawn_point: 1}
+        - {type: weap, owner: agent, position: [12, 29], spawn_point: 1}
+        # Enemy actors don't honour spawn_point — placed once.
+        - {type: e3, owner: enemy, position: [60, 20], stance: 0, count: 6}
+        - {type: fact, owner: enemy, position: [122, 4]}
+      scheduled_events:
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [78, 20], stance: 0, count: 3}
+    win_condition:
+      all_of:
+        # N_total = 8 (6 swarm + 3 reinforce tanks − 1 grace) — see
+        # the medium-tier comment. The 6-member swarm latches
+        # clause 1 but is one short of clause 3, so a one-shot
+        # scout (no re-cycle to (78,20)) cannot complete the chain.
+        - then:
+            id: scout-cycle-keep-info-fresh-hard
+            clauses:
+              - {enemies_discovered_gte: 3}
+              - {after_ticks: 1500}
+              - {enemies_discovered_gte: 8}
+        - {units_killed_gte: 3}
+        - {within_ticks: 4000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - all_of:
+          - {after_ticks: 300}
+          - {not: {own_units_gte: 1}}
+    max_turns: 50

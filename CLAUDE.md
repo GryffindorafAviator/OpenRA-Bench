@@ -153,6 +153,32 @@ A scenario is defective if any of the following hold:
   override stance. A stance flip is a real load-bearing verb:
   `set_stance(units, 3)` converts an idle ReturnFire formation
   into an active hunter.
+- **`scheduled_events:` — mid-episode scripted hooks** (Wave-9
+  engine feature, pinned by
+  `OpenRA-Rust/openra-data/tests/test_scheduled_events.rs` +
+  `tests/test_scheduled_events.py`). A scenario may declare a
+  top-level (or per-level `overrides:`) `scheduled_events:` list;
+  each entry fires once when `world_tick >= tick`. Three event
+  kinds:
+  - `spawn_actors` — inject new actors mid-episode (reinforcement
+    waves). `actors:` is a normal actor list (`count:` expands).
+    Spawned actors get fresh ids, so a perception count predicate
+    (`enemies_discovered_gte`) treats them as additive. They are
+    placed via the same path as initial scenario actors (Mobile/
+    Health for units, typed Vehicle/Turret components attached).
+  - `destroy_actors` — remove every actor matching `filter:`
+    (`owner:` + optional circular `region: {x, y, radius}`).
+  - `shorten_deadline` — clamp the episode's `max_ticks` DOWN to
+    `new_max_ticks` (never grows it).
+  Parsed by `oramap.rs::read_scheduled_events`, fired by
+  `env.rs::fire_scheduled_events` after each `process_frame`.
+  This is the only way to test information-FRESHNESS perception
+  (the scout-cycle idiom) — a hidden enemy placed only at t=0
+  cannot exercise "re-observe a stale region". Worked example:
+  `scout-cycle-keep-info-fresh`. Footgun: a scenario-declared
+  `stance:3` AGENT combat unit auto-hunts the whole map; for a
+  perception pack keep the agent's combat arm `stance:0` so a
+  stall policy can't win for free by self-delivering the army.
 - **`pbox` costs 600** (not the 400 some old specs assumed);
   defense and infantry are SEPARATE production queues so an
   efficient policy queues `build('pbox')` and `build('e1')` in
@@ -178,11 +204,13 @@ A scenario is defective if any of the following hold:
 
 When authoring a pack you may discover that the intended capability
 cannot be expressed in the current engine — e.g. an order is a
-no-op, a stance doesn't behave as advertised, enemy actors don't
-honour `spawn_point`, there is no mid-episode scripted-event hook,
-or some specific order/predicate isn't surfaced. **The correct move
-is to fix the engine, not to retire the pack, weaken the bar, or
-substitute a different mechanic that masks the gap.** Concretely:
+no-op, a stance doesn't behave as advertised, or some specific
+order/predicate isn't surfaced. (Two historical gaps are now
+closed: enemy actors DO honour `spawn_point` per-owner, and
+`scheduled_events:` provides the mid-episode scripted-event hook —
+see the feature notes above.) **The correct move is to fix the
+engine, not to retire the pack, weaken the bar, or substitute a
+different mechanic that masks the gap.** Concretely:
 
 1. Reproduce the gap with a focused Rust or Python test.
 2. Add the test as a failing test in `OpenRA-Rust/openra-sim/tests/`
