@@ -367,9 +367,22 @@ class RustObsAdapter:
             "economy_value": self.signals.cash + self.signals.resources,
             "power_provided": self.signals.power_provided,
             "power_drained": self.signals.power_drained,
+            # Own buildings carry the REAL engine actor id (and hp_pct /
+            # is_primary) so an agent can target a building for repair /
+            # sell / power_down / set_primary. Mirrors how units_summary
+            # keeps the engine unit id — without it `prompt_v2` would
+            # fall back to a list-index id the engine's resolver rejects.
             "own_buildings": [
-                {"type": t, "cell_x": x, "cell_y": y}
-                for (t, x, y) in self.signals.own_buildings
+                {
+                    "id": str(b.get("id", "")),
+                    "type": str(b.get("type", "")).lower(),
+                    "cell_x": int(b.get("cell_x", 0)),
+                    "cell_y": int(b.get("cell_y", 0)),
+                    "hp": float(b.get("hp_pct", 1.0) or 0.0),
+                    "is_primary": bool(b.get("is_primary", False)),
+                }
+                for b in (self._raw.get("own_buildings", []) or [])
+                if isinstance(b, dict) and b.get("type")
             ],
             "production": list(self.signals.production_items),
             # S9 spatial tensor passthrough (flat row-major [y][x][c] +

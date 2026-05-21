@@ -138,11 +138,20 @@ def state_from_render(render_state: dict) -> dict:
         # briefings (agent_rollout._strip_ascii_minimap) — it's
         # redundant, token-heavy, and a coordinate-counting crutch.
         "minimap": "",
+        # Keep the REAL engine actor id (own_buildings now surfaces it,
+        # mirroring units_summary) so repair / sell / power_down /
+        # set_primary orders resolve. Fall back to the list index only
+        # for legacy obs that predate the id field.
         "buildings_summary": [
-            {"type": t, "id": i, "cell_x": x, "cell_y": y}
-            for i, (t, x, y) in enumerate(
-                [(b["type"], b["cell_x"], b["cell_y"]) for b in own_b]
-            )
+            {
+                "type": b.get("type"),
+                "id": b.get("id") if b.get("id") not in (None, "") else i,
+                "cell_x": b.get("cell_x"),
+                "cell_y": b.get("cell_y"),
+                "hp": b.get("hp"),
+                "is_primary": b.get("is_primary"),
+            }
+            for i, b in enumerate(own_b)
         ],
         "units_summary": render_state.get("units_summary", []) or [],
         "enemy_summary": enemies,

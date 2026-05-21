@@ -207,6 +207,28 @@ A scenario is defective if any of the following hold:
 - **`fact` has cost 0** → not buildable via `StartProduction`
   (engine gates on `cost > 0`). Use `proc` as the "second base seed"
   in expand-arm objectives.
+- **`health:` on a pre-placed actor NOW WORKS** (historical footgun
+  fixed). The Rust scenario parser
+  (`oramap.rs::RawScenarioActor`/`ScenarioActor`) used to parse only
+  `actor_type / owner / position / count / spawn_point / stance` and
+  silently dropped a `health:` line, so an actor placed with
+  `health: 40` spawned at full HP. The parser now carries
+  `health: N` (an HP PERCENTAGE, 1-100) through to the spawned
+  actor's `Health` trait (`hp = max_hp * N / 100`, clamped ≥1).
+  Pre-placed damaged buildings/units are the basis for the
+  repair-triage / disaster-recovery idiom. Pinned by
+  `OpenRA-Rust/openra-data/tests/test_actor_health.rs` +
+  `tests/test_actor_health_field.py`.
+- **Building actor ids ARE surfaced for `repair` / `sell` /
+  `power_down` / `set_primary`** (historical footgun fixed).
+  `RustObsAdapter.render_state()` used to build `own_buildings` as
+  `{type, cell_x, cell_y}` — it dropped the engine actor id, so
+  `prompt_v2` assigned `id = list-index` and `env.rs::resolve_owned`
+  rejected the bogus id ⇒ no agent could target a building. The
+  adapter now includes the REAL engine `id` (plus `hp` / `is_primary`)
+  in `own_buildings` / `buildings_summary`, mirroring how
+  `units_summary` keeps the real unit id. Pinned by
+  `tests/test_repair_building_id.py`.
 - **`not own_units_gte:1`** mis-fires on turn 1 when the agent
   starts unit-less (documented footgun from `economy-force-buildup`).
   Use `after_ticks` + `not has_building:fact` for the unit-less
