@@ -5,17 +5,22 @@ meta:
   real_world_meaning: >
     Forlorn hope / military sacrifice doctrine. A high-value enemy
     construction yard (`fact`) sits at the far east of the map,
-    heavily defended; the agent's small force at the west cannot
-    survive the engagement. The OBJECTIVE is the building's
-    destruction — survival is NOT required. A "preserve the force"
-    policy that engages carefully and tries to save units loses on
-    the clock (the picket grinds attackers down and they never
-    arrive); only an all-in commit that drives the WHOLE force
-    straight at the objective and trades every attacker for damage
-    on the fact actually razes it in time. This is delayed-terminal
-    credit assignment with an explicit cost-vs-objective trade-off:
-    every unit lost looks locally negative, but the only successful
-    plan accepts the loss of all of them.
+    defended by an anti-armor picket; the agent's small strike
+    package at the west cannot punch through without heavy losses.
+    The OBJECTIVE is the building's destruction — keeping the force
+    intact is NOT required and is not achievable. A "preserve the
+    force" policy that engages carefully and tries to save units
+    loses on the clock (the picket grinds the lead element down and
+    the rest never arrive); a half-commit that advances and halts
+    short of the objective also times out. Only an all-in commit
+    that drives the WHOLE force decisively at the objective and
+    focus-fires through the picket — trading most of the attackers
+    for the kill — actually razes the fact in time. This is
+    delayed-terminal credit assignment with an explicit
+    cost-vs-objective trade-off: every unit lost looks locally
+    negative, but the only successful plan accepts that the bulk of
+    the force is spent and only a remnant survives to land the
+    killing blow.
   robotics_analogue: >
     Expendable strike package / single-use intervention: a fleet of
     cheap drones must destroy a critical adversary asset under a
@@ -32,25 +37,36 @@ meta:
 base_map: rush-hour-arena
 
 # The discriminator: the enemy fact at (110,20) is guarded by an
-# anti-armor picket — an e3 rocket-infantry WALL forward of the
-# objective plus a 4tnk heavy tank held back at x=108 guarding the
-# fact. A careful "preserve the force" approach (skirmish, retreat,
-# regroup, pick off targets) cannot land enough damage on the fact
-# before the deadline — the e3 wall outranges and out-damages the
-# 2tnk column in a stand-off, and any retreat resets the clock. The
+# anti-armor picket — an e3 rocket-infantry WALL just west of the
+# objective (x=106) plus a 4tnk heavy tank guarding the fact close
+# in. A careful "preserve the force" approach (lead probe, hold the
+# rest, retreat the damaged) cannot land enough damage on the fact
+# before the deadline — the e3 wall outranges and out-damages a
+# single probing 2tnk, and the held-back reserve never engages. A
+# half-commit that advances the whole force but halts SHORT of the
+# objective bleeds units in the open and likewise times out. The
 # intended play commits ALL six tanks plus the four e3 escorts
-# straight east, trading the column through the e3 wall and pushing
-# the survivors onto the fact. Win is buildings-only; force wipe is
-# NOT a fail.
+# straight east, focus-fires (`attack_unit`) through the e3 wall and
+# the 4tnk, and pushes the remnant onto the fact. Win is
+# buildings-only.
 #
-# Engine balance pass (armor-class weapon selection + stance fixes):
-# the post-fix 4tnk co-located with the e3 wall right next to the
-# fact over-killed the strike force before it could reach the
-# objective (all-in DREW). Re-tuned: the e3 wall sits forward (easy
-# x=104 / medium x=102 / hard x=100) so the strike force trades
-# through it with push-room to spare, and the 4tnk is pulled back to
-# x=108 every tier so it brawls only the survivors. Picket density
-# graduates 2→3→4 e3 across easy→medium→hard.
+# Engine recalibration (movement fixes: moving units take fire en
+# route, `attack_unit` on out-of-sight targets paths normally, no
+# sprint-invincibility). Two consequences had to be designed
+# around: (1) the engine auto-`done`s the episode the moment the
+# AGENT force is fully wiped (a true total-sacrifice collapses to a
+# DRAW, not a win-by-objective) — so the all-in must focus-fire hard
+# enough to keep a remnant alive long enough to raze the fact;
+# (2) the engine also auto-`done`s when the last enemy COMBAT unit
+# dies — the SENTINEL fact (an enemy building) keeps the episode
+# alive past picket elimination so within_ticks evaluates on the
+# terminal frame. Re-tuned picket: a 2/3/3-e3 wall at x=106 graded
+# easy→medium→hard, with the 4tnk close in front of the fact (x=109
+# easy/medium; x=112 on hard, where the seed-flank staging needs a
+# flank-robust win). The all-in trades through the picket losing the
+# bulk of the force (≈4 easy / ≈6 medium / a near-total loss on
+# hard) but a remnant razes the fact in budget; stall, careful
+# preserve, and half-commit all time out as real LOSSES.
 base:
   agent: {faction: allies, cash: 0}
   enemy: {faction: soviet, cash: 0, bot_type: guard}
@@ -83,21 +99,18 @@ base:
     - {type: e3,   owner: agent, position: [8, 22], stance: 1, count: 2}
     # ── Defender — `guard` bot, leashed (lunge then snap back). e3
     # rockets shred 2tnk armour at range 5; 4tnk heavy brawls close.
-    # Medium picket = a 3-e3 anti-armor WALL at x=102 (forward of the
-    # objective so the strike force trades through it while it still
-    # has push-room) + 1 4tnk HP-sponge at x=108 guarding the fact.
-    # Spread the e3 wall vertically (y=16/20/24) to cover the west
-    # approach corridor — an all-in commit still cracks it but trades
-    # roughly half the force in doing so. On EASY, lighter picket
-    # (2 e3 at x=104); on HARD, denser (4 e3 at x=100). The 4tnk is
-    # held back at x=108 every tier so it brawls only what survives
-    # the e3 wall, not the whole column at once (engine balance pass:
-    # the post-armor-fix 4tnk co-located with the e3 wall over-killed
-    # the strike force before it could reach the fact).
-    - {type: e3,   owner: enemy, position: [102, 16], stance: 2}
-    - {type: e3,   owner: enemy, position: [102, 20], stance: 2}
-    - {type: e3,   owner: enemy, position: [102, 24], stance: 2}
-    - {type: 4tnk, owner: enemy, position: [108, 20], stance: 2}
+    # Medium picket = a 3-e3 anti-armor WALL at x=106 (spread
+    # vertically y=16/20/24 across the approach corridor) + 1 4tnk
+    # HP-sponge at x=109 close in front of the objective fact. The
+    # all-in commit focus-fires through the wall losing roughly half
+    # the force; a probing / standoff / preserve play cannot crack
+    # it. On EASY, lighter picket (2 e3 at x=106); on HARD, the
+    # 3-e3 wall plus the 4tnk pulled back to x=112 (behind the fact)
+    # so the win is robust to the seed-flank staging latitude.
+    - {type: e3,   owner: enemy, position: [106, 16], stance: 2}
+    - {type: e3,   owner: enemy, position: [106, 20], stance: 2}
+    - {type: e3,   owner: enemy, position: [106, 24], stance: 2}
+    - {type: 4tnk, owner: enemy, position: [109, 20], stance: 2}
     # Objective: the high-value enemy fact at far east (110, 20).
     - {type: fact, owner: enemy, position: [110, 20]}
     # Sentinel fact — far north corner, never engaged. Keeps the
@@ -107,19 +120,21 @@ base:
     - {type: fact, owner: enemy, position: [122, 4]}
 
 levels:
-  # ── EASY ── the bare sacrifice skill: light defender (only 2× e3
-  # + 1× 4tnk). A preserve-the-force plan still times out, but the
-  # all-in commit razes the fact comfortably.
+  # ── EASY ── the bare sacrifice skill: light defender (2× e3
+  # wall at x=106 + 1× 4tnk at x=109). A preserve-the-force plan
+  # times out, but the all-in commit razes the fact, losing roughly
+  # four of its ten units doing so.
   easy:
     description: >
       A defended enemy construction yard sits at the far east
       (110, 20). Your strike package (6 tanks + 4 rocket infantry)
-      at the west cannot survive the engagement intact. You DO
-      NOT need to keep your units alive — the objective is the
-      enemy fact's DESTRUCTION before the deadline. A careful,
-      preserve-the-force approach times out on the clock; commit
-      the WHOLE force straight east at the objective, accept the
-      losses, and raze the fact.
+      at the west cannot punch through the picket without heavy
+      losses. The objective is the enemy fact's DESTRUCTION before
+      the deadline — keeping the force intact is neither required
+      nor possible. A careful, preserve-the-force approach times
+      out on the clock; so does advancing and halting short of the
+      objective. Commit the WHOLE force straight east, focus-fire
+      through the picket, accept the losses, and raze the fact.
     overrides:
       actors:
         - {type: 2tnk, owner: agent, position: [6, 16], stance: 1, count: 2}
@@ -127,9 +142,9 @@ levels:
         - {type: 2tnk, owner: agent, position: [6, 24], stance: 1, count: 2}
         - {type: e3,   owner: agent, position: [8, 18], stance: 1, count: 2}
         - {type: e3,   owner: agent, position: [8, 22], stance: 1, count: 2}
-        - {type: e3,   owner: enemy, position: [104, 18], stance: 2}
-        - {type: e3,   owner: enemy, position: [104, 22], stance: 2}
-        - {type: 4tnk, owner: enemy, position: [108, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [106, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [106, 23], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [109, 20], stance: 2}
         - {type: fact, owner: enemy, position: [110, 20]}
         - {type: fact, owner: enemy, position: [122, 4]}
     win_condition:
@@ -145,16 +160,18 @@ levels:
   # ── MEDIUM ── +1 controlled variable: heavier defender (3× e3
   # wall + 1× 4tnk — the base composition). The preserve-the-force
   # trap tightens: any standoff loses ground; the all-in commit
-  # still wins but trades roughly half the package through the wall.
+  # still wins but trades roughly six of its ten units through the
+  # wall.
   medium:
     description: >
       Heavier picket (a 3-rocket-infantry wall spread y=16/20/24 at
-      x=102 + 1 heavy tank held back at x=108) guarding the enemy
-      fact at (110, 20). Same task: raze the fact before the
-      deadline; survival is NOT required. The careful,
+      x=106 + 1 heavy tank at x=109) guarding the enemy fact at
+      (110, 20). Same task: raze the fact before the deadline;
+      keeping the force intact is not required. The careful,
       preserve-the-force approach reliably times out — the e3
-      outrange your tanks in any standoff. Commit everything,
-      all-in, straight at the objective.
+      outrange your tanks in any standoff — and so does halting
+      short of the objective. Commit everything, all-in,
+      focus-fire through the wall, and raze the fact.
     overrides: {}
     win_condition:
       all_of:
@@ -168,17 +185,19 @@ levels:
 
   # ── HARD ── +1 controlled variable: seed-chosen staging latitude
   # (two spawn_point groups, NORTH y=10 / SOUTH y=30) so the all-in
-  # vector flips per seed and can't be memorised; picket adds one
-  # more e3 (heavy on top of the heavy-2tnk pair). Tight deadline.
+  # vector flips per seed and can't be memorised. Same 3-e3 wall as
+  # medium but the 4tnk is pulled back behind the fact (x=112) so
+  # the win stays robust to the flank. Tight deadline.
   hard:
     description: >
-      Strongest defender on the far-east enemy fact at (110, 20);
-      your strike package stages from a seed-chosen latitude
-      (NORTH or SOUTH) so the all-in vector varies per seed. Raze
-      the fact before the (tight) deadline. Survival is NOT
-      required — every unit may be spent. The careful preserve
-      plan and any partial commit both time out; only the
-      whole-force all-in commit lands enough damage on the fact.
+      Defended far-east enemy fact at (110, 20); your strike
+      package stages from a seed-chosen latitude (NORTH or SOUTH)
+      so the all-in vector varies per seed. Raze the fact before
+      the (tight) deadline. Keeping the force intact is not
+      required — the bulk of it will be spent. The careful preserve
+      plan and any partial / halt-short commit both time out; only
+      the whole-force all-in commit, focus-firing through the
+      picket, lands the killing blow on the fact.
     overrides:
       actors:
         # spawn_point 0 — NORTH staging (y=8..12)
@@ -195,17 +214,17 @@ levels:
         - {type: e3,   owner: agent, position: [8, 31], stance: 1, count: 2, spawn_point: 1}
         # Defender — symmetric picket on the objective fact (enemy
         # actors don't honour spawn_point — see CLAUDE.md; the same
-        # picket meets either spawn). Hard's e3 anti-armor wall is the
-        # densest (4 e3, one per latitude y=14/18/22/26) and the
-        # furthest forward (x=100) so a flank-staged strike package
-        # still trades through it with push-room left for the fact.
-        # The 4tnk HP-sponge is held back at x=108 (guards the fact;
-        # brawls only the survivors) — same idiom as easy/medium.
-        - {type: e3,   owner: enemy, position: [100, 14], stance: 2}
-        - {type: e3,   owner: enemy, position: [100, 18], stance: 2}
-        - {type: e3,   owner: enemy, position: [100, 22], stance: 2}
-        - {type: e3,   owner: enemy, position: [100, 26], stance: 2}
-        - {type: 4tnk, owner: enemy, position: [108, 20], stance: 2}
+        # picket meets either spawn). Hard's e3 anti-armor wall is a
+        # 3-e3 wall at x=106 (y=16/20/24) — the same wall as medium —
+        # but the 4tnk HP-sponge is pulled BACK to x=112 (behind the
+        # objective fact). That keeps the all-in WIN robust to the
+        # seed-flank staging latitude (NORTH/SOUTH): a flank-staged
+        # strike package focus-fires the wall and razes the fact
+        # without the 4tnk over-killing it from in front first.
+        - {type: e3,   owner: enemy, position: [106, 16], stance: 2}
+        - {type: e3,   owner: enemy, position: [106, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [106, 24], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [112, 20], stance: 2}
         - {type: fact, owner: enemy, position: [110, 20]}
         - {type: fact, owner: enemy, position: [122, 4]}
     win_condition:

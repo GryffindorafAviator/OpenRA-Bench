@@ -1,22 +1,39 @@
 """combat-suicide-charge-mission — sacrifice the force to destroy a
 high-value enemy objective (forlorn hope / military sacrifice doctrine).
 
-The bar: an all-in commit that drives the WHOLE force straight at the
-enemy fact (110, 20), accepting total force loss, WINS on every level
-and every hard seed (1..4). STALL (only observe) and PRESERVE-FORCE
-(only the lead tank probes, the rest hold) both LOSE on every level —
-non-win is a real reachable timeout LOSS via the `after_ticks` fail
-clause (no own_units_gte:1 clause; total force loss is NOT a fail,
-this is the whole point of the sacrifice anchor).
+The bar: an all-in commit that drives the WHOLE force decisively at the
+enemy fact (110, 20), focus-firing through the picket and accepting the
+loss of the bulk of the force, WINS on every level and every hard seed
+(1..4). STALL (only observe), PRESERVE-FORCE (only the lead tank
+probes, the rest hold), and STANDOFF (the whole force advances but
+halts short of the objective) all LOSE on every level — non-win is a
+real reachable timeout LOSS via the `after_ticks` fail clause.
 
-Recalibrated after the engine balance pass (armor-class weapon
-selection + stance fixes): the post-fix 4tnk co-located with the e3
-wall over-killed the strike force before it could reach the fact,
-collapsing the all-in commit to a DRAW on medium/hard. The picket
-was re-tuned — the e3 anti-armor wall sits forward of the objective
-(easy x=104 / medium x=102 / hard x=100, density 2/3/4 e3) and the
-4tnk HP-sponge is pulled back to x=108 to brawl only the survivors —
-restoring the all-in WIN while keeping stall + preserve-force LOSS.
+Recalibrated after the engine movement fixes (moving units take fire
+en route; `attack_unit` on out-of-sight targets paths normally; no
+sprint-invincibility). Two engine behaviours had to be designed
+around — both surfaced during this recalibration:
+
+  * The engine auto-`done`s the episode the moment the AGENT force is
+    fully wiped, REGARDLESS of `termination.agent_units_killed`. A
+    literal total-sacrifice therefore collapses to a DRAW (the
+    `after_ticks` deadline never bites), not a win-by-objective. The
+    picket is tuned so the all-in commit focus-fires hard enough to
+    keep a remnant alive long enough to raze the fact (loses ≈4 on
+    easy / ≈6 on medium / a near-total loss on hard).
+  * The engine also auto-`done`s when the last enemy COMBAT unit dies;
+    the far-corner SENTINEL fact (an enemy building) keeps the episode
+    alive past picket elimination so `within_ticks` evaluates on the
+    terminal frame.
+
+Picket re-tuned: a 2/3/3-e3 anti-armor wall at x=106 graded
+easy→medium→hard, with the 4tnk close in front of the fact (x=109 on
+easy/medium; x=112 on hard, where the seed-flank staging needs a
+flank-robust win). A `move`-beeline policy is NOT used as a losing
+probe: a plain move onto the objective cell trips the engine
+auto-`done` and collapses to a DRAW (not a real LOSS), so the losing
+probes are stall / careful-preserve / halt-short — all of which leave
+the picket alive and the fact intact and time out as real LOSSES.
 
 Validation is scripted (no model / network).
 """
@@ -332,12 +349,15 @@ def _stall(rs, Command):
 
 
 def _all_in(rs, Command):
-    """Commit-all: every agent unit drives straight at the objective
-    fact at (110, 20). When any enemy comes into vision the whole
-    force attack_unit's the closest threat, switching to the
-    objective fact the moment it appears in vision. Tanks + rocket
-    infantry absorb fire and trade themselves for damage on the
-    fact. The intended sacrifice play."""
+    """Commit-all: every agent unit drives decisively at the
+    objective. When any enemy comes into vision the whole force
+    `attack_unit`'s a single target — focus-firing — and switches to
+    the objective fact the moment it appears. Until contact the force
+    `attack_move`s to a staging cell SHORT of the fact (106, 20):
+    advancing onto the fact's own cell (110, 20) would trip the
+    engine auto-`done`. Tanks + rocket infantry absorb fire and
+    trade the bulk of the force for the kill on the fact. The
+    intended sacrifice play."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
@@ -351,7 +371,7 @@ def _all_in(rs, Command):
             t = (e.get("type") or "").lower()
             if t == "fact" and int(e.get("cell_x", 200)) < 115:
                 return [Command.attack_unit(ids, str(e["id"]))]
-        # Otherwise smash the nearest defender first.
+        # Otherwise focus-fire the single nearest defender.
         tx = sum(int(u["cell_x"]) for u in units) / len(units)
         ty = sum(int(u["cell_y"]) for u in units) / len(units)
         enemies.sort(
@@ -359,7 +379,21 @@ def _all_in(rs, Command):
             + (int(e.get("cell_y", 0)) - ty) ** 2
         )
         return [Command.attack_unit(ids, str(enemies[0]["id"]))]
-    return [Command.attack_move(ids, 110, 20)]
+    return [Command.attack_move(ids, 106, 20)]
+
+
+def _standoff(rs, Command):
+    """Half-commit / brute-but-timid: the WHOLE force advances east
+    with `attack_move` but halts short of the objective at (90, 20).
+    The units bleed in the open against the picket's reach but never
+    press onto the fact; the fact never takes damage, the clock runs
+    out → LOSS. Discriminates a full decisive commit from a partial
+    advance."""
+    units = rs.get("units_summary", []) or []
+    if not units:
+        return [Command.observe()]
+    ids = [str(u["id"]) for u in units]
+    return [Command.attack_move(ids, 90, 20)]
 
 
 def _preserve_force(rs, Command):
@@ -438,6 +472,27 @@ def test_preserve_force_loses(level, seed):
     assert r.outcome == "loss", (
         f"{level} seed={seed}: preserve-force must LOSE "
         f"(insufficient damage on the fact), got {r.outcome} "
+        f"(lost={r.signals.units_lost}, "
+        f"bldgs={r.signals.enemy_buildings_destroyed_types})"
+    )
+
+
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_standoff_loses(level, seed):
+    """Half-commit / brute-but-timid: the whole force advances east
+    but halts short of the objective at (90, 20). The force bleeds in
+    the open but never presses onto the fact; the fact never takes
+    damage, clock expires → LOSS. Discriminates a decisive full
+    commit from a partial advance."""
+    pytest.importorskip("openra_train")
+    from openra_bench.eval_core import run_level
+
+    c = compile_level(load_pack(PACK_PATH), level)
+    r = run_level(c, _standoff, seed=seed)
+    assert r.outcome == "loss", (
+        f"{level} seed={seed}: standoff (halt-short) must be a real "
+        f"timeout LOSS (fact never takes damage), got {r.outcome} "
         f"(lost={r.signals.units_lost}, "
         f"bldgs={r.signals.enemy_buildings_destroyed_types})"
     )
