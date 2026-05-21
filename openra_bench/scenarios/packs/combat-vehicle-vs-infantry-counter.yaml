@@ -21,33 +21,43 @@
 # Pre-placed (each spawn group): agent `fact` + `tent` (infantry
 # trainer; enables e1 and e3) + `weap` (vehicle trainer; enables
 # 2tnk) + a single starter `jeep` (allies scout vehicle; visibility
-# over the enemy composition + satisfies own_units_gte:1 from turn 0
-# so the unit-less misfire footgun in CLAUDE.md doesn't trip on the
-# fail clause). The tent+weap pair makes BOTH counter compositions
-# buildable from turn 1 — the decision the model faces is
-# composition, not tech-up.
+# over the enemy composition). The starter jeep is `stance: 0`
+# (HoldFire) so it NEVER auto-fires — it scouts, it does not fight.
+# This is the load-bearing anti-stall guard (CLAUDE.md: an armour-
+# class engine fix made pre-placed agent combat units auto-fire
+# effectively, so a HoldFire jeep cannot rack up kills on its own).
+# The tent+weap pair makes BOTH counter compositions buildable from
+# turn 1 — the decision the model faces is composition, not tech-up.
+#
+# The win predicate requires `unit_type_count_gte: 2tnk:3` — the
+# agent must have ACTUALLY FIELDED 3 medium tanks (the right
+# counter). A stall policy never builds tanks; a wrong-counter
+# policy (e3 / e1) never builds 2tnk — neither can satisfy the win
+# regardless of how many kills the entrenched enemy concedes. Only
+# building + commanding the 3-tank fist clears the bar.
 #
 # Discrimination on EASY / MEDIUM (single enemy cluster, both
-# compositions are buildable from t=1):
-#   • stall (only observe): never reaches the kill bar → after_ticks
-#     LOSS.
-#   • build-only-e1 (match enemy 1:1 with cheap rifles): 25× e1 vs
-#     the enemy e1 mass is a 1:1 attrition; the enemy holds entrenched
-#     while the agent has to MOVE INTO range — moving infantry get
-#     shot first; attrition LOSES, the kill bar is unmet OR the
-#     starter jeep + survivors evaporate before the cap.
-#   • build-only-e3 (anti-armour rockets against infantry — the wrong
-#     counter): 8× e3 ($2400) costs $300/unit to put out the same
-#     anti-infantry DPS that 24× e1 ($2400) would; the rocket squad
-#     is OUT-SHOT by the e1 mass on raw infantry-vs-infantry numbers
-#     (e3 hp45 < e1 hp50; e3 rng4 < tank rng4.75; e3 anti-armour
-#     warhead is overkill on infantry but the same slow projectiles
-#     under-perform vs small targets) → kill bar unmet OR survivors
-#     under N → LOSS.
-#   • intended build-2tnk (3× medium tanks @ $850 = $2550): the right
-#     counter — heavy armour soaks small-arms fire, tank dps22 + rng
-#     4.75 + sight 6c walks through a static e1 mass without losing
-#     a tank → kill bar met, all 3 tanks alive, fact intact → WIN.
+# compositions are buildable from t=1). The win predicate is
+# `unit_type_count_gte 2tnk:3 AND units_killed_gte K AND
+# has_building fact` — the 2tnk:3 clause means ONLY a policy that
+# actually builds the 3-tank fist can clear the bar:
+#   • stall (only observe): builds nothing; the HoldFire jeep never
+#     fires → 0 kills, 0 tanks. The entrenched e1 swarm eventually
+#     hunts down the idle jeep → force-wipe (not own_units_gte:1)
+#     LOSS (or after_ticks LOSS if the jeep is never reached).
+#   • build-only-e1 (match enemy 1:1 with cheap rifles): never
+#     builds 2tnk → the 2tnk:3 clause is structurally unmet; even
+#     a full kill count cannot win → after_ticks / force-wipe LOSS.
+#   • build-only-e3 (anti-armour rockets against infantry — the
+#     wrong counter): never builds 2tnk → the 2tnk:3 clause is
+#     structurally unmet; the rocket squad is also OUT-SHOT by the
+#     e1 mass on raw infantry-vs-infantry numbers (e3 hp45 < e1
+#     hp50; slow anti-armour projectiles under-perform vs small
+#     targets) → after_ticks / force-wipe LOSS.
+#   • intended build-2tnk (3× medium tanks @ $850 = $2550): the
+#     right counter — heavy armour soaks small-arms fire, tank
+#     dps22 + rng 4.75 + sight 6c walks through a static e1 mass.
+#     2tnk:3 clause met, kill bar met, fact intact → WIN.
 #
 # Discrimination on HARD (+1 axis: 2 agent spawn_point groups):
 #   • The agent base seed-rotates between NORTH (y=12) and SOUTH
@@ -70,15 +80,31 @@
 #   • `after_ticks` fail clauses reachable within max_turns
 #     (within_ticks 5400 ≤ 5403 at max_turns 60): a staller hits
 #     after_ticks 5401 and LOSES, never draws.
-#   • Starting `jeep` ensures own_units_gte:1 is met from t=0 so
-#     the unit-less mis-fire (CLAUDE.md) doesn't trip the fail
-#     clause before the model has built anything.
+#   • Starting `jeep` is `stance: 0` (HoldFire) — it scouts but
+#     never auto-fires, so a pure-observe stall policy cannot score
+#     kills with it. The win predicate's `unit_type_count_gte`
+#     2tnk:3 is the real anti-cheat: only the agent that builds the
+#     3-tank fist can clear the bar. The fail clause is
+#     `after_ticks | not has_building:fact | not own_units_gte:1` —
+#     the agent starts WITH the jeep so `own_units_gte:1` is
+#     satisfied from t=0 (the unit-less turn-1 mis-fire footgun in
+#     CLAUDE.md does not apply); the force-wipe clause turns a
+#     stalled-and-overrun episode into a real LOSS instead of an
+#     engine auto-`done` DRAW when the entrenched e1 swarm hunts
+#     down the idle HoldFire jeep.
+#   • The vehicle queue (`weap` war factory) needs `powr` online
+#     AND a `fix` service depot present for `2tnk` to clear its
+#     prerequisites — both are pre-placed in every base so the
+#     tank counter is producible from turn 1 (the decision is
+#     composition, not tech-up). `tent` produces e1/e3 with `powr`
+#     alone.
 #   • Spawn-group footgun (CLAUDE.md oramap): on hard, ANY agent
 #     actor with `spawn_point` filters OUT every agent actor without
-#     one — so BOTH bases (fact + tent + weap + jeep) are
-#     duplicated under BOTH spawn_point groups at their respective
-#     coords. The single far enemy fact at (124,20) and the centre
-#     enemy cluster have NO spawn_point and place on every seed.
+#     one — so BOTH bases (fact + powr + tent + weap + fix + jeep)
+#     are duplicated under BOTH spawn_point groups at their
+#     respective coords. The single far enemy fact at (124,20) and
+#     the centre enemy cluster have NO spawn_point and place on
+#     every seed.
 #   • starting_cash $2550 = exactly 3× 2tnk; 8× e3 = $2400 (cash
 #     unspent); 25× e1 = $2500. Neither rocket nor rifle mass is
 #     dominant against the entrenched enemy.
@@ -130,13 +156,15 @@ base:
   planning: true
   termination: {max_ticks: 8000}
   # Default base (overridden on hard). The starter jeep gives turn-1
-  # scouting (sight 7c) AND satisfies own_units_gte:1 from t=0 so the
-  # fail clause's not own_units_gte:1 doesn't mis-fire on turn 1.
+  # scouting (sight 7c). It is `stance: 0` (HoldFire) so it never
+  # auto-fires — a stall policy cannot score kills with it.
   actors:
     - {type: fact, owner: agent, position: [10, 20]}
+    - {type: powr, owner: agent, position: [10, 16]}
     - {type: tent, owner: agent, position: [14, 18]}
     - {type: weap, owner: agent, position: [14, 22]}
-    - {type: jeep, owner: agent, position: [12, 20]}
+    - {type: fix,  owner: agent, position: [18, 20]}
+    - {type: jeep, owner: agent, position: [12, 20], stance: 0}
     # Far persistent enemy marker — prevents engine auto-done when
     # the live infantry cluster falls so the win/fail evaluator sees
     # the terminal frame.
@@ -146,9 +174,9 @@ levels:
   # ── EASY ─────────────────────────────────────────────────────────
   # Bare counter-selection skill: a small visible enemy infantry
   # cluster (8× e1) on the centre lane. Cash $2550 funds 3× 2tnk
-  # (the right counter) cleanly. Loss cap is generous via the
-  # own_units_gte:1 floor only (any survivor counts). Stall: kill bar
-  # unmet → after_ticks LOSS.
+  # (the right counter) cleanly. The win requires fielding 3× 2tnk
+  # AND 6 kills; stall / wrong-counter never field the tanks → kill
+  # bar + 2tnk:3 clause unmet → after_ticks LOSS.
   easy:
     description: >
       Cash $2550. The enemy is a small cluster of 8 rifle infantry
@@ -160,16 +188,18 @@ levels:
       armoured fist (2tnk @ $850, exactly 3 for $2550) OR rifle
       infantry (e1 @ $100, up to 25). Scout the enemy with the jeep,
       pick the correct hard counter, and commit the whole budget.
-      Win when 6 enemy units are killed AND ≥1 of your units are
-      alive AND your construction yard still stands, before tick
-      5400. Stalling, picking the wrong counter, or letting your
-      force evaporate fails the bar.
+      Win when you have fielded 3 medium tanks (2tnk) AND 6 enemy
+      units are killed AND your construction yard still stands,
+      before tick 5400. Stalling or picking the wrong counter never
+      fields the 3-tank fist and fails the bar.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [10, 16]}
         - {type: tent, owner: agent, position: [14, 18]}
         - {type: weap, owner: agent, position: [14, 22]}
-        - {type: jeep, owner: agent, position: [12, 20]}
+        - {type: fix,  owner: agent, position: [18, 20]}
+        - {type: jeep, owner: agent, position: [12, 20], stance: 0}
         # 8× e1 entrenched cluster — stance:3 (attack anything in
         # range). Spread over a 3×3 grid centred on (70,20) so the
         # mass can be engaged from any approach axis.
@@ -184,15 +214,15 @@ levels:
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 6}
-        - {own_units_gte: 1}
         - {has_building: fact}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
         - {after_ticks: 5401}
-        - {not: {own_units_gte: 1}}
         - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
     max_turns: 60
 
   # ── MEDIUM ───────────────────────────────────────────────────────
@@ -214,15 +244,17 @@ levels:
       through small-arms fire. Mass rockets (e3 @ $300) waste cost-
       per-effect against soft targets and get out-DPSed by the rifle
       mass on attrition; matching with own rifles (e1 @ $100) is a
-      1:1 trade with no advantage. Win when 8 enemy units are killed
-      AND ≥1 of your units are alive AND your fact still stands,
-      before tick 5400.
+      1:1 trade with no advantage. Win when you have fielded 3
+      medium tanks (2tnk) AND 8 enemy units are killed AND your fact
+      still stands, before tick 5400.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [10, 16]}
         - {type: tent, owner: agent, position: [14, 18]}
         - {type: weap, owner: agent, position: [14, 22]}
-        - {type: jeep, owner: agent, position: [12, 20]}
+        - {type: fix,  owner: agent, position: [18, 20]}
+        - {type: jeep, owner: agent, position: [12, 20], stance: 0}
         # 12× e1 entrenched cluster — deeper centre mass.
         - {type: e1, owner: enemy, position: [70, 17], stance: 3}
         - {type: e1, owner: enemy, position: [70, 18], stance: 3}
@@ -239,15 +271,15 @@ levels:
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 8}
-        - {own_units_gte: 1}
         - {has_building: fact}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
         - {after_ticks: 5401}
-        - {not: {own_units_gte: 1}}
         - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
     max_turns: 60
 
   # ── HARD ─────────────────────────────────────────────────────────
@@ -271,21 +303,25 @@ levels:
       medium tanks (2tnk) walk through small-arms fire; mass rockets
       (e3) waste cost-per-effect against soft targets and get out-
       DPSed on attrition; matching with own rifles is a 1:1 trade
-      with no advantage. Win when 8 enemy units are killed AND ≥1 of
-      your units are alive AND your fact still stands, before tick
-      5400.
+      with no advantage. Win when you have fielded 3 medium tanks
+      (2tnk) AND 8 enemy units are killed AND your fact still
+      stands, before tick 5400.
     overrides:
       actors:
         # ── AGENT spawn 0 — NORTH base (y=12) ─────────────────────
         - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 8], spawn_point: 0}
         - {type: tent, owner: agent, position: [14, 10], spawn_point: 0}
         - {type: weap, owner: agent, position: [14, 14], spawn_point: 0}
-        - {type: jeep, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [18, 12], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [12, 12], stance: 0, spawn_point: 0}
         # ── AGENT spawn 1 — SOUTH base (y=28) ─────────────────────
         - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 32], spawn_point: 1}
         - {type: tent, owner: agent, position: [14, 26], spawn_point: 1}
         - {type: weap, owner: agent, position: [14, 30], spawn_point: 1}
-        - {type: jeep, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [18, 28], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [12, 28], stance: 0, spawn_point: 1}
         # ── CENTRE ENEMY CLUSTER — pure infantry (always places) ──
         # 12× e1 entrenched on the central lane. Per CLAUDE.md, enemy
         # actors do not honour spawn_point — this cluster lands on
@@ -307,13 +343,13 @@ levels:
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 8}
-        - {own_units_gte: 1}
         - {has_building: fact}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
         - {after_ticks: 5401}
-        - {not: {own_units_gte: 1}}
         - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
     max_turns: 60
