@@ -808,6 +808,18 @@ UPGRADED = [
     # cannot generalise — placement must be computed relative to the
     # actual fact each seed.
     "build-sequence-tech-cheapest",
+    # Wave-11 REASONING pack — robust build-order planning (PlanBench
+    # robust planning / N+1 resilient design / redundancy anchor). The
+    # agent must reach a powered war factory AND keep it through a
+    # mid-episode `scheduled_events: destroy_actors` strike that razes
+    # the one exposed power plant; a single-powr build order drops to
+    # low power and loses, the resilient order pre-builds a redundant
+    # 2nd powr. Hard tier defines two agent spawn_point groups (NORTH
+    # base y=12 / SOUTH base y=26) round-robined by seed, with the
+    # exposed powr + strike region duplicated per latitude; a memorised
+    # placement cell cannot generalise — the redundant powr must be
+    # placed relative to the actual fact each seed.
+    "build-sequence-tech-most-resilient",
     # Wave-7 REASONING econ pack — SC2 silo management / working-capital
     # allocation / FIFO perishable inventory cap anchor. Cash starts NEAR
     # the proc-only storage cap (1800 vs 2000); income accrues; the
