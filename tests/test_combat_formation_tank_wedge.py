@@ -202,113 +202,116 @@ def _brute_column_policy(rs, Command):
 
 
 def _intended_wedge_policy(rs, Command):
-    """Intended wedge cycle: identify the leader (closest to y=20),
-    drive lead on-axis at y=20, push flankers to y=18 and y=22
-    trailing one cell west, attack any in-range enemy with all units
-    that can bear. The wedge engages each bracket end-on so only
-    1-2 e3 per bracket fire on a given tank at a time.
+    """Intended wedge cycle: advance the formation to the mouth of the
+    fire corridor, then — instead of running the gauntlet single-file
+    — turn the whole wedge ONTO the off-axis brackets and dismantle the
+    rocket-soldier clusters end-on before pushing through to the
+    objective. The column policy that just attack_moves straight east
+    along y=20 sits inside Dragon range of BOTH brackets at once and
+    bleeds itself dry; the wedge eliminates the off-axis threat first,
+    so the residual drive to (80,20) is uncontested.
+
+    Phases:
+      1. brackets alive & lead still west of the corridor → advance the
+         formation to x≈38 (corridor mouth), holding y-spread.
+      2. brackets alive & lead at the corridor → turn EVERY tank onto
+         its nearest rocket soldier (focus-fire the brackets end-on).
+      3. brackets cleared → attack_move the surviving wedge to the
+         objective region centred on (80, 20).
     """
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
     targs = _targets(enemies)
     if not units:
         return [Command.observe()]
-    # Sort units by current y; assign formation slots.
-    sorted_units = sorted(units, key=lambda u: u["cell_y"])
-    # 5-tank wedge slots: from outermost-flank to lead and back.
-    # We use 5 logical slots: (dx=-2, dy=-2), (dx=-1, dy=-1),
-    # (dx=0, dy=0 — lead), (dx=-1, dy=+1), (dx=-2, dy=+2).
-    slots = [(-2, -2), (-1, -1), (0, 0), (-1, 1), (-2, 2)]
+    e3s = [e for e in targs if (e.get("type") or "").lower() == "e3"]
+    lead_x = max(u["cell_x"] for u in units)
     cmds = []
-    for u, (dx, dy) in zip(sorted_units, slots):
-        ux, uy = u["cell_x"], u["cell_y"]
-        # Lead pushes east aggressively; flankers track formation.
-        lead_x = max(ux, 12) + 8
-        tx = min(110, lead_x + dx)
-        ty = 20 + dy
-        in_range = [
-            e for e in targs
-            if abs(e["cell_x"] - ux) + abs(e["cell_y"] - uy) <= 5
-        ]
-        if in_range:
+    if e3s and lead_x >= 30:
+        # Phase 2 — turn the wedge onto the brackets, end-on.
+        for u in units:
+            ux, uy = u["cell_x"], u["cell_y"]
             t0 = min(
-                in_range,
+                e3s,
                 key=lambda e: abs(e["cell_x"] - ux) + abs(e["cell_y"] - uy),
             )
             cmds.append(Command.attack_unit([str(u["id"])], str(t0["id"])))
-        else:
+        return cmds
+    if e3s:
+        # Phase 1 — advance the formation to the corridor mouth.
+        for u in units:
             cmds.append(
-                Command.move_units([str(u["id"])], target_x=tx, target_y=ty)
+                Command.move_units(
+                    [str(u["id"])], target_x=38, target_y=u["cell_y"]
+                )
             )
+        return cmds
+    # Phase 3 — brackets cleared; drive the survivors to the objective.
+    for u in units:
+        cmds.append(
+            Command.attack_move([str(u["id"])], target_x=80, target_y=20)
+        )
     return cmds
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
-def test_stall_policy_loses(level):
-    """Stall must LOSE on medium and hard — the region bar is never
-    met because the agent never moves; defenders are stance:2 and
-    never come to the strike force, so the within_ticks deadline
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_stall_policy_loses(level, seed):
+    """Stall must LOSE on every level and seed — the region bar is
+    never met because the agent never moves; defenders are stance:2
+    and never come to the strike force, so the within_ticks deadline
     elapses → after_ticks LOSS."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
-    for s in seeds:
-        res = run_level(c, _stall_policy, seed=s)
-        assert res.outcome == "loss", (
-            f"{level} seed={s}: stall must LOSE; got {res.outcome} "
-            f"killed={res.signals.units_killed} lost={res.signals.units_lost}"
-        )
+    res = run_level(c, _stall_policy, seed=seed)
+    assert res.outcome == "loss", (
+        f"{level} seed={seed}: stall must LOSE; got {res.outcome} "
+        f"killed={res.signals.units_killed} lost={res.signals.units_lost}"
+    )
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
-def test_brute_column_attack_move_loses(level):
-    """Brute attack_move east on y=20 must LOSE — column on the
-    engagement axis takes simultaneous cross-fire from both
-    brackets; ≥3 tanks die before the column clears the gap →
-    own_units_gte:3 fails OR the region-at-objective bar is unmet
-    in time → LOSS.
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_brute_column_attack_move_loses(level, seed):
+    """Brute attack_move east on y=20 must LOSE on every level and
+    seed — the column on the engagement axis takes simultaneous
+    cross-fire from both brackets; tanks die before the column
+    clears the gap → own_units_gte:3 fails OR the region-at-objective
+    bar is unmet in time → LOSS (never a draw).
     """
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
-    for s in seeds:
-        res = run_level(c, _brute_column_policy, seed=s)
-        assert res.outcome == "loss", (
-            f"{level} seed={s}: brute column attack_move must LOSE; "
-            f"got {res.outcome} killed={res.signals.units_killed} "
-            f"lost={res.signals.units_lost}"
-        )
-
-
-def test_intended_wedge_wins_medium():
-    """Intended wedge cycle WINS on medium seed=1: lead absorbs the
-    on-axis 1tnk's fire, flankers offset to y=18/22 engage each
-    bracket end-on, ≥3 of 5 tanks reach (80,20) intact with the kill
-    bar met. Verified 2026-05-20 (killed=7 lost=1 tick=1353)."""
-    pytest.importorskip("openra_train")
-    from openra_bench.eval_core import run_level
-
-    c = compile_level(load_pack(PACK_PATH), "medium")
-    res = run_level(c, _intended_wedge_policy, seed=1)
-    assert res.outcome == "win", (
-        f"medium seed=1: intended wedge should WIN, got {res.outcome} "
-        f"killed={res.signals.units_killed} lost={res.signals.units_lost}"
+    res = run_level(c, _brute_column_policy, seed=seed)
+    assert res.outcome == "loss", (
+        f"{level} seed={seed}: brute column attack_move must LOSE; "
+        f"got {res.outcome} killed={res.signals.units_killed} "
+        f"lost={res.signals.units_lost}"
     )
 
 
-def test_intended_wedge_wins_easy():
-    """Wedge WINS on easy seed=1 (single bracket; verified 2026-05-20
-    killed=4 lost=0 tick=1233 — all 5 tanks reach (80,20) intact)."""
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_intended_wedge_wins(level, seed):
+    """Intended wedge cycle WINS on every level and every hard seed:
+    the formation advances to the corridor mouth, turns onto the
+    off-axis rocket-soldier brackets and dismantles them end-on, then
+    drives the survivors uncontested to (80,20). Recalibrated
+    2026-05-20 after the engine balance fixes (armor-class weapon
+    selection / stance semantics) made the run-the-gauntlet column
+    bleed faster — engaging the brackets first keeps ≥4-of-5 (easy)
+    / 5-of-5 (medium, hard) tanks alive while the column busts the
+    survival bar."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
-    c = compile_level(load_pack(PACK_PATH), "easy")
-    res = run_level(c, _intended_wedge_policy, seed=1)
+    c = compile_level(load_pack(PACK_PATH), level)
+    res = run_level(c, _intended_wedge_policy, seed=seed)
     assert res.outcome == "win", (
-        f"easy seed=1: intended wedge should WIN, got {res.outcome} "
-        f"killed={res.signals.units_killed} lost={res.signals.units_lost}"
+        f"{level} seed={seed}: intended wedge should WIN, got "
+        f"{res.outcome} killed={res.signals.units_killed} "
+        f"lost={res.signals.units_lost}"
     )
