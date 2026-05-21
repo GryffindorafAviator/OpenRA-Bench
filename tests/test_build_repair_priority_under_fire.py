@@ -2,35 +2,46 @@
 (Wave-10 REASONING: criticality-weighted repair triage).
 
 Three of the agent's structures are under simultaneous attrition from
-three separate grenadier bands. The damage picture is deliberately
-misleading and the agent's only job is the TRIAGE DECISION — which
-building(s) to put the `repair` organ on:
+separate grenadier bands. The damage picture is deliberately misleading
+and the agent's only job is the TRIAGE DECISION — which building(s) to
+put the `repair` organ on:
 
   * proc (refinery)  — HIGH value, on a LETHAL trajectory: dies inside
-    ~2 turns unrepaired; required by the win predicate.
-  * pbox (pillbox)   — LOW value DECOY: chipped to ~25% fast so it
-    LOOKS the most damaged, but it is not in the win predicate and its
-    defenders save it. Repairing it is wasted effort.
-  * weap (war factory) — MEDIUM: on easy a light band lets the high-HP
-    factory ride out the attack unrepaired; on medium / hard the band
-    is heavy enough that weap ALSO needs repair.
+    ~3 turns unrepaired; required by the win predicate.
+  * pbox (pillbox)   — LOW value DECOY: pre-placed at health 30 so it
+    LOOKS the most damaged, but it is Heavy-armoured (a light grenadier
+    band barely scratches it), is not in the win predicate, and
+    survives on its own. Repairing it is wasted effort.
+  * weap (war factory) — MEDIUM: on easy NO band sits on the war
+    factory directly, so a bridged proc keeps its band pinned and the
+    war factory rides out untouched; on medium / hard a light band ALSO
+    chews the war factory so it too needs repair.
 
-No-cheat bar (proven below for every level × seed 1-4):
+The pack carries NO agent combat units and NO kill bar — the engine
+movement fixes made pre-placed defenders resolve a clustered fire-fight
+in one ~90-tick window with the buildings never scratched, collapsing
+the old damage race. The triage is now a pure `repair`-target decision
+against an unopposed band. The win requires the buildings to SURVIVE a
+danger window (`after_ticks` floor + `within_ticks` ceiling), not
+merely be alive on turn 1.
 
-  * STALL (only `observe`) → proc never bridged → refinery dies ~turn
-    2 → `not building_count_gte:{proc}` fail fires → LOSS.
+No-cheat bar (proven below for every level x seed 1-4):
+
+  * STALL (only `observe`) -> proc never bridged -> refinery dies ~turn
+    4 -> `not building_count_gte:{proc}` fail fires -> LOSS.
   * REPAIR-PBOX-FIRST (toggle repair on the most-damaged-LOOKING
-    building, the pbox) → pbox saved but it is not in the win
-    predicate; the proc gets no repair and dies → LOSS.
-  * REPAIR-PROC-ONLY → WIN on easy (the war factory survives its light
-    band unaided) but LOSS on medium / hard (the heavier band kills
-    the unrepaired war factory → `not building_count_gte:{weap}` fail).
+    building, the pbox) -> pbox saved (it survives on its own anyway);
+    the proc gets no repair and dies -> LOSS.
+  * REPAIR-PROC-ONLY -> WIN on easy (no band sits on the war factory,
+    so a bridged proc keeps its band pinned) but LOSS on medium / hard
+    (the light war-factory band kills the unrepaired weap ->
+    `not building_count_gte:{weap}` fail).
   * INTENDED triage (repair proc — easy; proc + weap — medium / hard)
-    → autorepair out-paces the grenade chip, the hold-the-line
-    defenders clear the bands, the kill bar latches → WIN.
+    -> autorepair out-paces the grenade chip, the buildings ride the
+    bands out, the survival window opens -> WIN.
 
-Repair-everything also wins (it repairs the proc) — that is within the
-bar: the failure mode this pack discriminates is "repair the
+Repair-everything also wins (it repairs the proc + weap) — that is
+within the bar: the failure mode this pack discriminates is "repair the
 worst-LOOKING building", not "be thorough".
 """
 
@@ -119,6 +130,39 @@ def test_benchmark_anchor_lists_triage():
     assert "triage" in blob or "maintenance" in blob, anchors
 
 
+def test_pbox_decoy_is_pre_damaged_every_level():
+    """The pbox decoy is pre-placed already damaged (health: 30) so it
+    LOOKS the most-damaged building — the bait for the wrong triage."""
+    pack = load_pack(PACK)
+    for level in LEVELS:
+        c = compile_level(pack, level)
+        pboxes = [
+            a for a in c.scenario.actors
+            if a.owner == "agent" and a.type == "pbox"
+        ]
+        assert pboxes, f"{level}: no pbox decoy"
+        for a in pboxes:
+            assert a.health == 30, (
+                f"{level}: pbox decoy must be pre-damaged (health 30), "
+                f"got {a.health}"
+            )
+
+
+def test_no_agent_combat_units():
+    """The pack carries NO agent combat units — the triage is a pure
+    `repair`-target decision against an unopposed band."""
+    pack = load_pack(PACK)
+    buildings = {"proc", "weap", "pbox", "fix", "fact"}
+    for level in LEVELS:
+        c = compile_level(pack, level)
+        agent_types = {
+            a.type for a in c.scenario.actors if a.owner == "agent"
+        }
+        assert agent_types <= buildings, (
+            f"{level}: agent must own only buildings, got {agent_types}"
+        )
+
+
 @pytest.mark.parametrize("level", LEVELS)
 def test_every_level_has_a_reachable_timeout_fail(level):
     """Non-win must be a real LOSS, never a DRAW: the `after_ticks`
@@ -136,6 +180,28 @@ def test_every_level_has_a_reachable_timeout_fail(level):
     wt = next(int(x["within_ticks"]) for x in win_all_of if "within_ticks" in x)
     assert after_ticks == wt + 1, (
         f"{level}: after_ticks {after_ticks} must equal within_ticks+1 ({wt + 1})"
+    )
+
+
+@pytest.mark.parametrize("level", LEVELS)
+def test_win_has_survival_window(level):
+    """The win must require the buildings to SURVIVE a danger window —
+    an `after_ticks` floor below the `within_ticks` ceiling — so the win
+    cannot latch on turn 1 before any damage lands."""
+    c = compile_level(load_pack(PACK), level)
+    all_of = c.win_condition.model_dump().get("all_of", [])
+    floor = next(int(x["after_ticks"]) for x in all_of if "after_ticks" in x)
+    ceiling = next(
+        int(x["within_ticks"]) for x in all_of if "within_ticks" in x
+    )
+    assert 0 < floor < ceiling, (
+        f"{level}: win needs a survival window 0 < after_ticks "
+        f"({floor}) < within_ticks ({ceiling})"
+    )
+    reachable = 93 + 90 * (c.max_turns - 1)
+    assert floor < reachable, (
+        f"{level}: win after_ticks {floor} unreachable within "
+        f"{c.max_turns} turns (max tick {reachable})"
     )
 
 
@@ -195,7 +261,7 @@ def test_intended_triage_wins(level, seed):
 @pytest.mark.parametrize("seed", SEEDS)
 def test_repair_everything_wins(level, seed):
     """Repairing every damaged building also wins — it DOES repair the
-    proc. Thoroughness is not the failure mode under test."""
+    proc + weap. Thoroughness is not the failure mode under test."""
     c, r = _run(level, _repair_all, seed=seed)
     assert r.outcome == "win", (
         f"{level} seed{seed}: repair-all should WIN, got {r.outcome}"
@@ -209,7 +275,7 @@ def test_repair_everything_wins(level, seed):
 @pytest.mark.parametrize("seed", SEEDS)
 def test_stall_loses(level, seed):
     """Stall must LOSE — the proc band is never bridged; the refinery
-    dies ~turn 2 and the `not building_count_gte:{proc}` fail fires."""
+    dies ~turn 4 and the `not building_count_gte:{proc}` fail fires."""
     c, r = _run(level, _stall, seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed{seed} stall must LOSE; got {r.outcome} "
@@ -231,8 +297,8 @@ def test_repair_pbox_first_loses(level, seed):
 
 @pytest.mark.parametrize("seed", SEEDS)
 def test_repair_proc_only_wins_easy(seed):
-    """On easy the war factory rides out its light band unaided, so
-    repairing only the proc is sufficient → WIN."""
+    """On easy no band sits on the war factory, so a bridged proc keeps
+    its band pinned — repairing only the proc is sufficient → WIN."""
     c, r = _run("easy", _repair_proc, seed=seed)
     assert r.outcome == "win", (
         f"easy seed{seed} repair-proc-only should WIN, got {r.outcome}"
@@ -242,9 +308,9 @@ def test_repair_proc_only_wins_easy(seed):
 @pytest.mark.parametrize("level", ("medium", "hard"))
 @pytest.mark.parametrize("seed", SEEDS)
 def test_repair_proc_only_loses_on_medium_and_hard(level, seed):
-    """On medium / hard the heavier war-factory band kills the
-    unrepaired weap — repairing only the proc is no longer enough →
-    LOSS (the deeper 2-of-3 triage axis)."""
+    """On medium / hard a light band ALSO chews the war factory —
+    repairing only the proc is no longer enough → LOSS (the deeper
+    2-of-3 triage axis)."""
     c, r = _run(level, _repair_proc, seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed{seed} repair-proc-only must LOSE; got {r.outcome} "
