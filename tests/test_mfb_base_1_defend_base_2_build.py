@@ -13,17 +13,24 @@ every level + seed:
               second `fact` never appears → clock kills the run
               (`after_ticks` fail).
 
-Recalibration note (engine balance fixes — armor-class weapon
-selection, stance semantics, parallel production, pbox now fires):
-the grenadier raid spawn moved from (22,30) to (20,30). At (22,30)
-the grenadiers spent their whole approach inside the agent's fog,
-so the HoldFire defenders never got a meaningful attack order and
-merely sat idle — survival was RNG. The post-balance combat shift
-tipped that RNG: on the hard SOUTH spawn the defenders were wiped
-exactly as the MCV deployed, losing a unit race the intended split
-should win. At (20,30) the grenadiers are in base #1's vision from
-turn 0, so the defenders can actually be ordered onto them — the
-defense becomes a real, controllable fight.
+Recalibration note (engine movement fixes — `attack_unit` on an
+out-of-sight target paths normally instead of teleporting, and a
+moving unit both fires and takes fire en route): on the hard tier
+the `rusher` enemy bot commits the east-lane patrol riflemen
+(`e1` at (110,15)/(110,45)) at the agent's nearest mass — the
+fresh MCV driving east. One patrol `e1` chases the MCV all the
+way back toward base #1. The intended-split policy used to select
+defender targets with a coarse `cell_x < 80` western-half filter,
+which wrongly captured that chasing patrol `e1`; the three
+HoldFire riflemen were then ordered to `attack_unit` it, marched
+east out of base #1, and — because a moving unit now genuinely
+takes fire en route (no sprint-invincibility) — were ground down
+and wiped, losing every own unit (`not own_units_gte:1` fired)
+even though the MCV deployed. The fix keeps the defenders on the
+ACTUAL home-side raid: target the grenadier raiders by type
+(`e3`) AND proximity to base #1 (`cell_x < 60`), so the riflemen
+never chase an east-lane patrol. The pack YAML is unchanged — the
+regression was purely in this validation policy's target filter.
 
 Validation is scripted (no model / network) — uses
 `openra_bench.eval_core.run_level`.
@@ -182,13 +189,21 @@ def _agent_riflemen(rs):
     ]
 
 
-def _west_enemies(rs):
-    """Enemy non-buildings on the western half (the home-side patrol)."""
+def _raid_enemies(rs):
+    """The home-side grenadier raid: `e3` units near base #1.
+
+    Filtered by type (`e3`) AND proximity (`cell_x < 60`) so an
+    east-lane patrol `e1` that the `rusher` bot has sent chasing the
+    fresh MCV back toward base #1 is NOT mistaken for a raider — the
+    defenders must stay on the actual home-side raid, not march east
+    after a patrol and get ground down en route."""
     out = []
     for e in (rs.get("enemy_summary", []) or []):
         if e.get("is_building"):
             continue
-        if e.get("cell_x", 999) < 80:
+        if str(e.get("type", "")).lower() != "e3":
+            continue
+        if e.get("cell_x", 999) < 60:
             out.append(e)
     return out
 
@@ -216,7 +231,7 @@ def _intended_split_policy_for(level):
     def _policy(rs, Command):
         cmds = []
         # Track A: defenders focus-fire the westmost western raider.
-        enemies = _west_enemies(rs)
+        enemies = _raid_enemies(rs)
         riflemen = _agent_riflemen(rs)
         if enemies and riflemen:
             target = min(enemies, key=lambda e: e.get("cell_x", 0))
@@ -266,7 +281,7 @@ def _mcv_only_east_policy_for(level):
 def _all_defend_policy(rs, Command):
     """Defenders engage; MCV never moves / never deploys. The second
     fact never appears → clock LOSS."""
-    enemies = _west_enemies(rs)
+    enemies = _raid_enemies(rs)
     riflemen = _agent_riflemen(rs)
     cmds = []
     if enemies and riflemen:
