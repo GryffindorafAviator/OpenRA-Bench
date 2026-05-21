@@ -91,12 +91,20 @@
 #
 # Engine-footgun notes:
 #   • Per CLAUDE.md, `move_units` opportunistically auto-fires en
-#     route. Jeeps are stance:1 so they will auto-defend if engaged
-#     mid-transit; the engine-side animation is NOT a tool call (the
-#     bench only counts the COMMAND NAME the agent emitted), so an
-#     auto-fire during transit isn't a violation of anything. There
-#     are no `forbidden_tools` on this pack anyway — the rule is
-#     purely turn-budget-based.
+#     route. Jeeps carry an EXPLICIT stance:1 (ReturnFire) so they
+#     auto-defend if engaged mid-transit; the engine-side animation is
+#     NOT a tool call (the bench only counts the COMMAND NAME the
+#     agent emitted), so an auto-fire during transit isn't a violation
+#     of anything. There are no `forbidden_tools` on this pack anyway
+#     — the rule is purely turn-budget-based.
+#   • The explicit stance:1 is LOAD-BEARING for the bar. After the
+#     engine stance-semantics balance fix, an actor with no `stance:`
+#     resolves to the AttackAnything default (stance:3), which
+#     ADVANCES toward any visible enemy — the far enemy `fact` marker
+#     at (120,20) would self-deliver un-stanced jeeps to the egress
+#     region and a stall / build-distractor policy would WIN for free.
+#     stance:1 keeps the jeeps inert until an explicit `move_units`
+#     order is issued, so the distractor discrimination still binds.
 #   • `attack_unit` is on the `tools:` allowlist (per the spec —
 #     the model SEES it as available). A model that picks attack_unit
 #     to clear the patrol with `move_units`-only-style discipline
@@ -179,13 +187,19 @@ base:
     # distractor is observable rather than a silent no-op. Without
     # this the distractor wouldn't even be a temptation.
     - {type: fact, owner: agent, position: [4, 20]}
-    # 3 fast jeeps at the lane mouth — stance:1 so they will auto-
-    # return-fire if attacked en route (move_units auto-fire is
-    # engine-side, NOT a tool call). The intended policy moves them
-    # east; nothing else is required.
-    - {type: jeep, owner: agent, position: [8, 19]}
-    - {type: jeep, owner: agent, position: [8, 20]}
-    - {type: jeep, owner: agent, position: [8, 21]}
+    # 3 fast jeeps at the lane mouth — EXPLICIT stance:1 (ReturnFire)
+    # so they auto-return-fire if attacked en route but do NOT
+    # self-advance. After the engine stance-semantics balance fix, an
+    # actor with no `stance:` resolves to the AttackAnything default
+    # (stance:3), which advances toward any visible enemy — the far
+    # enemy `fact` marker at (120,20) would draw the un-stanced jeeps
+    # east on their own, so a stall / build-distractor policy would
+    # WIN for free and invert the bar. stance:1 keeps the jeeps inert
+    # until an explicit `move_units` order is issued (explicit orders
+    # override stance) while still defending if a patrol opens fire.
+    - {type: jeep, owner: agent, position: [8, 19], stance: 1}
+    - {type: jeep, owner: agent, position: [8, 20], stance: 1}
+    - {type: jeep, owner: agent, position: [8, 21], stance: 1}
     # Persistent enemy `fact` marker at the egress — keeps the
     # episode alive past any patrol death (engine auto-done-on-
     # enemy-wipe would collapse a deadline-bound reach to DRAW
@@ -214,9 +228,11 @@ levels:
     overrides:
       actors:
         - {type: fact, owner: agent, position: [4, 20]}
-        - {type: jeep, owner: agent, position: [8, 19]}
-        - {type: jeep, owner: agent, position: [8, 20]}
-        - {type: jeep, owner: agent, position: [8, 21]}
+        # stance:1 — see base.actors comment: explicit ReturnFire so
+        # the jeeps don't self-deliver under the engine default.
+        - {type: jeep, owner: agent, position: [8, 19], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 21], stance: 1}
         # Single passive sentry far off the lane — visible on the
         # minimap but cannot engage the jeep column on y=20.
         - {type: e1, owner: enemy, position: [40, 32], stance: 0}
@@ -255,9 +271,11 @@ levels:
       enemy: {faction: soviet, cash: 0, bot_type: patrol}
       actors:
         - {type: fact, owner: agent, position: [4, 20]}
-        - {type: jeep, owner: agent, position: [8, 19]}
-        - {type: jeep, owner: agent, position: [8, 20]}
-        - {type: jeep, owner: agent, position: [8, 21]}
+        # stance:1 — see base.actors comment: explicit ReturnFire so
+        # the jeeps don't self-deliver under the engine default.
+        - {type: jeep, owner: agent, position: [8, 19], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 1}
+        - {type: jeep, owner: agent, position: [8, 21], stance: 1}
         # Light patrol probe on the central corridor — single
         # rifleman, the `patrol` bot oscillates it ±8 along x.
         - {type: e1, owner: enemy, position: [60, 20], stance: 2}
@@ -307,13 +325,14 @@ levels:
         - {type: fact, owner: agent, position: [4, 8],  spawn_point: 0}
         - {type: fact, owner: agent, position: [4, 32], spawn_point: 1}
         # NORTH staging (spawn_point 0): jeeps at y=7..9 on x=8..9.
-        - {type: jeep, owner: agent, position: [8, 7],  spawn_point: 0}
-        - {type: jeep, owner: agent, position: [8, 8],  spawn_point: 0}
-        - {type: jeep, owner: agent, position: [8, 9],  spawn_point: 0}
+        # stance:1 — see base.actors comment.
+        - {type: jeep, owner: agent, position: [8, 7],  spawn_point: 0, stance: 1}
+        - {type: jeep, owner: agent, position: [8, 8],  spawn_point: 0, stance: 1}
+        - {type: jeep, owner: agent, position: [8, 9],  spawn_point: 0, stance: 1}
         # SOUTH staging (spawn_point 1): jeeps at y=31..33 on x=8..9.
-        - {type: jeep, owner: agent, position: [8, 31], spawn_point: 1}
-        - {type: jeep, owner: agent, position: [8, 32], spawn_point: 1}
-        - {type: jeep, owner: agent, position: [8, 33], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 31], spawn_point: 1, stance: 1}
+        - {type: jeep, owner: agent, position: [8, 32], spawn_point: 1, stance: 1}
+        - {type: jeep, owner: agent, position: [8, 33], spawn_point: 1, stance: 1}
         # Central patrol probe (anchor 60,20) — always present.
         - {type: e1, owner: enemy, position: [60, 20], stance: 2}
         # Flank patrol probes — one at y=12 (covers north detour
