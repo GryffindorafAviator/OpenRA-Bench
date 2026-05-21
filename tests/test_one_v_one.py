@@ -155,3 +155,22 @@ def test_both_controllers_commands_reach_the_engine():
     # Commands were issued on at least one recorded turn per side.
     assert any(t["n_cmds"] >= 1 for t in res.agent_trace)
     assert any(t["n_cmds"] >= 1 for t in res.enemy_trace)
+
+
+def test_human_controller_can_drive_a_1v1_side():
+    """Phase 2 x Phase 3 integration — a HumanController (the
+    human-labeling backend) drives one side of a 1v1 match against a
+    scripted opponent, proving the human-vs-bot 1v1 path works."""
+    from openra_bench.human_labeling import HumanController, ScriptedInputSource
+    from openra_bench.one_v_one import run_1v1
+
+    path = _combat_scenario_path()
+    # A scripted "human": observe every turn (a pass-turn human).
+    human = HumanController(ScriptedInputSource([]), name="human")
+    res = run_1v1(path, human, _stall, seed=1, max_turns=40)
+
+    assert res.winner in ("agent", "enemy", "draw")
+    assert res.agent_name == "human"
+    assert res.ticks >= 0
+    # The HumanController was actually driven each turn.
+    assert len(res.agent_trace) == len(res.enemy_trace)
