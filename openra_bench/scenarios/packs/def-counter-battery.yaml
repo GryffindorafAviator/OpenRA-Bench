@@ -1,0 +1,451 @@
+# def-counter-battery — Kill the Artillery FIRST (counter-battery)
+#
+# REASONING capability — THREAT PRIORITISATION. The enemy force is a
+# frontline screen of rifle infantry (e1) with TWO/THREE long-range
+# artillery pieces (`arty`, range 7c, dps45) posted in the rear. The
+# artillery OUT-RANGES the agent's base pillboxes (`pbox`, range 5c)
+# and bombards the construction yard (`fact`) from a standoff the
+# pbox cannot answer. The agent commands a mobile strike force of
+# medium tanks and must do the COUNTER-BATTERY thing: drive the
+# tanks PAST the infantry screen and destroy the artillery FIRST,
+# before it razes the fact. Grinding the frontline infantry screen
+# while the artillery keeps firing loses the construction yard.
+#
+# Real-world anchors (binding meta.benchmark_anchor):
+#   - Military counter-battery doctrine — when an enemy battery is
+#     shelling your position from beyond your own guns' reach, the
+#     correct response is a counter-battery strike that silences the
+#     guns; trading fire with the enemy's screening infantry while
+#     the battery keeps firing is the canonical mistake.
+#   - Threat prioritisation — engage the highest-impact threat first,
+#     not the nearest or loudest one. The infantry screen is in
+#     front and loud; the artillery in the rear is the threat that
+#     actually destroys the objective.
+#   - SC2 siege-tank counter — siege tanks out-range static defence
+#     and must be killed by a mobile force that closes the distance;
+#     trading with the screening army leaves the siege line intact.
+#
+# DISCRIMINATION (the four-script bar — scripted, no model needed;
+# every lazy / brute / wrong-priority play LOSES, only the intended
+# counter-battery strike WINS):
+#
+#   • stall (observe-only): the tanks never move; the artillery
+#     bombards the fact unopposed and razes it in ~6-9 decision
+#     turns ⇒ `not building_count_gte:fact:1` fail clause fires →
+#     real LOSS (not a draw).
+#
+#   • brute attack_move (drive east into the enemy): attack_move
+#     auto-targets the NEAREST hostile — the infantry screen — so
+#     the tanks halt at the screen and trade fire with it while the
+#     rear artillery keeps shelling the fact. The fact is razed
+#     before the screen is even cleared → LOSS.
+#
+#   • screen-first (explicitly focus-fire the infantry screen, then
+#     pivot to the artillery): the screen is DEEP enough that
+#     clearing it takes longer than the artillery's razing window;
+#     the fact is razed before the strike force pivots to the guns.
+#     The fact-alive fail clause fires AND the kill bar is never
+#     reached (the run ends the moment the fact falls, capping the
+#     kill count well below K) → LOSS.
+#
+#   • intended counter-battery strike (drive the tanks straight to
+#     the artillery, destroy ALL the guns FIRST, THEN mop up the
+#     infantry screen): the guns die in ~1-2 decision turns of
+#     concentrated tank fire (arty hp75 vs ~88-132 tank dps); once
+#     the battery is silent the fact stops taking damage and
+#     survives, and the strike force has the rest of the budget to
+#     clear the screen for the kill bar → WIN.
+#
+# WHY THE SPEC WORKS (engine combat sheet, per CLAUDE.md / prompt_v2):
+#   - `arty` = artillery: $600 hp75 rng7c dps45 sight5c. Range 7c
+#     OUT-RANGES `pbox` (rng5c) — the base defences genuinely cannot
+#     answer it. hp75 is FRAGILE: 4× 2tnk (88 dps) kill one arty in
+#     well under a decision turn, so the counter-battery strike is
+#     decisive once the tanks reach the guns.
+#   - `arty` is placed on `stance:2` (Defend — auto-fires on the
+#     fact which is in range, never advances), so the bombardment
+#     is a STABLE, predictable clock: the fact's razing window does
+#     not depend on what the agent does to the screen.
+#   - The infantry screen is `e1` (rifle infantry, hp50) on
+#     `stance:0` (HoldFire — a passive picket line). A passive
+#     screen does NOT chip the fact, so the razing window is purely
+#     artillery-driven; and it does NOT shoot the strike force, so
+#     a strike that drives PAST it pays no toll. The screen matters
+#     ONLY because a wrong-priority policy CHOOSES to grind it.
+#   - `2tnk` = medium tank: hp400 rng4.75c dps22. Four to six tanks
+#     concentrate enough fire to one-shot-class the fragile arty;
+#     infantry cannot meaningfully block tank movement, so the
+#     strike can drive through the screen to reach the guns.
+#   - The kill bar K is set ABOVE the number of kills a screen-first
+#     policy can rack up before the fact falls (the run ends on the
+#     fact's destruction), but BELOW the full enemy roster — the
+#     counter-battery strike, having SAVED the fact, has the rest of
+#     the budget to mop the screen and clear K. So K being met is a
+#     PROXY for "the artillery was killed in time" even though no
+#     per-type enemy-kill predicate exists.
+#   - Anti-DRAW: a persistent enemy `fact` marker far east (120,21)
+#     keeps the episode alive past enemy-elimination so the win/fail
+#     evaluator always sees the terminal frame (CLAUDE.md footgun).
+#   - Tick budget: ~90 ticks/turn, max_turns 30 ⇒ reachable tick
+#     ≈ 93 + 90·29 = 2703. `within_ticks: 2700` and `after_ticks:
+#     2701` both bite inside the budget — a staller hits the
+#     deadline as a real LOSS, never a draw.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_def_counter_battery.py -q
+
+meta:
+  id: def-counter-battery
+  title: 'Counter-Battery — Kill the Artillery FIRST'
+  capability: reasoning
+  real_world_meaning: >
+    A frontline of enemy rifle infantry screens two or three
+    long-range artillery pieces posted in the rear. The artillery
+    out-ranges the base pillboxes and shells the construction yard
+    from a standoff the static defences cannot answer. The mobile
+    tank force must perform a counter-battery strike: drive past the
+    infantry screen and destroy the artillery FIRST, before it razes
+    the construction yard. Trading fire with the screening infantry
+    while the artillery keeps firing loses the base — the highest-
+    impact threat must be engaged first, not the nearest one.
+  robotics_analogue: >
+    Military counter-battery doctrine and threat prioritisation:
+    when a hostile asset is degrading your objective from beyond
+    your defences' reach, the correct response is a targeted strike
+    that neutralises that asset first, even though a nearer, louder
+    threat is competing for attention. Spending the response on the
+    screening force while the real threat keeps operating is the
+    canonical prioritisation failure — the same shape as a SC2
+    siege-tank counter, where a mobile force must close on and kill
+    the out-ranging siege line rather than trade with its escort.
+  benchmark_anchor:
+    - "military counter-battery doctrine"
+    - "threat prioritization"
+    - "SC2 siege-tank counter"
+  author: openra-bench
+
+# rush-hour-arena: 128×40 playable (x in [2..126], y in [2..38]).
+# The agent base sits at the west; the enemy screen+battery sits a
+# short distance east, with the artillery already inside range 7c of
+# the fact. The strike force must drive east through the screen to
+# reach and destroy the guns.
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent:
+    faction: allies
+    cash: 0
+  enemy:
+    faction: soviet
+    cash: 0
+    # No scripted bot — the enemy is a STATIC posture (passive
+    # infantry screen + stationary `stance:2` artillery). The test
+    # is the agent's threat-prioritisation decision, not a reactive
+    # opponent; a fixed enemy keeps the razing clock deterministic.
+    bot_type: ''
+  # Combat-only toolset (no build / no harvest): the test is which
+  # target the fixed strike force engages FIRST, not production.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # React the instant the artillery is spotted or a tank is lost —
+  # the counter-battery decision is reactive; the strike must
+  # re-target the moment it learns where the guns are.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 6000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare counter-battery skill: 4 medium tanks vs a 15-rifle screen
+  # backed by TWO artillery pieces. The two guns raze the fact in
+  # ~9 decision turns; the intended strike kills both guns in ~4-5
+  # turns and then has the rest of the budget to mop the screen for
+  # the kill bar. stall / brute / screen-first all LOSE the fact.
+  easy:
+    description: >
+      Your construction yard (fact) sits at the west edge (20,21),
+      ringed by two pillboxes (pbox, range 5c, anti-infantry). A
+      strike force of four medium tanks (2tnk) is staged just west
+      of the base. The enemy is a frontline screen of fifteen rifle
+      infantry (e1) with TWO long-range artillery pieces (arty,
+      range 7c) posted in the rear — the artillery OUT-RANGES your
+      pillboxes and is already shelling the construction yard.
+      Counter-battery doctrine: drive the tanks PAST the infantry
+      screen and destroy BOTH artillery pieces FIRST, before they
+      raze the fact; then mop up the screen. Grinding the infantry
+      screen while the artillery keeps firing loses the base. Win
+      when 12 enemy units are destroyed AND the construction yard is
+      still standing, before tick 2700.
+    overrides:
+      actors:
+        # Strike force — 4 medium tanks staged west of the base.
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1}
+        # Base defences — two pillboxes (anti-infantry, range 5c).
+        # They shred the infantry screen if it advances but CANNOT
+        # reach the artillery (range 7c) — the thematic out-range.
+        - {type: pbox, owner: agent, position: [16, 19]}
+        - {type: pbox, owner: agent, position: [16, 23]}
+        # The objective — the construction yard the artillery is
+        # bombarding.
+        - {type: fact, owner: agent, position: [20, 21]}
+        # Infantry screen — 15 rifle infantry (e1) in 3 columns
+        # (x=23,25,27) × 5 rows (y=15..23), stance:0 (HoldFire — a
+        # passive picket line; it neither chips the fact nor shoots
+        # the strike force, so the razing clock is purely artillery-
+        # driven and a strike that drives PAST pays no toll). It
+        # matters only because a wrong-priority policy CHOOSES to
+        # grind it.
+        - {type: e1, owner: enemy, position: [23, 15], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 17], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 23], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 15], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 17], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 23], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 15], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 17], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 23], stance: 0}
+        # The battery — TWO artillery pieces in the rear (x=27,
+        # inside range 7c of the fact at x=20). stance:2 (Defend —
+        # auto-fires on the in-range fact, never advances) so the
+        # bombardment is a stable clock.
+        - {type: arty, owner: enemy, position: [27, 20], stance: 2}
+        - {type: arty, owner: enemy, position: [27, 22], stance: 2}
+        # Persistent far enemy `fact` marker — keeps the episode
+        # alive past enemy-elimination so the win/fail evaluator
+        # sees the terminal frame (anti-DRAW; CLAUDE.md footgun).
+        - {type: fact, owner: enemy, position: [120, 21]}
+    win_condition:
+      all_of:
+        # Kill bar 12 — ABOVE the ~9 kills a screen-first policy can
+        # rack up before the fact falls, BELOW the full 17-unit
+        # roster. Reaching it is a proxy for "the artillery was
+        # killed in time" (the run ends the moment the fact falls).
+        - {units_killed_gte: 12}
+        # The load-bearing clause — the construction yard must still
+        # be standing. The artillery razes it unless the strike
+        # silences the guns first.
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a HEAVIER BATTERY — THREE artillery
+  # pieces (vs easy's two) backed by a deeper 21-rifle screen, with
+  # 6 medium tanks. Three guns raze the fact FASTER (~6 decision
+  # turns), so the counter-battery strike must be more decisive and
+  # there are three guns to clear, not two. A screen-first policy
+  # caps at ~6 kills before the fact falls; the intended strike
+  # silences the three guns in ~4-5 turns and mops to the kill bar.
+  medium:
+    description: >
+      Your construction yard (fact) sits at the west edge (20,21),
+      ringed by three pillboxes. A strike force of six medium tanks
+      (2tnk) is staged just west of the base. The enemy is a deep
+      frontline screen of twenty-one rifle infantry (e1) with THREE
+      long-range artillery pieces (arty, range 7c) posted in the
+      rear — the artillery out-ranges your pillboxes and is shelling
+      the construction yard. The heavier three-gun battery razes the
+      yard faster than easy's two-gun battery. Counter-battery
+      doctrine: drive the tanks past the infantry screen and destroy
+      ALL THREE artillery pieces FIRST, then mop up the screen.
+      Grinding the infantry screen while the artillery keeps firing
+      loses the base. Win when 14 enemy units are destroyed AND the
+      construction yard is still standing, before tick 2700.
+    overrides:
+      actors:
+        # Strike force — 6 medium tanks staged west of the base.
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 26], stance: 1}
+        # Base defences — three pillboxes (range 5c, out-ranged by
+        # the artillery's range 7c).
+        - {type: pbox, owner: agent, position: [16, 19]}
+        - {type: pbox, owner: agent, position: [16, 21]}
+        - {type: pbox, owner: agent, position: [16, 23]}
+        - {type: fact, owner: agent, position: [20, 21]}
+        # Infantry screen — 21 rifle infantry (e1) in 3 columns
+        # (x=23,25,27) × 7 rows (y=15..27), stance:0 (passive
+        # picket line).
+        - {type: e1, owner: enemy, position: [23, 15], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 17], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 23], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 25], stance: 0}
+        - {type: e1, owner: enemy, position: [23, 27], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 15], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 17], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 23], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 25], stance: 0}
+        - {type: e1, owner: enemy, position: [25, 27], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 15], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 17], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 19], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 23], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 25], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 27], stance: 0}
+        # The battery — THREE artillery pieces in the rear (x=27,
+        # inside range 7c of the fact). stance:2 (Defend).
+        - {type: arty, owner: enemy, position: [27, 19], stance: 2}
+        - {type: arty, owner: enemy, position: [27, 21], stance: 2}
+        - {type: arty, owner: enemy, position: [27, 23], stance: 2}
+        - {type: fact, owner: enemy, position: [120, 21]}
+    win_condition:
+      all_of:
+        # Kill bar 14 — above the ~6 kills a screen-first policy
+        # reaches before the (faster) three-gun battery razes the
+        # fact; the counter-battery strike clears it after saving
+        # the yard.
+        - {units_killed_gte: 14}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: the base latitude flips
+  # by seed. TWO agent spawn_point groups (NORTH base y=14 / SOUTH
+  # base y=28) are round-robined per seed; the matching enemy
+  # screen+battery is tagged with the SAME spawn_point so the
+  # per-owner spawn filter (oramap.rs expand_scenario_actors)
+  # instantiates exactly one self-consistent base+battery pair per
+  # seed. The counter-battery DOCTRINE generalises across either
+  # latitude; a memorised "drive to (27,21)" plan strikes empty
+  # ground on the off-latitude seed. Battery size and kill bar match
+  # medium (3 arty, K=14); the controlled axis is the spawn flip.
+  hard:
+    description: >
+      Your construction yard sits at a seed-chosen latitude (NORTH
+      base y=14 or SOUTH base y=28 — the whole base and the enemy
+      formation flip together with the seed), ringed by three
+      pillboxes, with six medium tanks staged just west of it. The
+      enemy is a deep frontline screen of twenty-one rifle infantry
+      (e1) with THREE long-range artillery pieces (arty, range 7c)
+      posted in the rear — the artillery out-ranges your pillboxes
+      and is shelling the construction yard. Counter-battery
+      doctrine: drive the tanks past the infantry screen at YOUR
+      base's latitude and destroy all three artillery pieces FIRST,
+      then mop up the screen. Grinding the infantry screen while the
+      artillery keeps firing loses the base. Win when 14 enemy units
+      are destroyed AND the construction yard is still standing,
+      before tick 2700.
+    overrides:
+      actors:
+        # Persistent far enemy `fact` marker (anti-DRAW) — no
+        # spawn_point, places every seed; on the symmetry axis
+        # (y=21) so it sits on neither base's approach line.
+        - {type: fact, owner: enemy, position: [120, 21]}
+        # ── spawn_point 0 — NORTH base (y=14) ──────────────────────
+        - {type: 2tnk, owner: agent, position: [10,  9], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 13], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 15], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 17], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 19], stance: 1, spawn_point: 0}
+        - {type: pbox, owner: agent, position: [16, 12], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [16, 16], spawn_point: 0}
+        - {type: fact, owner: agent, position: [20, 14], spawn_point: 0}
+        - {type: e1, owner: enemy, position: [23,  8], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [23, 10], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [23, 12], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [23, 14], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [23, 16], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [23, 18], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [23, 20], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [25,  8], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [25, 10], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [25, 12], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [25, 14], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [25, 16], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [25, 18], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [25, 20], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [27,  8], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [27, 10], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [27, 12], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [27, 14], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [27, 16], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [27, 18], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [27, 20], stance: 0, spawn_point: 0}
+        - {type: arty, owner: enemy, position: [27, 12], stance: 2, spawn_point: 0}
+        - {type: arty, owner: enemy, position: [27, 14], stance: 2, spawn_point: 0}
+        - {type: arty, owner: enemy, position: [27, 16], stance: 2, spawn_point: 0}
+        # ── spawn_point 1 — SOUTH base (y=28) ──────────────────────
+        - {type: 2tnk, owner: agent, position: [10, 23], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 25], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 31], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 33], stance: 1, spawn_point: 1}
+        - {type: pbox, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [16, 30], spawn_point: 1}
+        - {type: fact, owner: agent, position: [20, 28], spawn_point: 1}
+        - {type: e1, owner: enemy, position: [23, 22], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [23, 24], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [23, 26], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [23, 28], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [23, 30], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [23, 32], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [23, 34], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [25, 22], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [25, 24], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [25, 26], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [25, 28], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [25, 30], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [25, 32], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [25, 34], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [27, 22], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [27, 24], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [27, 26], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [27, 28], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [27, 30], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [27, 32], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [27, 34], stance: 0, spawn_point: 1}
+        - {type: arty, owner: enemy, position: [27, 26], stance: 2, spawn_point: 1}
+        - {type: arty, owner: enemy, position: [27, 28], stance: 2, spawn_point: 1}
+        - {type: arty, owner: enemy, position: [27, 30], stance: 2, spawn_point: 1}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 14}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
