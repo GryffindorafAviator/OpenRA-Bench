@@ -1,0 +1,437 @@
+# rob-partial-base-loss-continue — press on after a non-critical base loss
+#
+# REASONING capability — graceful degradation / incident triage. A
+# mid-episode `scheduled_events` destroy event razes a NON-CRITICAL
+# slice of the agent's base (an outer pillbox + 1 of 2 harvesters);
+# the war-critical core (fact + proc + powr + weap + fix) is left
+# untouched. The intended policy TRIAGES the loss — recognises the
+# razed assets are not on the win path — and PRESSES ON with the core
+# objective (field the heavy-armour establishment, clear the eastern
+# garrison) instead of panic-rebuilding the lost non-essentials.
+#
+# Real-world anchor: graceful degradation under partial system loss;
+# incident triage (distinguish a critical outage from a cosmetic one);
+# PlanBench replanning that does NOT over-react to an exogenous but
+# non-blocking loss; military battle-damage assessment (don't divert
+# the main effort to repair a non-mission-essential asset).
+#
+# DISCRIMINATION (the four-script no-cheat bar):
+#   • stall (only `observe`): the army never attacks → kill bar (K)
+#     unmet → after_ticks T+1 fires → timeout LOSS.
+#   • rebuild-the-non-essentials (after the destroy event, build
+#     `pbox` + `harv` to restore the razed slice): the indivisible
+#     reserve is spent on assets that are NOT in the win predicate
+#     (pbox 600 + harv 1400 = 2000 cr ⇒ the whole reserve). The
+#     casualties the enemy strike inflicts on the 2tnk column are
+#     NEVER replaced, so `unit_type_count_gte:{2tnk,N}` busts; and
+#     the build/place turns spent on pbox+harv delay the assault past
+#     the deadline → LOSS on the type-count clause AND/OR the clock.
+#   • intended press-on (ignore the razed non-essentials; commit the
+#     2tnk column east via attack_move, and build a 2tnk replacement
+#     only when the establishment drops below N): the reserve covers
+#     the per-tier expected tank losses, the garrison falls, the
+#     type-count + kill + fact-intact bars all pass inside T → WIN.
+#
+# ENGINE NOTES (CLAUDE.md / SCENARIO_QUALITY.md):
+#  - Combat unit `2tnk` (allied medium tank, cost 850). Allied tank
+#    tech-prereq is `weap` (war factory) + `fix` (service depot) — so
+#    BOTH are pre-placed in the core base; the destroy event leaves
+#    them untouched so the rebuild queue stays open all episode.
+#  - The lane-mouth strikers are `1tnk` (light tank) at stance:2
+#    (Defend — fire on the in-range column but DON'T chase it east).
+#    Verified across all tiers / seeds 1-4: the opening salvo kills
+#    ~1 agent 2tnk before the column escapes range, then the strikers
+#    hold. That single casualty is the establishment gap; a 4tnk
+#    striker instead WIPES the medium-tank column and makes the kill
+#    bar unreachable (a no-rebuild policy would then also lose for
+#    the wrong reason). 1tnk@stance:2 lands the bounded, recoverable
+#    loss the triage discrimination needs.
+#  - `scheduled_events: destroy_actors` removes every actor matching
+#    `filter: {owner, region:{x,y,radius}}` (oramap.rs::
+#    read_scheduled_events / env.rs::fire_scheduled_events, pinned by
+#    openra-data/tests/test_scheduled_events.rs). The filter has NO
+#    actor_type key — region isolation is what limits the blast to
+#    the outer pbox + the south harvester: the destroy circle is
+#    centred on the SOUTH outpost (11,30) r=4, ~12 cells from the
+#    core base row (y=16..18), so the fact/proc/powr/weap/fix and the
+#    surviving NORTH harvester are all outside the radius.
+#  - The destroy event fires at tick ~1200 — after the agent's first
+#    few decision turns (so the loss is observed mid-episode, the
+#    triage decision is live) but with ample budget left to press on.
+#  - `building_count_gte:{type: fact, n: 1}` re-counts LIVE building
+#    actors every tick — the destroy event never touches the fact, so
+#    this clause stays satisfied; it is in BOTH the win (fact intact)
+#    and the fail (`not building_count_gte:fact`) so a core-loss is a
+#    real immediate LOSS.
+#  - Enemy uses the `turtle` scripted bot: the eastern e1 garrison
+#    HOLDS at x=80 instead of surging west, so the kill bar is
+#    reachable by a single eastbound assault and the loss event stays
+#    isolated to the scripted destroy hook (not a roaming enemy).
+#  - The 2× 4tnk strikers at the lane mouth are stance:3
+#    (AttackAnything) — they fire on the 2tnk column from tick 0, so
+#    ~1 agent tank dies before the first decision turn. That casualty
+#    is the establishment gap the press-on policy must replace; the
+#    rebuild-non-essentials policy spends its reserve elsewhere and
+#    busts the type-count bar.
+#  - The far enemy `fact` at (120,20) is the engine-auto-done guard
+#    (CLAUDE.md): without a persistent MustBeDestroyed enemy the
+#    engine ends the episode the instant the last garrison e1 falls,
+#    collapsing a clean run to DRAW before the win/fail evaluator.
+#  - Tick budget: max_turns 60 ⇒ ceiling 93 + 90·59 = 5403 ⇒
+#    within_ticks 5400 + after_ticks 5401 both reachable; a non-
+#    finisher LOSES (not draws); the win/fail windows don't overlap.
+#  - `not own_units_gte:1` mis-fires on turn 1 when the agent starts
+#    unit-less (CLAUDE.md footgun) — this pack starts with 4 2tnk +
+#    fact, so `own_units_gte:1` is safe.
+#  - mine actors (neutral) feed the harvesters; they are placed
+#    OUTSIDE the destroy circle so the surviving north harvester
+#    still has a patch — but income is incidental, the reserve cash
+#    is the budget that matters and harvesting is not on the win path.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_rob_partial_base_loss_continue.py -q
+
+meta:
+  id: rob-partial-base-loss-continue
+  title: 'Graceful Degradation — Press On After a Non-Critical Base Loss'
+  capability: reasoning
+  real_world_meaning: >
+    Triage an exogenous partial loss. Mid-mission, a scripted strike
+    razes a NON-CRITICAL slice of the agent's base — an outer pillbox
+    and one of two harvesters — while the war-critical core
+    (construction yard, refinery, power, war factory, service depot)
+    is untouched. The intended policy performs battle-damage
+    assessment: it recognises the lost assets are NOT on the win path
+    and PRESSES ON with the core objective (field the heavy-armour
+    establishment and clear the eastern garrison defending the enemy
+    construction yard), rather than diverting its indivisible reserve
+    cash and its decision turns to panic-rebuilding the non-essentials.
+    Rebuilding the razed pillbox + harvester wastes the whole reserve
+    and the clock; the establishment and kill bars then go unmet.
+  robotics_analogue: >
+    Graceful degradation under partial subsystem loss. A field robot
+    loses a non-mission-essential sensor or a spare battery pack
+    mid-task; a brittle controller halts the primary task to restore
+    the lost component, blowing the mission deadline, while a robust
+    one assesses that the loss does not block the objective and
+    continues. The discrimination is incident triage — distinguishing
+    a critical failure (which DOES require a stop-and-fix) from a
+    cosmetic / redundant one (which must be ignored so the main
+    effort stays on schedule).
+  benchmark_anchor:
+    - "graceful degradation"
+    - "incident triage"
+    - "critical-vs-noncritical assessment"
+    - "PlanBench replanning under exogenous loss"
+    - "military battle-damage assessment"
+  author: "openra-bench"
+
+# rush-hour-arena: 128×40, playable bounds (2,2,124,36). Agent core
+# base at the WEST (x≈8..16, y≈16..18). The SOUTH outpost (outer pbox
+# + south harvester) sits at (11..12, 30) — the destroy circle is
+# centred there so the blast is isolated from the core. 2tnk column
+# stages at x=22; enemy garrison holds at x=80; far enemy fact at
+# (120,20) is the engine-auto-done guard.
+base_map: rush-hour-arena
+starting_cash: 2000  # per-level override below
+
+base:
+  agent:
+    faction: allies
+    cash: 2000
+  enemy:
+    faction: soviet
+    # `turtle` (Wave-2 scripted bot) — the eastern e1 garrison holds
+    # position and returns fire only, so the kill bar is satisfied by
+    # an eastbound assault rather than by absorbing a surge. The
+    # pre-placed `4tnk` strikers (stance:3) handle the opening
+    # casualty independently; the partial-base loss is the scripted
+    # `destroy_actors` hook, not a roaming enemy.
+    bot_type: turtle
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  termination:
+    max_ticks: 7000
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # The bare triage skill: at tick 1200 the destroy event razes the
+  # outer pbox + the south harvester; the core base is untouched. The
+  # 2tnk column starts at 4 and loses ~1 to the opening strike; the
+  # 2000 cr reserve covers TWO replacement tanks (850 each) if the
+  # agent presses on — or is fully wasted if it rebuilds pbox+harv.
+  easy:
+    description: >
+      You command 4 medium tanks (2tnk) at a forward staging area
+      (x=22, y=18..24) with a CORE base behind you — construction
+      yard (fact), refinery (proc), power (powr), war factory (weap),
+      service depot (fix). A SOUTH outpost holds an outer pillbox
+      (pbox) and one of your two ore harvesters (harv). Two enemy
+      light tanks (1tnk) are staged at the lane mouth (x=24) and will
+      engage the moment the episode starts — expect ONE of your tanks
+      to die in the opening salvo. At tick ~1200 an enemy strike
+      RAZES the SOUTH outpost — the outer pillbox and that harvester
+      are destroyed; your core base is UNTOUCHED. An eastern garrison
+      of 5 rifle infantry (e1) at x=80 defends the enemy construction
+      yard. The razed pillbox and harvester are NOT on your win path:
+      do NOT spend your reserve (2000 cr) rebuilding them. The
+      intended play is to PRESS ON — attack_move the 2tnk column east
+      to clear the garrison, and build a replacement 2tnk only when
+      your tank count drops below 4. Win when you have killed >=5
+      enemy units AND you have >=4 medium tanks alive AND your
+      construction yard is intact, before tick 5400. Stalling, and
+      rebuilding the razed non-essentials, both LOSE.
+    starting_cash: 2000
+    overrides:
+      actors:
+        # Agent CORE base — fact + proc + powr + weap + fix at the
+        # west edge, y=16..18. Untouched by the destroy event.
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [10, 18]}
+        - {type: powr, owner: agent, position: [12, 18]}
+        - {type: weap, owner: agent, position: [14, 18]}
+        - {type: fix,  owner: agent, position: [16, 18]}
+        # North harvester — SURVIVES (outside the destroy circle).
+        - {type: harv, owner: agent, position: [10, 16]}
+        # SOUTH outpost — outer pbox + south harvester. Both RAZED by
+        # the destroy event at tick 1200 (region {11,30,r4}).
+        - {type: pbox, owner: agent, position: [12, 30]}
+        - {type: harv, owner: agent, position: [10, 30]}
+        # Neutral ore mines feeding the harvesters (outside the
+        # destroy circle; income is incidental — the reserve cash is
+        # the budget that matters).
+        - {type: mine, owner: neutral, position: [14, 14]}
+        - {type: mine, owner: neutral, position: [14, 16]}
+        # 4 medium tanks (2tnk) at the forward staging line.
+        - {type: '2tnk', owner: agent, position: [22, 18], stance: 2}
+        - {type: '2tnk', owner: agent, position: [22, 20], stance: 2}
+        - {type: '2tnk', owner: agent, position: [22, 22], stance: 2}
+        - {type: '2tnk', owner: agent, position: [22, 24], stance: 2}
+        # Strike force: 2× 1tnk at the lane mouth (stance:2 Defend —
+        # fire on the in-range column at x=22 but do NOT chase it east;
+        # the opening salvo costs the agent ~1 medium tank, a bounded
+        # recoverable loss).
+        - {type: '1tnk', owner: enemy, position: [24, 19], stance: 2}
+        - {type: '1tnk', owner: enemy, position: [24, 23], stance: 2}
+        # Eastern garrison: 5 rifle infantry defending the enemy fact.
+        - {type: e1, owner: enemy, position: [80, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 24], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 20], stance: 1}
+        # Persistent enemy `fact` far east (engine auto-done guard).
+        - {type: fact, owner: enemy, position: [120, 20]}
+      # Wave-9 scheduled destroy event: at tick 1200 raze every agent
+      # actor inside the SOUTH-outpost circle — the outer pbox at
+      # (12,30) and the south harvester at (10,30). The core base row
+      # (y=16..18) and the north harvester (10,16) are ~12+ cells
+      # away, outside r=4, so they survive.
+      scheduled_events:
+        - tick: 1200
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 11, y: 30, radius: 4}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: '2tnk', n: 4}}
+        - {units_killed_gte: 5}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: a HARDER non-critical loss to triage —
+  # the destroy event razes the outer pbox + the south harvester AND
+  # a second outer pbox (a fuller-looking outpost), and the strike is
+  # tighter (3× 4tnk). The reserve is held at 2000 cr — STILL only
+  # ~two replacement tanks — so rebuilding the (now larger) razed
+  # outpost is even more clearly a budget trap, while the press-on
+  # policy must still absorb the opening casualty.
+  medium:
+    description: >
+      Tougher version: THREE enemy light tanks (1tnk) are staged at
+      the lane mouth (x=24, y=18..24) and engage the moment the
+      episode starts — expect ONE of your tanks to die in the opening
+      salvo. Your SOUTH outpost now holds TWO outer pillboxes and one
+      harvester; at tick ~1200 an enemy strike RAZES the entire
+      outpost — both pillboxes and that harvester — while your CORE
+      base (fact + proc + powr + weap + fix) and your north harvester
+      are UNTOUCHED. The eastern garrison is 6 rifle infantry at
+      x=80. Reserve cash (2000 cr) covers ~two replacement medium
+      tanks — NOT the razed outpost. Press on: attack_move the 2tnk
+      column east and rebuild a tank only when your count drops below
+      4. Win when you have killed >=5 enemy units AND you have >=4
+      medium tanks alive AND your construction yard is intact, before
+      tick 5400. Stalling and rebuilding the razed outpost both LOSE.
+    starting_cash: 2000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [10, 18]}
+        - {type: powr, owner: agent, position: [12, 18]}
+        - {type: weap, owner: agent, position: [14, 18]}
+        - {type: fix,  owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [10, 16]}
+        # SOUTH outpost — 2 outer pbox + 1 harv; all RAZED at tick 1200.
+        - {type: pbox, owner: agent, position: [10, 30]}
+        - {type: pbox, owner: agent, position: [12, 30]}
+        - {type: harv, owner: agent, position: [11, 28]}
+        - {type: mine, owner: neutral, position: [14, 14]}
+        - {type: mine, owner: neutral, position: [14, 16]}
+        - {type: '2tnk', owner: agent, position: [22, 18], stance: 2}
+        - {type: '2tnk', owner: agent, position: [22, 20], stance: 2}
+        - {type: '2tnk', owner: agent, position: [22, 22], stance: 2}
+        - {type: '2tnk', owner: agent, position: [22, 24], stance: 2}
+        # 3-tank strike (1tnk, stance:2 Defend): concentrated on the
+        # mid-column (y=19..23) so the opening salvo reliably resolves
+        # to ~1 lost 2tnk; the strikers hold their post and never
+        # chase the column east.
+        - {type: '1tnk', owner: enemy, position: [24, 19], stance: 2}
+        - {type: '1tnk', owner: enemy, position: [24, 21], stance: 2}
+        - {type: '1tnk', owner: enemy, position: [24, 23], stance: 2}
+        # Garrison: 6 e1 at x=80..82.
+        - {type: e1, owner: enemy, position: [80, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 24], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 22], stance: 1}
+        - {type: fact, owner: enemy, position: [120, 20]}
+      scheduled_events:
+        - tick: 1200
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 11, y: 30, radius: 4}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: '2tnk', n: 4}}
+        - {units_killed_gte: 5}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. TWO seed-driven AGENT spawn_point groups (a NORTH-flank
+  #      scout at (18,12) on spawn 0; a SOUTH-flank scout at (18,32)
+  #      on spawn 1). The core base + 2tnk column + south outpost are
+  #      SHARED across both groups at identical cells so the strike
+  #      and destroy geometry is symmetric, but a memorised opening
+  #      cannot generalise — the scout's flank flips per seed.
+  #      (CLAUDE.md: enemy actors are NOT spawn-filtered; ANY agent
+  #      actor with a spawn_point forces every agent actor WITHOUT
+  #      one to be filtered out — so EVERY agent actor declares
+  #      spawn_point and the shared base is duplicated across BOTH
+  #      groups. scheduled_events do NOT honour spawn_point — the
+  #      single destroy event fires on both seeds and razes the
+  #      south outpost, which is at identical cells in both groups.)
+  #   2. Larger replacement budget (3000 cr ⇒ ~3 replacement tanks)
+  #      to absorb the staggered 3-tank strike — but rebuilding the
+  #      razed outpost (2 pbox + harv ≈ 2600 cr) STILL consumes
+  #      almost the whole reserve and is the budget trap.
+  hard:
+    description: >
+      Hard tier: TWO seed-driven base orientations (a NORTH-flank
+      scout at (18,12) on spawn 0; a SOUTH-flank scout at (18,32) on
+      spawn 1) keep the strike and destroy geometry symmetric but
+      defeat a memorised opening. Three enemy light tanks (1tnk)
+      strike the central 2tnk column; the SOUTH outpost (2 outer
+      pillboxes + 1 harvester) is RAZED at tick ~1200 while the core
+      base (fact + proc + powr + weap + fix) and the north harvester
+      survive. The eastern garrison is 6 rifle infantry at x=80.
+      Reserve cash (3000 cr) covers ~three replacement medium tanks.
+      Win when you have killed >=5 enemy units AND you have >=4
+      medium tanks alive AND your construction yard is intact, before
+      tick 5400. Stalling and rebuilding the razed outpost both LOSE;
+      the intended play is to PRESS ON — attack_move east and replace
+      only the tank casualties.
+    starting_cash: 3000
+    overrides:
+      actors:
+        # SPAWN 0 — NORTH-flank scout at (18,12). Core base, 2tnk
+        # column, and south outpost duplicated across both groups
+        # (per CLAUDE.md: ANY agent actor with a spawn_point forces
+        # agent actors WITHOUT one to be filtered out).
+        - {type: fact, owner: agent, position: [8, 18], spawn_point: 0}
+        - {type: proc, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [12, 18], spawn_point: 0}
+        - {type: weap, owner: agent, position: [14, 18], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [16, 18], spawn_point: 0}
+        - {type: harv, owner: agent, position: [10, 16], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [10, 30], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [12, 30], spawn_point: 0}
+        - {type: harv, owner: agent, position: [11, 28], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [14, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [14, 16], spawn_point: 0}
+        - {type: '2tnk', owner: agent, position: [22, 18], stance: 2, spawn_point: 0}
+        - {type: '2tnk', owner: agent, position: [22, 20], stance: 2, spawn_point: 0}
+        - {type: '2tnk', owner: agent, position: [22, 22], stance: 2, spawn_point: 0}
+        - {type: '2tnk', owner: agent, position: [22, 24], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [18, 12], stance: 0, spawn_point: 0}
+        # SPAWN 1 — SOUTH-flank scout at (18,32). Symmetric.
+        - {type: fact, owner: agent, position: [8, 18], spawn_point: 1}
+        - {type: proc, owner: agent, position: [10, 18], spawn_point: 1}
+        - {type: powr, owner: agent, position: [12, 18], spawn_point: 1}
+        - {type: weap, owner: agent, position: [14, 18], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [16, 18], spawn_point: 1}
+        - {type: harv, owner: agent, position: [10, 16], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [12, 30], spawn_point: 1}
+        - {type: harv, owner: agent, position: [11, 28], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [14, 14], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [14, 16], spawn_point: 1}
+        - {type: '2tnk', owner: agent, position: [22, 18], stance: 2, spawn_point: 1}
+        - {type: '2tnk', owner: agent, position: [22, 20], stance: 2, spawn_point: 1}
+        - {type: '2tnk', owner: agent, position: [22, 22], stance: 2, spawn_point: 1}
+        - {type: '2tnk', owner: agent, position: [22, 24], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [18, 32], stance: 0, spawn_point: 1}
+        # 3-tank strike (1tnk, stance:2, mid-column concentrated;
+        # enemy actors place on every seed — enemy actors do NOT
+        # honour spawn_point).
+        - {type: '1tnk', owner: enemy, position: [24, 19], stance: 2}
+        - {type: '1tnk', owner: enemy, position: [24, 21], stance: 2}
+        - {type: '1tnk', owner: enemy, position: [24, 23], stance: 2}
+        - {type: e1, owner: enemy, position: [80, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [80, 24], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 22], stance: 1}
+        - {type: fact, owner: enemy, position: [120, 20]}
+      scheduled_events:
+        - tick: 1200
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 11, y: 30, radius: 4}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: '2tnk', n: 4}}
+        - {units_killed_gte: 5}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {own_units_gte: 1}}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
