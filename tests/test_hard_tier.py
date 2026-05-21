@@ -1083,6 +1083,14 @@ UPGRADED = [
     # generalise. Raider bands place at BOTH latitudes (enemy actors
     # don't honour spawn_point — CLAUDE.md).
     "mfb-supply-line-link-between-bases",
+    # Wave-10 mutual-support / SC2 ball-micro pack: advance a 6-tank
+    # squad as a tight ball so focus-fire is reciprocal; a strung-out
+    # column feeds each harasser cluster its lead tanks one at a time.
+    # Hard tier defines two agent spawn_point groups (NORTH y=10..15 /
+    # SOUTH y=25..30) round-robined by seed; the harasser belt and the
+    # objective cluster are symmetric across y=20 so either spawn faces
+    # an equivalent mutual-support decision (no memorised opening).
+    "coord-mutual-support",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

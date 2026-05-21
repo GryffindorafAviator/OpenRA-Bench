@@ -1,0 +1,360 @@
+# coord-mutual-support — advance a 6-tank squad as a TIGHT BALL so
+# every unit stays inside mutual-support range; a spread-out advance
+# loses stragglers to focused fire.
+#
+# Wave-10 ACTION seed (capability: action). Real-world / benchmark
+# anchors:
+#   - Military "mutual support" doctrine: units position so each can
+#     cover the others by fire — an element that drifts outside
+#     supporting range can be engaged and destroyed before help
+#     arrives ("defeat in detail"). The remedy is to keep the force
+#     concentrated within mutual-support distance as it advances.
+#   - StarCraft 2 "ball" micro: an army moved as a tight clump
+#     concentrates ALL its DPS on whatever it touches and destroys
+#     a defending cluster in one or two volleys; a strung-out column
+#     feeds the defender one unit at a time and is picked apart.
+#   - SMAC / SMACv2 squad-coherence: cooperative-MARL benchmarks
+#     reward keeping the squad together so focus-fire is reciprocal,
+#     not one-sided.
+#
+# Mechanism (engine-load-bearing physics):
+#   - Six medium tanks (2tnk) start at the west edge. The mission is
+#     to drive east and converge on an enemy cluster centred near
+#     (60,20), destroy K of the defenders, and finish with at least
+#     FIVE of the six tanks still alive — i.e. lose at most ONE.
+#   - The route is flanked by HARASSER clusters of anti-tank rocket
+#     soldiers (e3, Dragon launcher, rng ~5, dps ~12, hp 45) nested
+#     just off the engagement axis. Each cluster only fires on
+#     whatever agent unit is within its ~5-cell envelope.
+#   - SPREAD / STRUNG-OUT advance (single-file column, units strung
+#     across many cells of x): the lead tanks enter a harasser
+#     cluster's envelope ALONE while the rest of the squad is still
+#     cells behind. The cluster concentrates its full fire on the
+#     1-2 lead tanks; with no supporting tanks in range to return
+#     fire and trade the cluster down, the lead tanks are destroyed
+#     before the column closes up. The squad bleeds ≥2 tanks across
+#     the harasser belt and the objective cluster → own_units_gte:5
+#     busts → LOSS.
+#   - TIGHT BALL (all six tanks kept inside a ~3-cell clump as they
+#     advance): the whole squad enters each harasser cluster's
+#     envelope together. All six tanks' cannon fire (dps ~22 each)
+#     concentrates on the cluster and erases it in one or two
+#     volleys, BEFORE the cluster's spread-out fire can finish any
+#     single tank (2tnk hp 400). Reciprocal focus-fire: the ball
+#     out-trades every cluster and reaches the objective with ≥5
+#     tanks intact → WIN.
+#
+# The cohesion of the ADVANCE (not only the final fight) is made
+# load-bearing by an en-route checkpoint: a `then:` ordered latch
+# requires ≥5 of the 6 tanks to be inside a tight mid-route region
+# TOGETHER before the objective clause counts. A strung-out column
+# never has 5 tanks inside the checkpoint radius at one tick, so the
+# latch never advances even if the lead tanks survive. (win_conditions.py
+# has no max-inter-unit-distance predicate; the en-route checkpoint
+# region is the CLAUDE-sanctioned substitute.)
+#
+# Discrimination bar (script-policy proxies — tests/test_coord_mutual_support.py):
+#   • stall (only observe)            → LOSS. Tanks idle at the west
+#     edge; the squad never advances into harasser range, so nothing
+#     ever engages it; the within_ticks deadline elapses → LOSS.
+#   • brute strung-out column (each   → LOSS. Tanks issued the same
+#     tank attack_move'd east, one      far attack_move drift into a
+#     per turn, no regroup)             single-file column; the lead
+#     tanks enter each harasser cluster alone and are focus-fired
+#     down with no supporting fire in range → ≥2 tanks lost →
+#     own_units_gte:5 busts / checkpoint latch never advances → LOSS.
+#   • intended tight ball (advance    → WIN. The whole squad enters
+#     in a ~3-cell clump, regroup       every cluster together; six
+#     before each contact)              tanks' concentrated cannon
+#     fire erases each cluster in 1-2 volleys before it can finish a
+#     tank; ≥5 of 6 survive, K kills, checkpoint cleared → WIN.
+#
+# Engine guardrails (per CLAUDE.md / SCENARIO_REVIEW_CHECKLIST.md):
+#   - Map: rush-hour-arena (128×40, playable x ∈ [2..126], y ∈
+#     [2..38]). Squad at x=6, harasser belt at x=30..46, objective
+#     cluster near (60,20), persistent fact at (120,20).
+#   - CLAUDE.md footgun: enemy clusters at the EXACT cell (60,20)
+#     silently fail to place. The objective defenders are placed at
+#     the verified-placeable off-axis neighbours (59,19)/(59,21)/
+#     (61,19)/(61,21)/(60,18)/(60,22) — all within radius 6 of
+#     (60,20) so the win region still covers them. No actors at the
+#     documented bad cells (50,20)/(60,20)/(60,28)/(90,30).
+#   - Persistent far-east enemy `fact` at (120,20) absorbs engine
+#     auto-done on enemy-wipe so the win/fail evaluator sees the
+#     terminal frame (no DRAW collapse).
+#   - Harassers/defenders are stance:2 (Defend — auto-fire on the
+#     nearest in-range foe; they engage and pursue a unit once it
+#     enters their envelope). A staller never advances into that
+#     envelope, so it is never engaged — stall LOSES purely on the
+#     clock, never via a free combat outcome.
+#   - All deadlines reachable within max_turns. Empirically a column
+#     under sustained combat advances ~65-78 ticks/turn; max_turns
+#     75 ⇒ the after_ticks 4501 deadline (≤ 93 + 90·74 = 6753) bites
+#     well before the turn budget runs out.
+
+meta:
+  id: coord-mutual-support
+  title: 'Mutual Support — Advance the Squad as a Tight Ball'
+  capability: action
+  real_world_meaning: >
+    A six-tank squad at the west edge must advance east, punch through
+    a belt of anti-tank harasser clusters, converge on an enemy
+    cluster near the centre, destroy the defenders, and finish with at
+    least five of the six tanks alive. Advancing strung-out — a
+    single-file column spread across many cells — feeds each harasser
+    cluster one or two lead tanks at a time; the cluster concentrates
+    its fire and destroys the isolated leaders before the rest of the
+    squad closes up, and the force is defeated in detail. The winning
+    play is to advance as a TIGHT BALL: keep all six tanks inside a
+    small clump so the whole squad enters each cluster's fire envelope
+    together, every tank's cannon concentrates on the cluster, and the
+    defenders are erased in one or two volleys before they can finish
+    any single tank. Mutual support means no element ever advances
+    outside the supporting range of the others.
+  robotics_analogue: >
+    Multi-agent coherent advance under fire: a defender concentrates
+    its fire on whichever agent is closest and within its weapon
+    envelope. A strung-out formation lets the defender pick off the
+    leading agents one at a time (one-sided focus fire); a coherent
+    clump brings the whole team's firepower to bear at once
+    (reciprocal focus fire) and out-trades the defender. The decision
+    under test is formation cohesion — keep the squad inside
+    mutual-support range throughout the advance, regrouping before
+    each contact rather than racing the fastest units ahead.
+  benchmark_anchor:
+    - "military mutual support"
+    - "SC2 ball micro"
+    - "SMAC squad coherence"
+    - "defeat-in-detail avoidance: keep the force concentrated"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  # React the instant a tank is lost or a harasser is spotted — keeping
+  # the ball tight is reactive micro; without these the model only
+  # regroups on the next turn boundary and a straggler gets free shots.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 7000}
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Bare mutual-support skill: ONE harasser cluster on the route plus
+  # the objective cluster. A strung-out column already loses ≥2 tanks
+  # (lead tank focus-fired alone at the harasser, then again at the
+  # objective). The tight ball clears both with ≥5 of 6 alive. Stall
+  # LOSES on the clock (the squad never advances into harasser range so
+  # nothing reaches it — the within_ticks deadline simply elapses).
+  easy:
+    description: >
+      Six medium tanks (2tnk) stage at the west edge (x=6, y=17..22).
+      ONE harasser cluster of THREE anti-tank rocket soldiers (e3,
+      Dragon launcher, range ~5) nests just south of the engagement
+      axis at (38,23)/(39,23)/(40,23); the harassers auto-fire on the
+      nearest tank in range. An objective cluster of FOUR e3 sits
+      around (60,20). The objective is to get at least FIVE of your six
+      tanks into the region centred on (60,20) (radius 6), destroy at
+      least 5 enemy units, and finish with at least five tanks alive,
+      before tick 4500 — AND the squad must pass through a mid-route
+      checkpoint region near (40,20) with ≥5 tanks together first.
+      Advancing strung-out feeds the harasser and the objective cluster
+      your lead tanks one at a time and they are focus-fired down
+      before support arrives (≥2 lost → bust). The intended play is a
+      TIGHT BALL — keep all six tanks in a small clump so the whole
+      squad enters each cluster's fire envelope together and
+      concentrates its cannon fire. Stall LOSES (the squad never
+      advances, so the region bar is never met and the clock runs out).
+    overrides:
+      actors:
+        # STRIKE FORCE — 6 medium tanks at the west edge, stance:1
+        # ReturnFire (fire on attackers / explicit targets, never
+        # lunge — preserves the formation-cohesion test).
+        - {type: 2tnk, owner: agent, position: [6, 17], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
+        # HARASSER CLUSTER — 3× e3 just south of the axis at x=38..40,
+        # y=23. A tank passing on y=20 enters Dragon range (Manhattan
+        # ~3-5). All stance:2 (Defend — auto-fire on the nearest
+        # in-range tank).
+        - {type: e3, owner: enemy, position: [38, 23], stance: 2}
+        - {type: e3, owner: enemy, position: [39, 23], stance: 2}
+        - {type: e3, owner: enemy, position: [40, 23], stance: 2}
+        # OBJECTIVE CLUSTER — 4× e3 around (60,20). Cells avoid the
+        # exact (60,20) silent-fail cell; all within radius 6 of it.
+        - {type: e3, owner: enemy, position: [59, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [59, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [61, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [61, 21], stance: 2}
+        # Persistent far-east enemy fact — engine auto-done mitigation.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: mutual-support-easy
+            clauses:
+              # Mid-route checkpoint: the squad must pass the harasser
+              # belt as a tight ball (≥5 tanks inside r5 of (40,20) at
+              # one tick). A strung-out column never satisfies this.
+              - {units_in_region_gte: {x: 40, y: 20, radius: 5, n: 5}}
+              # Objective: ≥5 tanks converged on the enemy cluster.
+              - {units_in_region_gte: {x: 60, y: 20, radius: 6, n: 5}}
+        - {units_killed_gte: 5}
+        - {own_units_gte: 5}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 75
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: a SECOND harasser cluster brackets
+  # the route from the NORTH flank, so a strung-out column is picked
+  # apart from both sides. The objective cluster is denser (5× e3).
+  # The tight ball must hold cohesion through TWO harasser contacts.
+  medium:
+    description: >
+      Six medium tanks (2tnk) stage at the west edge (x=6, y=17..22).
+      TWO harasser clusters bracket the route — a SOUTH cluster of
+      THREE e3 at (34,24)/(35,24)/(36,24) and a NORTH cluster of THREE
+      e3 at (42,16)/(43,16)/(44,16) (all stance:2). An objective
+      cluster of FIVE e3 sits around (60,20). Get at least FIVE of
+      your six tanks into the region centred on (60,20) (radius 6),
+      destroy at least 7 enemy units, and finish with at least five
+      tanks alive, before tick 4500 — and pass the mid-route
+      checkpoint near (40,20) with ≥5 tanks together first. A
+      strung-out column is harassed from BOTH flanks and the lead
+      tanks are focus-fired down one at a time → ≥2 lost → bust. The
+      intended play is a TIGHT BALL — regroup before each contact so
+      the whole squad concentrates its cannon fire and erases each
+      cluster in one or two volleys. Stall LOSES.
+    overrides:
+      actors:
+        - {type: 2tnk, owner: agent, position: [6, 17], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
+        # SOUTH harasser cluster — 3× e3 at x=34..36, y=24.
+        - {type: e3, owner: enemy, position: [34, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [35, 24], stance: 2}
+        - {type: e3, owner: enemy, position: [36, 24], stance: 2}
+        # NORTH harasser cluster — 3× e3 at x=42..44, y=16.
+        - {type: e3, owner: enemy, position: [42, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [43, 16], stance: 2}
+        - {type: e3, owner: enemy, position: [44, 16], stance: 2}
+        # OBJECTIVE CLUSTER — 5× e3 around (60,20).
+        - {type: e3, owner: enemy, position: [59, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [59, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [61, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [61, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 18], stance: 2}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: mutual-support-medium
+            clauses:
+              - {units_in_region_gte: {x: 40, y: 20, radius: 5, n: 5}}
+              - {units_in_region_gte: {x: 60, y: 20, radius: 6, n: 5}}
+        - {units_killed_gte: 7}
+        - {own_units_gte: 5}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 75
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. THREE harasser clusters (south, north, on-axis) and a denser
+  #      6× e3 objective cluster — the ball must hold cohesion through
+  #      a longer harassed corridor.
+  #   2. TWO agent spawn_point groups (NORTH staging y=10..15 OR SOUTH
+  #      staging y=25..30) round-robined by seed, so the tight ball
+  #      must form from a flipped starting latitude per seed. Harasser
+  #      and objective placement is symmetric across y=20 so either
+  #      spawn faces an equivalent mutual-support decision.
+  hard:
+    description: >
+      Six medium tanks (2tnk) stage at ONE of two west-edge corridors
+      (NORTH staging y=10..15 OR SOUTH staging y=25..30, chosen by
+      seed — anti-memorisation). THREE harasser clusters line the
+      route — a SOUTH cluster of THREE e3 at x=32..34 y=25, a NORTH
+      cluster of THREE e3 at x=40..42 y=15, and an on-axis cluster of
+      TWO e3 at (46,20)/(47,20) (all stance:2). An objective cluster
+      of SIX e3 sits around (60,20). Get at least FIVE of your six
+      tanks into the region centred on (60,20) (radius 6), destroy at
+      least 9 enemy units, and finish with at least five tanks alive,
+      before tick 4500 — and pass the mid-route checkpoint near
+      (43,20) with ≥5 tanks together first. A strung-out column is
+      harassed from three sides and picked apart. The intended play
+      is a TIGHT BALL — keep all six tanks in a small clump, regroup
+      before each contact, concentrate the squad's cannon fire on
+      each cluster in turn. Stall LOSES.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging corridor (y=10..15). The ball
+        # forms north of the axis and drives diagonally SE.
+        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 11], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 13], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 15], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging corridor (y=25..30). Mirror of
+        # spawn 0 across y=20 — the ball drives diagonally NE.
+        - {type: 2tnk, owner: agent, position: [6, 25], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 27], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, spawn_point: 1}
+        # SOUTH harasser cluster — 3× e3 at x=32..34, y=25.
+        - {type: e3, owner: enemy, position: [32, 25], stance: 2}
+        - {type: e3, owner: enemy, position: [33, 25], stance: 2}
+        - {type: e3, owner: enemy, position: [34, 25], stance: 2}
+        # NORTH harasser cluster — 3× e3 at x=40..42, y=15.
+        - {type: e3, owner: enemy, position: [40, 15], stance: 2}
+        - {type: e3, owner: enemy, position: [41, 15], stance: 2}
+        - {type: e3, owner: enemy, position: [42, 15], stance: 2}
+        # ON-AXIS harasser cluster — 2× e3 at (46,20)/(47,20).
+        - {type: e3, owner: enemy, position: [46, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [47, 20], stance: 2}
+        # OBJECTIVE CLUSTER — 6× e3 around (60,20). Symmetric across
+        # y=20 so either spawn faces an equivalent objective fight.
+        - {type: e3, owner: enemy, position: [59, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [59, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [61, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [61, 21], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 18], stance: 2}
+        - {type: e3, owner: enemy, position: [60, 22], stance: 2}
+        # Persistent far-east enemy fact — engine auto-done mitigation.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - then:
+            id: mutual-support-hard
+            clauses:
+              - {units_in_region_gte: {x: 43, y: 20, radius: 5, n: 5}}
+              - {units_in_region_gte: {x: 60, y: 20, radius: 6, n: 5}}
+        - {units_killed_gte: 9}
+        - {own_units_gte: 5}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 3}}
+    max_turns: 75
