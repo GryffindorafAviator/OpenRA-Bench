@@ -29,9 +29,20 @@ The win predicate makes the relocation load-bearing:
   win.
 * `within_ticks:5400` paired with `after_ticks:5401` ⇒ a non-
   finisher is a real reachable timeout LOSS in interrupt mode
-  (60 turns × ≤90 ticks/step), never a draw. (In practice, every
-  failure mode triggers the `not building_count_gte:fact:1` clause
-  much earlier when the rusher razes the last fact.)
+  (60 turns × ≤90 ticks/step), never a draw.
+
+RECALIBRATION NOTE (engine movement fixes — moving units fire AND
+take fire en route, `attack_unit` paths normally): post-fix the
+rusher band fights the off-lane garrison and chews through the
+western base's buildings more slowly, so the original western fact
+can SURVIVE the whole episode — the `not building_count_gte:fact:1`
+fail clause then never bites and a stall / deploy-in-place play
+DRAWS instead of LOSING. The fail_condition now carries an explicit
+RELOCATION-DEADLINE clause — `{after_ticks:1800, not:{any_of:[<safe
+regions>]}}` — that makes the relocation capability the load-bearing
+teeth: if NO fact stands in a safe relocation region by tick 1800
+(the intended move+deploy completes by ~tick 370 — a ~5× margin)
+the episode is a real reachable LOSS, never a draw.
 
 These tests prove with deterministic scripted policies (no model,
 no network) that:
@@ -218,6 +229,47 @@ def test_every_level_has_a_reachable_timeout_fail(level):
     assert deadline < reachable, (
         f"{level}: deadline {deadline} unreachable within "
         f"{c.max_turns} turns (max tick {reachable}) → draw degeneracy"
+    )
+
+
+@pytest.mark.parametrize("level", LEVELS)
+def test_relocation_deadline_fail_clause_present(level):
+    """RECALIBRATION (engine movement fixes): every level's
+    fail_condition must carry a relocation-deadline clause —
+    `{all_of:[{after_ticks:T}, {not:{any_of:[building_in_region …]}}]}`
+    — so a stall / deploy-in-place play that never produces a fact in
+    a safe relocation region is a real LOSS (not a draw) even when the
+    rusher fails to raze the original western fact. The deadline T
+    must be reachable inside max_turns and comfortably above the
+    intended move+deploy completion (~tick 370)."""
+    c = compile_level(load_pack(PACK), level)
+    fc = c.fail_condition.model_dump(exclude_none=True)
+    reloc = None
+    for clause in fc.get("any_of", []) or []:
+        inner = clause.get("all_of") or []
+        has_after = any("after_ticks" in n for n in inner)
+        has_not_region = any(
+            isinstance(n.get("not"), dict)
+            and isinstance((n["not"] or {}).get("any_of"), list)
+            and all(
+                "building_in_region" in r
+                for r in (n["not"]["any_of"] or [])
+            )
+            for n in inner
+        )
+        if has_after and has_not_region:
+            reloc = clause
+    assert reloc is not None, (
+        f"{level}: missing relocation-deadline fail clause "
+        f"(post-engine-fix anti-draw teeth); fail={fc}"
+    )
+    deadline = next(
+        n["after_ticks"] for n in reloc["all_of"] if "after_ticks" in n
+    )
+    reachable = 93 + 90 * (c.max_turns - 1)
+    assert 400 < deadline < reachable, (
+        f"{level}: relocation deadline {deadline} must be > intended "
+        f"completion (~370) and < reachable {reachable}"
     )
 
 
