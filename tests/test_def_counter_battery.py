@@ -254,10 +254,21 @@ def _screen_first(rs, Command):
 
 
 def _counter_battery_strike(rs, Command):
-    """The intended play — drive the tanks toward the artillery and
-    attack_unit the guns FIRST (highest-impact threat); only once the
-    battery is silent mop up the infantry screen. Saving the fact
-    leaves the rest of the budget to clear the kill bar → WIN."""
+    """The intended play — drive the tanks PAST the infantry screen to
+    the rear battery and attack_unit the guns FIRST (highest-impact
+    threat); only once the battery is silent mop up the infantry
+    screen for the kill bar. Saving the fact leaves the rest of the
+    budget to clear the kill bar → WIN.
+
+    Post engine-movement-fix: `attack_unit` no longer teleport-chases
+    an out-of-sight target — it closes distance at the tank's real
+    Mobile speed. The strike must therefore PUSH THROUGH the screen
+    with `move_units` (a plain move, which the engine still resolves
+    at full speed) rather than `attack_unit`-ing a screen rifleman
+    en route — stopping to trade with the screen lets the artillery
+    raze the fact before the guns are reached. Only once the tanks
+    are deep east (past the screen column) and the guns are silenced
+    does the policy pivot to mopping the screen."""
     ts = _tanks(rs)
     if not ts:
         return [Command.observe()]
@@ -265,12 +276,31 @@ def _counter_battery_strike(rs, Command):
     ids = [str(t["id"]) for t in ts]
     artys = [e for e in es if str(e.get("type", "")).lower() == "arty"]
     if artys:
+        # Guns in sight — kill the battery FIRST, concentrated fire.
         return [Command.attack_unit(ids, str(artys[0]["id"]))]
+    ax = sum(t.get("cell_x", 0) for t in ts) / len(ts)
+    ay = int(sum(t["cell_y"] for t in ts) / len(ts))
+    if ax < 26:
+        # Still closing on the battery — drive STRAIGHT through the
+        # screen toward the rear (a plain move, not an attack order,
+        # so the tanks don't stop to grind the passive picket line).
+        return [Command.move_units(ids, 29, ay)]
+    # Deep east with no gun in sight — the battery is dead; mop the
+    # infantry screen for the kill bar.
     e1s = [e for e in es if str(e.get("type", "")).lower() == "e1"]
     if e1s:
         return [Command.attack_unit(ids, str(e1s[0]["id"]))]
+    return [Command.observe()]
+
+
+def _wrong_path(rs, Command):
+    """Wrong route — drive the tanks AWAY from the battery (back west).
+    The guns are never engaged; the artillery razes the fact → LOSS."""
+    ts = _tanks(rs)
+    if not ts:
+        return [Command.observe()]
     ay = int(sum(t["cell_y"] for t in ts) / len(ts))
-    return [Command.move_units(ids, 27, ay)]
+    return [Command.move_units([str(t["id"]) for t in ts], 8, ay)]
 
 
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
@@ -331,5 +361,23 @@ def test_screen_first_loses(level, seed):
     assert r.outcome == "loss", (
         f"{level} seed={seed}: screen-first must LOSE (the artillery "
         f"razes the fact before the screen is cleared), got "
+        f"{r.outcome} (kills={r.signals.units_killed})"
+    )
+
+
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_wrong_path_loses(level, seed):
+    """The wrong-route play — driving the tanks away from the battery
+    instead of toward it — must LOSE on every level and seed: the guns
+    are never engaged and the artillery razes the fact."""
+    pytest.importorskip("openra_train")
+    from openra_bench.eval_core import run_level
+
+    c = compile_level(load_pack(PACK_PATH), level)
+    r = run_level(c, _wrong_path, seed=seed)
+    assert r.outcome == "loss", (
+        f"{level} seed={seed}: wrong-path must LOSE (the artillery "
+        f"razes the fact while the tanks drive the wrong way), got "
         f"{r.outcome} (kills={r.signals.units_killed})"
     )
