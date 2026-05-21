@@ -1,0 +1,369 @@
+# maint-sell-and-recoup-cash.yaml
+#
+# REASONING capability — Wave-10 "capital reallocation" pack (SC2 sell
+# mechanic / asset divestment / CAPEX redeployment anchor). The agent
+# owns a working base — a Construction Yard (`fact`), a Refinery
+# (`proc`), Power Plants (`powr`), a Service Depot (`fix`) — PLUS an
+# over-built static-defence cluster (extra pillboxes / a Tesla coil /
+# a radar dome) that the mission no longer needs. The objective has
+# shifted to OFFENCE: the agent must stand up a War Factory (`weap`)
+# and field a batch of 3 medium tanks (`2tnk`).
+#
+# Starting cash alone is NOT enough for that critical purchase
+# (weap 2000 + 3×2tnk ≈ 2550 ⇒ ~4550 total > starting cash on every
+# tier) and there is NO income source — the pre-placed `proc` has no
+# ore patch within reach, so it generates nothing. The only path to
+# the weap + tank batch inside the tick budget is:
+#
+#     1. `sell` the now-obsolete static-defence buildings
+#        (each refunds 50% of its build cost)
+#     2. `build('weap')` + `place_building`  (war factory)
+#     3. `build('2tnk')` ×3                  (the tank batch)
+#
+# Without selling, the agent has insufficient cash to buy the war
+# factory and tanks (production gates on cash ≥ cost; the build never
+# starts) ⇒ no weap, no 2tnk ⇒ the clock runs out ⇒ real LOSS.
+# Selling the redundant assets recoups the capital that funds the
+# critical purchase — the intended divest-then-buy play WINS.
+#
+# Real-world anchors:
+#   - SC2 sell mechanic: salvage a structure for a partial cash
+#     refund and redeploy the capital where it is now needed.
+#   - Capital reallocation / asset divestment: liquidate a redundant
+#     asset and reinvest the freed capital into the new priority.
+#   - PlanBench resource reallocation: the planner must reason that
+#     the partial refund from divesting the obsolete defences is the
+#     ONLY way to fund the offensive purchase under the budget —
+#     buying from cash alone is impossible, and there is no income.
+#
+# DISCRIMINATIONS (no defect, no cheat):
+#   - stall (observe only): LOSS — never sells, never builds; cash
+#     stays below the weap+tank cost, the war factory build never
+#     starts, no tanks ⇒ win clauses unmet AND the clock runs out
+#     (a real reachable timeout LOSS — the stall path reaches
+#     ~tick 7833 at turn 87, past the after_ticks 7801 deadline).
+#   - build-without-selling: LOSS — `build('weap')` is rejected
+#     until cash ≥ 2000; even if weap is somehow afforded, the
+#     3×2tnk batch is not — there is no income source, so the goal
+#     can never be funded from starting cash alone.
+#   - sell-only (divest but never buy): LOSS — the cash is recouped
+#     but the agent never builds the war factory or the tanks ⇒ win
+#     clauses unmet, clock runs out.
+#   - sell-then-buy (intended): WIN — the refund from divesting the
+#     obsolete defences funds the war factory and the 3-tank batch
+#     within the tick budget; fact still standing.
+#
+# ENGINE FACTS (CLAUDE.md / probed on the live engine):
+#   - weap cost 2000, prereq `proc` (refinery). proc + powr are
+#     pre-placed so the weap queue accepts it from turn 1 once cash
+#     is available.
+#   - 2tnk cost ≈ 850, produced by `weap`, tech-gated by `fix`
+#     (Service Depot) — `fix` is pre-placed so the tank batch only
+#     needs the War Factory, not a Depot too. One tank completes
+#     roughly every ~12 decision turns from a single war factory.
+#   - SELL refunds 50% of build cost (world.rs::order_sell): probed
+#     live — pbox 300 (cost 600), tsla 600 (1200), dome 750 (1500),
+#     hbox 375 (750). The obsolete-defence cluster on each tier is
+#     sized so cash + the full set of refunds CLEARS the weap+tank
+#     cost with a small slack, while cash ALONE falls short.
+#   - `proc` with no ore patch in reach generates NO income — the
+#     sell is the only way to raise cash (mirrors the no-income
+#     design of `build-sell-and-rebuild-elsewhere`).
+#   - `fact` cost 0 ⇒ NOT buildable via StartProduction; pre-placed
+#     so `building_count_gte:{fact}` holds turn 1. The critical
+#     purchase is the weap + the tanks, not the fact.
+#   - `place_building` does NOT enforce build-adjacency — the war
+#     factory can be placed anywhere in-bounds (CLAUDE.md).
+#   - `building_count_gte` / `unit_type_count_gte` are present-tense
+#     count predicates (the weap must STAND and the 3 tanks must be
+#     ALIVE at the win check).
+#   - within_ticks paired with after_ticks in fail ⇒ a non-finisher
+#     is a real reachable timeout LOSS (CLAUDE.md rule 2).
+#   - No scripted bot — this is a pure capital-reallocation reasoning
+#     puzzle: the budget gate is the load-bearing discrimination and
+#     the clock is the anti-stall teeth. An adversary would only raze
+#     the slow-to-build War Factory / Service Depot (one tank takes
+#     ~12 turns; 3 tanks ~36+) and make the pack unsolvable rather
+#     than sharpen the reasoning test.
+#   - Inert enemy `fact` far east is the ONLY enemy actor (anti-DRAW:
+#     keeps the episode alive so the win/fail check fires; the engine
+#     auto-`done`s on enemy-elimination otherwise).
+#
+# Validate (no model / no network):
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m pytest tests/test_maint_sell_and_recoup_cash.py -q
+
+meta:
+  id: maint-sell-and-recoup-cash
+  title: 'Sell and Recoup Cash — Divest Obsolete Assets to Fund a Critical Purchase'
+  capability: reasoning
+  real_world_meaning: >
+    The mission has shifted to offence: the agent must field a War
+    Factory and a batch of 3 medium tanks, but starting cash alone
+    does not cover that purchase and there is no income source. The
+    base carries an over-built static-defence cluster (extra
+    pillboxes, a Tesla coil, a radar dome) that the new objective no
+    longer needs. The only path to the war factory and the tanks
+    inside the tick budget is to SELL the now-obsolete defences —
+    recovering 50% of their build cost as liquid cash — and reinvest
+    that capital into the critical purchase. Stalling, buying without
+    selling (cash-gated), and divesting but never buying all lose;
+    only sell-then-buy wins.
+  robotics_analogue: >
+    Reallocate sunk capital from a deprecated subsystem to fund a
+    newly-critical capability under a hard budget. A fleet carries
+    redundant hardware provisioned for a mission profile that no
+    longer applies; the operating reserve alone cannot commission the
+    capability the current objective demands, and no fresh funding is
+    incoming. The right move is a deliberate divestment of the
+    obsolete hardware — salvaging roughly half its capital in liquid
+    form — and reinvesting it into the new priority before the budget
+    window closes. Holding the dead assets strands the capital and
+    forfeits the objective.
+  benchmark_anchor:
+    - 'capital reallocation'
+    - 'asset divestment'
+    - 'SC2 sell mechanic'
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  # No scripted bot: this is a pure capital-reallocation reasoning
+  # puzzle — the discrimination is the BUDGET GATE (the critical
+  # purchase is unaffordable without divesting the obsolete assets)
+  # and the clock is the anti-stall teeth. An adversary would only
+  # raze the slow-to-build War Factory / Service Depot and make the
+  # pack unsolvable rather than sharpen the reasoning test; the
+  # inert enemy `fact` marker far east is the only enemy actor
+  # (anti-DRAW so the win/fail check fires).
+  enemy:
+    faction: soviet
+    bot_type: ''
+  # Minimal toolset: observe, sell (load-bearing divestment verb),
+  # build + place_building (the critical-purchase primitive). No
+  # harvest / deploy — those would side-step the decision (training
+  # income from a harv loop, or deploying a spare MCV would make the
+  # goal affordable without selling).
+  tools:
+    - observe
+    - sell
+    - build
+    - place_building
+  planning: true
+  # Re-decide the instant a building is sold / lost, so the agent
+  # gets a clean re-plan window after the divestment.
+  interrupts:
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 12000
+
+starting_cash: 3500
+
+levels:
+  # ── EASY ──────────────────────────────────────────────────────────
+  # Bare budget puzzle (the clock is the anti-stall teeth). The base
+  # owns fact + proc + 2×powr + fix and an obsolete static-defence
+  # cluster: 2×pbox (refund 300 each) + 1×tsla (600) + 1×dome (750)
+  # = 1950 recoverable. Starting cash 3500 is below the ~4550
+  # weap+tank cost; 3500 + 1950 = 5450 clears it with slack.
+  # max_turns 90 → reachable tick 93 + 90·89 = 8103 > within_ticks
+  # 7800; the after_ticks 7801 fail bites a non-finisher as a real
+  # LOSS (the stall path reaches ~tick 7833 at turn 87).
+  easy:
+    description: >
+      You hold a base in the safe north-west corner — a Construction
+      Yard (fact), a Refinery (proc), two Power Plants (powr) and a
+      Service Depot (fix). You ALSO own an over-built static-defence
+      cluster — two pillboxes (pbox), a Tesla coil (tsla) and a
+      radar dome (dome) — that the new mission no longer needs. The
+      objective has shifted to OFFENCE: you must build a War Factory
+      (weap) and field 3 medium tanks (2tnk). Your starting cash is
+      3500 — not enough for the war factory (cost 2000) plus the
+      3-tank batch (~2550) — and there is no income source. SELL the
+      obsolete static-defence buildings to recoup their capital
+      (each refunds 50% of its build cost), then BUILD the war
+      factory and the 3 tanks. Win by owning a war factory AND at
+      least 3 medium tanks AND the Construction Yard still alive AND
+      before tick 7800. Stalling, buying without selling (cash
+      blocks the build), and selling but never buying all lose on
+      the clock.
+    starting_cash: 3500
+    overrides:
+      actors:
+        # Core base — SAFE far north-west corner. fact / proc / powr
+        # (×2, headroom for weap + tank drains) / fix (the 2tnk
+        # tech-prereq, pre-placed so the tank batch only needs weap).
+        - {type: fact, owner: agent, position: [4, 4]}
+        - {type: proc, owner: agent, position: [4, 9]}
+        - {type: powr, owner: agent, position: [4, 14]}
+        - {type: powr, owner: agent, position: [8, 14]}
+        - {type: fix,  owner: agent, position: [8, 9]}
+        # Obsolete static-defence cluster — the divestment target.
+        # 2×pbox (300 each) + tsla (600) + dome (750) = 1950 of
+        # recoverable capital. Placed just east of the core base.
+        - {type: pbox, owner: agent, position: [16, 6]}
+        - {type: pbox, owner: agent, position: [16, 10]}
+        - {type: tsla, owner: agent, position: [20, 6]}
+        - {type: dome, owner: agent, position: [20, 10]}
+        # Anti-DRAW marker: unarmed enemy fact far east keeps the
+        # episode alive so the win/fail evaluation fires (engine
+        # auto-`done`s on enemy-elimination otherwise).
+        - {type: fact, owner: enemy, position: [122, 20]}
+    win_condition:
+      all_of:
+        # The critical purchase — war factory built from the
+        # recouped capital.
+        - building_count_gte: {type: weap, n: 1}
+        # The tank batch — 3 medium tanks fielded.
+        - unit_type_count_gte: {type: 2tnk, n: 3}
+        # Construction Yard still alive (present-tense count
+        # predicate, not the one-shot `has_building`).
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 7800
+    fail_condition:
+      any_of:
+        - after_ticks: 7801
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 90
+
+  # ── MEDIUM ────────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER cash AND a LARGER obsolete
+  # cluster. Cash 3000 (below easy) — less reserve, so the agent must
+  # recoup MORE capital by divesting a bigger redundant set. Obsolete
+  # cluster: 3×pbox (900) + tsla (600) + hbox (375) = 1875
+  # recoverable; 3000 + 1875 = 4875 clears the ~4550 weap+tank cost
+  # with slack. The discrimination is sharper than easy: cash alone
+  # is further below the goal, so a partial divestment (selling only
+  # some of the cluster) may not raise enough — the agent must reason
+  # over the WHOLE redundant set. max_turns 90 → reachable tick 8103
+  # > within_ticks 7800.
+  medium:
+    description: >
+      You hold a base in the safe north-west corner — a Construction
+      Yard (fact), a Refinery (proc), two Power Plants (powr) and a
+      Service Depot (fix) — plus an over-built static-defence cluster
+      (three pillboxes, a Tesla coil and a heavy pillbox) the new
+      mission no longer needs. The objective has shifted to OFFENCE:
+      build a War Factory (weap) and field 3 medium tanks (2tnk).
+      Your starting cash is 3000 — well below the war factory (2000)
+      plus the 3-tank batch (~2550) — and there is no income source.
+      SELL the obsolete static-defence buildings to recoup their
+      capital (each refunds 50% of its build cost), then build the
+      war factory and the 3 tanks. Win by owning a war factory AND
+      3 medium tanks AND the Construction Yard still alive AND
+      before tick 7800. Stalling, buying without selling (cash
+      blocks the build), and selling but never buying all lose on
+      the clock.
+    starting_cash: 3000
+    overrides:
+      actors:
+        # Core base — SAFE far north-west corner.
+        - {type: fact, owner: agent, position: [4, 4]}
+        - {type: proc, owner: agent, position: [4, 9]}
+        - {type: powr, owner: agent, position: [4, 14]}
+        - {type: powr, owner: agent, position: [8, 14]}
+        - {type: fix,  owner: agent, position: [8, 9]}
+        # Obsolete static-defence cluster — the divestment target,
+        # bigger than easy. 3×pbox (300 each) + tsla (600) + hbox
+        # (375) = 1875 recoverable. Placed just east of the base.
+        - {type: pbox, owner: agent, position: [16, 6]}
+        - {type: pbox, owner: agent, position: [16, 10]}
+        - {type: pbox, owner: agent, position: [20, 6]}
+        - {type: tsla, owner: agent, position: [20, 10]}
+        - {type: hbox, owner: agent, position: [24, 8]}
+        # Anti-DRAW marker far east.
+        - {type: fact, owner: enemy, position: [122, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: weap, n: 1}
+        - unit_type_count_gte: {type: 2tnk, n: 3}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 7800
+    fail_condition:
+      any_of:
+        - after_ticks: 7801
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 90
+
+  # ── HARD ──────────────────────────────────────────────────────────
+  # +1 controlled variable: TWO spawn_point groups (NORTH y=4 vs
+  # SOUTH y=34 base corner) round-robined by seed, AND the tightest
+  # cash (2800). The obsolete-defence cluster and the core base both
+  # duplicate across the two spawn groups at the matching latitude,
+  # so the divest-then-buy decision is identical on either spawn —
+  # the spawn axis varies only the base LATITUDE. An inert HoldFire
+  # rifle at the spawn-matched corner surfaces the spawn variation
+  # in `units_summary` (the hard-tier contract test asserts that
+  # different seeds produce different agent starts).
+  # Obsolete cluster: 3×pbox (900) + tsla (600) + dome (750) = 2250
+  # recoverable; 2800 + 2250 = 5050 clears the ~4550 cost.
+  # max_turns 90 → reachable tick 8103 > within_ticks 7800.
+  hard:
+    description: >
+      Your base stages from a seed-chosen latitude (NORTH or SOUTH).
+      You hold a Construction Yard (fact), a Refinery (proc), two
+      Power Plants (powr) and a Service Depot (fix) at the safe
+      corner of your latitude, PLUS an over-built static-defence
+      cluster (three pillboxes, a Tesla coil and a radar dome) the
+      new mission no longer needs. The objective has shifted to
+      OFFENCE: build a War Factory (weap) and field 3 medium tanks
+      (2tnk). Your starting cash is 2800 — well below the war factory
+      (2000) plus the 3-tank batch (~2550) — and there is no income
+      source. SELL the obsolete static-defence buildings to recoup
+      their capital (each refunds 50% of its build cost), then build
+      the war factory and the 3 tanks. Win by owning a war factory
+      AND 3 medium tanks AND the Construction Yard still alive AND
+      before tick 7800. Stalling, buying without selling, and selling
+      but never buying all lose on the clock.
+    starting_cash: 2800
+    overrides:
+      actors:
+        # NORTH spawn (spawn_point 0): core base + obsolete cluster
+        # at the NW corner.
+        - {type: fact, owner: agent, position: [4, 4],   spawn_point: 0}
+        - {type: proc, owner: agent, position: [4, 9],   spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 14],  spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 14],  spawn_point: 0}
+        - {type: fix,  owner: agent, position: [8, 9],   spawn_point: 0}
+        - {type: pbox, owner: agent, position: [16, 6],  spawn_point: 0}
+        - {type: pbox, owner: agent, position: [16, 10], spawn_point: 0}
+        - {type: pbox, owner: agent, position: [20, 6],  spawn_point: 0}
+        - {type: tsla, owner: agent, position: [20, 10], spawn_point: 0}
+        - {type: dome, owner: agent, position: [24, 8],  spawn_point: 0}
+        # Inert HoldFire rifle at the NORTH corner so the spawn
+        # variation surfaces in `units_summary` (the hard-tier
+        # contract test asserts different seeds produce different
+        # agent starts; otherwise this pack is buildings-only and
+        # the spawn round-robin is invisible to the obs channel).
+        - {type: e1,   owner: agent, position: [12, 6], stance: 0, spawn_point: 0}
+        # SOUTH spawn (spawn_point 1): core base + obsolete cluster
+        # at the SW corner (symmetric across y=20).
+        - {type: fact, owner: agent, position: [4, 34],  spawn_point: 1}
+        - {type: proc, owner: agent, position: [4, 29],  spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 24],  spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 24],  spawn_point: 1}
+        - {type: fix,  owner: agent, position: [8, 29],  spawn_point: 1}
+        - {type: pbox, owner: agent, position: [16, 32], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [20, 32], spawn_point: 1}
+        - {type: tsla, owner: agent, position: [20, 28], spawn_point: 1}
+        - {type: dome, owner: agent, position: [24, 30], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 32], stance: 0, spawn_point: 1}
+        # Anti-DRAW marker far east (enemy actors don't honour
+        # spawn_point — CLAUDE.md oramap.rs per-owner footgun — so it
+        # always places regardless of seed).
+        - {type: fact, owner: enemy, position: [122, 20]}
+    win_condition:
+      all_of:
+        - building_count_gte: {type: weap, n: 1}
+        - unit_type_count_gte: {type: 2tnk, n: 3}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 7800
+    fail_condition:
+      any_of:
+        - after_ticks: 7801
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 90

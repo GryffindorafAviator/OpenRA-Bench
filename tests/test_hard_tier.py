@@ -1147,7 +1147,11 @@ UPGRADED = [
     # spawn-specific positions — a memorised opening mis-places
     # out of bounds on one spawn. Per-group inert HoldFire e1
     # spawn-witness surfaces the variation via units_summary.
-    "power-budget-online",
+    "power-budget-online",    # Wave-10 capital-reallocation pack — divest obsolete defences to
+    # fund a War Factory + tank batch; hard tier 2 spawn_point groups
+    # (NORTH y=4 / SOUTH y=34).
+    "maint-sell-and-recoup-cash",
+
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
