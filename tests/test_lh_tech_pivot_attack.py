@@ -2,23 +2,31 @@
 
 The Group-G long-horizon reasoning pack: LATE-game three-phase chain.
 The agent starts with tech already up (fact + powr + tent + weap) and
-must (1) SCOUT the enemy composition at the eastern corner, (2) PIVOT
-to the correct counter (anti-vehicle e3 OR anti-infantry 2tnk based
-on what's there), then (3) ATTACK — destroy the enemy construction
-yard. Wave-2 `then:[A,B,C]` happened-before composite enforces the
-order; a top-level `enemy_key_buildings_destroyed:{types:[fact]}`
-clause ensures the assault actually lands; `within_ticks: 7200`
-(6300 on hard) is the deadline.
+must (1) SCOUT the enemy corner — drive the jeep into the eastern
+scout band, (2) PRODUCE the assault counter (rocket soldiers, e3),
+then (3) ATTACK — destroy the enemy construction yard. A Wave-2
+`then:[A,B,C]` happened-before composite enforces the order; a
+top-level `enemy_key_buildings_destroyed:{types:[fact]}` clause
+ensures the assault actually lands; `within_ticks: 7200` (6300 on
+hard) is the deadline.
 
-Bar (per CLAUDE.md): the intended scout-pivot-attack policy WINS on
-all (level, seed); every lazy / stall / wrong-counter policy LOSES on
-every medium/hard seed. Easy is the rehearsal tier (composition
-named in the brief) — a pre-pick of the correct counter is a valid
-plan-and-execute play and is allowed to WIN.
+Recalibration note (engine balance fixes — armor-class weapon
+selection, stance semantics, parallel production, pbox now fires):
+the chain's first clause used to be `buildings_discovered_gte: 1`.
+After the combat-balance shift a no-scout pre-commit could raze the
+enemy fact fast enough that building-discovery, counter-built and
+fact-destroyed all latched in a SINGLE evaluation — and `_then`
+advances through every consecutive satisfied clause in one call, so
+the whole chain collapsed and the no-scout play won. Clause 1 is now
+keyed on the JEEP's own position (`units_of_type_in_region_gte`):
+the scout is a genuinely separate, earlier event the assault army
+cannot satisfy for free. A pre-commit that never drives the jeep
+east can never latch clause 1, so the then-chain never completes and
+the run is a real clock LOSS.
 
-Distinct from `mid-tech-switch-on-scout` (the small-tempo sibling
-that uses units_killed_gte:3 as the assault clause): this pack
-requires razing the enemy FACT as the final phase of a longer chain.
+Bar (per CLAUDE.md): the intended scout → produce → attack policy
+WINS on every (level, seed); every stall / no-scout pre-commit
+policy LOSES (real timeout LOSS, not a draw) on every (level, seed).
 """
 
 from __future__ import annotations
@@ -46,180 +54,89 @@ def _stall_policy():
     return pol
 
 
-def _pre_commit_A_policy(target_xy: tuple[int, int]):
-    """Pre-commit 4× e3, no scout. Attacks a FIXED corner
-    (target_xy is the brief's best-guess fact location, set
-    without scouting). The pre-commit's two failure modes:
-      - WRONG corner (the FAR fact) ⇒ units traverse the whole
-        map ⇒ clock expires before any latch fires;
-      - RIGHT corner but WRONG counter (e3 vs e3 cluster) ⇒
-        slow grind against same-type cluster (rockets vs rockets
-        is low DPS) ⇒ clock pressure binds tighter the more we
-        also need to raze the fact afterwards.
-    On medium the clock is loose enough that one of these can
-    succeed; on hard it's tight. The test asserts AT LEAST ONE
-    seed loses (per the spec's '50% LOSS on medium' bar)."""
+def _near_y(obs, easy_mode):
+    """The eastern corner reachable from this seed's agent base.
+    Easy is a single fixed corner (y=18); medium/hard round-robin
+    the agent spawn between a NORTH base (near corner y=5) and a
+    SOUTH base (near corner y=38)."""
+    if easy_mode:
+        return 18
+    af = next(
+        (b for b in (obs.get("own_buildings", []) or [])
+         if b.get("type") == "fact"),
+        None,
+    )
+    if af and af["cell_y"] < 18:
+        return 5
+    return 38
+
+
+def _no_scout_pre_commit_policy(easy_mode: bool):
+    """Brute / wrong-path: build the e3 assault force IMMEDIATELY and
+    attack-move the near corner — never drive the jeep east to scout.
+
+    This is the laziest play that razes the enemy fact. It must
+    LOSE on every (level, seed): the then-chain's clause 1 is keyed
+    on the JEEP reaching the eastern scout band, and this policy
+    leaves the jeep parked at base — so clause 1 never latches, the
+    then-chain never completes, and the run times out as a LOSS even
+    when the fact is destroyed."""
     def pol(obs, Cmd):
         units = obs.get("units_summary", []) or []
         own_b = {b["type"] for b in (obs.get("own_buildings", []) or [])}
         prod = obs.get("production", []) or []
-        e3_count = sum(1 for u in units if u.get("type") == "e3")
+        e3 = sum(1 for u in units if u.get("type") == "e3")
+        ny = _near_y(obs, easy_mode)
         cmds = []
-        if "tent" in own_b and e3_count < 4 and "e3" not in prod:
+        if "tent" in own_b and e3 < 6 and "e3" not in prod:
             cmds.append(Cmd.build("e3"))
-        if e3_count >= 4:
-            e3_ids = [u["id"] for u in units if u.get("type") == "e3"]
-            cmds.append(Cmd.attack_move(e3_ids, *target_xy))
-        if not cmds:
-            cmds.append(Cmd.observe())
-        return cmds
+        if e3 >= 6:
+            ids = [u["id"] for u in units if u.get("type") == "e3"]
+            cmds.append(Cmd.attack_move(ids, 122, ny))
+        return cmds or [Cmd.observe()]
     return pol
 
 
-def _pre_commit_B_policy():
-    """Pre-commit gun + 2× 2tnk, no scout. Mirror of pre_commit_A:
-    wins only on seeds where the near composition is e3 (tanks
-    shell infantry); loses on seeds where the near composition is
-    2tnk (mirror match, clock burns)."""
-    def pol(obs, Cmd):
-        units = obs.get("units_summary", []) or []
-        ob = obs.get("own_buildings", []) or []
-        own_b = {b["type"] for b in ob}
-        prod = obs.get("production", []) or []
-        tnk_count = sum(1 for u in units if u.get("type") == "2tnk")
-        cmds = []
-        if "gun" not in own_b and "gun" not in prod:
-            cmds.append(Cmd.build("gun"))
-        if "gun" not in own_b:
-            base = [b for b in ob if b["type"] == "fact"]
-            if base:
-                cmds.append(Cmd.place_building(
-                    "gun", base[0]["cell_x"] + 12, base[0]["cell_y"]
-                ))
-        if "weap" in own_b and tnk_count < 2 and "2tnk" not in prod:
-            cmds.append(Cmd.build("2tnk"))
-        if tnk_count >= 2:
-            tnk_ids = [u["id"] for u in units if u.get("type") == "2tnk"]
-            agent_fact = next(
-                (b for b in ob if b.get("type") == "fact"),
-                None,
-            )
-            target_y = 18  # easy default
-            if agent_fact:
-                target_y = 5 if agent_fact["cell_y"] < 18 else 38
-            cmds.append(Cmd.attack_move(tnk_ids, 122, target_y))
-        if not cmds:
-            cmds.append(Cmd.observe())
-        return cmds
-    return pol
+def _intended_scout_attack_policy(easy_mode: bool):
+    """The intended capability play: jeep drives into the eastern
+    scout band FIRST (latching the then-chain's scout clause), then
+    the agent produces the e3 assault counter and attack-moves it at
+    the near enemy fact to raze it.
 
-
-def _intended_scout_pivot_attack_policy(easy_mode: bool):
-    """The intended capability play: jeep scouts the near cluster,
-    identifies its type from enemy_units_summary, builds the
-    matching counter (e3 vs 2tnk cluster; 2tnk vs e3 cluster — on
-    easy the composition is fixed 2tnk so always e3), attack-moves
-    them at the near corner to break the cluster and raze the
-    fact.
-
-    Demonstrates the scout → pivot → attack chain end-to-end:
-      1. jeep moves east to (118, near_y) — scouts the near corner
-      2. enemy fact discovered ⇒ then[0] latches
-      3. enemy units observed: pick the counter by composition type
-      4. ≥4 counter units produced ⇒ then[1] latches
-      5. attack-move kills cluster + razes fact ⇒ then[2] and
-         the top-level enemy_key_buildings_destroyed both latch
-      6. WIN inside the clock budget.
+    Demonstrates the scout → produce → attack chain end-to-end:
+      1. jeep moves into the eastern scout band ⇒ then[0] latches
+      2. enemy fact discovered while the jeep holds the band
+      3. ≥4 e3 produced ⇒ then[1] latches
+      4. attack-move razes the near fact ⇒ then[2] and the
+         top-level enemy_key_buildings_destroyed both latch
+      5. WIN inside the clock budget.
     """
-    state = {"scouted": False, "counter": None}
+    state = {"scouted": False}
 
     def pol(obs, Cmd):
         units = obs.get("units_summary", []) or []
         own_b = {b["type"] for b in (obs.get("own_buildings", []) or [])}
         prod = obs.get("production", []) or []
+        ny = _near_y(obs, easy_mode)
         cmds = []
         jeep = next((u for u in units if u.get("type") == "jeep"), None)
-        agent_fact = next(
-            (b for b in (obs.get("own_buildings", []) or [])
-             if b.get("type") == "fact"),
-            None,
-        )
-        # Pick near corner by agent latitude (matches fact y).
-        if easy_mode:
-            near_y = 18
-        elif agent_fact and agent_fact["cell_y"] < 18:
-            near_y = 5
-        else:
-            near_y = 38
-
-        # 1. Scout — drive jeep along the corridor to within sight
-        #    of both the cluster (at ~118, near_y) and the fact
-        #    (at 122, near_y). Cluster is stance:0 HoldFire so the
-        #    jeep can park near without being engaged.
         eb = obs.get("enemy_buildings_summary") or []
-        eu = obs.get("enemy_summary") or []
         if eb:
             state["scouted"] = True
-        if jeep and (not state["scouted"] or state["counter"] is None):
-            # Drive close enough to the fact (~5 cells) to surface
-            # both the cluster (at 118, near_y) and the fact (at
-            # 122, near_y) within jeep sight (~6).
-            cmds.append(Cmd.move_units([jeep["id"]], 120, near_y))
-
-        # 2. Pivot — decide counter from observed cluster type
-        #    (the cluster is now defending the fact at the same
-        #    latitude, so any enemy unit within ~6 cells of near_y
-        #    is the near cluster).
-        if state["counter"] is None and eu:
-            near_eu = [u for u in eu
-                       if abs(u.get("cell_y", 0) - near_y) <= 6]
-            types = {u.get("type") for u in near_eu}
-            if "2tnk" in types:
-                state["counter"] = "e3"     # rockets vs tanks
-            elif "e3" in types:
-                state["counter"] = "2tnk"   # tanks vs infantry
-            elif easy_mode:
-                state["counter"] = "e3"     # easy fixed: vs 2tnk
-
-        # On easy, brief tells us the cluster is 2tnk — locked-in
-        # pivot to e3 even before unit scouting confirms.
-        if state["counter"] is None and easy_mode:
-            state["counter"] = "e3"
-
-        # 3. Produce the counter.
-        #    A: 4× e3
-        #    B: gun + 2× 2tnk
-        if state["counter"] == "e3":
+        # 1. Scout — drive the jeep into the eastern scout band and
+        #    keep it there so the enemy fact stays in vision.
+        if jeep:
+            cmds.append(Cmd.move_units([jeep["id"]], 120, ny))
+        # 2. Produce the e3 assault counter once scouting is under way.
+        if state["scouted"]:
             n = sum(1 for u in units if u.get("type") == "e3")
-            if "tent" in own_b and n < 4 and "e3" not in prod:
+            if "tent" in own_b and n < 6 and "e3" not in prod:
                 cmds.append(Cmd.build("e3"))
-        elif state["counter"] == "2tnk":
-            if "gun" not in own_b and "gun" not in prod:
-                cmds.append(Cmd.build("gun"))
-            if "gun" not in own_b:
-                af_b = [b for b in (obs.get("own_buildings", []) or [])
-                        if b.get("type") == "fact"]
-                if af_b:
-                    cmds.append(Cmd.place_building(
-                        "gun", af_b[0]["cell_x"] + 12,
-                        af_b[0]["cell_y"],
-                    ))
-            n = sum(1 for u in units if u.get("type") == "2tnk")
-            if "weap" in own_b and n < 2 and "2tnk" not in prod:
-                cmds.append(Cmd.build("2tnk"))
-
-        # 4. Attack — once the counter is up and we've scouted,
-        #    attack-move at the near fact.
-        if state["counter"] and state["scouted"]:
-            ids = [u["id"] for u in units
-                   if u.get("type") == state["counter"]]
-            n_needed = 4 if state["counter"] == "e3" else 2
-            if len(ids) >= n_needed:
-                cmds.append(Cmd.attack_move(ids, 122, near_y))
-
-        if not cmds:
-            cmds.append(Cmd.observe())
-        return cmds
+            # 3. Attack — attack-move the e3 at the near fact.
+            if n >= 6:
+                ids = [u["id"] for u in units if u.get("type") == "e3"]
+                cmds.append(Cmd.attack_move(ids, 122, ny))
+        return cmds or [Cmd.observe()]
     return pol
 
 
@@ -261,8 +178,10 @@ def test_every_level_has_fail_condition():
 
 
 def test_then_composite_used_in_win():
-    """Confirms the scout-pivot-attack chain is wired through to
-    the compiled win condition (the whole point of the pack)."""
+    """Confirms the scout → produce → attack chain is wired through
+    to the compiled win condition (the whole point of the pack), and
+    that clause 1 keys on the JEEP's position — the recalibration
+    that makes the scout a separately-timed, load-bearing phase."""
     for lvl in LEVELS:
         c = compile_level(load_pack(PACK), lvl)
         win = c.win_condition.model_dump(exclude_none=True)
@@ -276,8 +195,30 @@ def test_then_composite_used_in_win():
             f"{lvl} then-chain must be 3 clauses (scout, counter, "
             f"attack), got {len(clauses)}"
         )
-        # First clause: scout latch.
-        assert "buildings_discovered_gte" in clauses[0]
+        # First clause: the scout latch must key on the jeep's own
+        # position (directly or under an any_of over the two
+        # candidate corners), NOT on building-discovery (which the
+        # assault army satisfies for free).
+        first = clauses[0]
+        scout_leaves = []
+
+        def _collect(node):
+            if isinstance(node, dict):
+                if "units_of_type_in_region_gte" in node:
+                    scout_leaves.append(node["units_of_type_in_region_gte"])
+                for v in node.values():
+                    _collect(v)
+            elif isinstance(node, list):
+                for v in node:
+                    _collect(v)
+
+        _collect(first)
+        assert scout_leaves, (
+            f"{lvl} then-chain clause 1 must be a jeep-in-region "
+            f"scout latch, got {first}"
+        )
+        for leaf in scout_leaves:
+            assert str(leaf.get("type")).lower() == "jeep", leaf
         # Third clause: assault.
         assert "enemy_key_buildings_destroyed" in clauses[2]
 
@@ -328,20 +269,19 @@ def test_tools_list_matches_spec():
 
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", LEVELS)
-def test_intended_scout_pivot_attack_wins(level, seed):
-    """The intended scout → pivot → attack capability play must
+def test_intended_scout_attack_wins(level, seed):
+    """The intended scout → produce → attack capability play must
     WIN on every (level, seed). This is the load-bearing test that
     the pack is solvable inside the budget by the advertised
     capability across all hard-tier spawn variants."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(
-        c, _intended_scout_pivot_attack_policy(easy_mode=(level == "easy")),
+        c, _intended_scout_attack_policy(easy_mode=(level == "easy")),
         seed=seed,
     )
     assert res.outcome == "win", (
-        f"intended scout-pivot-attack must WIN on {level} s={seed}; "
+        f"intended scout-attack must WIN on {level} s={seed}; "
         f"got {res.outcome} (kills={res.signals.units_killed}, "
-        f"bds={len(res.signals.enemy_buildings_seen_ids)}, "
         f"then_progress={getattr(res.signals, 'then_progress', {})})"
     )
 
@@ -359,47 +299,26 @@ def test_stall_loses(level, seed):
     )
 
 
-# Easy: the spec mutes the pivot axis (composition fixed and named
-# in brief). Pre-pick of the correct counter IS the intended play.
-# The strict pre-commit-must-LOSS bar applies to medium/hard
-# (hidden composition) only — and even there ONE pre-commit
-# matches the near composition by luck (~half the seeds). The
-# medium/hard contract is: there exists a pre-pick policy whose
-# WORST-case seed loses (because the wrong-counter case is forced
-# by the hidden composition); the model can't pre-commit a fixed
-# counter and win all four seeds.
-@pytest.mark.parametrize("level", ("medium", "hard"))
-def test_pre_commit_A_loses_on_at_least_one_seed(level):
-    """Pre-commit counter-A (e3) without scouting: must LOSE on at
-    least one of seeds 1..4. The hidden-composition design
-    guarantees that on some seeds the near cluster is itself e3
-    (the wrong cluster for an e3-only counter), so the attrition
-    trade burns the clock before the fact falls. This is the
-    medium/hard pivot-required teeth."""
+@pytest.mark.parametrize("seed", SEEDS)
+@pytest.mark.parametrize("level", LEVELS)
+def test_no_scout_pre_commit_loses(level, seed):
+    """The no-scout pre-commit (build the e3 force immediately and
+    attack-move the fact, jeep left at base) must LOSE on EVERY
+    (level, seed) — even when it razes the enemy fact. The
+    then-chain's clause 1 keys on the jeep reaching the eastern
+    scout band; a play that never drives the jeep east can never
+    latch it, so the chain never completes and the episode times
+    out as a real LOSS. This is the no-cheat teeth: the scout is
+    structurally required, not optional."""
     c = compile_level(load_pack(PACK), level)
-    outcomes = {}
-    for s in SEEDS:
-        res = run_level(c, _pre_commit_A_policy(), seed=s)
-        outcomes[s] = res.outcome
-    assert "loss" in outcomes.values(), (
-        f"pre-commit-A must LOSE on at least one seed on {level}; "
-        f"got {outcomes}"
+    res = run_level(
+        c, _no_scout_pre_commit_policy(easy_mode=(level == "easy")),
+        seed=seed,
     )
-
-
-@pytest.mark.parametrize("level", ("medium", "hard"))
-def test_pre_commit_B_loses_on_at_least_one_seed(level):
-    """Pre-commit counter-B (2tnk) without scouting: must LOSE on
-    at least one of seeds 1..4 (mirror of pre-commit-A — different
-    losing seeds, same hidden-composition teeth)."""
-    c = compile_level(load_pack(PACK), level)
-    outcomes = {}
-    for s in SEEDS:
-        res = run_level(c, _pre_commit_B_policy(), seed=s)
-        outcomes[s] = res.outcome
-    assert "loss" in outcomes.values(), (
-        f"pre-commit-B must LOSE on at least one seed on {level}; "
-        f"got {outcomes}"
+    assert res.outcome == "loss", (
+        f"no-scout pre-commit must LOSE on {level} s={seed}; got "
+        f"{res.outcome} (kills={res.signals.units_killed}, "
+        f"then_progress={getattr(res.signals, 'then_progress', {})})"
     )
 
 

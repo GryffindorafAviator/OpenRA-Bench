@@ -5,12 +5,27 @@
 # but no army; a far enemy base sits at the east edge defended by a
 # hidden composition (either an anti-infantry cluster: 4× 2tnk, OR
 # an anti-vehicle cluster: 6× e3). The agent must:
-#   1. SCOUT the enemy composition (latch buildings_discovered_gte:1)
-#   2. PIVOT to the correct counter (anti-vehicle e3 vs anti-infantry
-#      2tnk) — this is the second clause of the `then` chain
+#   1. SCOUT the enemy corner — drive the jeep into the eastern
+#      scout band (the then-chain's first clause, keyed on the
+#      JEEP's own position via units_of_type_in_region_gte)
+#   2. PRODUCE the assault counter (rocket soldiers, e3) — second
+#      clause of the `then` chain
 #   3. ATTACK — destroy the enemy fact (third clause of the `then`,
 #      AND a separate top-level enemy_key_buildings_destroyed clause)
 # All inside `within_ticks: 7200`.
+#
+# RECALIBRATION (engine balance fixes — armor-class weapon
+# selection, stance semantics, parallel production, pbox now fires):
+# clause 1 of the then-chain used to be `buildings_discovered_gte:1`.
+# After the combat-balance shift a no-scout pre-commit could raze the
+# enemy fact fast enough that building-discovery, counter-built and
+# fact-destroyed all latched in ONE `_then` evaluation — and `_then`
+# advances through every consecutive satisfied clause in a single
+# call, so the whole chain collapsed and the no-scout play won.
+# Clause 1 is now keyed on the JEEP reaching the eastern scout band:
+# the scout is a genuinely separate, earlier event the assault army
+# cannot satisfy for free, so a no-scout pre-commit can never latch
+# it and times out as a real LOSS.
 #
 # Distinct from `mid-tech-switch-on-scout` (the small-tempo sibling):
 # that pack tests tech-switch as a single mid-game decision (cash
@@ -43,12 +58,11 @@
 #     the engine cannot auto-terminate by accident before the near
 #     fact is reached.
 #   - `then` is the Wave-2 happened-before composite: clauses must
-#     latch IN ORDER. A "skip the scout and rush" play that destroys
-#     the fact without ever seeing it doesn't help — the fact-down
-#     event implicitly discovers the building too, but only IF the
-#     attack lands inside the clock; pre-committing the wrong
-#     counter against the near cluster blows the clock before any
-#     latch lands.
+#     latch IN ORDER. Because clause 1 keys on the JEEP's position
+#     (not on building-discovery, which the assault army satisfies
+#     for free), a "skip the scout and rush" play can never latch
+#     clause 1 — the chain stays at idx 0 and the run times out as
+#     a LOSS even when the enemy fact is razed.
 #
 # Validate:
 #   cd /Users/berta/Projects/OpenRA-Bench && \
@@ -163,7 +177,18 @@ levels:
         - then:
             id: scout-pivot-attack-easy
             clauses:
-              - {buildings_discovered_gte: 1}
+              # SCOUT: the jeep itself must reach the eastern scout
+              # band. `buildings_discovered_gte` was satisfiable for
+              # free by the assault army marching into vision of the
+              # fact (the then-chain advances multiple clauses in one
+              # evaluation when they collapse to one tick) — so a
+              # no-scout pre-commit could win. Keying clause 1 on the
+              # JEEP's position makes the scout a genuinely separate,
+              # earlier event: a pre-commit that never drives the jeep
+              # east can never latch this clause, so the then-chain
+              # never completes and the run is a clock LOSS.
+              - {units_of_type_in_region_gte:
+                   {type: jeep, x: 120, y: 18, radius: 12, n: 1}}
               - {unit_type_count_gte: {type: e3, n: 4}}
               - {enemy_key_buildings_destroyed: {types: [fact]}}
         - {enemy_key_buildings_destroyed: {types: [fact]}}
@@ -248,7 +273,19 @@ levels:
         - then:
             id: scout-pivot-attack-medium
             clauses:
-              - {buildings_discovered_gte: 1}
+              # SCOUT: the jeep must reach EITHER eastern corner's
+              # scout band (the seed picks which corner is near).
+              # Keying the clause on the jeep's own position (not on
+              # building-discovery, which the assault army satisfies
+              # for free) makes the scout a real, separately-timed
+              # phase: a no-scout pre-commit never moves the jeep east
+              # so this clause never latches and the then-chain stalls
+              # ⇒ clock LOSS.
+              - any_of:
+                  - {units_of_type_in_region_gte:
+                       {type: jeep, x: 120, y: 5, radius: 12, n: 1}}
+                  - {units_of_type_in_region_gte:
+                       {type: jeep, x: 120, y: 38, radius: 12, n: 1}}
               - any_of:
                   - {unit_type_count_gte: {type: e3, n: 4}}
                   - all_of:
@@ -335,7 +372,17 @@ levels:
         - then:
             id: scout-pivot-attack-hard
             clauses:
-              - {buildings_discovered_gte: 1}
+              # SCOUT: the jeep must reach EITHER eastern corner's
+              # scout band (compass-only briefing — the seed picks
+              # which corner is near). Keyed on the jeep's own
+              # position so the scout is a real, separately-timed
+              # phase the assault army cannot satisfy for free; a
+              # no-scout pre-commit never latches it ⇒ clock LOSS.
+              - any_of:
+                  - {units_of_type_in_region_gte:
+                       {type: jeep, x: 120, y: 5, radius: 12, n: 1}}
+                  - {units_of_type_in_region_gte:
+                       {type: jeep, x: 120, y: 38, radius: 12, n: 1}}
               - any_of:
                   - {unit_type_count_gte: {type: e3, n: 4}}
                   - all_of:
