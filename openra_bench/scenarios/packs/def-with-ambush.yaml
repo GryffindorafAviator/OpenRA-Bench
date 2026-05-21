@@ -29,51 +29,46 @@
 # DISCRIMINATIONS (the bar — every lazy / wrong policy LOSES, the
 # intended hold-the-ambush-positions policy WINS):
 #
-#   • stall (observe only): the static defender at (15,20) fixes
-#     the lead of the band briefly but is overwhelmed; the
-#     ambushers at (40,15)/(40,25) auto-fire when the band passes
-#     into their sight (stance:3 in range), and on easy this is
-#     ENOUGH to win — stall HAPPENS to satisfy the hold-position
-#     intent because the engine handles auto-engagement from
-#     stance:3 + sight. On medium and hard the band is too heavy
-#     for ambushers-on-auto-only: the band's lead tanks engage the
-#     ambushers as they fire and the choke is breached before the
-#     ambushers finish the band. Stall LOSES on medium/hard.
+#   • the intended HOLD policy is observe-only — the ambushers
+#     carry stance:2 (Defend) and auto-fire from their held
+#     posts, so "do nothing" IS the capability. The wrong
+#     policies are the two CENTRALISE moves below; "stall" is
+#     not a separate losing policy here because the test is
+#     positional discipline (NOT moving), not action.
 #
 #   • centralise-to-fact (move all ambushers to the fact at
-#     (10,20) or the choke at (15,20)): the ambushers MOVE WEST,
-#     leaving the (40,15)/(40,25) firing positions on turn 1.
-#     They never engage the band from the flank (their sight is
-#     too short to spot the band from x≈10..15 before the band
-#     reaches the choke); the band is now opposed only by a
-#     concentrated cluster at the choke, which is overwhelmed by
-#     the heavier composition (the band's tank component out-
-#     attritions a cluster of e1 + a few 2tnk in close range
-#     without the ambush flanks shooting from outside the
-#     band's primary fire envelope). Fact razed → LOSS.
+#     (10,20)): the ambushers MOVE WEST, leaving the
+#     (40,16)/(40,24) firing positions on turn 1, and stack at
+#     the fact. They never engage the band from the flank — the
+#     L-ambush crossfire envelope is abandoned. On easy the
+#     centralised cluster fights the light band head-on and
+#     trades 3-4 tanks → the `units_lost_lte:2` attrition cap is
+#     busted → LOSS. On medium/hard the heavier band's tank
+#     component out-attritions the stacked cluster at close
+#     range → fact razed → LOSS.
 #
 #   • centralise-to-choke (move all ambushers to (15,20)): same
 #     pathology as centralise-to-fact — the flanking fire
 #     envelope is abandoned. The defender + ambushers stacked at
-#     the choke are out-attritioned by the band; fact razed →
-#     LOSS on medium/hard.
+#     the choke are out-attritioned (medium/hard: fact razed) or
+#     bust the attrition cap (easy) → LOSS every level.
 #
-#   • intended HOLD-AMBUSH-POSITIONS (do nothing, or set_stance
-#     to 3, or explicitly stop): the ambushers REMAIN at
-#     (40,15)/(40,25). When the rusher band reaches x≈40 on
-#     y=20, both ambush groups have the band's units inside
-#     sight range (5 cells from y=15/25 to y=20). stance:3
-#     auto-fires; the band takes flank damage from BOTH sides
+#   • intended HOLD-AMBUSH-POSITIONS (do nothing, or explicitly
+#     stop): the ambushers REMAIN at (40,16)/(40,24). When the
+#     rusher band reaches x≈40 on y=20, both ambush groups have
+#     the band's units inside 2tnk WEAPON range (4 cells from
+#     y=16/24 to y=20). stance:2 (Defend) auto-fires from the
+#     held post; the band takes flank damage from BOTH sides
 #     simultaneously (an L-ambush). The static defender at the
 #     choke finishes whatever filters through. Fact survives,
-#     kill bar met → WIN every seed.
+#     kill bar met, attrition cap held → WIN every seed.
 #
 # ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
 #   - rush-hour-arena (128×40 playable, x in [2..126], y in [2..38]).
 #   - `rusher` bot CONCENTRATES the band on the foe nearest the
 #     agent CENTROID every ~8 ticks (openra-sim/src/scripted_bot.rs::
-#     Rusher). Centroid math: 4 ambushers (40,15) + 4 ambushers
-#     (40,25) + 1 fixing defender (15,20) + fact (10,20) places the
+#     Rusher). Centroid math: 4 ambushers (40,16) + 4 ambushers
+#     (40,24) + 1 fixing defender (15,20) + fact (10,20) places the
 #     centroid at x≈34, y=20. The nearest agent unit to the
 #     centroid is the choke defender at (15,20), so the band drives
 #     WEST on y=20 toward the choke — passing right through the
@@ -82,23 +77,27 @@
 #     ambushers directly even through fog — not the intent. Rusher
 #     is the correct bot for "enemy advances at the centroid /
 #     toward the fact / past the ambush".)
-#   - 2tnk sight_range ≥ 5 cells (gamerules.rs/`sight_range_
-#     parses_wdist_format` test). Ambushers at (40,15) detect any
-#     enemy at (40,20) (distance 5, at the edge of sight). The
-#     brief's literal (40,8)/(40,32) positions are OUTSIDE sight
-#     of the band on y=20 (distance 12, fog-veiled) and would never
-#     auto-engage — those positions would degenerate the discriminator
-#     (HOLD == STALL == LOSS even when ambushers stay put). The
-#     y=15/y=25 placement preserves the spirit ("off the direct
-#     y=20 path, hidden until the band commits") while keeping
-#     auto-engagement load-bearing.
-#   - stance:3 (AttackAnything) on the ambushers — the engine
-#     auto-fires on any foe in vision range. The DISCRIMINATOR is
-#     POSITION (the ambushers must REMAIN at the firing zone
-#     coordinates to be in sight of the band); the model does
-#     NOT need to issue attack orders. Centralise-to-fact /
-#     centralise-to-choke moves the ambushers OUT of sight and
-#     defeats the auto-engagement.
+#   - 2tnk WEAPON range is ~4 cells (empirically: a stance:2 2tnk
+#     kills a target at distance ≤4 but not at distance 5+).
+#     Ambushers at y=16/y=24 are 4 cells off the y=20 band lane —
+#     INSIDE weapon range — so a HELD (stance:2) tank auto-fires
+#     on the band as it passes x=40. The earlier y=15/y=25
+#     placement (5 cells off) sat just OUTSIDE weapon range, so a
+#     stance:2 hold never engaged; the y=16/y=24 placement keeps
+#     the spirit ("off the direct y=20 path, hidden until the
+#     band commits") while making auto-engagement load-bearing.
+#   - stance:2 (Defend) on the ambushers — the engine auto-fires
+#     on any foe in WEAPON range while the tank HOLDS its post
+#     (never advances). stance:3 (AttackAnything) is NOT used:
+#     the engine stance-semantics fix makes stance:3 ADVANCE
+#     toward the nearest visible enemy, so stance:3 ambushers
+#     would HUNT the band and abandon the firing zone — defeating
+#     the hold-the-ambush doctrine. The DISCRIMINATOR is POSITION
+#     (the ambushers must REMAIN at the firing zone coordinates
+#     to be in weapon range of the band); the model does NOT need
+#     to issue attack orders. Centralise-to-fact /
+#     centralise-to-choke moves the ambushers OUT of the firing
+#     zone and defeats the auto-engagement.
 #   - Inert enemy `fact` marker far east (anti-DRAW): without a
 #     persistent enemy actor the engine auto-`done`s on enemy-elim
 #     before the win/fail evaluator runs (CLAUDE.md footgun).
@@ -170,7 +169,7 @@ base:
     # centroid — the centroid (with the fixing defender + fact in
     # the west and the ambushers off-axis at x=40) sits at y=20,
     # so the band drives WEST on y=20 and walks past the
-    # (40,15)/(40,25) firing zones.
+    # (40,16)/(40,24) firing zones.
     bot_type: rusher
   # Combat-only toolset (no build / no harvest): the test is the
   # HOLD / CENTRALISE positional decision, not production.
@@ -196,32 +195,36 @@ base:
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
   # Bare ambush-HOLD skill: ONE light rusher band on y=20. Ambushers
-  # at (40,15)/(40,25) auto-fire (stance:3 + sight range 5 covers
-  # the y=20 lane). The choke defender at (15,20) is a single e1
-  # that exists to (a) draw the centroid, (b) give the band a
+  # at (40,16)/(40,24) auto-fire from a HELD post (stance:2 Defend;
+  # 4 cells off the y=20 lane is inside the ~4-cell 2tnk weapon
+  # range). The choke defender at (15,20) is a single e1 that
+  # exists to (a) draw the centroid, (b) give the band a
   # nearest-foe target so it commits west, and (c) trip the
   # enemy_unit_spotted interrupt at the choke. A "centralise" play
   # (move all ambushers to the fact/choke) wastes the flanking fire
-  # envelope; on easy the band is light enough that the engine's
-  # stance:3 auto-engagement WHEN HELD beats the band comfortably,
-  # but the centralised pile-up at the choke is bled by the band's
-  # 1tnk + e3 component before clearing the band → fact razed.
+  # envelope; on easy the band is light enough that it cannot raze
+  # the fact even against a centralised cluster, so the load-
+  # bearing easy discriminator is the `units_lost_lte:2` attrition
+  # cap — HOLD trades ~1 tank from the off-axis firing zone while a
+  # centralised cluster fighting head-on trades 3-4 and busts it.
   easy:
     description: >
       Your construction yard (fact) sits at the west edge (10,20).
       A single rifleman defender holds the choke at (15,20). Four
       2tnk ambushers are concealed OFF the direct y=20 path at
-      (40,15) and four more at (40,25) — both groups within sight
-      of the y=20 lane but outside the enemy's scout cone of the
-      direct push. A light enemy rusher band approaches from the
-      east on y=20. HOLD the ambushers in their concealed positions
-      (do not move them) so they auto-engage when the band walks
-      past their firing zone (stance:3 + sight). Centralising the
+      (40,16) and four more at (40,24) — both groups 4 cells off
+      the y=20 lane (inside their weapon range) but outside the
+      enemy's scout cone of the direct push. A light enemy rusher
+      band approaches from the east on y=20. HOLD the ambushers
+      in their concealed positions (do not move them) — they are
+      on Defend stance and auto-engage from their held posts when
+      the band walks past their firing zone. Centralising the
       ambushers at the fact or choke abandons the flanking fire
-      envelope; the choke defender alone is too light to hold.
-      Win: ≥6 enemies killed AND your fact still standing AND
-      finish before tick 2400. Lose on the deadline or if the
-      fact is razed.
+      envelope: the cluster fights the band head-on and trades
+      too many tanks. Win: ≥6 enemies killed AND your fact still
+      standing AND ≤2 tanks lost AND finish before tick 2400.
+      Lose on the deadline, if the fact is razed, or if more than
+      2 tanks are lost.
     overrides:
       actors:
         # Agent construction yard — WEST, the band's target via
@@ -233,71 +236,79 @@ levels:
         # interrupt. stance:1 ReturnFire so it engages back when
         # fired upon (but does not chase).
         - {type: e1, owner: agent, position: [15, 20], stance: 1}
-        # Ambushers — NORTH group at (40,15)..(41,16). y=15 is
-        # 5 cells off the y=20 lane, at the edge of 2tnk sight,
-        # so the band on y=20 enters auto-engage range as it
-        # passes x=40. stance:3 (AttackAnything) auto-fires.
-        - {type: 2tnk, owner: agent, position: [40, 15], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 15], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 14], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 14], stance: 3}
-        # Ambushers — SOUTH group, mirror at y=25..26.
-        - {type: 2tnk, owner: agent, position: [40, 25], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 25], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 26], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 26], stance: 3}
-        # Light rusher band — 8× e1 at the east lane mouth on
-        # y=20. e1 is fragile vs 2tnk cannon (1-shot kills per
-        # CLAUDE.md / combat-focus-fire-priority), so the ambush
-        # rapidly clears the band. Kill bar 6 (of 8) is met by
-        # the ambush flank fire comfortably.
-        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 8}
+        # Ambushers — NORTH group at (40,16)..(41,15). y=16 is
+        # 4 cells off the y=20 lane — INSIDE the 2tnk weapon
+        # range (~4 cells) so a stance:2 (Defend) tank holding
+        # its post auto-fires on the band as it passes x=40,
+        # while still off the direct y=20 path. stance:2 (NOT
+        # stance:3): stance:3 AttackAnything now ADVANCES toward
+        # the nearest visible enemy (engine stance-semantics
+        # fix), which would make the ambushers HUNT and abandon
+        # the firing zone; stance:2 holds the post and auto-fires
+        # in range — exactly the ambush-HOLD behaviour.
+        - {type: 2tnk, owner: agent, position: [40, 16], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 16], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 15], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 15], stance: 2}
+        # Ambushers — SOUTH group, mirror at y=24..25.
+        - {type: 2tnk, owner: agent, position: [40, 24], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 24], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 25], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 25], stance: 2}
+        # Rusher band — mixed light tanks + rifle infantry on
+        # y=20. The 1tnk component lingers in the ambush kill
+        # zone long enough for the stance:2 crossfire to clear
+        # the kill bar; pure fast infantry would slip past the
+        # held tanks' slow reload. 4× 1tnk + 4× e1 (8 total).
+        - {type: 1tnk, owner: enemy, position: [78, 20], stance: 3, count: 4}
+        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 4}
         # Inert enemy `fact` marker far east (anti-DRAW): without
         # it the engine auto-`done`s on enemy-elim before the
         # win/fail evaluator runs.
         - {type: fact, owner: enemy, position: [120, 20]}
+    # The load-bearing easy discriminator is the ATTRITION CAP
+    # (`units_lost_lte: 2`) paired with the kill + fact bars.
+    # HOLD keeps the stance:2 ambushers in their (40,16)/(40,24)
+    # firing positions — 4 cells off the y=20 lane, INSIDE 2tnk
+    # weapon range — so the L-ambush crossfire shreds the band
+    # from outside its primary fire envelope and trades only ~1
+    # tank. CENTRALISE moves the ambushers WEST onto the band's
+    # y=20 fire axis and stacks them at the fact/choke: the
+    # cluster fights the whole band at close range head-on,
+    # trading 3-4 tanks before clearing it → attrition cap
+    # busted → LOSS. (The band is deliberately light enough that
+    # it cannot raze the fact on easy even against a centralised
+    # cluster, so the attrition cap — not fact-survival — is the
+    # easy discriminator; the threshold is 2 rather than the old
+    # 0 because the engine combat rebalance means even a clean
+    # HOLD trades one tank.)
     win_condition:
       all_of:
         - {units_killed_gte: 6}
         - {building_count_gte: {type: fact, n: 1}}
-        # `units_lost_lte: 0` — the load-bearing centralise
-        # discriminator on easy. HOLD-ambush keeps the
-        # ambushers in their (40,15)/(40,25) firing positions
-        # OFF the band's primary fire axis (y=20): the band
-        # concentrates fire on the choke defender / nearest
-        # foe to centroid, and the flanking 2tnk salvos on
-        # e1 from y=15/y=25 take negligible return fire.
-        # Centralise-to-fact MOVES the ambushers WEST through
-        # y=20 (the band's fire axis), exposing them to the
-        # incoming e1 volley, and at least 1 tank is hit (the
-        # bench observed lost=1 for centralise on easy).
-        - {units_lost_lte: 0}
+        - {units_lost_lte: 2}
         - {within_ticks: 2400}
     fail_condition:
       any_of:
         - {after_ticks: 2401}
         - {not: {building_count_gte: {type: fact, n: 1}}}
-        - {not: {units_lost_lte: 0}}
+        - {not: {units_lost_lte: 2}}
     max_turns: 50
 
   # ── MEDIUM ───────────────────────────────────────────────────────
   # +1 controlled variable: HEAVIER band (mixed 1tnk + e3 + e1
-  # composition) — the centralise-to-choke pathology now actually
-  # bites on a stall, because a clustered defender at the choke
-  # cannot out-attrition the band's tank component. HOLD-ambush
-  # still WINS because the flanking 2tnk crossfire from
-  # (40,15)/(40,25) shreds the band before the lead tanks reach
-  # the choke. Stall (observe-only) borderline LOSES because the
-  # choke e1 dies first, then the band's lead 1tnks shred the
-  # ambushers while in range of each other (the ambushers fire,
-  # but cannot finish a multi-tank band before the trailing units
-  # reach the fact unless commanded).
+  # composition) — the centralise pathology now bites HARD: a
+  # clustered defender at the fact/choke cannot out-attrition the
+  # band's tank component and the fact is razed. HOLD-ambush
+  # still WINS because the flanking stance:2 2tnk crossfire from
+  # (40,16)/(40,24) shreds the band before the lead tanks reach
+  # the choke.
   medium:
     description: >
       Your construction yard (fact) sits at the west edge (10,20).
       A single rifleman defender holds the choke at (15,20). Four
       2tnk ambushers are concealed OFF the direct y=20 path at
-      (40,15) and four more at (40,25). A HEAVIER enemy rusher
+      (40,16) and four more at (40,24). A HEAVIER enemy rusher
       band approaches from the east on y=20 (mixed light tanks +
       rocket infantry + riflemen). HOLD the ambushers in their
       concealed positions so the flanking crossfire envelope
@@ -311,17 +322,19 @@ levels:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: e1, owner: agent, position: [15, 20], stance: 1}
-        # Ambushers — NORTH + SOUTH, identical to easy.
-        - {type: 2tnk, owner: agent, position: [40, 15], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 15], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 14], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 14], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 25], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 25], stance: 3}
-        - {type: 2tnk, owner: agent, position: [40, 26], stance: 3}
-        - {type: 2tnk, owner: agent, position: [41, 26], stance: 3}
+        # Ambushers — NORTH + SOUTH, stance:2 (Defend) HOLD at
+        # y=16/y=24 (4 cells off the y=20 lane, inside 2tnk
+        # weapon range), identical placement idiom to easy.
+        - {type: 2tnk, owner: agent, position: [40, 16], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 16], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 15], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 15], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 24], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 24], stance: 2}
+        - {type: 2tnk, owner: agent, position: [40, 25], stance: 2}
+        - {type: 2tnk, owner: agent, position: [41, 25], stance: 2}
         # HEAVY band — 3× 1tnk + 4× e3 + 4× e1 (11 enemies). 1tnk
-        # is fragile to 2tnk crossfire from y=15+y=25 (flanking
+        # is fragile to 2tnk crossfire from y=16+y=24 (flanking
         # 2tnk salvos shred a 1tnk in 2-3 shots). The e3 anti-
         # vehicle rockets are dangerous to the ambushers if they
         # close to range, but the rusher concentrates on the
@@ -352,10 +365,10 @@ levels:
   # actors don't honour spawn_point — CLAUDE.md — so we duplicate
   # the enemy band across BOTH latitudes; the rusher centroid pulls
   # whichever latitude the agent occupies). A memorised "ambushers
-  # at (40,15)/(40,25)" plan from one spawn does not generalise to
-  # the other (the matching ambush coords are (40,3)/(40,13) for
-  # NORTH-spawn at y=8, (40,27)/(40,37) for SOUTH-spawn at y=32 —
-  # in-bounds adjusted).
+  # at (40,16)/(40,24)" plan from one spawn does not generalise to
+  # the other (the matching ambush coords are (40,4..5)/(40,11..12)
+  # for NORTH-spawn at y=8, (40,28..29)/(40,35..36) for SOUTH-spawn
+  # at y=32 — 3-4 cells off the base row, in weapon range).
   # The HOLD-ambush doctrine generalises: the model must keep the
   # ambushers AT THEIR SPAWN COORDS, regardless of which latitude
   # is active.
@@ -379,32 +392,34 @@ levels:
         # ── spawn_point 0 — NORTH base at y=8 ──────────────────
         - {type: fact, owner: agent, position: [10, 8], spawn_point: 0}
         - {type: e1, owner: agent, position: [15, 8], stance: 1, spawn_point: 0}
-        # Ambushers — NORTH-of-base group at y=3 (5 off the
-        # base row y=8 — at sight edge; in-bounds y≥2).
-        - {type: 2tnk, owner: agent, position: [40, 3], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [41, 3], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [40, 4], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [41, 4], stance: 3, spawn_point: 0}
-        # Ambushers — SOUTH-of-base group at y=13 (5 off the
-        # base row y=8).
-        - {type: 2tnk, owner: agent, position: [40, 13], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [41, 13], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [40, 14], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [41, 14], stance: 3, spawn_point: 0}
+        # Ambushers — NORTH-of-base group at y=4..5 (3-4 cells
+        # off the base row y=8 — INSIDE 2tnk weapon range; in-
+        # bounds y≥2). stance:2 (Defend) HOLD.
+        - {type: 2tnk, owner: agent, position: [40, 4], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [41, 4], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [40, 5], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [41, 5], stance: 2, spawn_point: 0}
+        # Ambushers — SOUTH-of-base group at y=11..12 (3-4 cells
+        # off the base row y=8).
+        - {type: 2tnk, owner: agent, position: [40, 11], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [41, 11], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [40, 12], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [41, 12], stance: 2, spawn_point: 0}
         # ── spawn_point 1 — SOUTH base at y=32 ─────────────────
         - {type: fact, owner: agent, position: [10, 32], spawn_point: 1}
         - {type: e1, owner: agent, position: [15, 32], stance: 1, spawn_point: 1}
-        # Ambushers — NORTH-of-base group at y=27 (5 off y=32).
-        - {type: 2tnk, owner: agent, position: [40, 27], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [41, 27], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [40, 28], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [41, 28], stance: 3, spawn_point: 1}
-        # Ambushers — SOUTH-of-base group at y=37 (5 off y=32;
-        # y=37 is in-bounds for playable y ≤ 38).
-        - {type: 2tnk, owner: agent, position: [40, 37], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [41, 37], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [40, 36], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [41, 36], stance: 3, spawn_point: 1}
+        # Ambushers — NORTH-of-base group at y=28..29 (3-4 cells
+        # off the base row y=32).
+        - {type: 2tnk, owner: agent, position: [40, 28], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [41, 28], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [40, 29], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [41, 29], stance: 2, spawn_point: 1}
+        # Ambushers — SOUTH-of-base group at y=35..36 (3-4 cells
+        # off the base row y=32; in-bounds y ≤ 38).
+        - {type: 2tnk, owner: agent, position: [40, 35], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [41, 35], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [40, 36], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [41, 36], stance: 2, spawn_point: 1}
         # ── Enemy bands at BOTH latitudes (enemy actors don't
         # honour spawn_point — CLAUDE.md). The rusher centroid
         # pulls whichever latitude the agent occupies; the

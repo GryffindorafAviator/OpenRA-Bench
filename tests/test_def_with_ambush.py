@@ -1,7 +1,7 @@
 """def-with-ambush scenario pack — Rust engine full loop.
 
 REASONING capability — FOG-AMBUSH doctrine: defenders pre-placed in
-concealment OFF the direct enemy axis (at (40,15)/(40,25) on
+concealment OFF the direct enemy axis (at (40,16)/(40,24) on
 easy/medium; at the corresponding off-row positions for the
 seed-chosen base latitude on hard) must HOLD their hidden firing
 positions and let the rusher band advance into the L-ambush
@@ -13,10 +13,15 @@ WEST through the band's fire axis (y=20).
 
 The load-bearing discriminator is POSITIONAL DISCIPLINE — the
 intended policy KEEPS the ambushers at their starting cells (do
-nothing, or set_stance to 3, or explicitly stop). stance:3 +
-sight_range≥5 makes auto-engagement load-bearing once the band
-walks into range — the model does NOT need to issue attack
-orders; it ONLY needs to NOT MOVE the ambushers.
+nothing, or explicitly stop). The ambushers carry stance:2
+(Defend) — they hold their post and auto-fire on any enemy that
+enters weapon range; the firing rows are placed 4 cells off the
+band's lane (INSIDE the ~4-cell 2tnk weapon range) so the band
+walks into auto-engage range as it passes. stance:2 — NOT
+stance:3 (AttackAnything), which now ADVANCES toward the nearest
+visible enemy and would make the ambushers HUNT and abandon the
+firing zone. The model does NOT need to issue attack orders; it
+ONLY needs to NOT MOVE the ambushers.
 
 The bar:
 
@@ -25,10 +30,14 @@ The bar:
 * `units_killed_gte: K` — real engagement bar matched per tier
   (6 easy, 8 medium, 8 hard) so an active-HOLD ambush clears it
   while a centralise pile-up cannot.
-* `units_lost_lte: 0` (easy only) — the attrition cap that bites
+* `units_lost_lte: 2` (easy only) — the attrition cap that bites
   CENTRALISE on easy where the lighter band cannot raze the fact
-  fast enough on its own (without this clause, easy's centralise
-  also wins on the kill bar because the ambushers fire en route).
+  on its own (without this clause, easy's centralise also wins
+  because a centralised cluster still clears the light band).
+  HOLD trades ~1 tank from the off-axis firing zone; centralise
+  trades 3-4 fighting the band head-on, busting the cap. The
+  threshold is 2 (not 0) because the engine combat rebalance
+  means even a clean HOLD trades one tank.
 * `within_ticks: 2400` paired with `after_ticks: 2401` — a non-
   finisher is a real reachable timeout LOSS, never a draw.
 * `not building_count_gte:{type:fact,n:1}` in the fail clause —
@@ -66,25 +75,28 @@ SEEDS = (1, 2, 3, 4)
 
 
 def hold(rs, C):
-    """HOLD the ambush positions — observe-only. stance:3 on the
-    pre-placed 2tnk ambushers + sight_range≥5 (the y=15/y=25 firing
-    positions cover the y=20 band lane at the edge of sight) means
-    the engine auto-engages the band as it walks past the ambush
-    cells. The model only needs to NOT MOVE the ambushers — the
-    intended capability is positional discipline, not active
-    micro. WINS every level + every hard seed."""
+    """HOLD the ambush positions — observe-only. stance:2 (Defend)
+    on the pre-placed 2tnk ambushers means each tank holds its
+    post and auto-fires on any enemy that enters weapon range;
+    the y=16/y=24 firing rows are 4 cells off the y=20 band lane,
+    INSIDE the ~4-cell 2tnk weapon range, so the engine
+    auto-engages the band as it walks past the ambush cells. The
+    model only needs to NOT MOVE the ambushers — the intended
+    capability is positional discipline, not active micro. WINS
+    every level + every hard seed."""
     return [C.observe()]
 
 
 def centralise_to_fact(rs, C):
     """Centralise all ambushers to the fact cell (the "defend the
     high-value asset" pattern). Moves the 2tnk ambushers WEST out
-    of their (40,15)/(40,25) firing positions; the flanking
-    crossfire envelope is abandoned. On easy the move crosses the
-    band's fire axis (y=20) and at least 1 tank is hit → attrition
-    cap busted → LOSS. On medium/hard the stacked cluster at the
-    fact cannot out-attrition the band's tank component → fact
-    razed → LOSS."""
+    of their (40,16)/(40,24) firing positions; the flanking
+    crossfire envelope is abandoned. On easy the centralised
+    cluster fights the band head-on and trades 3-4 tanks →
+    attrition cap (units_lost_lte:2) busted → LOSS. On
+    medium/hard the stacked cluster at the fact cannot
+    out-attrition the band's tank component → fact razed →
+    LOSS."""
     units = [
         u for u in rs.get("units_summary", []) if u.get("type") == "2tnk"
     ]
@@ -241,10 +253,10 @@ def test_hold_wins_every_level_and_seed(level):
 def test_centralise_to_fact_loses_every_level_and_seed(level):
     """Centralise-to-fact moves the ambushers OUT of the hidden
     firing positions and into the fact. The flanking crossfire
-    envelope is abandoned; on easy the move crosses the band's
-    fire axis (attrition cap busted), on medium/hard the cluster
-    is out-attritioned (fact razed). LOSS every level + every
-    seed (a real LOSS, not a draw)."""
+    envelope is abandoned; on easy the centralised cluster
+    fights the band head-on and busts the attrition cap, on
+    medium/hard the cluster is out-attritioned (fact razed).
+    LOSS every level + every seed (a real LOSS, not a draw)."""
     c = compile_level(load_pack(PACK), level)
     for seed in SEEDS:
         r = run_level(c, centralise_to_fact, seed=seed)
