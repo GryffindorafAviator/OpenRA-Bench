@@ -40,6 +40,7 @@ UPGRADED = [
     "perception-frontier-reading",
     "perception-target-vs-fog",
     "reasoning-frontier-commit",
+    "tp-decision-under-clock",
     "rush-hour",
     "custom-map-no-enemy",
     "tempo-double-window",
@@ -219,6 +220,21 @@ UPGRADED = [
     # don't honour spawn_point — CLAUDE.md) and the rusher bot
     # concentrates on the active agent centroid regardless.
     "mfb-mirror-base-east-west",
+    # Wave-10 reasoning pack — production resilience via N+1 redundant
+    # capacity planning (redundancy / N+1 planning / robust capacity
+    # planning / SC2 multi-production anchor). The agent inherits a
+    # base whose only War Factory is exposed and WILL be razed by a
+    # pre-placed enemy mammoth-tank ring; it must pre-build a redundant
+    # second War Factory in the safe western base before the primary
+    # falls so unit production survives. Hard tier defines two agent
+    # spawn_point groups (NORTH base latitude y=14 / SOUTH base
+    # latitude y=26) round-robined by seed; the full base (including
+    # the exposed weap) is duplicated across both groups and the 6×
+    # 4tnk strike ring is duplicated at both latitudes (enemies don't
+    # honour spawn_point — CLAUDE.md). A memorised backup-weap
+    # placement cell mis-places out of build radius on one of the two
+    # spawn groups.
+    "mfb-redundant-tech-buildings",
     # Wave-4 TURTLE node of the tech triple (SC2 turtle macro /
     # military fortify-before-research doctrine anchor). Hard defines
     # two agent spawn_point groups (NORTH base / SOUTH base) so the
@@ -1091,6 +1107,22 @@ UPGRADED = [
     # objective cluster are symmetric across y=20 so either spawn faces
     # an equivalent mutual-support decision (no memorised opening).
     "coord-mutual-support",
+    # Wave-10 REASONING econ pack — commodity hedging / finance
+    # inventory-vs-cash balance / SC2 silo management. The agent runs
+    # a high-throughput economy (fact + proc + powr + 7× harv) and
+    # "trades with itself": harvested ore either banks as capped
+    # stockpile or converts to cash. The model must HEDGE the silo
+    # buffer — too few silos floods the 2000 proc cap and spoils
+    # income; too many sinks cash into idle storage — so the win bar
+    # punishes BOTH the under- and over-buffered extremes. Hard tier
+    # defines two agent spawn_point groups (WEST base fact x=8 / EAST
+    # base fact x=80) round-robined by seed; both spawns share
+    # identical y-geometry so per-spawn throughput is symmetric, but
+    # the silos must be placed near the *actual* fact and a memorised
+    # placement cell cannot generalise. Neutral mine patches are
+    # duplicated at both spawn columns (neutral actors don't honour
+    # spawn_point — CLAUDE.md).
+    "econ-resource-trade-with-self",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
