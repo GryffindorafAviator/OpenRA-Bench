@@ -193,29 +193,42 @@ pytestmark_engine = pytest.mark.skipif(
 )
 
 
+# The defended asset footprint — defenders regroup here whenever no
+# probe is visible so they stay ON the refinery (16,20) / barracks and
+# are in range the moment the patrol bounces a probe back west.
+_ANCHOR = (15, 20)
+
+
 def _intended_policy(rs, Command):
-    """Fire-support-on-home-turf: HOLD position, order every defender
-    onto the nearest visible enemy unit each turn. The patroller's own
-    oscillation script will bring it back into range repeatedly until
-    it dies; defenders never leave the asset footprint."""
+    """Fire-support-on-home-turf: order every defender onto the nearest
+    visible enemy unit each turn; when no probe is in sight (it has
+    oscillated east into fog) regroup ON the asset footprint. The
+    patroller's own oscillation script brings it back into range
+    repeatedly — re-engaging each swing kills every probe in turn
+    while the defenders never leave the asset."""
     units = rs.get("units_summary", []) or []
     enemies = [e for e in (rs.get("enemy_summary", []) or [])
                if not e.get("is_building")]
     if not units:
         return [Command.observe()]
-    if not enemies:
-        # Nothing in sight (probe just died and respawn pending):
-        # observe; do not wander.
-        return [Command.observe()]
     cmds = []
-    for u in units:
-        # Pick the nearest visible enemy unit (not building).
-        ux, uy = u["cell_x"], u["cell_y"]
-        target = min(enemies, key=lambda e:
-                     (e["cell_x"] - ux) ** 2 + (e["cell_y"] - uy) ** 2)
-        cmds.append(
-            Command.attack_unit([str(u["id"])], str(target["id"]))
-        )
+    if enemies:
+        for u in units:
+            # Pick the nearest visible enemy unit (not building).
+            ux, uy = u["cell_x"], u["cell_y"]
+            target = min(enemies, key=lambda e:
+                         (e["cell_x"] - ux) ** 2 + (e["cell_y"] - uy) ** 2)
+            cmds.append(
+                Command.attack_unit([str(u["id"])], str(target["id"]))
+            )
+    else:
+        # No probe in sight — hold the asset footprint, do not wander.
+        for u in units:
+            cmds.append(
+                Command.move_units(
+                    [str(u["id"])], target_x=_ANCHOR[0], target_y=_ANCHOR[1]
+                )
+            )
     return cmds
 
 
