@@ -14,10 +14,17 @@ Discrimination bar verified by engine-driven scripted policies:
     home fact scores nothing; the proc-destruction clause is the
     only path to a win).
   • naive all-in attack-move into the patch (medium / hard) → LOSS
-    (the thicker garrison's anti-tank e3 trades the column below
-    the ≥2-tank survival floor; the raid must focus the e3 first).
-  • intended raid (advance, focus the anti-tank defender, raze the
+    (the thicker garrison's three anti-tank e3 trade the whole
+    column away; the raid must distribute fire across the e3s).
+  • intended raid (advance, focus the anti-tank defenders, raze the
     proc, keep ≥2 tanks + the home fact)  → WIN.
+
+Recalibrated 2026-05 after the engine movement fixes ((A) attack_unit
+on out-of-sight targets paths normally, (B) moving units fire and take
+fire en route, stance-respecting): the 4-tank column traded the old
+3 e1 + 1 e3 garrison too cheaply, so an undirected all-in kept ≥2
+tanks and won on medium / hard. The garrison is now 2 e1 + 3 anti-tank
+e3 and the intended policy distributes fire across the e3s.
 """
 
 from __future__ import annotations
@@ -278,8 +285,9 @@ def _naive_allin_policy(rs, Command):
 
 def _intended_raid_policy(rs, Command):
     """Intended expansion raid: advance to the patch, focus the
-    anti-tank rocket soldier first, then raze the proc. Keeps the
-    column intact and razes the refinery well before the deadline."""
+    anti-tank rocket soldiers first — distributing the column's fire
+    across every live e3 so none is left shooting — then raze the
+    proc. Keeps ≥2 tanks and razes the refinery before the deadline."""
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
     if not units:
@@ -291,13 +299,16 @@ def _intended_raid_policy(rs, Command):
     ]
     proc = [e for e in enemies if (e.get("type") or "").lower() == "proc"]
     cmds = []
-    for u in units:
+    for i, u in enumerate(units):
         if u["cell_x"] < 50:
             cmds.append(
                 Command.attack_move([str(u["id"])], target_x=58, target_y=20)
             )
         elif e3:
-            cmds.append(Command.attack_unit([str(u["id"])], str(e3[0]["id"])))
+            # Spread fire across every anti-tank defender (round-robin)
+            # so the column is never out-traded by an undamaged e3.
+            tgt = e3[i % len(e3)]
+            cmds.append(Command.attack_unit([str(u["id"])], str(tgt["id"])))
         elif proc:
             cmds.append(Command.attack_unit([str(u["id"])], str(proc[0]["id"])))
         else:
