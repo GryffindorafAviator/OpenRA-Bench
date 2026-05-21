@@ -515,6 +515,12 @@ class InteractiveSession:
     def max_turns(self) -> int:
         return self.compiled.max_turns
 
+    @property
+    def objective(self) -> str:
+        """The scenario objective brief — the SAME text an LLM agent is
+        given as its goal. What the human must accomplish to WIN."""
+        return (self.compiled.scenario.description or "").strip()
+
     def render_state(self) -> dict:
         """The current observation — the SAME render_state an LLM agent
         is shown for this scenario."""

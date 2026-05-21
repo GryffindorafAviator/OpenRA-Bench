@@ -1311,9 +1311,10 @@ class TestPlayTab:
     def test_play_start_rejects_empty_pack(self):
         from app import _play_start
 
-        sess, sel, queue, img, brief, status = _play_start(
-            None, "", "easy", 1
-        )
+        out = _play_start(None, "", "easy", 1)
+        # (sess, sel, queue, objective, img, brief, status, units)
+        assert len(out) == 8
+        sess, sel, queue, objective, img, brief, status, units = out
         assert sess is None
         assert sel == [] and queue == []
         assert "scenario" in status.lower()
@@ -1321,5 +1322,21 @@ class TestPlayTab:
     def test_play_clear_resets_selection_and_queue(self):
         from app import _play_clear
 
-        sel, queue, _brief = _play_clear(None)
+        out = _play_clear(None)
+        assert len(out) == 4  # (sel, queue, brief, units_df)
+        sel, queue, _brief, _units = out
         assert sel == [] and queue == []
+
+    def test_play_objective_md_empty_without_session(self):
+        from app import _play_objective_md
+
+        assert _play_objective_md(None) == ""
+
+    def test_play_units_df_empty_without_session(self):
+        from app import _play_units_df
+
+        df = _play_units_df(None, [])
+        assert list(df.columns) == [
+            "sel", "id", "type", "x", "y", "hp%", "activity"
+        ]
+        assert len(df) == 0

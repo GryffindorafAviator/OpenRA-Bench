@@ -1056,7 +1056,9 @@ def _play_scenarios() -> list[str]:
 
 
 def _play_minimap(render_state: dict):
-    """PIL minimap image — the same view an LLM agent is shown."""
+    """PIL minimap image — the same view an LLM agent is shown,
+    upscaled 3x (nearest-neighbour) so individual units stay distinct
+    instead of merging into one blob at display size."""
     try:
         import base64
         import io
@@ -1068,9 +1070,51 @@ def _play_minimap(render_state: dict):
         b64 = render_png_b64(render_state)
         if not b64:
             return None
-        return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+        w, h = img.size
+        return img.resize((w * 3, h * 3), Image.NEAREST)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _play_objective_md(sess) -> str:
+    """The scenario objective — what the human must do to WIN."""
+    if sess is None:
+        return ""
+    obj = (getattr(sess, "objective", "") or "").strip()
+    if not obj:
+        return ""
+    return f"### 🎯 Objective\n{obj}"
+
+
+def _play_units_df(sess, sel):
+    """Table of the human's own units — id, type, cell, hp, activity —
+    with a ✓ on the currently-selected ones. Disambiguates units that
+    overlap into a single dot on the minimap."""
+    cols = ["sel", "id", "type", "x", "y", "hp%", "activity"]
+    if sess is None:
+        return pd.DataFrame(columns=cols)
+    try:
+        rs = sess.render_state()
+    except Exception:  # noqa: BLE001
+        return pd.DataFrame(columns=cols)
+    selset = {str(s) for s in (sel or [])}
+    rows = []
+    for u in rs.get("units_summary", []) or []:
+        if not isinstance(u, dict):
+            continue
+        uid = str(u.get("id", ""))
+        hp = u.get("hp", u.get("hp_pct", ""))
+        rows.append([
+            "✓" if uid in selset else "",
+            uid,
+            u.get("actor_type") or u.get("type") or "?",
+            u.get("cell_x"),
+            u.get("cell_y"),
+            hp,
+            u.get("activity", ""),
+        ])
+    return pd.DataFrame(rows, columns=cols)
 
 
 def _play_status_md(sess) -> str:
@@ -1103,7 +1147,12 @@ def _play_briefing_md(sess, sel, queue) -> str:
 
 def _play_render(sess, sel, queue):
     img = _play_minimap(sess.render_state()) if sess is not None else None
-    return img, _play_briefing_md(sess, sel, queue), _play_status_md(sess)
+    return (
+        img,
+        _play_briefing_md(sess, sel, queue),
+        _play_status_md(sess),
+        _play_units_df(sess, sel),
+    )
 
 
 def _play_start(prev_sess, pack, level, seed):
@@ -1113,8 +1162,12 @@ def _play_start(prev_sess, pack, level, seed):
             prev_sess.close()
         except Exception:  # noqa: BLE001
             pass
+    empty_units = _play_units_df(None, [])
     if not pack:
-        return None, [], [], None, "", "_pick a scenario first_"
+        return (
+            None, [], [], "", None, "", "_pick a scenario first_",
+            empty_units,
+        )
     try:
         from openra_bench.human_labeling import InteractiveSession
 
@@ -1122,15 +1175,24 @@ def _play_start(prev_sess, pack, level, seed):
             pack, level or "easy", int(seed or 1)
         )
     except Exception as e:  # noqa: BLE001
-        return None, [], [], None, f"⚠️ {e}", "_start failed_"
-    img, brief, status = _play_render(sess, [], [])
-    return sess, [], [], img, brief, status
+        return (
+            None, [], [], "", None, f"⚠️ {e}", "_start failed_",
+            empty_units,
+        )
+    img, brief, status, units = _play_render(sess, [], [])
+    return (
+        sess, [], [], _play_objective_md(sess),
+        img, brief, status, units,
+    )
 
 
 def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
     """Translate a minimap click into a selection or a queued order."""
     if sess is None or evt is None or evt.index is None:
-        return sel, queue, _play_briefing_md(sess, sel, queue)
+        return (
+            sel, queue, _play_briefing_md(sess, sel, queue),
+            _play_units_df(sess, sel),
+        )
     try:
         from openra_bench.human_labeling import (
             HumanAction,
@@ -1139,17 +1201,21 @@ def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
             own_units_at_cell,
         )
 
-        px, py = evt.index  # native image pixels
+        px, py = evt.index  # pixels in the displayed (upscaled) image
         rs = sess.render_state()
         rows = [r for r in (rs.get("minimap") or "").split("\n") if r]
         if not rows:
-            return sel, queue, _play_briefing_md(sess, sel, queue)
+            return (
+                sel, queue, _play_briefing_md(sess, sel, queue),
+                _play_units_df(sess, sel),
+            )
         h = len(rows)
         w = max(len(r) for r in rows)
-        cell = 6  # openra_bench.minimap.CELL
-        cx, cy = minimap_click_to_cell(
-            px, py, w * cell, h * cell, w, h
-        )
+        # _play_minimap renders at CELL(6) and upscales 3x → the image
+        # the user clicks is w*18 x h*18 px; map the click back at that
+        # resolution, not the base CELL resolution.
+        img_w, img_h = w * 6 * 3, h * 6 * 3
+        cx, cy = minimap_click_to_cell(px, py, img_w, img_h, w, h)
         if mode == "Move here" and sel:
             queue = queue + [
                 HumanAction(mode="move", units=list(sel), target=(cx, cy))
@@ -1166,7 +1232,10 @@ def _play_click(sess, sel, queue, mode, evt: gr.SelectData):
             sel = own_units_at_cell(rs, cx, cy, radius=1)
     except Exception as e:  # noqa: BLE001
         logger.warning("play click failed: %s", e)
-    return sel, queue, _play_briefing_md(sess, sel, queue)
+    return (
+        sel, queue, _play_briefing_md(sess, sel, queue),
+        _play_units_df(sess, sel),
+    )
 
 
 def _play_end_turn(sess, sel, queue):
@@ -1175,12 +1244,12 @@ def _play_end_turn(sess, sel, queue):
             sess.submit_turn(list(queue))
         except Exception as e:  # noqa: BLE001
             logger.warning("play submit_turn failed: %s", e)
-    img, brief, status = _play_render(sess, [], [])
-    return sess, [], [], img, brief, status
+    img, brief, status, units = _play_render(sess, [], [])
+    return sess, [], [], img, brief, status, units
 
 
 def _play_clear(sess):
-    return [], [], _play_briefing_md(sess, [], [])
+    return [], [], _play_briefing_md(sess, [], []), _play_units_df(sess, [])
 
 
 def build_app() -> gr.Blocks:
@@ -1399,13 +1468,20 @@ def build_app() -> gr.Blocks:
                         value=1, label="Seed", precision=0, scale=1,
                     )
                     play_start = gr.Button("▶ Start", scale=1)
+                play_objective = gr.Markdown()
                 play_status = gr.Markdown(_play_status_md(None))
                 with gr.Row():
                     play_img = gr.Image(
                         label="Minimap — click to select units / give orders",
-                        height=360, interactive=False, show_label=True,
+                        height=420, interactive=False, show_label=True,
                     )
                     play_brief = gr.Markdown()
+                play_units = gr.Dataframe(
+                    label="Your units (✓ = selected)",
+                    headers=["sel", "id", "type", "x", "y", "hp%",
+                             "activity"],
+                    interactive=False, wrap=True,
+                )
                 with gr.Row():
                     play_mode = gr.Radio(
                         choices=[
@@ -1422,27 +1498,31 @@ def build_app() -> gr.Blocks:
                     _play_start,
                     inputs=[play_sess, play_scen, play_level, play_seed],
                     outputs=[
-                        play_sess, play_sel, play_queue,
-                        play_img, play_brief, play_status,
+                        play_sess, play_sel, play_queue, play_objective,
+                        play_img, play_brief, play_status, play_units,
                     ],
                 )
                 play_img.select(
                     _play_click,
                     inputs=[play_sess, play_sel, play_queue, play_mode],
-                    outputs=[play_sel, play_queue, play_brief],
+                    outputs=[
+                        play_sel, play_queue, play_brief, play_units,
+                    ],
                 )
                 play_end_btn.click(
                     _play_end_turn,
                     inputs=[play_sess, play_sel, play_queue],
                     outputs=[
                         play_sess, play_sel, play_queue,
-                        play_img, play_brief, play_status,
+                        play_img, play_brief, play_status, play_units,
                     ],
                 )
                 play_clear_btn.click(
                     _play_clear,
                     inputs=[play_sess],
-                    outputs=[play_sel, play_queue, play_brief],
+                    outputs=[
+                        play_sel, play_queue, play_brief, play_units,
+                    ],
                 )
 
             # ── About Tab ─────────────────────────────────────────────────
