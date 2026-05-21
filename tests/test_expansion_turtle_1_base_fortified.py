@@ -123,22 +123,32 @@ def over_tech(rs, C):
 def make_intended(pbox_target: int, gun_target: int):
     """Intended fortification policy: continuously REINFORCE the
     pre-placed pbox seed against the hunt band's grinding attrition,
-    cap with the gun bar once pbox is at target, and train a stream
-    of replacement infantry to maintain own_units_gte:3 as the
-    starting screen takes damage.
+    secure the gun bar once pbox is above a survival floor, and train
+    a stream of replacement infantry to maintain own_units_gte:3 as
+    the starting screen takes damage.
 
-    Defence queue is SERIAL (Defense), Infantry queue is PARALLEL —
-    both held continuously full. The pbox_target+3 buffer keeps the
-    queue requesting reinforcement even when attrition holds the
-    count at target (so any single pbox kill is replaced before the
-    count dips below the bar).
+    Defence queue is SERIAL (Defense), Infantry queue is PARALLEL.
+    The Defence queue is held continuously full: the moment it is
+    empty the policy queues the next item. Priority order:
+      1. if pbox is below the survival floor (target-2) → build pbox;
+      2. else if a gun is still needed (and weap is online) → gun;
+      3. else top pbox up to target+5 so attrition is always covered.
+
+    Placement spams the closest free cells each turn (the engine
+    takes the first valid one); a cell freed by a destroyed pbox is
+    re-used, so the defensive wall is rebuilt in place rather than
+    marching ever-eastward into the open.
     """
-
-    placed = set()
 
     def policy(rs, C):
         own = rs.get("own_buildings") or []
         occupied = {(b["cell_x"], b["cell_y"]) for b in own}
+        # Treat unit-occupied cells as blocked too — a pbox cannot
+        # place onto a cell a unit is standing on, and a blocked
+        # placement silently stalls the serial Defence queue.
+        for u in (rs.get("units_summary") or []):
+            if u.get("cell_x") is not None:
+                occupied.add((u["cell_x"], u["cell_y"]))
         pbox_count = sum(1 for b in own if b.get("type") == "pbox")
         gun_count = sum(1 for b in own if b.get("type") == "gun")
         weap_count = sum(1 for b in own if b.get("type") == "weap")
@@ -157,51 +167,36 @@ def make_intended(pbox_target: int, gun_target: int):
             if str(u.get("type", "")).lower() in ("e1", "e3")
         )
         cmds = []
-        # Candidate placement cells: east of fact (lane mouth), in
-        # bounds (y∈[2,38] on rush-hour-arena, x∈[2,126]).
+        # Candidate placement cells east of fact, in bounds
+        # (y∈[2,38], x∈[2,126]), nearest-to-fact first.
         cells = []
-        for dx in (6, 8, 10, 12, 14, 4, 16, 5, 7, 9, 11, 13, 15):
-            for dy in (-3, -1, 1, 3, -2, 2, 0, -4, 4):
-                cells.append((fx + dx, fy + dy))
+        for dx in range(3, 24):
+            for dy in range(-10, 11):
+                cx, cy = fx + dx, fy + dy
+                if 2 <= cx <= 126 and 2 <= cy <= 38:
+                    cells.append((cx, cy))
+        cells.sort(key=lambda c: abs(c[0] - fx) + abs(c[1] - fy))
+        free = [c for c in cells if c not in occupied]
 
-        # Defence queue (Serial): prioritise gun once pbox at target
-        # and weap is online, otherwise reinforce pbox up to
-        # target+3 buffer to absorb attrition.
+        # Defence queue (Serial): keep it continuously full.
         if n_pbox + n_gun == 0:
-            if (
-                gun_count < gun_target
-                and weap_count >= 1
-                and pbox_count >= pbox_target
-            ):
-                cmds.append(C.build("gun"))
-            elif pbox_count < pbox_target + 3:
+            need_gun = gun_count < gun_target and weap_count >= 1
+            if pbox_count < pbox_target - 2:
                 cmds.append(C.build("pbox"))
-            elif gun_count < gun_target and weap_count >= 1:
+            elif need_gun:
                 cmds.append(C.build("gun"))
+            elif pbox_count < pbox_target + 5:
+                cmds.append(C.build("pbox"))
 
-        # Place any in-flight defence at the next free east cell.
+        # Place in-flight defence — spam the closest free cells so a
+        # freed (destroyed-pbox) cell is reclaimed and the queue is
+        # never stalled by an invalid target cell.
         if n_pbox >= 1:
-            for cx, cy in cells:
-                if (
-                    2 <= cy <= 38
-                    and 2 <= cx <= 126
-                    and (cx, cy) not in occupied
-                    and (cx, cy) not in placed
-                ):
-                    cmds.append(C.place_building("pbox", cx, cy))
-                    placed.add((cx, cy))
-                    break
+            for cx, cy in free[:6]:
+                cmds.append(C.place_building("pbox", cx, cy))
         if n_gun >= 1:
-            for cx, cy in cells:
-                if (
-                    2 <= cy <= 38
-                    and 2 <= cx <= 126
-                    and (cx, cy) not in occupied
-                    and (cx, cy) not in placed
-                ):
-                    cmds.append(C.place_building("gun", cx, cy))
-                    placed.add((cx, cy))
-                    break
+            for cx, cy in free[:6]:
+                cmds.append(C.place_building("gun", cx, cy))
 
         # Infantry queue (Parallel): keep training replacements so
         # own_units_gte:3 holds through screen attrition.
