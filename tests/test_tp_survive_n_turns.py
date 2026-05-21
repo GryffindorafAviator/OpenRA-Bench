@@ -1,26 +1,34 @@
-"""tp-survive-n-turns — REASONING pure-survival pack.
+"""tp-survive-n-turns — REASONING active-defence survival pack.
 
-The pack tests PURE SURVIVAL under sustained attrition (SC2 survival /
-military hold-the-line / sustained-ops anchor): the agent holds a
+The pack tests ACTIVE DEFENCE under sustained attrition (SC2 survival
+/ military hold-the-line / sustained-ops anchor): the agent holds a
 fixed force (6× 2tnk + fact + powr, no economy tools) and must keep
 ≥N of those units AND its construction yard (`fact`) ALIVE until the
 survival tick T elapses. Relentless rusher waves arrive throughout —
 an opening wave at t=0 plus scheduled-event reinforcement waves.
 There is NO offensive objective.
 
+The capability is ACTIVE TARGET TRIAGE — each turn order all 6 tanks
+to focus-fire the rusher CLOSEST TO THE FACT. The Defend-stance
+default auto-fire spreads each tank onto its own nearest target;
+under sustained pressure that spread fire lets leakers slip past and
+raze the construction yard. Concentrating fire on the fact-side
+threat clears the building's attackers before they raze it.
+
 Bar (binding):
-- intended HOLD-FOCUS (keep the 6 tanks clustered on the fact, focus-
-  fire each arriving wave, never chase) WINS on every level + every
-  hard seed (1..4);
-- STALL (observe-only) LOSES on every level + every seed — spread
-  Defend-stance fire is too slow, the sustained waves raze the fact;
+- intended ACTIVE-DEFENCE (each turn focus-fire the enemy nearest the
+  fact, never chase out) WINS on every level + every hard seed (1..4);
+- STALL (observe-only) LOSES on every level + every seed — passive
+  Defend-stance spread fire lets leakers raze the fact;
 - AGGRESSIVE-CHARGE (attack_move the column at the rushers) LOSES on
-  every level + every seed — the column is ground down piecemeal and
+  every level + every seed — moving tanks are shot up en route and
   own_units drops below N;
 - non-win is a real reachable LOSS (the fail tree fires on a razed
   fact / an own-force below N, and the broad after_ticks ≤
   93 + 90·(max_turns − 1) catches a limp to the deadline) — never a
-  DRAW;
+  DRAW. The pack declares NO interrupts: an interrupt-driven loop
+  advances fewer ticks per turn (step_until_event breaks early on a
+  signal), starving the deadline into a DRAW;
 - hard ships ≥2 `spawn_point` groups (seed-driven start variation).
 """
 from __future__ import annotations
@@ -213,58 +221,58 @@ def test_hard_has_multiple_spawn_point_groups():
 # ── 2) engine-required scripted-policy discrimination sweep ────────────
 
 
-def _enemy_xy(e):
-    return e.get("cell_x", e.get("x", 999)), e.get("cell_y", e.get("y", 999))
-
-
 def _stall(rs, C):
-    """Observe-only — must LOSE (spread Defend fire too slow)."""
+    """Observe-only — must LOSE (passive Defend-stance spread fire
+    lets leakers raze the fact)."""
     return [C.observe()]
 
 
-def _hold_focus(rs, C):
-    """Intended capability: keep the 6 tanks clustered on the fact and
-    focus-fire the enemy nearest the force centroid — concentrate all
-    guns so each wave is finished fast. Must WIN."""
+def _defend_fact(rs, C):
+    """Intended capability — ACTIVE TARGET TRIAGE: each turn order all
+    6 tanks to focus-fire the rusher CLOSEST TO THE FACT, so the
+    construction yard's attackers are cleared before they raze it.
+    Tanks stay clustered on the base (the fact-side enemy is already
+    at the base, so attack_unit fires without a long chase). Must
+    WIN. Reads `enemy_summary` (the visible-enemy list the engine
+    surfaces) — NOT the non-existent `enemy_positions` key."""
     us = rs.get("units_summary") or []
     if not us:
         return [C.observe()]
     ids = [str(u["id"]) for u in us]
-    en = rs.get("enemy_positions") or []
-    if not en:
+    bldgs = rs.get("own_buildings") or []
+    facts = [b for b in bldgs if str(b.get("type", "")).lower() == "fact"]
+    en = rs.get("enemy_summary") or []
+    if not en or not facts:
         return [C.stop(ids)]
-    cx = sum(u["cell_x"] for u in us) / len(us)
-    cy = sum(u["cell_y"] for u in us) / len(us)
-    tgt = min(en, key=lambda e: (_enemy_xy(e)[0] - cx) ** 2
-              + (_enemy_xy(e)[1] - cy) ** 2)
-    tid = tgt.get("id")
-    if tid is None:
-        return [C.stop(ids)]
-    return [C.attack_unit(ids, str(tid))]
+    fx, fy = facts[0]["cell_x"], facts[0]["cell_y"]
+    tgt = min(en, key=lambda e: (e["cell_x"] - fx) ** 2
+              + (e["cell_y"] - fy) ** 2)
+    return [C.attack_unit(ids, str(tgt["id"]))]
 
 
 def _charge(rs, C):
     """Aggressive: drive the column at the rushers (the trap). Must
-    LOSE — met in the open and ground down piecemeal."""
+    LOSE — moving tanks are shot up en route and ground down
+    piecemeal in the open."""
     us = rs.get("units_summary") or []
     if not us:
         return [C.observe()]
     ids = [str(u["id"]) for u in us]
-    en = rs.get("enemy_positions") or []
+    en = rs.get("enemy_summary") or []
     if not en:
         return [C.attack_move(ids, target_x=64, target_y=20)]
-    ex, ey = _enemy_xy(en[0])
-    return [C.attack_move(ids, target_x=ex, target_y=ey)]
+    return [C.attack_move(ids, target_x=en[0]["cell_x"],
+                          target_y=en[0]["cell_y"])]
 
 
 @pytest.mark.parametrize("lv", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
-def test_intended_hold_focus_wins(lv, seed):
+def test_intended_active_defence_wins(lv, seed):
     c = compile_level(load_pack(PACK), lv)
-    res = run_level(c, _hold_focus, seed=seed)
+    res = run_level(c, _defend_fact, seed=seed)
     assert res.outcome == "win", (
-        f"{lv} seed{seed}: intended hold-focus must WIN, got {res.outcome} "
-        f"(units_lost={res.signals.units_lost})"
+        f"{lv} seed{seed}: intended active-defence must WIN, got "
+        f"{res.outcome} (units_lost={res.signals.units_lost})"
     )
 
 

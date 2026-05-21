@@ -4,45 +4,49 @@
 #     openra_bench/scenarios/packs/tp-survive-n-turns.yaml
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
-# REASONING capability — PURE SURVIVAL under sustained attrition.
-# The agent fields a fixed force (6× 2tnk + fact + powr, no economy
-# tools) and must KEEP ≥N of those units AND its construction yard
-# (fact) ALIVE until the survival tick T elapses. Relentless rusher
-# waves arrive throughout the episode (a wave at t=0 plus
-# scheduled-event reinforcement waves). There is NO offensive
-# objective: no kill quota, no region to reach, no building to
-# raze. The only thing that matters is what is still standing at
-# tick T.
+# REASONING capability — ACTIVE DEFENCE of a key structure under
+# sustained attrition. The agent fields a fixed force (6× 2tnk +
+# fact + powr, no economy tools) and must KEEP ≥N of those units AND
+# its construction yard (fact) ALIVE until the survival tick T
+# elapses. Relentless rusher waves arrive throughout the episode (a
+# wave at t=0 plus scheduled-event reinforcement waves). There is NO
+# offensive objective: no kill quota, no region to reach, no
+# building to raze. The only thing that matters is what is still
+# standing at tick T.
 #
-# The reasoning under test is RESTRAINT + POSITIONAL DISCIPLINE,
-# not aggression:
-#   - Hold the 6 tanks as ONE tight cluster on the fact so their
-#     fire concentrates and the rushers — which charge the agent
-#     centroid — are met by all six guns at once. A clustered
-#     defence trades up: each arriving rusher is focus-killed
-#     before it can spread damage.
-#   - Do NOT charge out. The rusher bot concentrates its whole
-#     band on the agent mass; a column that sallies forward is met
-#     piecemeal in the open, loses tanks one at a time, and drops
-#     below N — aggression is a TRAP here.
+# The reasoning under test is ACTIVE TARGET TRIAGE — defend the
+# construction yard, but do not over-commit:
+#   - Each turn, ORDER the 6 tanks to focus-fire the rusher CLOSEST
+#     TO THE FACT. The Defend-stance default auto-fire spreads each
+#     tank onto its own nearest target — under sustained pressure
+#     that spread fire lets leakers slip through to the construction
+#     yard and chip it down. Concentrating fire on the fact-side
+#     threat clears the building's attackers before they raze it.
+#   - Do NOT charge out. The rusher bot concentrates its whole band
+#     on the agent mass; a column that sallies forward is shot up
+#     en route (a moving unit now takes fire — engine fix) and met
+#     piecemeal in the open, losing tanks one at a time until the
+#     force drops below N. Aggression is a TRAP here.
 #   - Do NOT stall (observe-only). Passive Defend-stance tanks
-#     auto-fire but never reposition or focus; the SUSTAINED wave
-#     pressure grinds an unmanaged cluster down — a straggler gets
-#     swarmed, the fact takes hits between waves, and either
-#     own_units or the fact falls before T.
+#     auto-fire but never re-target onto the fact's attackers; the
+#     SUSTAINED wave pressure walks leakers past the spread fire and
+#     razes the construction yard before T.
 #
 # DISCRIMINATIONS (no defect, no cheat):
-#   - stall (observe only): LOSS — the sustained rusher waves wear
-#     the unmanaged force down; a tank is lost and/or the fact is
-#     razed before T ⇒ the win all-of is false at the survival
-#     gate ⇒ the broad after_ticks fail bites (real LOSS).
+#   - stall (observe only): LOSS — the Defend-stance spread fire
+#     never prioritises the fact's attackers; sustained waves walk
+#     leakers through and raze the construction yard before T ⇒ the
+#     win all-of is false at the survival gate ⇒ the broad
+#     after_ticks fail bites, AND `not building_count_gte fact`
+#     fires the instant the fact dies (real reachable LOSS).
 #   - aggressive-charge (attack_move the column at the rushers):
-#     LOSS — the column is met in the open and ground down piecemeal
-#     by the concentrated band; own_units drops below N.
-#   - intended hold-defence (keep the 6 tanks clustered on the fact,
-#     focus-fire each arriving wave, never chase): WIN — the force
-#     trades up against the piecemeal-arriving rushers, ≥N tanks and
-#     the fact are still standing when T elapses.
+#     LOSS — moving tanks take fire en route and are met in the open
+#     and ground down piecemeal; own_units drops below N.
+#   - intended active-defence (each turn order all 6 tanks to
+#     focus-fire the rusher nearest the fact, never chase out): WIN
+#     — the construction yard's attackers are cleared before they
+#     raze it, ≥N tanks and the fact are still standing when T
+#     elapses.
 #
 # ENGINE FACTS (CLAUDE.md):
 #   - PURE SURVIVAL idiom (proven by lh-100-turn-marathon-survival):
@@ -57,9 +61,15 @@
 #     eval_core ⇒ non-win at the gate is a real reachable LOSS,
 #     never a DRAW — CLAUDE.md rule 3).
 #   - tick budget: engine advances ~90 ticks per decision turn
-#     (tick ≈ 93 + 90·(turn-1)). Every after_ticks / within_ticks
-#     is reachable inside max_turns so a staller hits a real
-#     reachable timeout LOSS. Re-verified per level.
+#     (tick ≈ 93 + 90·(turn-1)). NO interrupts are declared on this
+#     pack — interrupt-driven `step_until_event` advances FEWER
+#     ticks per decision turn (it breaks early on a signal), which
+#     starved the survival deadline so the episode hit max_turns
+#     before the gate and degenerated to a DRAW. With interrupts
+#     removed, every turn advances a clean ~90 ticks and every
+#     after_ticks / within_ticks is reachable inside max_turns so a
+#     staller hits a real reachable timeout LOSS. Re-verified per
+#     level.
 #   - rusher bot: concentrates the whole band on the agent mass
 #     (~8-tick re-target interval, see scripted_bot.rs::Rusher).
 #   - scheduled_events spawn_actors: injects reinforcement waves
@@ -74,7 +84,21 @@
 #     actor declaring spawn_point filters out unspawned agent
 #     actors). The rusher band sits on the CENTRAL lane (y≈20),
 #     equidistant from both base spawn latitudes, so the
-#     stall-vs-hold discrimination is seed-symmetric.
+#     stall-vs-defend discrimination is seed-symmetric.
+#
+# RECALIBRATION NOTE (engine movement fixes): after the engine
+# movement fixes — (A) `attack_unit` on out-of-sight targets paths
+# at real Mobile speed (no teleport); (B) moving units fire AND take
+# fire en route (no sprint-invincibility) — the prior "focus-fire
+# beats spread-fire" framing inverted: against a weak e1 swarm,
+# concentrating all six tanks on ONE arbitrary target wastes shots
+# (overkill) and the rest of the wave closes and bleeds the column.
+# The recalibrated capability is ACTIVE TARGET TRIAGE — focus the
+# rusher CLOSEST TO THE FACT (defend the building, not whichever
+# target is nearest the tanks). Passive spread fire (stall) lets
+# leakers raze the fact; a charge is shot up en route. Wave counts,
+# timings and the interrupt removal were all re-tuned so the bar
+# holds on every level + every hard seed.
 
 meta:
   id: tp-survive-n-turns
@@ -87,20 +111,21 @@ meta:
     waves that arrive throughout the window. There is no offensive
     objective — credit arrives only if enough of the force and the
     asset are still standing at the end. The capability under test
-    is restraint and positional discipline: hold a concentrated
-    defence so each wave is met with massed fire, never sally out
-    into the open where the force is ground down piecemeal, and
-    never sit idle while sustained pressure wears the line down.
-    Aggression is a trap; passivity is a slow loss; only a managed
-    hold survives.
+    is active target triage: each turn concentrate the force's fire
+    on the threat closest to the key structure so leakers never
+    raze it, never sally out into the open where the force is ground
+    down piecemeal, and never sit idle while spread fire lets the
+    asset be chipped away. Aggression is a trap; passivity is a
+    slow loss; only an actively-managed defence survives.
   robotics_analogue: >
     Holding a defended perimeter through a sustained incident: a
     fixed response team must keep a minimum capacity and the core
     asset online until relief arrives, absorbing wave after wave of
     pressure. Committing the team forward into the open burns it
-    down; leaving it unmanaged lets attrition erode the line. The
-    discipline is to hold the concentrated defence and trade up on
-    every wave until the clock runs out.
+    down; leaving it unmanaged lets attrition erode the asset. The
+    discipline is to actively triage — concentrate the team on
+    whatever threatens the core asset most — and trade up on every
+    wave until the clock runs out.
   benchmark_anchor:
     - "SC2 survival"
     - "military hold-the-line"
@@ -122,37 +147,39 @@ base:
   # fixed force. The only verbs are positional: move/attack/stop.
   tools: [move_units, attack_unit, attack_move, stop]
   planning: true
-  # Re-decide the instant a rusher is spotted or a tank is lost —
-  # survival is reactive, not on a fixed cadence.
-  interrupts:
-    enemy_unit_spotted: true
-    own_unit_destroyed: true
+  # NO interrupts: an interrupt-driven decision loop advances fewer
+  # ticks per turn (step_until_event breaks early on a signal),
+  # which starves the survival deadline so a staller times out as a
+  # DRAW instead of a real reachable LOSS. A fixed ~90-tick turn
+  # keeps every deadline reachable inside max_turns.
   termination:
     max_ticks: 20000
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # The bare survival skill. N=4 (lose at most 2 of 6 tanks), T=2700
-  # (~turn 31). One opening wave at t=0 plus ONE scheduled
-  # reinforcement wave at tick 900. Stall LOSES (unmanaged cluster
-  # ground down — a tank lost or the fact chipped); aggressive-charge
-  # LOSES (column met in the open, dropped below 4); intended hold
-  # WINS. max_turns 45 → reachable tick 93 + 90·44 = 4053 > the
-  # within_ticks 3600 upper band and the after_ticks 3601 fail, so a
-  # non-winner is a real reachable timeout LOSS.
+  # The bare active-defence skill. N=4 (lose at most 2 of 6 tanks),
+  # T=2700 (~turn 31). One opening wave at t=0 plus TWO scheduled
+  # reinforcement waves. Stall LOSES (spread fire lets leakers raze
+  # the fact); aggressive-charge LOSES (column shot up in the open,
+  # dropped below 4); intended active-defence WINS. max_turns 45 →
+  # reachable tick 93 + 90·44 = 4053 > the within_ticks 3600 upper
+  # band and the after_ticks 3601 fail, so a non-winner is a real
+  # reachable timeout LOSS.
   easy:
     description: >
       You hold a fixed force — 6 medium tanks (2tnk), a construction
       yard (fact) and a power plant (powr) at your west base. Enemy
       rifle infantry charge your base in waves: one at the start and
       two reinforcement waves across the game. There is NO objective
-      to attack — just SURVIVE. To WIN you must, once tick 2700 has elapsed,
-      STILL have your construction yard standing AND at least 4 of
-      your own units alive (survive until tick 3600). Keep your
-      tanks clustered on the construction yard and focus-fire each
-      wave as it arrives. Charging out into the open gets your tanks
-      ground down one by one (you drop below 4); sitting idle lets
-      the sustained waves wear your line down. Both lose.
+      to attack — just SURVIVE. To WIN you must, once tick 2700 has
+      elapsed, STILL have your construction yard standing AND at
+      least 4 of your own units alive (survive until tick 3600).
+      Each turn, order your tanks to focus-fire the enemy closest to
+      your construction yard — concentrate fire so the building's
+      attackers are cleared before they raze it. Charging out into
+      the open gets your tanks shot up one by one (you drop below
+      4); sitting idle lets spread auto-fire miss the leakers and
+      the waves raze the construction yard. Both lose.
     overrides:
       actors:
         # ── Agent base (west): 6× 2tnk in a tight cluster ON the
@@ -168,38 +195,41 @@ levels:
         - {type: 2tnk, owner: agent, position: [16, 22], stance: 2}
         # ── Opening rusher wave at the mid-map lane mouth (x=64,
         # same row as the base). Charges the agent centroid.
-        - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
+        - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 6}
+        - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 6}
+        - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 6}
         # Inert enemy `fact` marker far east (anti-DRAW): keeps the
         # episode alive past the last rusher death so the survival
         # gate is evaluated.
         - {type: fact, owner: enemy, position: [124, 20]}
       # TWO scheduled reinforcement waves — the pressure is
       # SUSTAINED, not one-shot. Spawned actors get fresh ids and
-      # charge the agent mass like the opening wave. NOTE: the
-      # scheduled_events block MUST sit inside `overrides:` — at the
-      # level root the loader silently drops it (this was a latent
-      # defect: the waves never fired). With the waves now firing,
-      # two of them restore the cumulative pressure the engine
-      # balance fixes drained: a single wave let the unmanaged
-      # Defend-stance cluster clear everything and a stall WON for
-      # free. Spread (stall) fire now falls behind and the fact is
-      # razed before the survival gate, while focused fire (the
-      # intended hold) clears each wave in time.
+      # charge the agent mass like the opening wave. The block MUST
+      # sit inside `overrides:` — at the level root the loader
+      # silently drops it. The opening 6×3 + two 7×3 waves are the
+      # re-tuned counts: spread (stall) fire falls behind and the
+      # fact is razed before the survival gate, while focused fire
+      # on the fact's attacker (the intended active defence) clears
+      # each wave in time and keeps ≥4 tanks.
       scheduled_events:
-        - tick: 600
+        - tick: 800
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 7}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 7}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 7}
         - tick: 1500
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 7}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 7}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 7}
+        - tick: 2200
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 7}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 7}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 7}
     win_condition:
       all_of:
         - {building_count_gte: {type: fact, n: 1}}
@@ -210,6 +240,7 @@ levels:
     # 3601) — win is evaluated FIRST, so the broad clock fail only
     # fires if the win all-of is unsatisfied at that tick
     # (CLAUDE.md rule 3: non-win must be a real LOSS, not a draw).
+    # The fact / units clauses fire the instant either drops.
     fail_condition:
       any_of:
         - {after_ticks: 3601}
@@ -218,22 +249,24 @@ levels:
     max_turns: 45
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 controlled variable: HEAVIER sustained pressure (TWO scheduled
-  # rifle waves) and a longer hold (T=3600, ~turn 41). N stays at 4
-  # of 6. max_turns 55 → reachable tick 93 + 90·54 = 4953 > the
-  # within_ticks 4500 band and the after_ticks 4501 fail.
+  # +1 controlled variable: HEAVIER sustained pressure (FOUR
+  # scheduled rifle waves on top of the opening wave) and a longer
+  # hold (T=3600, ~turn 41). N stays at 4 of 6. max_turns 55 →
+  # reachable tick 93 + 90·54 = 4953 > the within_ticks 4500 band
+  # and the after_ticks 4501 fail.
   medium:
     description: >
       Same fixed force — 6 medium tanks (2tnk), a construction yard
       (fact) and a power plant (powr). The waves are heavier now:
-      rifle infantry charge in three pulses — one at the start and
-      two more across the game. There is NO objective to attack —
-      just SURVIVE. To WIN you must, once tick
-      3600 has elapsed, STILL have your construction yard standing
-      AND at least 4 of your own units alive (survive until tick
-      4500). Hold the tank cluster on the construction yard and
-      focus each wave down. Charging out (ground down piecemeal)
-      and sitting idle (worn down by sustained pressure) both lose.
+      rifle infantry charge in five pulses — one at the start and
+      four more across the game. There is NO objective to attack —
+      just SURVIVE. To WIN you must, once tick 3600 has elapsed,
+      STILL have your construction yard standing AND at least 4 of
+      your own units alive (survive until tick 4500). Each turn,
+      focus-fire the enemy closest to your construction yard so its
+      attackers are cleared before they raze it. Charging out
+      (shot up in the open) and sitting idle (spread fire lets the
+      fact be chipped away) both lose.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [12, 20]}
@@ -244,34 +277,51 @@ levels:
         - {type: 2tnk, owner: agent, position: [16, 18], stance: 2}
         - {type: 2tnk, owner: agent, position: [16, 20], stance: 2}
         - {type: 2tnk, owner: agent, position: [16, 22], stance: 2}
-        # Opening wave — rifle infantry. The e3 rocket soldiers were
-        # removed after the engine balance fixes: rockets carry a
-        # building-damage bonus and razed the fact even under
-        # focused fire, so the intended hold could not WIN. Pure e1
-        # rifle pressure preserves the discrimination — spread
-        # (stall) fire loses the fact, focused (hold) fire holds it.
-        - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
+        # Opening wave — rifle infantry. Pure e1 rifle pressure
+        # (no e3 rocket soldiers — rockets carry a building-damage
+        # bonus and raze the fact even under focused fire, which
+        # collapses the bar).
+        - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 6}
+        - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 6}
+        - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 6}
         - {type: fact, owner: enemy, position: [124, 20]}
-      # TWO scheduled reinforcement waves — sustained pressure
+      # FOUR scheduled reinforcement waves — sustained pressure
       # across the whole window. Block sits inside `overrides:` (the
       # loader drops it at the level root). Pure e1 (no e3) for the
-      # same reason as the opening wave: rocket soldiers raze the
-      # fact even under focused fire and collapse the bar.
+      # same reason as the opening wave. The 6×3 opening + four 6×3
+      # waves are re-tuned so spread (stall) fire loses the fact and
+      # the focused active defence holds it with ≥4 tanks.
       scheduled_events:
-        - tick: 1000
+        - tick: 700
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
-        - tick: 2200
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 6}
+        - tick: 1300
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 4}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
-            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 6}
+        - tick: 1900
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 6}
+        - tick: 2500
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 6}
+        - tick: 3100
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [64, 18], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 6}
+            - {type: e1, owner: enemy, position: [64, 22], stance: 3, count: 6}
     win_condition:
       all_of:
         - {building_count_gte: {type: fact, n: 1}}
@@ -306,11 +356,11 @@ levels:
       cell cannot generalise. Rifle waves charge in from the central
       lane throughout the game — one opening wave and five
       reinforcement waves. There is NO objective to attack — just
-      SURVIVE. To WIN you must, once tick 4500 has
-      elapsed, STILL have your construction yard standing AND at
-      least 4 of your own units alive (survive until tick 5400).
-      Hold the tank cluster on the construction yard and focus each
-      wave down. Charging out and sitting idle both lose.
+      SURVIVE. To WIN you must, once tick 4500 has elapsed, STILL
+      have your construction yard standing AND at least 4 of your
+      own units alive (survive until tick 5400). Each turn,
+      focus-fire the enemy closest to your construction yard.
+      Charging out and sitting idle both lose.
     overrides:
       actors:
         # ── NORTH base spawn (spawn_point 0).
@@ -334,57 +384,56 @@ levels:
         # ── Opening rusher band on the CENTRAL lane (y=19..21), the
         # map mid-latitude — equidistant from BOTH the north (y=12)
         # and south (y=28) base spawns so the discrimination is
-        # seed-symmetric. After the engine balance fixes, two
-        # converging bands (the old north+south layout) scaled the
-        # pressure non-linearly and seed-asymmetrically: the
-        # intended hold won on one spawn and lost on the other.
-        # A single central band charges whichever base latitude is
-        # chosen at an equal reach. Pure e1 rifle (no e3 rockets —
-        # rockets raze the fact even under focused fire).
-        - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 3}
+        # seed-symmetric. A single central band charges whichever
+        # base latitude is chosen at an equal reach. Pure e1 rifle
+        # (no e3 rockets — rockets raze the fact even under focused
+        # fire). Lighter per-wave count (4 vs the same-latitude
+        # tiers) keeps the seed-1/3 vs seed-2/4 diagonal-approach
+        # difference inside the active-defence margin.
+        - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 4}
+        - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+        - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 4}
         # Inert enemy `fact` marker far east (anti-DRAW).
         - {type: fact, owner: enemy, position: [124, 20]}
       # FIVE scheduled reinforcement waves on the central lane —
       # sustained pressure across the whole 4500-tick hold. Block
       # sits inside `overrides:` (the loader drops it at the level
-      # root). Each wave is light (6 rifle) so focused fire clears
-      # it in time; the CUMULATIVE pressure of five waves is what an
-      # unmanaged spread (stall) falls behind on, losing the fact
-      # before the survival gate. Pure e1 (no e3) — see the
-      # opening-wave note.
+      # root). Each wave is light (12 rifle) so focused fire on the
+      # fact's attacker clears it in time; the CUMULATIVE pressure
+      # of five waves is what an unmanaged spread (stall) falls
+      # behind on, losing the fact before the survival gate. Pure e1
+      # (no e3) — see the opening-wave note.
       scheduled_events:
-        - tick: 1000
+        - tick: 800
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
-        - tick: 1660
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 4}
+        - tick: 1500
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
-        - tick: 2320
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 4}
+        - tick: 2200
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
-        - tick: 2980
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 4}
+        - tick: 2900
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
-        - tick: 3640
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 4}
+        - tick: 3600
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 2}
-            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [64, 19], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 20], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [64, 21], stance: 3, count: 4}
     win_condition:
       all_of:
         - {building_count_gte: {type: fact, n: 1}}
