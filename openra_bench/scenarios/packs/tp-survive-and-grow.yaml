@@ -1,0 +1,382 @@
+# tp-survive-and-grow — Survive AND Grow Economy + Army Concurrently
+#
+# REASONING focus: OPERATIONS-CONTINUITY under sustained pressure. A
+# string of light enemy raid bands keeps probing the agent base while
+# the agent must SIMULTANEOUSLY (a) keep the construction yard (fact)
+# and the harvest loop alive — SURVIVE — and (b) GROW: ramp the
+# economy (cash + stored resources) past a bar AND expand the armoured
+# force from 2 to 5 medium tanks. Three failure modes, all real LOSSes:
+#
+#   • stall (observe-only): nothing grows — the economy bar is never
+#     met, the tank count stays at 2, AND the pre-placed tanks do not
+#     auto-defend decisively; a raid band eventually reaches the
+#     fact. LOSS via the deadline (bars unmet) or the fact-razed
+#     fail clause.
+#   • defend-only (micro the 2 starter tanks onto every raid, never
+#     build, never harvest): the base survives but NOTHING grows —
+#     economy_value stays at starting_cash and the 2tnk count never
+#     reaches 5 ⇒ the win bars are never met ⇒ `after_ticks` timeout
+#     LOSS.
+#   • grow-only (pump harvest income + queue 2tnk every turn, never
+#     command the starter tanks onto the raids): the war-factory
+#     queue and the economy climb, but the un-commanded starter tanks
+#     do NOT decisively screen the raids — the light bands walk into
+#     the base and raze the fact ⇒ `not building_count_gte:fact:1`
+#     fail fires → LOSS.
+#   • intended CONCURRENT (every turn: keep the harvester in
+#     `harvest`, queue 2tnk from the war factory, AND command the
+#     tank line — starters plus the freshly-built ones — onto the
+#     incoming raid band): the economy climbs while the army grows
+#     to 5 and the screen holds the raids off the fact → all four
+#     win clauses satisfied before the deadline → WIN.
+#
+# Real-world anchor:
+#   • SRE operations continuity during an incident — while an attack
+#     (raid bands / DDoS / partial outage) is ONGOING, the on-call
+#     must keep the live service healthy (SURVIVE) AND keep shipping
+#     the capacity/feature roadmap (GROW). Freezing the roadmap to
+#     firefight stalls the business; ignoring the incident to ship
+#     features takes the service down. Continuity = both at once.
+#   • SC2 macro under pressure — hold the natural against harass
+#     WHILE keeping probe saturation and unit production climbing.
+#   • Military operations continuity — sustain the line under
+#     contact WHILE the logistics tail keeps building combat power.
+#
+# Why the spec works (engine sheet, per CLAUDE.md + verified against
+# the installed engine wheel with scripted run_level smoke tests):
+#   • `2tnk` (medium tank) costs $850 and is built from the vehicle
+#     queue of a `weap` War Factory. The `2tnk` tech prereq is a
+#     `fix` Service Depot — VERIFIED against the installed engine:
+#     with `weap` alone the Vehicle queue only offers jeep/1tnk/harv;
+#     `2tnk`/`3tnk` need `fix` present. fact + powr + weap + fix +
+#     proc are all pre-placed so the 2tnk vehicle queue is HOT from
+#     turn 1 — growing the army is just `build('2tnk')` (units spawn
+#     at the weap, no placement step). Starter force = 2× 2tnk; the
+#     win bar `unit_type_count_gte:{2tnk,5}` needs 3 more built
+#     ($2550) — real production, not a memorised number.
+#   • Vehicle production is slow (~1 tank per ~450 ticks); a play
+#     that queues 2tnk blindly every turn drains all cash. The
+#     intended play queues exactly the 3 it needs.
+#   • `unit_type_count_gte` counts AGENT units of a type from
+#     units_summary (CLAUDE.md: own actor_type surfaces). 2tnk built
+#     from the weap are additive; 2tnk LOST to raids are subtracted —
+#     so the agent must both build AND keep them alive to clear 5.
+#   • Income: a pre-placed `harv` on a neutral `mine` placed WEST of
+#     the base (behind it, away from the eastern raid lane) refines
+#     to the `proc`. The west-side loop keeps the harvester out of
+#     the raid path so long as the base stands — but a grow-only
+#     play that never screens the raids loses the fact, and once the
+#     base falls the harvest loop collapses too. `economy_value_gte`
+#     = cash + stored resources. M is tuned ABOVE the cash that
+#     survives the 3×2tnk spend, so harvest income is REQUIRED — a
+#     defend-only play that never harvests leaves economy_value at
+#     the starting cash, below M.
+#   • Base topology: the `fact` is the EASTERNMOST agent building —
+#     it is the shield. The war factory and service depot sit deep
+#     behind it (west) so a screened base keeps its 2tnk-production
+#     tech alive; an un-screened base loses the fact first (the
+#     intended survive-fail) before the raids even reach weap/fix.
+#   • The raid bands are light (3-4 e1 + 0-1 e3) on `bot_type: hunt`
+#     — each unit pursues the nearest agent unit. Light enough that
+#     a commanded 2tnk line screens them with zero losses; heavy
+#     enough that an un-commanded base loses the fact. The starter
+#     2tnk are stance:2 (Defend — auto-fire in range but never
+#     advance) so they bleed a raid that walks into them but do NOT
+#     chase it down: the agent must still actively command the line
+#     to intercept raids before they reach the fact. (stance:2 is
+#     the default; declared explicitly for clarity.)
+#   • `building_count_gte:{type:fact,n:1}` is the PRESENT-TENSE
+#     fact-alive check (NOT `has_building:fact`, the one-shot ever-
+#     seen set that stays true after a raze — CLAUDE.md footgun).
+#   • A persistent unarmed enemy `fact` far east keeps the episode
+#     alive past a full raid-band wipe so the win/fail evaluator
+#     sees the terminal frame (no DRAW collapse on enemy-wipe
+#     auto-done — CLAUDE.md).
+#   • Tick budget: no interrupts ⇒ exactly 90 ticks/step ⇒ max tick
+#     = 93 + 90·(max_turns−1). Every `within_ticks` / `after_ticks`
+#     is reachable inside max_turns so stallers hit a real LOSS,
+#     never a DRAW. Re-derived per level.
+#
+# Discrimination bar (four scripted policies, no model needed —
+# verified via openra_bench.eval_core.run_level on the installed
+# wheel): stall LOSE · defend-only LOSE · grow-only LOSE ·
+# concurrent WIN, on every level and every hard seed (1-4).
+# Non-win is a real reachable timeout / fact-razed LOSS, never a
+# draw.
+#
+# Validate (no engine / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/tp-survive-and-grow.yaml
+
+meta:
+  id: tp-survive-and-grow
+  title: 'Survive and Grow — Hold the Base While Ramping Economy + Army'
+  capability: reasoning
+  real_world_meaning: >
+    While a string of light enemy raid bands keeps probing your base,
+    you must SURVIVE (keep the construction yard and the harvest loop
+    alive) AND GROW concurrently — ramp the economy (cash + stored
+    resources) past a bar AND expand the armoured force from 2 to 5
+    medium tanks. Pure defence does not grow: the economy bar is
+    never met and the tank count never reaches 5, so the deadline
+    bites. Growth-only gets razed: an un-screened base lets the
+    raids burn down the construction yard. Only a play that runs
+    both streams every turn — keep the harvester working, queue
+    tanks from the war factory, AND command the tank line onto each
+    incoming raid — clears all four win clauses before the deadline.
+  robotics_analogue: >
+    SRE operations continuity during an incident: while an attack is
+    ONGOING you must keep the live service healthy (survive) AND keep
+    shipping the capacity / feature roadmap (grow). Freezing the
+    roadmap to firefight stalls the business; ignoring the incident
+    to ship features takes the service down. Continuity is sustaining
+    both streams at once — the same pattern as macro-under-pressure
+    in RTS and operations-under-contact in military logistics.
+  benchmark_anchor:
+    - "SRE ops continuity"
+    - "SC2 macro under pressure"
+    - "ops continuity"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: hunt}
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  # No interrupts — the survive-AND-grow decision is a STATIC
+  # up-front commitment (every turn: harvest + queue 2tnk + command
+  # the screen). Disabling interrupts also keeps the tick budget
+  # deterministic (exactly 90 ticks/step) so the `after_ticks` fail
+  # clause reliably bites a staller.
+  interrupts: {}
+  termination:
+    max_ticks: 12000
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ── bare SURVIVE-AND-GROW skill: light raid bands, a
+  # modest economy bar (2400), and the 2→5 tank ramp. Income
+  # ~95 cr/turn; starting_cash 1500 funds 1× 2tnk ($850) outright,
+  # the rest must come from harvest. M=2400 is ABOVE the cash that
+  # survives the 3×2tnk spend (1500 − 2550 < 0) so harvest income
+  # is mandatory. max_turns 60 ⇒ reachable tick 93+90·59 = 5403;
+  # deadline 5400.
+  easy:
+    description: >
+      Light enemy raid bands keep probing your base from the east.
+      Your construction yard (fact), refinery (proc), power (powr),
+      war factory (weap) and service depot (fix) are pre-placed,
+      with 2 medium tanks (2tnk) and 1 harvester (harv) on a west-
+      side ore patch. SURVIVE and GROW at the same time: keep the
+      harvester harvesting every turn, build 3 more 2tnk from the
+      war factory ($850 each), AND command your tank line onto each
+      incoming raid so it never reaches the construction yard. Win
+      when economy value (cash + stored resources) reaches 2400 AND
+      you field at least 5 medium tanks AND the fact is still alive
+      — all before tick 5400. Pure defence never grows past the
+      bars; ignoring the raids lets them raze the fact. Only running
+      both streams wins.
+    starting_cash: 1500
+    overrides:
+      actors:
+        # Pre-placed agent base. The `fact` is the EASTERNMOST agent
+        # building — the shield. weap + fix sit deep behind it (west)
+        # so a screened base keeps the 2tnk-production tech alive;
+        # an un-screened base loses the fact (the intended survive-
+        # fail) before the raids reach weap/fix. weap + fix together
+        # keep the 2tnk vehicle queue hot from turn 1.
+        - {type: fix,  owner: agent, position: [5,  17]}
+        - {type: weap, owner: agent, position: [5,  23]}
+        - {type: powr, owner: agent, position: [8,  17]}
+        - {type: proc, owner: agent, position: [8,  23]}
+        - {type: fact, owner: agent, position: [12, 20]}
+        # 2 starter medium tanks EAST of the fact (between the base
+        # and the raids). stance:2 = Defend (auto-fire in range,
+        # never advance) — they bleed a raid that walks into them
+        # but do NOT chase, so the agent must actively command the
+        # screen to intercept raids before they reach the fact.
+        - {type: 2tnk, owner: agent, position: [16, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [16, 21], stance: 2}
+        # Harvester + ore patch WEST of the base — the harvest loop
+        # runs entirely behind the base, away from the eastern raid
+        # lane. The harvester is safe from the raids ONLY while the
+        # fact stands; if the base falls the loop collapses too.
+        - {type: harv, owner: agent, position: [5,  20]}
+        - {type: mine, owner: neutral, position: [2, 20]}
+        # Light raid bands on bot_type:hunt — each unit pursues the
+        # nearest agent unit. Two staggered light bands (3× e1, then
+        # 3× e1 + 1× e3) so the pressure is SUSTAINED, not a single
+        # probe. Off the (50,20) silently-failing column (CLAUDE.md).
+        - {type: e1, owner: enemy, position: [58, 20], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [72, 22], stance: 3, count: 1}
+        # Anti-DRAW marker: unarmed high-HP enemy fact far east keeps
+        # the episode alive past a full raid wipe so the win/fail
+        # check fires (engine auto-done on enemy-wipe ⇒ DRAW).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 2400}
+        - {unit_type_count_gte: {type: 2tnk, n: 5}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 axis: a HIGHER economy bar (3000 vs easy's 2400)
+  # on the SAME 1500 cash and the SAME 2→5 tank ramp. The raid bands
+  # stay light (the screen must hold with zero tank losses for the
+  # `unit_type_count_gte:2tnk,5` net count to clear — heavier raids
+  # would make the bar a slugfest-survival test rather than a
+  # survive-AND-grow test), but a third trailing band keeps the
+  # pressure sustained the full episode so an un-commanded screen
+  # still loses the fact. The higher M means a defend-only play that
+  # lets the harvester idle cannot clear the bar even with the base
+  # intact, and a concurrent play must keep the harvester running
+  # the WHOLE episode (not just survive a probe).
+  # max_turns 60 ⇒ reachable tick 5403; deadline 5400.
+  medium:
+    description: >
+      Sustained light enemy raid bands probe your base from the
+      east. Your fact, proc, powr, war factory, service depot, 2
+      medium tanks and 1 harvester (on a west-side ore patch) are
+      pre-placed. SURVIVE and GROW concurrently: keep the harvester
+      harvesting every turn, build 3 more 2tnk from the war factory
+      ($850 each), AND command the tank line onto each raid. Win
+      when economy value reaches 3000 AND you field at least 5
+      medium tanks AND the fact is still alive — all before tick
+      5400. The higher economy bar means a defend-only play that
+      never harvests cannot clear it; an un-screened base loses the
+      fact; only concurrent survive-and-grow, sustained the whole
+      episode, wins.
+    starting_cash: 1500
+    overrides:
+      actors:
+        - {type: fix,  owner: agent, position: [5,  17]}
+        - {type: weap, owner: agent, position: [5,  23]}
+        - {type: powr, owner: agent, position: [8,  17]}
+        - {type: proc, owner: agent, position: [8,  23]}
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: 2tnk, owner: agent, position: [16, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [16, 21], stance: 2}
+        - {type: harv, owner: agent, position: [5,  20]}
+        - {type: mine, owner: neutral, position: [2, 20]}
+        # Three staggered LIGHT raid bands — same per-band intensity
+        # as easy (3× e1, then 3× e1 + 1× e3) plus a third trailing
+        # 3× e1 band so the pressure runs the full episode.
+        - {type: e1, owner: enemy, position: [58, 20], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [72, 22], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [86, 18], stance: 3, count: 3}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 3000}
+        - {unit_type_count_gte: {type: 2tnk, n: 5}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── HARD ── +1 axis: TWO seed-driven agent spawn_point groups so
+  # the whole base (fact/proc/powr/weap/fix/2tnk/harv) flips between
+  # NORTH (y=14) and SOUTH (y=26) per seed; the harvest patch and
+  # the tank screen must follow. Enemies do NOT honour spawn_point
+  # (CLAUDE.md: oramap.rs::expand_scenario_actors), so raid bands
+  # are staged at BOTH candidate latitudes; the hunt bot pursues
+  # whichever agent base this seed spawned. A memorised "base at
+  # (12,20)" plan misses the active cluster. Same 1500 cash, same
+  # 2→5 ramp, same economy bar 3000 as medium and same light raid
+  # intensity — the controlled variable here is purely the seeded
+  # spawn flip. max_turns 60 ⇒ reachable tick 5403; deadline 5400.
+  hard:
+    description: >
+      Your base — construction yard, refinery, power, war factory,
+      service depot, 2 medium tanks and 1 harvester — flips between
+      a NORTH (y=14) and a SOUTH (y=26) staging per seed; the
+      harvest patch and the tank screen flip with it. Light enemy
+      raid bands are staged at BOTH candidate latitudes and pursue
+      your base. SURVIVE and GROW concurrently: keep the harvester
+      harvesting, build 3 more 2tnk from the war factory ($850
+      each), AND command the tank line onto the raids converging on
+      your active base. Win when economy value reaches 3000 AND you
+      field at least 5 medium tanks AND the fact is still alive —
+      all before tick 5400. A memorised base location misses the
+      active cluster; pure defence never grows past the bars;
+      ignoring the raids loses the fact. Only concurrent survive-
+      and-grow at the correct latitude wins.
+    starting_cash: 1500
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base (y=14). Every agent actor of
+        # this base tagged spawn_point:0. The `fact` is the
+        # easternmost building (the shield); weap/fix sit deep west.
+        - {type: fix,  owner: agent, position: [5,  11], spawn_point: 0}
+        - {type: weap, owner: agent, position: [5,  17], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8,  11], spawn_point: 0}
+        - {type: proc, owner: agent, position: [8,  17], spawn_point: 0}
+        - {type: fact, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [16, 13], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [16, 15], stance: 2, spawn_point: 0}
+        - {type: harv, owner: agent, position: [5,  14], spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=26, mirror across y=20).
+        - {type: fix,  owner: agent, position: [5,  23], spawn_point: 1}
+        - {type: weap, owner: agent, position: [5,  29], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8,  23], spawn_point: 1}
+        - {type: proc, owner: agent, position: [8,  29], spawn_point: 1}
+        - {type: fact, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [16, 25], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [16, 27], stance: 2, spawn_point: 1}
+        - {type: harv, owner: agent, position: [5,  26], spawn_point: 1}
+        # Spawn-matched ore patches WEST of each base — neutral
+        # actors always place regardless of spawn_point (CLAUDE.md);
+        # the active base's harvester runs its loop entirely behind
+        # the base, away from the eastern raid lanes.
+        - {type: mine, owner: neutral, position: [2, 14]}
+        - {type: mine, owner: neutral, position: [2, 26]}
+        # Enemies don't honour spawn_point — raid bands staged at
+        # BOTH candidate latitudes (y=14 and y=26). The hunt bot
+        # pursues the nearest agent unit, and ALL agent units sit at
+        # the active base, so EVERY raider — both latitudes' bands —
+        # eventually converges on the active base. The per-latitude
+        # band is therefore deliberately HALF the easy/medium total
+        # (one light 3× e1 + 1× e3 band per latitude = 8 raiders
+        # converging), keeping the total pressure on the active base
+        # at the same light intensity as easy/medium rather than
+        # double it. A trailing band at each latitude would
+        # over-pressure the active base and collapse the timing
+        # discrimination.
+        - {type: e1, owner: enemy, position: [60, 14], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [62, 14], stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [60, 26], stance: 3, count: 3}
+        - {type: e3, owner: enemy, position: [62, 26], stance: 3, count: 1}
+        # Anti-DRAW marker on the symmetry axis.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {economy_value_gte: 3000}
+        - {unit_type_count_gte: {type: 2tnk, n: 5}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
