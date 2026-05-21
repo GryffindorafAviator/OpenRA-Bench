@@ -8,6 +8,17 @@ level and every hard seed. Non-win is a real reachable timeout LOSS.
 
 Validation is scripted (no model / network). The four policies below
 are exhaustive proxies for the realistic plays a model could try.
+
+Recalibrated after the engine balance fixes (armor-class weapon
+selection, stance semantics, parallel production, pbox-fires): the
+ringed `1tnk` defenders are now pinned to stance:2 (Defend) in the
+pack YAML. Without an explicit stance they default to stance:3
+(AttackAnything), which — after the engine stance-semantics fix —
+actively HUNTS the enemy `fact` marker across the map and destroys
+it, ending the run as a premature DRAW the moment the enemy's last
+MustBeDestroyed building falls. stance:2 holds the ring on the patch
+so stall / pull-home run to a real `after_ticks` timeout LOSS and the
+intended ring keeps every defender alive (hard `units_lost_lte: 2`).
 """
 
 from __future__ import annotations
