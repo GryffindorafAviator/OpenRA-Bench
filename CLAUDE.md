@@ -183,6 +183,24 @@ A scenario is defective if any of the following hold:
   defense and infantry are SEPARATE production queues so an
   efficient policy queues `build('pbox')` and `build('e1')` in
   parallel from turn 1.
+- **Multiple production buildings of the same category produce IN
+  PARALLEL** (engine fix, pinned by
+  `OpenRA-Rust/openra-sim/tests/test_parallel_production.rs` +
+  `tests/test_parallel_production.py`). The production tick advances
+  a category's queue once per completed, alive production building
+  of that category — two `weap` advance the Vehicle queue twice per
+  tick, so two war factories roughly DOUBLE vehicle output (likewise
+  `tent`/`barr` → Infantry, `hpad`/`afld` → Aircraft, `spen`/`syrd`
+  → Ship). Before the fix the engine modelled production as ONE
+  per-player queue per category and a 2nd factory added zero
+  throughput. Building / Defense queues (fed by the construction
+  yard) keep single-stream semantics. This makes "build a 2nd
+  factory to hit a throughput quota" a real load-bearing capability
+  — see `build-production-throughput-multibuilding`. NOTE: the 2nd
+  factory only helps if there is CASH to feed both queues; a
+  cash-starved play (e.g. `econ-buy-vs-build-decision`, where a 2nd
+  weap leaves only ~1 tank's worth of residual cash) is still a
+  losing CAPEX trap — the fix does not break that pack's bar.
 - **`place_building` does NOT enforce build-adjacency** — orders
   work at arbitrary in-bounds coords. Forward-base / far-region
   building is solvable with a single `build + place_building`.

@@ -1191,6 +1191,13 @@ UPGRADED = [
     # instantiates exactly one self-consistent base latitude with its
     # bands per seed and a memorised opening cannot generalise.
     "build-repair-priority-under-fire",
+    # Pure-survival pack: the hard tier defines two agent spawn_point
+    # groups (NORTH y=12 / SOUTH y=28) round-robined by seed; the fact,
+    # powr and all 6 starting tanks are duplicated across both groups.
+    # The rusher band + scheduled reinforcement waves charge the
+    # central lane and converge on whichever latitude the seed
+    # selected, so a memorised hold cell cannot generalise.
+    "tp-survive-n-turns",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

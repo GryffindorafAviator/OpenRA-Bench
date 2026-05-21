@@ -1,0 +1,277 @@
+# Validate: python -m openra_bench.scenarios.validate packs/build-production-throughput-multibuilding.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# BUILD-PRODUCTION-THROUGHPUT-MULTIBUILDING (REASONING — parallel
+# manufacturing throughput: a second production building of the same
+# category doubles per-tick output).
+#
+# Real-world anchor: queueing theory / SC2 multi-factory throughput /
+# manufacturing parallelism. A SINGLE assembly line is a serial
+# server — it clears one job at a time. Adding a SECOND identical line
+# in the same category does not split the job; it doubles the service
+# RATE. The decision the pack tests is the one a factory planner makes
+# under a delivery deadline: a fixed quota of vehicles must ship by
+# tick T, and a single war factory CANNOT clear the quota in time. The
+# agent has cash for a SECOND war factory — building it (and feeding
+# both queues) is the only play that hits the deadline.
+#
+# This pack exists to exercise the parallel-production engine fix
+# (OpenRA-Rust/openra-sim/src/world.rs — the production tick now
+# advances a category's queue once per completed, alive production
+# building of that category; see test_parallel_production.rs and
+# tests/test_parallel_production.py). Before the fix the engine
+# modelled production as ONE per-player queue per category, so a 2nd
+# war factory added ZERO throughput and this pack would be unsolvable;
+# the fix makes two factories roughly double vehicle output, exactly
+# the OpenRA behaviour.
+#
+# THE DECISION (the whole test):
+#   The agent starts with a full base — fact + proc + powr + fix +
+#   ONE war factory (weap) — and cash for a SECOND weap ($2000) plus
+#   the tank quota. A medium-tank quota (2tnk × N) must be FIELDED
+#   before a tight tick deadline T. Measured (installed wheel, seed 1,
+#   12000-cash sandbox, both queues kept saturated):
+#     • ONE weap:  tank #5 fields ≈ tick 2613, tank #6 ≈ tick 3063.
+#     • TWO weap (2nd queued turn 1, placed ≈ tick 1443, both queues
+#       saturated thereafter): tank #6 fields ≈ tick 2253, tank #7
+#       ≈ tick 2613.
+#   So with N=6 and T≈2700 a ONE-factory play reaches only 5 tanks by
+#   the deadline (LOSS) while the TWO-factory play has 6 well before
+#   it (WIN). The deadline is the teeth: it is reachable inside
+#   max_turns, so a non-finisher LOSES on a real timeout, never draws.
+#
+# Engine facts used (verified against the installed openra_train wheel):
+#
+# 1. Build costs (gamerules.rs): weap = 2000 (prereq proc), 2tnk = 850
+#    (prereq weap + fix — the allied Service Depot tech gate). Both
+#    weap and fix are pre-placed, so 2tnk is buildable from turn 1 and
+#    a SECOND weap is buildable from turn 1 (proc pre-placed).
+# 2. Parallel production: the engine advances a category's production
+#    queue once per completed, alive production building of that
+#    category (Vehicle queue ← every `weap`). Two war factories thus
+#    clear the 2tnk queue at ~2× the rate of one — the capability the
+#    win predicate is load-bearing on.
+# 3. `place_building` has no adjacency requirement (CLAUDE.md), so the
+#    second weap may be placed anywhere in-bounds; the LOSS for a
+#    one-factory play is throughput-limited, not placement-limited.
+# 4. Tick alignment: the engine advances ~90 ticks per decision turn,
+#    so within_ticks ≤ 93 + 90·(max_turns − 1) is required (CLAUDE.md).
+#    fail_condition uses `after_ticks = within_ticks + 1` so a non-
+#    finisher LOSES on the very next tick after the window closes.
+# 5. The persistent unarmed enemy `fact` MARKER far away keeps the
+#    engine's auto-`done` (all-enemies-eliminated) path gated, so a
+#    non-winner reaches the deadline as a real LOSS (never a DRAW).
+#    The agent has no offensive tools, so the marker cannot be razed.
+# 6. The `not building_count_gte: fact: 1` fail clause guards the
+#    edge case where the agent's own `fact` is lost (here impossible —
+#    no enemy aggression — but kept as the CLAUDE.md defensive idiom).
+#    `building_count_gte` (counts the live `own_buildings` list) is
+#    used instead of `has_building` per the CLAUDE.md own-elimination
+#    footgun.
+# 7. Hard tier: the `spawn_point` filter applies ONLY to AGENT actors,
+#    and ANY agent actor with spawn_point causes agent actors WITHOUT
+#    spawn_point to be filtered out (CLAUDE.md oramap.rs footgun). So
+#    EVERY persistent agent base building is duplicated across both
+#    spawn_point groups at the spawn-matched coords; the enemy `fact`
+#    marker has no spawn_point and always places.
+#
+# DISCRIMINATIONS (CLAUDE.md bar — no defect, no cheat, no draw):
+#   • stall (only observe): LOSS — 0 tanks, the deadline bites.
+#   • one-weap-only (spam 2tnk from the single pre-placed factory,
+#     never build the 2nd): LOSS — a single serial factory clears
+#     only 5 tanks by the deadline, one short of the quota.
+#   • build-2nd-weap (queue the 2nd weap turn 1, place it, keep BOTH
+#     vehicle queues saturated): WIN — parallel throughput fields the
+#     6-tank quota well inside the deadline.
+
+meta:
+  id: build-production-throughput-multibuilding
+  title: 'Parallel Production Throughput — Build a Second War Factory to Hit the Quota'
+  capability: reasoning
+  real_world_meaning: >
+    A delivery deadline forces a manufacturing-throughput decision. A
+    fixed quota of vehicles must ship before a tight clock, and the
+    agent starts with exactly ONE production line (war factory). A
+    single serial line cannot clear the quota in time. The agent has
+    cash for a SECOND identical line; building it and feeding both
+    queues roughly doubles the per-tick output rate (parallel
+    manufacturing — a second assembly line does not split the job, it
+    doubles the service rate). The pack frames the classic
+    queueing-theory call: when one server cannot meet the deadline,
+    add a second server in parallel.
+  robotics_analogue: >
+    Fleet dispatch throughput under a delivery SLA: a warehouse must
+    ship N orders before a deadline, but a single loading dock (one
+    serial server) clears jobs too slowly to meet it. The operator
+    has budget for a second identical loading dock; commissioning it
+    and routing jobs to both docks doubles the dispatch rate. The
+    decision is a parallelism call — recognise that the single server
+    is the bottleneck and add a second server, rather than pushing
+    harder on the one that is already saturated.
+  benchmark_anchor:
+    - "queueing theory"
+    - "SC2 multi-factory throughput"
+    - "manufacturing parallelism"
+  author: openra-bench
+
+base_map: rush-hour-arena
+# Cash covers the SECOND war factory ($2000) plus the 6-tank quota
+# ($850 × 6 = $5100) with working slack — $9000. The stall and
+# one-factory plays keep this cash but cannot convert it to tanks
+# fast enough; the budget is never the binding constraint, throughput
+# is.
+starting_cash: 9000
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Pure throughput test: the decision is exclusively whether to lay
+  # down a SECOND war factory and feed both queues. No deploy, no
+  # harvest, no move/attack tools.
+  tools: [observe, build, place_building, stop]
+  spawn_mcvs: false
+  planning: true
+  # Re-decide the instant a production job completes — the agent
+  # should notice the first tanks fielding too slowly and commit to
+  # the second factory without burning fixed-cadence turns.
+  interrupts:
+    production_complete: true
+  termination: {max_ticks: 12000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare throughput call: one pre-placed weap, quota of 6 medium
+  # tanks, deadline tick 2700. A single factory fields only ~5 tanks
+  # by then; building the second and feeding both queues fields the
+  # 6th well inside the window. max_turns 35 → reachable tick
+  # 93 + 90·34 = 3153 > 2701 ✓ (the deadline bites as a real LOSS).
+  easy:
+    description: >
+      You have a full base — Construction Yard (fact), Refinery
+      (proc), Power Plant (powr), Service Depot (fix) and ONE War
+      Factory (weap) — and $9000. Field 6 medium tanks (2tnk, cost
+      $850 each) before tick 2700. ONE war factory cannot build 6
+      tanks in time — it is a single serial production line. You have
+      cash for a SECOND war factory ($2000); two factories produce
+      vehicles IN PARALLEL and roughly double your output. Build the
+      second weap, place it, and keep BOTH queues full. Win = own ≥6
+      medium tanks AND your fact still stands, before tick 2700.
+      Stalling or spamming tanks from the single factory both miss
+      the quota and LOSE on the clock.
+    starting_cash: 9000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [13, 20]}
+        - {type: powr, owner: agent, position: [13, 23]}
+        - {type: proc, owner: agent, position: [16, 20]}
+        - {type: fix,  owner: agent, position: [16, 23]}
+        - {type: weap, owner: agent, position: [19, 20]}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 35
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER deadline (tick 2613 — exactly the
+  # measured fielding tick of the 5th tank for a one-factory play, so
+  # one factory is a clean LOSS; the two-factory play fields its 7th
+  # by then, comfortable WIN). Same quota, same base. max_turns 33 →
+  # reachable tick 93 + 90·32 = 2973 > 2614 ✓.
+  medium:
+    description: >
+      Same base as easy (fact + proc + powr + fix + ONE weap, $9000)
+      but a tighter deadline: field 6 medium tanks (2tnk) before
+      tick 2613. A single war factory clears only ~5 tanks by then.
+      Build a SECOND war factory and feed both queues — two factories
+      produce vehicles in parallel and double your throughput. Win =
+      own ≥6 medium tanks AND your fact still stands, before tick
+      2613. Stall or single-factory spam both LOSE on the clock.
+    starting_cash: 9000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [13, 20]}
+        - {type: powr, owner: agent, position: [13, 23]}
+        - {type: proc, owner: agent, position: [16, 20]}
+        - {type: fix,  owner: agent, position: [16, 23]}
+        - {type: weap, owner: agent, position: [19, 20]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 2613}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2614}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 33
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO agent spawn_point
+  # groups (NORTH base y=14 / SOUTH base y=26) round-robined by seed.
+  # The whole base (fact + proc + powr×2 + fix + weap) is duplicated
+  # at both latitudes, so the placement coords for the second weap
+  # must be read from the actual base position — a memorised opening
+  # cannot generalise. Same tight quota (6) and same tight deadline
+  # (tick 2613) as medium; the throughput decision is identical, only
+  # the spawn latitude varies. max_turns 33 → reachable tick 2973
+  # > 2614 ✓.
+  hard:
+    description: >
+      Same throughput call as medium (field 6 medium tanks before
+      tick 2613 from a base with ONE pre-placed war factory; build a
+      SECOND for parallel output) but your base may begin in the
+      NORTH band (y≈14) or the SOUTH band (y≈26) depending on the
+      seed. Read your War Factory's actual position from the
+      observation and place the second weap adjacent to it. A single
+      factory clears only ~5 tanks by the deadline; build the second
+      and feed both queues. Win = own ≥6 medium tanks AND your fact
+      still stands, before tick 2613. Stall or single-factory spam
+      both LOSE on the clock.
+    starting_cash: 9000
+    overrides:
+      actors:
+        # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [13, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [13, 17], spawn_point: 0}
+        - {type: proc, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [16, 17], spawn_point: 0}
+        - {type: weap, owner: agent, position: [19, 14], spawn_point: 0}
+        # Inert spawn-witness e1 (HoldFire, no move/attack tool
+        # exposed, enemy ~100 cells away) — required for the hard-
+        # tier units_summary spawn-variation check; functionally
+        # inert for the throughput decision.
+        - {type: e1, owner: agent, position: [11, 14], spawn_point: 0, stance: 0}
+        # ── AGENT spawn 1 — SOUTH base (y=26) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [13, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [13, 29], spawn_point: 1}
+        - {type: proc, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [16, 29], spawn_point: 1}
+        - {type: weap, owner: agent, position: [19, 26], spawn_point: 1}
+        - {type: e1, owner: agent, position: [11, 26], spawn_point: 1, stance: 0}
+        # Persistent far enemy marker — LOSS-not-DRAW guarantee
+        # (no spawn_point ⇒ always places).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 2613}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2614}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 33
