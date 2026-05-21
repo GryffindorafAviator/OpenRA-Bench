@@ -27,6 +27,17 @@ Engine facts respected (CLAUDE.md):
     footgun); after_ticks is in fail_condition only.
   - hard has 2 agent spawn_point groups (north/south base) so seeds
     round-robin the start position per tests/test_hard_tier.py.
+
+Recalibrated (2026-05) after the engine movement fixes: the far
+enemy marker was a token `e1`, but the hard tier's per-spawn token
+agent `e1` sentry now auto-advances on the nearest visible enemy and
+ground the enemy `e1` to death — eliminating the last enemy actor,
+which auto-`done`s the engine and collapsed the hard tier to a DRAW
+before the clock could bite. The marker is now an unarmed high-HP
+`fact` (a lone rifleman cannot destroy it within the episode), so
+the within_ticks / after_ticks clock stays the real arbiter and the
+stall / econ-first / balanced policies all reach a real timeout LOSS
+on hard. The four scripted policies are unchanged.
 """
 
 from __future__ import annotations

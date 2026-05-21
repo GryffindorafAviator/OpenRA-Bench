@@ -62,9 +62,17 @@
 #   - tsla cost=1200, in the Defense production queue, prereq=weap.
 #   - weap prereq INCLUDES proc (engine-enforced; verified by
 #     building-and-planning's prereq probing and a fresh smoke).
-#   - fact is owner=enemy (not destroyable as a win path); the
-#     lone enemy e1 at (110,20) gives a target marker without
-#     attack pressure, and the agent's own fact is its own.
+#   - The far enemy marker is an unarmed high-HP `fact`, NOT an `e1`.
+#     After the 2026-05 engine movement fixes, the per-spawn token
+#     agent `e1` sentry on the HARD tier auto-advances on the nearest
+#     visible enemy and would grind a token enemy `e1` to death,
+#     eliminating the last enemy actor — the engine then auto-`done`s
+#     on enemy-elimination and collapses the tech race to a DRAW
+#     before the within_ticks clock can bite. A `fact` survives a
+#     lone rifleman for the whole episode, so it remains a persistent
+#     enemy actor and the clock stays the real arbiter. (Recalibrated
+#     for this; the race is still the clock, not combat — the marker
+#     carries no attack pressure.)
 #   - The win predicate `has_building: tsla` + `has_building: weap`
 #     pairs with `within_ticks` — no `after_ticks` in the WIN clause
 #     (would be inert per the ConquestVictoryConditions footgun).
@@ -146,9 +154,10 @@ levels:
         - {type: fact, owner: agent, position: [10, 18]}
         - {type: barr, owner: agent, position: [14, 22]}
         - {type: powr, owner: agent, position: [10, 26]}
-        # Token enemy: lightly-armed and far — no real attack
-        # pressure; the race is the clock, not combat.
-        - {type: e1, owner: enemy, position: [110, 20], stance: 2}
+        # Far enemy marker: an unarmed high-HP `fact` — no attack
+        # pressure, a persistent enemy actor so the engine never
+        # auto-`done`s on enemy-elimination; the race is the clock.
+        - {type: fact, owner: enemy, position: [110, 20]}
     win_condition:
       all_of:
         - {has_building: weap}
@@ -181,7 +190,8 @@ levels:
         - {type: fact, owner: agent, position: [10, 18]}
         - {type: barr, owner: agent, position: [14, 22]}
         - {type: powr, owner: agent, position: [10, 26]}
-        - {type: e1, owner: enemy, position: [110, 20], stance: 2}
+        # Far enemy marker: unarmed high-HP `fact` (auto-done guard).
+        - {type: fact, owner: enemy, position: [110, 20]}
     win_condition:
       all_of:
         - {has_building: weap}
@@ -234,9 +244,18 @@ levels:
         - {type: barr, owner: agent, position: [14, 26], spawn_point: 1}
         - {type: powr, owner: agent, position: [10, 22], spawn_point: 1}
         - {type: e1, owner: agent, position: [12, 24], spawn_point: 1}
-        # Enemy placed unconditionally (engine: spawn_point filter
-        # applies only to AGENT actors).
-        - {type: e1, owner: enemy, position: [110, 20], stance: 2}
+        # Enemy marker placed unconditionally (engine: spawn_point
+        # filter applies only to AGENT actors). An unarmed high-HP
+        # `fact` (not an `e1`): after the engine movement fixes, the
+        # per-spawn token agent `e1` sentry auto-advances on the
+        # nearest visible enemy and would whittle down a token enemy
+        # `e1`, eliminating the last enemy actor — the engine then
+        # auto-`done`s on enemy-elimination and collapses the tech
+        # race to a DRAW before the clock bites. A `fact` cannot be
+        # destroyed by a lone rifleman within the episode, so it stays
+        # a persistent enemy actor and the within_ticks / after_ticks
+        # clock remains the real arbiter (CLAUDE.md auto-done guard).
+        - {type: fact, owner: enemy, position: [110, 20]}
     win_condition:
       all_of:
         - {has_building: weap}
