@@ -1200,6 +1200,19 @@ UPGRADED = [
     "tp-survive-n-turns",
     # Wave-10 multi-base pack — rotate set_primary with alternating raids; hard 2 spawn_point groups.
     "mfb-rotating-production-pressure",
+    # Wave-10 Group-M preventive-maintenance pack — peacetime repair
+    # triage before a scheduled stress strike (disaster recovery /
+    # preventive maintenance scheduling / SC2 SCV-repair anchor). Five
+    # pre-placed buildings at mixed `health:`; the agent must repair
+    # the three win-critical buildings (proc + weap + fact) to full
+    # and keep `repair` on them through a late grenadier strike, not
+    # the loud low-value pbox/fix decoys. Hard tier defines two agent
+    # spawn_point groups (WEST base column x=20 / EAST base column
+    # x=70) round-robined by seed; the full base is duplicated under
+    # each spawn_point and both column strikes fire every seed
+    # (scheduled_events do not honour spawn_point), so a memorised
+    # opening cannot generalise.
+    "maint-repair-priority-order",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

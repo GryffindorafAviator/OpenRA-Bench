@@ -1,0 +1,389 @@
+# maint-repair-priority-order — preventive-maintenance repair triage:
+# a quiet inherited base whose structures are pre-damaged to varying
+# degrees; a stress strike lands LATE. Repair the HIGH-VALUE,
+# win-critical buildings to full BEFORE the strike (and keep the
+# repair organ on them THROUGH it) so they ride it out — repairing
+# the loud low-value decoy first wastes the maintenance window and the
+# critical buildings fall.
+#
+# REASONING capability — Wave-10 Group-M "preventive maintenance
+# scheduling" pack. Unlike the combat sibling
+# `build-repair-priority-under-fire` (three live grenadier bands at
+# t=0, a triage-under-fire decision), this pack is PEACETIME at the
+# start: nothing is shooting. The agent inherits a base of five
+# pre-placed buildings at different health levels and must decide,
+# during a calm window, WHICH to repair and IN WHAT ORDER before a
+# scheduled stress strike (`scheduled_events` spawn) hits. The damage
+# picture is deliberately misleading:
+#
+#   - proc (refinery)  — HIGH value, win-critical, pre-damaged to 40%.
+#   - weap (war factory) — HIGH value, win-critical, pre-damaged to ~55%.
+#   - fact (construction yard) — HIGH value, win-critical, ~50%.
+#   - pbox (pillbox)   — LOW value, the DECOY: pre-damaged to 20% so a
+#     naive "repair the most-damaged building first" heuristic targets
+#     it. The pbox is NOT in the win predicate and sits OUT of the
+#     strike's blast region — repairing it is wasted maintenance.
+#   - fix (service depot) — LOW value, ~35%, also outside the strike
+#     region and not win-critical.
+#
+# A late strike of grenadier squads spawns adjacent to the three
+# win-critical buildings and is removed shortly after (a bounded
+# stress burst, the canonical `spawn_actors` + `destroy_actors`
+# scheduled-event idiom). A building repaired to FULL and kept on
+# `repair` through the burst rides it out at 100%; a building left at
+# its inherited 40-55% HP is destroyed inside the burst.
+#
+# Bar:
+#   - stall (only observe): LOSS — the win-critical buildings are
+#     never repaired; the strike destroys the proc (and the weap /
+#     fact); fail clause `not building_count_gte:proc` fires.
+#   - repair-low-value-first (toggle repair on the most-damaged-
+#     LOOKING buildings — the pbox + fix): LOSS — the loud decoys are
+#     saved but they are not in the win predicate and never in
+#     danger; the proc / weap / fact get no repair and fall to the
+#     strike; same fail clause fires.
+#   - INTENDED triage (repair the proc + weap + fact to full and keep
+#     `repair` on them through the strike window): WIN — every
+#     win-critical building rides out the bounded burst at full HP;
+#     the three building-count clauses latch inside the clock.
+#
+# Anchor: preventive-maintenance scheduling / disaster recovery —
+# the plant / fleet preventive-maintenance doctrine ("service the
+# load-bearing assets to spec BEFORE the known stress event, not the
+# component with the loudest wear indicator"); the SC2 SCV-repair
+# habit of topping up the production structures ahead of a timing
+# attack; SRE pre-incident hardening.
+#
+# ENGINE FACTS (CLAUDE.md):
+# - `health: N` on a pre-placed actor is an HP PERCENTAGE (1-100):
+#   the engine seeds the spawned `Health` trait to max_hp * N / 100.
+#   (Engine fix: the scenario parser now carries the `health:` field
+#   through to the spawned actor — see openra-data/tests/
+#   test_actor_health.rs + tests/test_actor_health_field.py.)
+# - `repair` toggles autorepair on a building ID; it heals ~1% of the
+#   building's max HP per tick and deducts a small proportional cash
+#   cost (world.rs). Repair auto-stops when the building is full or
+#   the owner runs out of cash, so it must be RE-ISSUED each turn to
+#   keep healing a building that is being chipped. Buildings surface
+#   in `own_buildings` / `buildings_summary` each carrying the REAL
+#   engine actor `id` the agent targets (engine + adapter fix:
+#   tests/test_repair_building_id.py).
+# - `scheduled_events:` fires a `spawn_actors` burst at an absolute
+#   tick and a `destroy_actors` removes it shortly after — a bounded
+#   stress event (pinned by openra-data/tests/test_scheduled_events.rs).
+# - `building_count_gte:{type: proc, n: 1}` re-counts the LIVE
+#   building actors every tick (no accumulating-set footgun), so the
+#   moment a required building falls the `not building_count_gte`
+#   fail clause trips — a clean immediate LOSS, never a draw.
+# - Reachable tick approx 93 + 90*(max_turns-1); every within_ticks /
+#   after_ticks below sits inside reachable for its tier so the
+#   deadline always bites.
+# - Grenadier (e2) carries the Grenade weapon (Versus Wood 100%):
+#   proc / weap / fact are wood-armoured so the burst chews them fast;
+#   a building topped to full HP and kept on `repair` survives the
+#   bounded window, an un-repaired one does not.
+# - The unarmed high-HP enemy `fact` far east prevents the engine
+#   auto-`done` on enemy-elimination before the win/clock evaluates;
+#   the strike grenadiers are removed by `destroy_actors` so they
+#   never reach it.
+# - `after_ticks` is SAFE in this win clause: the agent has no attack
+#   tools and no units, so the engine's conquest auto-done (last
+#   enemy MustBeDestroyed building falls) can never fire — the
+#   CLAUDE.md `after_ticks`-in-win footgun does not apply here.
+# - hard: agent base declares `spawn_point` so each seed instantiates
+#   exactly one base column (per-owner filter, oramap.rs::
+#   expand_scenario_actors). scheduled_events do NOT honour
+#   spawn_point, so both column strikes always fire; the strike on
+#   the empty column harmlessly spawns grenadiers that find no
+#   buildings and are removed by the destroy_actors.
+
+meta:
+  id: maint-repair-priority-order
+  title: 'Repair Priority Order — Service the Critical Plant Before the Strike'
+  capability: reasoning
+  real_world_meaning: >
+    You inherit a quiet production base whose five structures are
+    pre-damaged to varying degrees and you have a maintenance window
+    before a scheduled stress event hits. The damage picture is
+    misleading: the pillbox is the most worn (20%) and the loudest
+    wear indicator, but it is low value, not load-bearing, and sits
+    away from the coming stress. The refinery, war factory, and
+    construction yard are the load-bearing assets and they are the
+    ones the strike targets. The intended decision is preventive-
+    maintenance triage: service the load-bearing plant to spec BEFORE
+    the known stress event and keep the repair organ on it through
+    the event — not the component whose wear gauge is reddest.
+    Repairing the loud low-value decoys first, or stalling, loses
+    the critical plant when the strike lands.
+  robotics_analogue: >
+    Preventive-maintenance scheduling / pre-incident hardening: a
+    plant or robot fleet has a known upcoming stress event (a peak-
+    load window, a qualification test, a storm) and a finite service
+    window beforehand. The correct policy services the load-bearing
+    subsystems to spec ahead of the event and keeps them monitored
+    through it, rather than chasing whichever wear indicator looks
+    worst. The same criticality-weighted, deadline-aware
+    prioritisation governs SC2 SCV pre-timing repair and SRE
+    pre-incident hardening.
+  benchmark_anchor:
+    - "disaster recovery"
+    - "preventive maintenance scheduling"
+    - "SC2 SCV repair"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 4000
+
+base:
+  agent:
+    faction: allies
+  # Stance-only enemy (no bot_type). The strike squads are injected
+  # mid-episode by scheduled_events and removed by a destroy_actors;
+  # there is no enemy at t=0 — the opening is genuinely peacetime.
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    # The load-bearing tool: toggles autorepair on a building.
+    - repair
+  planning: true
+  # Re-decide the instant the strike comes into sight so the agent
+  # can keep the repair organ on the critical buildings through the
+  # burst (repair must be re-issued each turn to keep healing).
+  interrupts:
+    enemy_unit_spotted: true
+    own_building_destroyed: true
+  termination:
+    max_ticks: 12000
+  actors: []
+
+levels:
+  # ── EASY ── the bare preventive-maintenance skill. Five pre-placed
+  # buildings at mixed health; one strike of 3 grenadier squads (3
+  # each) lands at tick 720 (~turn 9) and is removed at tick 820. The
+  # agent has ~8 calm turns to repair the proc + weap + fact to full
+  # and keep `repair` on them. within_ticks 1500 (~turn 17); max_turns
+  # 22 → reachable tick 1983, so after_ticks 1501 bites.
+  easy:
+    description: >
+      You inherit a quiet production base: a refinery (proc, ~40%
+      health), a war factory (weap, ~55%), a construction yard
+      (fact, ~50%), a pillbox (pbox, ~20%) and a service depot
+      (fix, ~35%). Nothing is attacking yet, but a grenadier strike
+      will hit the refinery, war factory and construction yard
+      around turn nine. The pillbox is the most worn and looks the
+      most urgent, but it is low value and out of the strike's path.
+      Use the maintenance window to toggle REPAIR on the refinery,
+      war factory and construction yard — repair them to full and
+      keep repair on them through the strike. Win when the refinery,
+      the war factory and the construction yard are all still
+      standing before tick 1500. If any of the three falls, or the
+      clock runs out with one missing, you lose. Stalling and
+      repairing the low-value pillbox / service depot both lose the
+      critical plant.
+    overrides:
+      actors:
+        # Three HIGH-value, win-critical buildings, pre-damaged.
+        # Stacked in the western column; the strike bursts spawn
+        # adjacent to each.
+        - {type: proc, owner: agent, position: [20, 12], health: 40}
+        - {type: weap, owner: agent, position: [20, 22], health: 55}
+        - {type: fact, owner: agent, position: [20, 32], health: 50}
+        # LOW-value decoys: the pbox is the MOST worn (20%) — the
+        # loudest wear indicator — but it is not win-critical and
+        # sits well east of the strike region. Repairing it is
+        # wasted maintenance.
+        - {type: pbox, owner: agent, position: [44, 16], health: 20}
+        - {type: fix,  owner: agent, position: [44, 28], health: 35}
+        # Unarmed high-HP enemy fact far east — prevents the engine
+        # auto-`done` on enemy-elim before the win/clock evaluates.
+        - {type: fact, owner: enemy, position: [120, 20]}
+      scheduled_events:
+        # Late stress strike: three grenadier squads spawn adjacent
+        # to the three win-critical buildings at tick 720, removed at
+        # tick 820 — a bounded burst. A building topped to full and
+        # kept on `repair` rides it out; an un-repaired one is razed.
+        - tick: 720
+          type: spawn_actors
+          actors:
+            - {type: e2, owner: enemy, position: [22, 9],  stance: 3, count: 3}
+            - {type: e2, owner: enemy, position: [22, 19], stance: 3, count: 3}
+            - {type: e2, owner: enemy, position: [22, 29], stance: 3, count: 3}
+        - tick: 820
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 22, y: 19, radius: 26}
+    # The win cannot latch before the strike resolves: `after_ticks:
+    # 900` holds it shut until tick 900 (the strike spawns at 720,
+    # is removed at 820, the building HPs settle by ~850). Only then
+    # does the survival of the three win-critical buildings actually
+    # mean they rode out the strike. A staller / wrong-repair play
+    # reaches tick 900 with the proc already razed, so the win never
+    # latches and `after_ticks: 1501` catches it as a clean LOSS.
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - after_ticks: 900
+        - within_ticks: 1500
+    fail_condition:
+      any_of:
+        - after_ticks: 1501
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 22
+
+  # ── MEDIUM ── +1 controlled variable: a heavier strike (4
+  # grenadiers per squad) AND a tighter clock (within_ticks 1300,
+  # max_turns 20 → reachable tick 1803, so after_ticks 1301 bites).
+  # The heavier burst punishes a building that is not topped to full
+  # AND kept on repair — a "repair once, then stop" play loses the
+  # proc inside the burst. The intended triage still wins with cash
+  # to spare.
+  medium:
+    description: >
+      You inherit a quiet production base: a refinery (proc, ~40%),
+      a war factory (weap, ~55%), a construction yard (fact, ~50%),
+      a pillbox (pbox, ~20%) and a service depot (fix, ~35%).
+      Nothing is attacking yet, but a heavy grenadier strike will
+      hit the refinery, war factory and construction yard around
+      turn nine. The pillbox is the most worn and looks the most
+      urgent, but it is low value and out of the strike's path. Use
+      the maintenance window to toggle REPAIR on the refinery, war
+      factory and construction yard, repair them to full, and KEEP
+      repair on them through the strike. Win when all three are
+      still standing before tick 1300. If any of the three falls,
+      or the clock runs out with one missing, you lose. Stalling,
+      repairing the low-value pillbox / service depot, and repairing
+      the critical buildings only once then stopping all lose.
+    overrides:
+      actors:
+        - {type: proc, owner: agent, position: [20, 12], health: 40}
+        - {type: weap, owner: agent, position: [20, 22], health: 55}
+        - {type: fact, owner: agent, position: [20, 32], health: 50}
+        - {type: pbox, owner: agent, position: [44, 16], health: 20}
+        - {type: fix,  owner: agent, position: [44, 28], health: 35}
+        - {type: fact, owner: enemy, position: [120, 20]}
+      scheduled_events:
+        - tick: 720
+          type: spawn_actors
+          actors:
+            - {type: e2, owner: enemy, position: [22, 9],  stance: 3, count: 4}
+            - {type: e2, owner: enemy, position: [22, 19], stance: 3, count: 4}
+            - {type: e2, owner: enemy, position: [22, 29], stance: 3, count: 4}
+        - tick: 820
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 22, y: 19, radius: 26}
+    # `after_ticks: 900` holds the win shut until the strike resolves
+    # (see the easy-tier note); only a base that rode out the strike
+    # can latch the three building-count clauses.
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - after_ticks: 900
+        - within_ticks: 1300
+    fail_condition:
+      any_of:
+        - after_ticks: 1301
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 20
+
+  # ── HARD ── +1 controlled variable: TWO spawn_point groups round-
+  # robin the AGENT base column (WEST x=20 cluster / EAST x=70
+  # mirror) per seed, so a single memorised opening cannot
+  # generalise. The agent base declares `spawn_point`; the per-owner
+  # filter (oramap.rs::expand_scenario_actors) instantiates exactly
+  # one self-consistent base column per seed; the persistent
+  # every-seed enemy auto-`done` fact is duplicated across both
+  # groups. Same heavy strike and clock as medium.
+  hard:
+    description: >
+      You inherit a quiet production base — a refinery (proc, ~40%),
+      a war factory (weap, ~55%), a construction yard (fact, ~50%),
+      a pillbox (pbox, ~20%) and a service depot (fix, ~35%). Your
+      base stages from a seed-chosen column, so a single memorised
+      opening cannot generalise. Nothing is attacking yet, but a
+      heavy grenadier strike will hit the refinery, war factory and
+      construction yard around turn nine. The pillbox is the most
+      worn and looks the most urgent, but it is low value and out of
+      the strike's path. Use the maintenance window to toggle REPAIR
+      on the refinery, war factory and construction yard, repair
+      them to full, and keep repair on them through the strike. Win
+      when all three are still standing before tick 1300. If any of
+      the three falls, or the clock runs out with one missing, you
+      lose. Stalling, repairing the low-value decoys, and repairing
+      the critical buildings only once then stopping all lose.
+    overrides:
+      actors:
+        # WEST base group (spawn_point 0). Full base duplicated under
+        # each spawn_point: ANY agent actor with a spawn_point
+        # filters OUT every ungrouped agent actor.
+        - {type: proc, owner: agent, position: [20, 12], health: 40, spawn_point: 0}
+        - {type: weap, owner: agent, position: [20, 22], health: 55, spawn_point: 0}
+        - {type: fact, owner: agent, position: [20, 32], health: 50, spawn_point: 0}
+        - {type: pbox, owner: agent, position: [44, 16], health: 20, spawn_point: 0}
+        - {type: fix,  owner: agent, position: [44, 28], health: 35, spawn_point: 0}
+        # Inert HoldFire spawn-witness — surfaces the seed's chosen
+        # column in units_summary (the buildings-only win predicate
+        # ignores it). Placed by the decoy cluster, well clear of the
+        # strike region, so it neither fights nor is targeted.
+        - {type: e1,   owner: agent, position: [44, 22], stance: 0, spawn_point: 0}
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 0}
+        # EAST base group (spawn_point 1) — the base mirrored east
+        # into the x=70 column with the same y-geometry.
+        - {type: proc, owner: agent, position: [70, 12], health: 40, spawn_point: 1}
+        - {type: weap, owner: agent, position: [70, 22], health: 55, spawn_point: 1}
+        - {type: fact, owner: agent, position: [70, 32], health: 50, spawn_point: 1}
+        - {type: pbox, owner: agent, position: [94, 16], health: 20, spawn_point: 1}
+        - {type: fix,  owner: agent, position: [94, 28], health: 35, spawn_point: 1}
+        # Inert HoldFire spawn-witness for the EAST group (see WEST).
+        - {type: e1,   owner: agent, position: [94, 22], stance: 0, spawn_point: 1}
+        - {type: fact, owner: enemy, position: [120, 44], spawn_point: 1}
+      scheduled_events:
+        # BOTH strike columns fire every seed — scheduled_events do
+        # NOT honour `spawn_point` (only the actors: list does), so
+        # the strike that lands on the EMPTY column simply spawns
+        # grenadiers that find no agent buildings and are removed by
+        # the destroy_actors at tick 820 before they can path
+        # anywhere. The strike on the OCCUPIED column (the seed's
+        # base) is the live one.
+        # WEST strike — bursts adjacent to the WEST base column.
+        - tick: 720
+          type: spawn_actors
+          actors:
+            - {type: e2, owner: enemy, position: [22, 9],  stance: 3, count: 4}
+            - {type: e2, owner: enemy, position: [22, 19], stance: 3, count: 4}
+            - {type: e2, owner: enemy, position: [22, 29], stance: 3, count: 4}
+        # EAST strike — bursts adjacent to the EAST base column.
+        - tick: 720
+          type: spawn_actors
+          actors:
+            - {type: e2, owner: enemy, position: [72, 9],  stance: 3, count: 4}
+            - {type: e2, owner: enemy, position: [72, 19], stance: 3, count: 4}
+            - {type: e2, owner: enemy, position: [72, 29], stance: 3, count: 4}
+        # One wide destroy region covers both columns' grenadiers.
+        - tick: 820
+          type: destroy_actors
+          filter:
+            owner: enemy
+            region: {x: 47, y: 19, radius: 42}
+    # `after_ticks: 900` holds the win shut until the strike resolves
+    # (see the easy-tier note); only a base that rode out the strike
+    # can latch the three building-count clauses.
+    win_condition:
+      all_of:
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - after_ticks: 900
+        - within_ticks: 1300
+    fail_condition:
+      any_of:
+        - after_ticks: 1301
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 20
