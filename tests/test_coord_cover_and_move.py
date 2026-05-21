@@ -3,7 +3,7 @@
 The bar (binding):
 - stall LOSES on every level + every seed (after_ticks timeout);
 - both-charge-through-the-centre LOSES on every level + every seed
-  (the heavy-tank brawl busts the attrition cap);
+  (the rocket fire + heavy-tank brawl bust the attrition cap);
 - single-squad-only LOSES on every level + every seed (half the force
   idle → the n=4 region clause is unreachable);
 - the intended bound-and-cover (periphery route around the fire zone)
@@ -12,18 +12,20 @@ The bar (binding):
   clause (no DRAW degeneracy);
 - hard ships ≥2 `spawn_point` groups (seed-driven start variation).
 
-Recalibrated after the engine balance pass (armor-class weapon
-selection + stance + parallel-production + pbox-fires fixes): the
-original design assumed a dense anti-tank-infantry cluster could
-out-trade a 6-tank charge, but post-fix medium tanks decisively
-out-DPS infantry — a 6-tank column charging even a 24-strong e3
-swarm one-shots the rockets and crosses with ZERO losses, collapsing
-the "mass-charge loses" discriminator. The fire zone is now ANCHORED
-BY 4tnk HEAVY TANKS (1 easy / 2 medium+hard): the heavy-tank brawl is
-what punishes a centre charge, while the e3/e1 infantry keep the
-anti-tank-infantry doctrine and the range geometry meaningful. All
-enemy units are stance:2 Defend (auto-fire in range, STATIONARY) so a
-staller is a clean timeout LOSS, not chased down by hunters.
+Recalibrated after the engine movement fixes ((A) attack_unit on
+out-of-sight targets paths normally — no teleport; (B) a moving unit
+fires AND takes fire en route — no sprint-invincibility). A 6-tank
+column that attack_moves through the centre now genuinely trades fire
+while crossing. Probing showed the e1 rifle cluster on the old easy
+tier could no longer punish the charge at all (0 losses): the
+load-bearing punisher is e3 ANTI-TANK ROCKET soldiers (the real
+anti-armour DPS) PLUS two 4tnk HEAVY-TANK anchors — e3 rockets alone,
+or a single 4tnk, only cost a charge ONE tank; four e3 plus two 4tnk
+cost it TWO. Every level now fields an e3 rocket cluster anchored by
+TWO 4tnk (easy a smaller 3× e3 cluster, medium/hard a 4× e3 cluster,
+hard adds e1 rifle screens). All enemy units are stance:2 Defend
+(auto-fire in range, STATIONARY) so a staller is a clean timeout
+LOSS, not chased down by hunters.
 
 Validation is scripted (no model / network).
 """
@@ -187,36 +189,39 @@ def test_two_squads_six_tanks_each_level():
     )
 
 
-def test_fire_zone_uses_anti_tank_rocket_on_medium_and_hard():
-    """The fire zone's lethality is the load-bearing property —
-    medium / hard must use e3 (anti-tank rocket soldier) at the
-    centre cluster. Easy may use e1 (forgiving)."""
+def test_fire_zone_uses_anti_tank_rocket_every_level():
+    """The fire zone's lethality is the load-bearing property — post
+    engine movement fixes the e3 (anti-tank rocket soldier) cluster is
+    the real anti-armour DPS, so EVERY level uses e3 at the centre.
+    Easy fields a smaller cluster (≥3 e3, the forgiving tier);
+    medium / hard a denser one (≥4 e3)."""
     pack = load_pack(PACK_PATH)
-    for lvl in ("medium", "hard"):
+    for lvl, want_e3 in (("easy", 3), ("medium", 4), ("hard", 4)):
         c = compile_level(pack, lvl)
         types = [a.type for a in c.scenario.actors if a.owner == "enemy"]
-        assert types.count("e3") >= 4, (
-            f"{lvl}: need ≥4 e3 (anti-tank rocket) for fire zone; got {types}"
+        assert types.count("e3") >= want_e3, (
+            f"{lvl}: need ≥{want_e3} e3 (anti-tank rocket) for fire "
+            f"zone; got {types}"
         )
         # Persistent far enemy marker (engine auto-done mitigation).
         assert "fact" in types, f"{lvl}: needs persistent enemy fact"
 
 
-def test_fire_zone_anchored_by_heavy_tank():
-    """Post-engine-balance-pass invariant: medium tanks out-DPS
-    infantry, so the centre fire zone is anchored by 4tnk heavy
-    tank(s) — the heavy-tank brawl is what punishes a centre charge.
-    Every level must carry at least one enemy 4tnk; medium and hard
-    carry two."""
+def test_fire_zone_anchored_by_two_heavy_tanks():
+    """Recalibration invariant: probing showed the e3 rockets alone or
+    a single 4tnk only cost a 6-tank charge ONE tank — it takes TWO
+    4tnk anchors alongside the rocket cluster to reliably cost the
+    charge TWO. Every level therefore anchors the fire zone with two
+    enemy 4tnk heavy tanks."""
     pack = load_pack(PACK_PATH)
-    for lvl, want in (("easy", 1), ("medium", 2), ("hard", 2)):
+    for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
         n4tnk = sum(
             1 for a in c.scenario.actors
             if a.owner == "enemy" and a.type == "4tnk"
         )
-        assert n4tnk >= want, (
-            f"{lvl}: fire zone must be anchored by ≥{want} enemy 4tnk "
+        assert n4tnk >= 2, (
+            f"{lvl}: fire zone must be anchored by ≥2 enemy 4tnk "
             f"(heavy-tank brawl), got {n4tnk}"
         )
 

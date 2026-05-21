@@ -14,18 +14,20 @@
 # also cross. Both squads converge on the eastern gathering region
 # having routed AROUND the fire zone rather than through it.
 #
-# Engine balance pass (armor-class weapon selection + stance + parallel
-# production + pbox-fires fixes): the original design assumed a dense
-# anti-tank-infantry cluster could out-trade a 6-tank charge. Post-fix,
-# medium tanks decisively OUT-DPS infantry — a 6-tank column charging
-# even a 24-strong e3 swarm one-shots the rockets and crosses with
-# ZERO losses, collapsing the "mass-charge loses" discriminator. The
-# fire zone is therefore now ANCHORED BY 4tnk HEAVY TANKS (1 on easy,
-# 2 on medium/hard): the heavy-tank brawl is what genuinely punishes a
-# centre charge, while the e3/e1 infantry keep the anti-tank-infantry
-# doctrine and the range geometry meaningful. All enemy units are
-# stance:2 Defend (auto-fire in range but STATIONARY) so a staller is
-# a clean timeout LOSS rather than chased down by hunters.
+# Engine movement-fix recalibration ((A) attack_unit on out-of-sight
+# targets paths normally — no teleport; (B) a moving unit fires AND
+# takes fire en route — no sprint-invincibility): a 6-tank column that
+# attack_moves straight through the centre now genuinely trades fire
+# with the cluster while crossing. The load-bearing punisher is the
+# combination of e3 ANTI-TANK ROCKET soldiers (the real anti-armour
+# DPS) AND 4tnk HEAVY-TANK anchors: probing shows e3 rockets alone or
+# a single 4tnk only cost a charging column ONE tank, but FOUR e3 plus
+# TWO 4tnk reliably cost it TWO. Every level therefore fields an e3
+# rocket cluster anchored by TWO 4tnk (easy uses a smaller 3× e3
+# cluster; medium/hard a 4× e3 cluster, hard adds e1 rifle screens).
+# All enemy units are stance:2 Defend (auto-fire in range but
+# STATIONARY) so a staller is a clean timeout LOSS rather than being
+# chased down by hunters.
 #
 # Real-world anchor: US Army FM 3-21.8 bounding overwatch — one fire
 # team in a stationary OVERWATCH posture provides suppressive fire
@@ -39,8 +41,8 @@
 #   • stall (observe-only): no squad crosses → win region empty →
 #     after_ticks timeout LOSS.
 #   • both-charge-together: all 6 tanks rush a single eastward column
-#     straight through the centre fire zone; the heavy-tank brawl plus
-#     the rocket fire bust the attrition cap → LOSS.
+#     straight through the centre fire zone; the rocket fire plus the
+#     heavy-tank brawl bust the attrition cap → LOSS.
 #   • single-squad-only: send Squad A through alone (Squad B idle
 #     west); A absorbs the centre fire AND half the force never
 #     reaches the win region (n=4 region clause unreachable) → LOSS.
@@ -52,16 +54,17 @@
 #     deadline losing ≤ the cap → WIN.
 #
 # Why the spec works (engine combat sheet):
-#   • 4tnk = heavy/mammoth tank — high HP and a heavy cannon; its
-#     brawl is what kills ≥2 of a 6-tank column that charges through
-#     the centre. Held at the cluster centre (y=20) it reaches a
-#     charging column on the y≈14..16 / y≈24..26 lanes.
-#   • e3 = anti-tank rocket soldier (rng4c, sight5c) — reinforces the
-#     centre fire zone and keeps the overwatch range geometry (a tank
-#     marginally out-ranges e3) meaningful, but does NOT on its own
-#     out-trade a tank column.
+#   • e3 = anti-tank rocket soldier (rng4c, sight5c) — the real
+#     anti-armour DPS of the fire zone; a 4× e3 cluster plus the two
+#     heavy-tank anchors is what kills ≥2 of a 6-tank column charging
+#     through the centre.
+#   • 4tnk = heavy/mammoth tank — high HP and a heavy cannon; the
+#     SECOND 4tnk anchor is what pushes a charging column's losses
+#     from one tank to two. Held at the cluster centre (y=20) it
+#     reaches a charging column on the y≈14..16 / y≈24..26 lanes.
 #   • 2tnk = medium tank (rng4.75c, sight6c, hp400) — out-DPSes
-#     infantry but is brawled down by the 4tnk anchor in the centre.
+#     infantry but is ground down by the e3 rockets + 4tnk anchors
+#     when it crosses the centre.
 #   • Periphery geometry: the centre fire zone occupies y≈13..27. A
 #     squad that rises to y≈6 (NORTH) or y≈34 (SOUTH) BEFORE reaching
 #     the fire zone's longitude (x≈50) routes entirely outside the
@@ -133,30 +136,33 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Bare bound-and-cover skill: a 4× e1 rifle-infantry cluster at the
-  # centre anchored by ONE 4tnk heavy tank. Engine balance pass: the
-  # post-armor-fix infantry can no longer kill a column of 6 medium
-  # tanks (they out-DPS the e1/e3 cluster outright), so the fire zone
-  # is anchored by a 4tnk heavy tank — its brawl is what punishes a
-  # mass charge. A both-charge straight through the centre clips the
-  # 4tnk's brawl and loses ≥2 tanks; stall times out; single-squad
-  # leaves half the force idle. The intended bound-and-cover routes
-  # both squads through the far periphery (y≈6 / y≈34, outside the
-  # centre fire zone) and converges east — taking zero losses.
+  # Bare bound-and-cover skill: a 3× e3 anti-tank-rocket cluster at the
+  # centre anchored by TWO 4tnk heavy tanks. Engine movement-fix
+  # recalibration: a charging column now genuinely trades fire while
+  # crossing — probing shows e3 rockets are the real anti-armour DPS,
+  # but it takes TWO heavy-tank anchors alongside them to cost a
+  # 6-tank charge TWO tanks. A both-charge straight through the centre
+  # eats the e3 rockets + the heavy-tank brawl and loses 2 tanks
+  # (busts the cap); stall times out; single-squad leaves half the
+  # force idle AND loses 2 crossing. The intended bound-and-cover
+  # routes both squads through the far periphery (y≈6 / y≈34, outside
+  # the centre fire zone) and converges east — taking zero losses.
+  # Easy is the FORGIVING tier: a smaller 3× e3 cluster (medium/hard
+  # field 4× e3), so the bounding-lane geometry is the bare skill.
   easy:
     description: >
       Two squads (Squad A at (10,15), Squad B at (10,25), 3 medium
-      tanks each) must cross a centre-of-map fire zone — a rifle-
-      infantry (e1) cluster anchored by one heavy tank (4tnk) at
-      roughly (50,20) — then land ≥4 tanks in the EAST gathering
-      region (x ≈ 100, y ≈ 20, radius 6) before tick 4500, losing ≤1
-      tank in total. Charging both squads straight through the centre
-      drives them into the heavy tank's brawl and busts the cap; a
-      single column alone absorbs every shot AND leaves half the
-      force behind. Alternate ROLES: one squad anchors at the edge of
-      enemy range to draw fire while the other sweeps through the
-      periphery (y outside the centre fire zone) and crosses; then
-      switch.
+      tanks each) must cross a centre-of-map fire zone — a small
+      anti-tank rocket-soldier (e3) cluster anchored by two heavy
+      tanks (4tnk) at roughly (50,20) — then land ≥4 tanks in the
+      EAST gathering region (x ≈ 100, y ≈ 20, radius 6) before tick
+      4500, losing ≤1 tank in total. Charging both squads straight
+      through the centre drives them into the rocket fire and the
+      heavy-tank brawl and busts the cap; a single column alone
+      absorbs every shot AND leaves half the force behind. Alternate
+      ROLES: one squad anchors at the edge of enemy range to draw
+      fire while the other sweeps through the periphery (y outside
+      the centre fire zone) and crosses; then switch.
     overrides:
       actors:
         # Squad A — northern fire team, staged at (10, 15).
@@ -167,17 +173,17 @@ levels:
         - {type: 2tnk, owner: agent, position: [10, 24], stance: 1}
         - {type: 2tnk, owner: agent, position: [10, 25], stance: 1}
         - {type: 2tnk, owner: agent, position: [10, 26], stance: 1}
-        # Centre fire zone: 4× rifle infantry + 1 heavy-tank anchor,
-        # all stance:2 Defend (auto-fire in range but STATIONARY — so
-        # a stall policy is a clean timeout LOSS, not an attrition
-        # one). Cells avoid (50,20) — CLAUDE.md footgun: enemy
-        # clusters at (50,20) silently fail to place. Off-axis
+        # Centre fire zone: 3× anti-tank rocket soldiers + 2 heavy-
+        # tank anchors, all stance:2 Defend (auto-fire in range but
+        # STATIONARY — so a stall policy is a clean timeout LOSS, not
+        # an attrition one). Cells avoid (50,20) — CLAUDE.md footgun:
+        # enemy clusters at (50,20) silently fail to place. Off-axis
         # neighbours (49/51 × 19/21) are verified-placeable.
-        - {type: e1,   owner: enemy, position: [49, 19], stance: 2}
-        - {type: e1,   owner: enemy, position: [49, 21], stance: 2}
-        - {type: e1,   owner: enemy, position: [51, 19], stance: 2}
-        - {type: e1,   owner: enemy, position: [51, 21], stance: 2}
-        - {type: 4tnk, owner: enemy, position: [50, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [49, 19], stance: 2}
+        - {type: e3,   owner: enemy, position: [49, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [51, 21], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [49, 20], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [51, 19], stance: 2}
         # Persistent far enemy `fact` — keeps the episode alive past
         # the central cluster being cleaned out so the win/fail
         # evaluator sees the terminal frame (no DRAW collapse).
@@ -195,14 +201,15 @@ levels:
     max_turns: 50
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 axis vs easy: ANTI-TANK rocket soldiers (e3) replace the rifle
-  # infantry AND the heavy-tank anchor doubles to TWO 4tnk. The fire
-  # zone is genuinely lethal to a 2tnk column crossing the centre.
-  # Both-charge-together LOSES (the centre brawl busts units_lost_
-  # lte:1); single-squad alone LOSES (lone column absorbs the centre
-  # fire AND half the force never reaches the win region). Only true
-  # bound-and-cover (route the squads through the far periphery,
-  # alternating cover/move roles) lands ≥4 tanks losing ≤1.
+  # +1 axis vs easy: the e3 anti-tank rocket cluster grows from 3 to
+  # 4 (a wider, denser fire zone) while keeping the TWO 4tnk anchors.
+  # The fire zone is genuinely lethal to a 2tnk column crossing the
+  # centre. Both-charge-together LOSES (the centre brawl + rockets
+  # bust units_lost_lte:1); single-squad alone LOSES (lone column
+  # absorbs the centre fire AND half the force never reaches the win
+  # region). Only true bound-and-cover (route the squads through the
+  # far periphery, alternating cover/move roles) lands ≥4 tanks
+  # losing ≤1.
   medium:
     description: >
       Two squads (Squad A at (10,15), Squad B at (10,25), 3 medium
