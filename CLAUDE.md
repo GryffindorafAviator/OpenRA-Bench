@@ -68,9 +68,18 @@ A scenario is defective if any of the following hold:
 - **Own-unit `actor_type`** surfaces in `units_summary`
   (`unit_type_count_eq / _gte` work). Predicates relying on it are
   valid.
-- **`power_surplus_gte` is currently inert** (obs reports
-  `power_provided / power_drained = 0`). Do **not** rely on it as a
-  sole discriminator.
+- **`power_surplus_gte` / `power_provided_gte` now work** (historical
+  footgun fixed). Pre-placed scenario buildings used to be invisible
+  to the player's `PowerManager` trait because only
+  `order_place_building` updated it, so the obs reported
+  `power_provided = power_drained = 0`. The engine now recomputes the
+  totals from the live building actors at snapshot time, honouring
+  the `PowerDown` toggle (`World.powered_down`). See
+  `OpenRA-Rust/openra-sim/tests/test_power_signals.rs` and
+  `tests/test_power_signals_python.py`. The new
+  `power_provided_gte` predicate (gross provided, ignores drains) is
+  the anti-cheat floor for load-shedding packs — see
+  `build-power-down-defensive`.
 - **`deploy` now works** for scenario-declared MCVs (the historical
   "unimplemented" footgun was a two-bug interaction: `classify_actor`
   in `openra-sim/src/gamerules.rs` returned `Vehicle` for MCV, and
@@ -84,14 +93,26 @@ A scenario is defective if any of the following hold:
   in range, lunges at the nearest foe within `GUARD_AGGRO ≈ 16`,
   snaps back past `GUARD_LEASH ≈ 18` — the bait-able-defender idiom
   proven in #4 / #6 / #7 / #15 / #18.
-- **`spawn_point` filter applies ONLY to AGENT actors** — enemy
-  actors with no `spawn_point` ALWAYS place, regardless of the chosen
-  group (`openra-data/src/oramap.rs::expand_scenario_actors`). You
-  cannot vary enemy count/composition by seed via `spawn_point`;
-  vary the agent's spawn instead and design symmetric enemy
-  placement. If ANY agent actor declares `spawn_point`, every agent
-  actor WITHOUT `spawn_point` is filtered OUT — so duplicate
-  base/garrison actors across BOTH spawn groups at identical coords.
+- **`spawn_point` filter is PER OWNER** (Wave-9
+  `openra-data/src/oramap.rs::expand_scenario_actors`). Each owner
+  (agent / enemy) activates the filter INDEPENDENTLY: if any actor of
+  that owner declares `spawn_point`, ONLY that owner's actors whose
+  `spawn_point` matches the chosen one are kept; that owner's actors
+  WITHOUT `spawn_point` are filtered out. Idioms:
+  - Pre-Wave-9 (agent-side axis, every existing pack): declare
+    `spawn_point` on agent actors → seed→spawn round-robin varies the
+    AGENT corner. Duplicate any persistent base/garrison agent actors
+    across BOTH spawn groups at identical coords. Enemy actors don't
+    declare `spawn_point` → enemy filter inactive → all enemies
+    place every seed (back-compat).
+  - Wave-9 (enemy-side axis, e.g. `adv-rps-counter-pick`): declare
+    `spawn_point` on enemy actors only → the env's
+    `new_with_spawn_point` falls back to
+    `distinct_enemy_spawn_points` and round-robins the seed across
+    enemy compositions while the agent base stays fixed. Persistent
+    per-seed enemy markers (e.g. a far-corner `fact` for engine
+    auto-`done` mitigation) MUST be duplicated across every enemy
+    spawn group, mirroring the agent-side idiom.
 - **`silo` is NOT MustBeDestroyed** — using it as an objective
   landmark allows premature engine auto-`done` when the *other*
   MustBeDestroyed buildings fall. Use `barr` / `proc` / `powr` /

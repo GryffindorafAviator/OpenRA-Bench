@@ -1,0 +1,389 @@
+# adv-rps-counter-pick — Wave-9
+#
+# REASONING capability — rock-paper-scissors counter SELECTION
+# against a seed-varying enemy composition. The agent's base is
+# fixed and identical across all hard seeds (fact + proc + powr +
+# tent + weap + fix + 2× jeep scouts), but the ENEMY ARCHETYPE
+# rotates per seed: an e1 rifle swarm, a 3tnk heavy column, an e3
+# rocket cluster, or another e1 swarm. Each archetype demands a
+# DIFFERENT hard counter (tanks vs swarm, rockets vs armour, rifles
+# vs rockets) — the agent CANNOT memorise a single opener; it must
+# (1) scout the enemy with the jeeps, (2) identify the composition,
+# (3) commit the budget to the matching counter.
+#
+# Wave-9 engine prerequisite (this pack is the worked example):
+# `expand_scenario_actors` now honours `spawn_point:` on ENEMY
+# actors too (per-owner activation). The matching helper
+# `distinct_enemy_spawn_points` lets the env round-robin the seed
+# axis over enemy compositions even when the agent base is fixed.
+# Before this engine change the only seed axis available was the
+# agent's spawn corner; an "always tanks" opener would generalise
+# across every seed. Now the right counter literally depends on
+# what the scout reveals.
+#
+# Real-world anchors:
+#   - SC2 hard-counter / pivot doctrine: scout the build order,
+#     pivot composition to the counter the scout reveals (zerglings
+#     → roaches → hydras chain). Pre-committing without scouting
+#     is the textbook "blind allin" loss.
+#   - Military RPS: tank-vs-infantry, infantry-vs-rocket, rocket-
+#     vs-tank. There is no dominant composition; the right answer
+#     depends on the enemy's actual order of battle.
+#   - Capability-based defence procurement under uncertainty:
+#     telemetry must confirm the threat profile BEFORE committing
+#     capex to one platform class. Buying anti-tank against an
+#     infantry threat (or rifles against an armour threat) is a
+#     cost-per-effect waste.
+#
+# Idiom (four-policy bar across all hard seeds 1..4):
+#   • stall (only observe)                → LOSS. Kill bar never met,
+#     after_ticks 5401 fires → LOSS (the `guard` enemy holds post,
+#     no force-wipe, so this is a clean clock LOSS).
+#   • brute attack_move east (no build)   → LOSS on every seed. The 2
+#     starter jeeps alone can't satisfy units_killed_gte:6 against any
+#     of the four enemy archetypes; they die first.
+#   • blind-counter (always-build-tanks, no scout) → LOSS on the e3
+#     seed (tanks vs anti-armour rockets is the worst RPS matchup —
+#     e3 alpha-strikes tank HP before they close). Also LOSS on the
+#     e1 swarm IF the agent commits the cash to e3 instead. The
+#     blind opener WINS one seed (the e1 seed if it commits to
+#     tanks), but the hard tier requires WINNING ON EVERY SEED
+#     (CLAUDE.md "every hard seed 1–4"), so a one-out-of-four play
+#     is a structural LOSS.
+#   • intended scout-then-counter         → WIN. Scout the cluster
+#     with a jeep (sight 7c), read the archetype, commit the WHOLE
+#     budget to the matching counter (e1-swarm → 2tnk; 3tnks → e3;
+#     e3-cluster → e1 mass; second-e1-swarm → 2tnk again). The
+#     intended counter clears the kill bar with the fact still up.
+#
+# Topology (rush-hour-arena 128 × 40; playable x in [2..126], y in
+# [2..38]):
+#   - Agent base at the WEST (x=8..14, y=20). Identical across all
+#     seeds (no agent-side spawn_point — the agent passes through
+#     the per-owner filter unconditionally because no agent actor
+#     declares spawn_point, while the enemy side activates its own
+#     filter independently — see openra-data/src/oramap.rs).
+#   - Enemy cluster at the CENTRE-EAST face (x=70..78, y=20). Each
+#     spawn_point group (0..3) places a different archetype at the
+#     same approximate location, so the scouting path is identical
+#     but what the scout sees is not.
+#   - Persistent enemy fact at (124, 20) on EVERY spawn (duplicated
+#     across all four enemy spawn_point groups at identical coords,
+#     mirroring the agent-side idiom). Prevents engine auto-`done`
+#     when the live cluster falls, letting the win/fail evaluator
+#     see the terminal frame.
+#
+# Engine guardrails (CLAUDE.md):
+#   - Enemy-side `spawn_point:` is the Wave-9 axis. The per-owner
+#     filter activates on the enemy side as soon as ANY enemy
+#     declares spawn_point: only enemies with the matching
+#     spawn_point pass; enemies WITHOUT spawn_point are filtered
+#     out (mirroring agent semantics — the "duplicate across every
+#     spawn group at identical coords" idiom). The persistent
+#     far-corner enemy fact is therefore duplicated across all
+#     four spawn_point groups so it lands every seed.
+#   - The pack-wide enemy `bot_type: guard` makes the enemies hold
+#     post and shoot back. They do not roam the map, so a stall is
+#     a clean clock LOSS rather than a force-wipe.
+#   - `after_ticks` 5401 in the fail clause is reachable inside
+#     `max_turns: 61` (max tick = 93 + 90·60 = 5493) → the deadline
+#     bites (no draw degeneracy).
+#   - Starter `jeep`s (×2) satisfy `own_units_gte:1` from t=0, so
+#     the unit-less mis-fire footgun (CLAUDE.md) doesn't trip the
+#     fail clause before the model has built anything. They are
+#     ALSO the scout vehicles — there is no separate "scout" unit.
+#   - `fix` (Service Depot) gives the agent the option to repair a
+#     damaged 2tnk between engagements. Pre-placed because the
+#     scenario is a counter-selection puzzle, not a build-order
+#     puzzle: every production prerequisite is online from t=0.
+#   - Map: rush-hour-arena (Rust-loadable; no map-gen needed).
+
+meta:
+  id: adv-rps-counter-pick
+  title: 'Scout-then-Counter — Hard Counter Selection Across Seeded Enemy Compositions'
+  capability: reasoning
+  real_world_meaning: >
+    A FIXED budget funds EITHER an armoured fist (medium tanks
+    2tnk), OR a rocket squad (e3 anti-tank), OR a rifle company
+    (e1 mass). The enemy archetype ROTATES per seed across four
+    compositions (rifle swarm / heavy tank column / rocket cluster
+    / second rifle swarm), each demanding a DIFFERENT counter.
+    Pre-committing to one composition LOSES on at least one seed.
+    The capability under test is the observation-driven counter
+    SELECTION loop: scout the enemy with the starter jeeps, infer
+    the threat profile, then commit the whole budget to the
+    matching counter. There is no dominant single build — the
+    right answer depends on what the scout reveals.
+  robotics_analogue: >
+    Threat-driven procurement under uncertainty: a fixed capital
+    budget funds anti-armour platforms OR anti-infantry platforms
+    OR foot soldiers; telemetry from forward scouts must confirm
+    the threat profile BEFORE the commit. Pre-committing to an
+    anti-tank loadout against an infantry threat (or vice-versa)
+    is a cost-per-effect waste that loses the engagement. The
+    decision under test is the read-then-commit loop, not a single
+    memorised build.
+  benchmark_anchor:
+    - "SC2 hard-counter / scout-and-pivot doctrine"
+    - "game-theoretic best response under composition uncertainty"
+    - "military RPS (tank-vs-infantry / infantry-vs-rocket / rocket-vs-tank)"
+    - "capability-based defense procurement under uncertainty"
+    - "PlanBench replanning on new observation"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 2550
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: guard}
+  tools: [build, place_building, move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination: {max_ticks: 8000}
+  # Default base used by easy/medium. Identical pre-placement: fact
+  # + proc + powr + tent + weap + fix + 2× jeep scouts + the
+  # persistent enemy fact marker at (124,20).
+  actors:
+    - {type: fact, owner: agent, position: [10, 20]}
+    - {type: proc, owner: agent, position: [10, 24]}
+    - {type: powr, owner: agent, position: [8, 18]}
+    - {type: tent, owner: agent, position: [14, 18]}
+    - {type: weap, owner: agent, position: [14, 22]}
+    - {type: fix,  owner: agent, position: [12, 24]}
+    - {type: jeep, owner: agent, position: [16, 20]}
+    - {type: jeep, owner: agent, position: [16, 22]}
+    # Persistent enemy marker (no spawn_point → places on every
+    # seed). Prevents engine auto-`done` when the live cluster
+    # falls so the win/fail evaluator sees the terminal frame.
+    - {type: fact, owner: enemy, position: [124, 20]}
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare counter-selection skill (single composition, no seed
+  # variation): enemy is an e1 rifle swarm at the centre cluster.
+  # The right counter is 3× 2tnk (heavy armour soaks small-arms,
+  # tank dps walks through the swarm). Cash 2550 funds it exactly.
+  # Wrong-counter (8× e3) cost-per-effect wastes on soft infantry.
+  # Stall: kill bar (6) never met → after_ticks LOSS.
+  easy:
+    description: >
+      Cash $2550. The enemy is a small rifle-infantry swarm (8× e1)
+      entrenched at the centre of the map. You start with a full
+      base (construction yard, refinery, power, barracks, war
+      factory, service depot, 2 scout jeeps) — all production
+      queues are online from turn 1. Scout the enemy with a jeep,
+      read the composition, then commit the whole $2550 to the
+      matching counter (3× medium tanks 2tnk = $2550 walks through
+      a rifle swarm; mass rockets are anti-armour ordnance and
+      waste cost-per-effect on soft targets). Win when 6 enemy
+      units are killed AND your construction yard still stands,
+      before tick 5400. Stalling and wrong-counter both LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [10, 24]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: weap, owner: agent, position: [14, 22]}
+        - {type: fix,  owner: agent, position: [12, 24]}
+        - {type: jeep, owner: agent, position: [16, 20]}
+        - {type: jeep, owner: agent, position: [16, 22]}
+        # 8× e1 rifle swarm at centre (no spawn_point on easy —
+        # single archetype, no per-seed variation).
+        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 21], stance: 3}
+        # Persistent far marker.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 61
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: the composition is FOGGED. The model must scout to
+  # verify the enemy is anti-armour-WEAK (no e3, no tanks) before
+  # picking the counter. Composition is still pure e1 (12 of them
+  # for slightly more attrition headroom), so the right counter is
+  # still 3× 2tnk — but a pre-commit policy hasn't read the brief
+  # ground-truth, and a play that scouts must DO so before
+  # committing.
+  medium:
+    description: >
+      Cash $2550. The enemy holds a centre garrison (~12 rifle
+      infantry) on the central lane; their composition is FOGGED
+      — scout with one of the starter jeeps to verify the threat
+      profile BEFORE committing the budget. Your construction yard,
+      refinery, power, barracks, war factory, and service depot are
+      all online from turn 1. Once you've read the enemy, commit
+      the WHOLE $2550 to the matching counter (3× 2tnk medium tanks
+      walks through a rifle swarm; mass rockets are anti-armour and
+      waste cost-per-effect; mass own rifles is a 1:1 trade with no
+      positional advantage). Win when 8 enemy units are killed AND
+      your construction yard still stands, before tick 5400.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [10, 24]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: weap, owner: agent, position: [14, 22]}
+        - {type: fix,  owner: agent, position: [12, 24]}
+        - {type: jeep, owner: agent, position: [16, 20]}
+        - {type: jeep, owner: agent, position: [16, 22]}
+        # 12× e1 entrenched centre cluster (no spawn_point).
+        - {type: e1, owner: enemy, position: [70, 17], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [70, 23], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [72, 22], stance: 3}
+        - {type: e1, owner: enemy, position: [74, 20], stance: 3}
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 8}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 61
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis (the Wave-9 capability): the ENEMY ARCHETYPE rotates
+  # per seed across FOUR spawn_point groups (the new engine
+  # per-owner spawn filter — openra-data/src/oramap.rs). The
+  # agent base is IDENTICAL across all seeds (no agent
+  # spawn_point declared → the per-owner agent filter is inactive
+  # → every agent actor passes through). The seed-axis is entirely
+  # driven by enemy composition:
+  #
+  #   spawn_point=0 → e1 rifle swarm   → counter with 2tnk
+  #   spawn_point=1 → 3tnk heavy column→ counter with e3 rockets
+  #   spawn_point=2 → e3 rocket cluster→ counter with e1 mass
+  #   spawn_point=3 → e1 rifle swarm   → counter with 2tnk
+  #
+  # The four groups are exposed by `distinct_enemy_spawn_points`,
+  # which the env round-robins across seeds (seeds 1..4 → groups
+  # 1,2,3,0 modulo 4). Three distinct archetypes (e1 swarm × 2,
+  # 3tnk column, e3 cluster) demand THREE distinct counters,
+  # making any pre-committed single build LOSE on at least one
+  # seed (CLAUDE.md hard-tier contract: must win on every seed
+  # 1..4). Only a scout-then-counter policy wins.
+  #
+  # The kill bar is `units_killed_gte:5` — calibrated so the
+  # right counter clears it cleanly on every archetype (the e1
+  # swarm has 6 units, the 3tnk column has 3 heavies plus 2 e1
+  # escorts = 5, the e3 cluster has 5 rocket soldiers) while a
+  # wrong-counter play stalls below it.
+  hard:
+    description: >
+      Cash $2550. Your base is fixed at the west (construction
+      yard, refinery, power, barracks, war factory, service depot,
+      2 scout jeeps) — full production from turn 1. The enemy
+      garrison at the centre-east of the map rotates ARCHETYPE
+      across seeds: an entrenched rifle swarm (e1), a heavy tank
+      column (3tnk), or an anti-armour rocket cluster (e3). Each
+      archetype demands a DIFFERENT counter: tanks (2tnk) shred
+      rifles; rockets (e3) shred heavy armour; mass rifles (e1)
+      shred rockets (e3 are anti-armour, weak vs soft mass).
+      Scout with a jeep to identify the composition BEFORE
+      committing the budget — a pre-committed single build LOSES
+      on at least one seed. Win when 5 enemy units are killed AND
+      your construction yard still stands, before tick 5400.
+    overrides:
+      actors:
+        # ── AGENT BASE (no spawn_point — identical every seed) ──
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [10, 24]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: tent, owner: agent, position: [14, 18]}
+        - {type: weap, owner: agent, position: [14, 22]}
+        - {type: fix,  owner: agent, position: [12, 24]}
+        - {type: jeep, owner: agent, position: [16, 20]}
+        - {type: jeep, owner: agent, position: [16, 22]}
+
+        # ── ENEMY spawn_point=0 — e1 rifle swarm (6 units) ──
+        # Counter: 2tnk (heavy armour walks through small-arms).
+        - {type: e1, owner: enemy, position: [70, 18], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [70, 20], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [70, 22], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [72, 19], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [72, 21], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [74, 20], stance: 3, spawn_point: 0}
+
+        # ── ENEMY spawn_point=1 — 3tnk heavy column (3 + 2 e1) ──
+        # Counter: e3 rocket cluster (anti-armour ordnance shreds
+        # heavy tanks; without rockets, the agent's tanks get
+        # out-traded by the heavy 3tnks at close range).
+        - {type: 3tnk, owner: enemy, position: [70, 19], stance: 3, spawn_point: 1}
+        - {type: 3tnk, owner: enemy, position: [70, 21], stance: 3, spawn_point: 1}
+        - {type: 3tnk, owner: enemy, position: [72, 20], stance: 3, spawn_point: 1}
+        - {type: e1,   owner: enemy, position: [74, 19], stance: 3, spawn_point: 1}
+        - {type: e1,   owner: enemy, position: [74, 21], stance: 3, spawn_point: 1}
+
+        # ── ENEMY spawn_point=2 — e3 rocket cluster (5 units) ──
+        # Counter: e1 mass (rifles shred rockets — e3 hp45, e3
+        # warhead is anti-armour, so rifles out-trade them at
+        # similar cost-per-DPS); tanks LOSE to anti-tank rockets
+        # at close range.
+        - {type: e3, owner: enemy, position: [70, 19], stance: 3, spawn_point: 2}
+        - {type: e3, owner: enemy, position: [70, 20], stance: 3, spawn_point: 2}
+        - {type: e3, owner: enemy, position: [70, 21], stance: 3, spawn_point: 2}
+        - {type: e3, owner: enemy, position: [72, 19], stance: 3, spawn_point: 2}
+        - {type: e3, owner: enemy, position: [72, 21], stance: 3, spawn_point: 2}
+
+        # ── ENEMY spawn_point=3 — e1 rifle swarm (6 units) ──
+        # Counter: 2tnk (same as spawn_point=0). Two groups of
+        # e1 swarms ensure `distinct_enemy_spawn_points` yields
+        # FOUR distinct groups (per the CLAUDE.md hard-tier
+        # contract) while keeping the COUNTER mapping at three
+        # distinct answers — the model must still scout because
+        # the WRONG opener loses on at least one seed.
+        - {type: e1, owner: enemy, position: [70, 17], stance: 3, spawn_point: 3}
+        - {type: e1, owner: enemy, position: [70, 19], stance: 3, spawn_point: 3}
+        - {type: e1, owner: enemy, position: [70, 21], stance: 3, spawn_point: 3}
+        - {type: e1, owner: enemy, position: [70, 23], stance: 3, spawn_point: 3}
+        - {type: e1, owner: enemy, position: [72, 20], stance: 3, spawn_point: 3}
+        - {type: e1, owner: enemy, position: [74, 20], stance: 3, spawn_point: 3}
+
+        # ── Persistent far marker (engine auto-`done` mitigation).
+        # Mirroring the agent-side "duplicate across BOTH spawn
+        # groups at identical coords" idiom (CLAUDE.md `spawn_point`
+        # is per-owner): when ANY enemy declares spawn_point, the
+        # enemy filter activates and an enemy actor WITHOUT
+        # spawn_point would be filtered out. So we duplicate the
+        # marker across every enemy spawn group so it lands on
+        # every seed.
+        - {type: fact, owner: enemy, position: [124, 20], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [124, 20], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [124, 20], spawn_point: 2}
+        - {type: fact, owner: enemy, position: [124, 20], spawn_point: 3}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 5}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 61
