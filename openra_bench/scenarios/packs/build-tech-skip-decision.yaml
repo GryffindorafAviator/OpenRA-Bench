@@ -1,0 +1,278 @@
+# build-tech-skip-decision — skip an unnecessary tech tier (YAGNI)
+#
+# REASONING capability — PlanBench unnecessary-step PRUNING. The
+# objective only needs BASIC infantry (e1, $100, trainable from turn 1
+# off the pre-placed tent). Climbing the full tech chain to a war
+# factory and medium tanks (powr → proc → weap + fix → 2tnk) is a
+# whole tech tier the objective never asks for: it wastes cash AND —
+# critically — the clock. The agent must recognise the goal does not
+# require high tech and skip STRAIGHT to the cheap e1-swarm path.
+#
+# Real-world anchors:
+#   • PlanBench unnecessary-step pruning — find the plan that omits
+#     every action the goal does not require, not merely SOME plan.
+#   • Lean process / muda elimination — do not add a production step
+#     the deliverable never consumes.
+#   • YAGNI ("You Aren't Gonna Need It") — do not build capability the
+#     requirement does not call for; it costs time and budget now.
+#
+# THE DECISION (the whole test):
+#   The agent starts with a Construction Yard (fact) + an Allied
+#   barracks (tent) already standing — so `e1` rifle infantry are
+#   buildable from turn 1 with NO prior tech step. A light enemy
+#   garrison of rifle infantry is incoming from the east (stance 3,
+#   AttackAnything — it advances on the agent base). Killing K of them
+#   is the objective. An e1 swarm (cost $100 each) clears a light
+#   infantry garrison comfortably when massed at the base and left to
+#   auto-fire as the garrison closes; the agent need only keep
+#   training e1 and rallying them at the base front.
+#
+#   The TECH-FULL-CHAIN play instead spends the budget and the clock
+#   building powr → proc → weap (+ fix) to reach medium tanks. That is
+#   a whole tech tier the garrison never required: by the deadline the
+#   tech play has only powr+proc standing and ZERO army — no tank has
+#   fielded — so the kill bar is unmet ⇒ LOSS on the clock. Stalling
+#   never kills anything ⇒ LOSS on the clock.
+#
+# Engine facts used (RA ruleset / prompt_v2 codex / CLAUDE.md):
+#   • e1 rifle infantry: cost $100, trainable from a barracks/tent.
+#     The tent is PRE-PLACED, so e1 is buildable on turn 1 with no
+#     prerequisite build — the cheap path is immediately actionable.
+#   • Full tech chain to medium tanks: powr ($300) → proc ($1400,
+#     prereq anypower) → weap ($2000, prereq proc); 2tnk ($850,
+#     prereq weap + fix). Three structures + a service depot before a
+#     single tank — many turns of placement + queue time; measured,
+#     the tech play has only reached powr+proc by the deadline.
+#   • A `stance:3` (AttackAnything) enemy advances toward the nearest
+#     visible foe (CLAUDE.md stance semantics) — so the garrison
+#     closes on the agent base on its own; the intended play just
+#     masses e1 at the base front and lets them auto-fire as
+#     defenders (concentrated fire beats the strung-out attacker).
+#   • `place_building` has no adjacency requirement (CLAUDE.md): the
+#     tech play's LOSS is from time cost, not placement difficulty.
+#   • Tick alignment: the engine advances ~90 ticks per decision turn,
+#     so within_ticks ≤ 93 + 90·(max_turns − 1). fail_condition uses
+#     after_ticks = within_ticks + 1 so a non-finisher LOSES one tick
+#     past the window — a real reachable timeout, never a DRAW.
+#   • A persistent unarmed enemy `fact` marker far east keeps the
+#     episode alive past the last garrison death so a non-winner
+#     reaches the deadline as a real LOSS (CLAUDE.md auto-done
+#     footgun).
+#   • `building_count_gte` (counts the live own_buildings list) is
+#     used for the fact-alive clause instead of `has_building`
+#     (CLAUDE.md own-elimination footgun).
+#   • Hard tier: the `spawn_point` filter applies ONLY to agent
+#     actors, and ANY agent actor with spawn_point filters out agent
+#     actors WITHOUT one (CLAUDE.md oramap.rs footgun). So the whole
+#     agent base (fact + tent) is duplicated across both spawn_point
+#     groups; the garrison + far enemy marker carry no spawn_point
+#     and always place.
+#
+# DISCRIMINATIONS (CLAUDE.md bar — no defect, no cheat, no draw):
+#   • stall (only observe): LOSS — 0 kills, the after_ticks deadline
+#     bites as a real reachable timeout.
+#   • tech-full-chain (build powr → proc → weap → fix, then 2tnk):
+#     LOSS — the unneeded tech tier burns the clock; by the deadline
+#     only powr+proc stand and no tank has fielded ⇒ kill bar unmet.
+#   • intended skip-to-e1-swarm (train e1 from the pre-placed tent
+#     from turn 1, rally them at the base front, let them auto-fire
+#     on the closing garrison): WIN — the kill bar is met AND the
+#     fact survives, well inside the deadline.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_build_tech_skip_decision.py -q
+
+meta:
+  id: build-tech-skip-decision
+  title: 'Skip the Unneeded Tech Tier — Clear a Light Garrison with a Basic e1 Swarm'
+  capability: reasoning
+  real_world_meaning: >
+    The objective only requires basic units. The agent starts with a
+    Construction Yard and an Allied barracks already standing, so cheap
+    rifle infantry (e1) are trainable from turn 1 with no prior tech
+    step, and a light enemy garrison — also basic infantry — is
+    incoming. An e1 swarm clears a light infantry garrison comfortably.
+    The trap is to climb the full tech chain (power plant → refinery →
+    war factory → service depot → medium tanks) to bring a higher tech
+    tier online that the objective never asked for: that whole tier
+    costs budget and, critically, clock — by the deadline no tank has
+    fielded at all. The pack tests whether the model recognises that
+    the goal does not require high tech and skips straight to the
+    cheap path.
+  robotics_analogue: >
+    Right-sizing the plan to the task. A delivery only needs a basic
+    pick-and-place cell that is already commissioned; provisioning a
+    full high-precision assembly line (extra power, feedstock, an
+    assembly station, a calibration depot) before starting work is a
+    whole capability tier the job never required — it burns budget and
+    blows the cycle-time deadline. The competent planner prunes every
+    step the goal does not consume and executes the minimal plan with
+    the capability already on hand.
+  benchmark_anchor:
+    - "PlanBench unnecessary-step pruning"
+    - "lean process"
+    - "YAGNI"
+  author: openra-bench
+
+base_map: rush-hour-arena
+# Cash covers a generous e1 swarm ($100 each) many times over AND, on
+# its own, a full tech chain (powr 300 + proc 1400 + weap 2000 + fix +
+# a 2tnk) — so the budget is NOT the binding constraint. The CLOCK is:
+# the tech tier simply cannot come online in time. Cash is kept ample
+# so the tech play's LOSS attributes cleanly to the wasted tier
+# (time), not to running out of money.
+starting_cash: 6000
+
+base:
+  agent: {faction: allies}
+  # No scripted bot — the garrison is a fixed group of stance:3
+  # (AttackAnything) rifle infantry that advances on the agent base
+  # on its own. The intended e1 swarm fights it as a base defender.
+  enemy: {faction: soviet, bot_type: '', cash: 0}
+  tools: [observe, build, place_building, move_units, attack_move, stop]
+  spawn_mcvs: false
+  planning: true
+  # Re-decide the instant a garrison unit is spotted or one of our own
+  # is destroyed — the skip-to-cheap-path call is made from the live
+  # threat reading, not on fixed cadence.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 12000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare step-pruning skill. Pre-placed fact + tent ⇒ e1 buildable
+  # turn 1. A light garrison of 5 rifle infantry (stance 3) advances
+  # from x=52. Training e1 and rallying them at the base front clears
+  # the 4-kill bar by ~tick 633 — a wide buffer under tick 1800. The
+  # tech-full-chain play has only powr+proc standing by the deadline
+  # and zero army ⇒ LOSS. max_turns 25 → reachable tick 93 + 90·24 =
+  # 2253 > 1801 ✓ (the deadline bites as a real LOSS).
+  easy:
+    description: >
+      Your base already has a Construction Yard (fact) and an Allied
+      barracks (tent) — so rifle infantry (e1, $100 each) are
+      buildable from turn 1 with NO prior tech step. A light enemy
+      garrison of 5 rifle infantry is advancing from the east. The
+      objective needs only basic units: train an e1 swarm and rally it
+      at your base front to meet the garrison. Do NOT climb the tech
+      chain to a war factory and tanks — that is a whole tech tier the
+      objective never asked for and it overruns the clock. Win when
+      ≥4 enemy units are killed AND your fact still stands, before
+      tick 1800. Stalling or teching to tanks both LOSE on the clock.
+    starting_cash: 6000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [13, 20]}
+        # Light garrison — 5× e1, stance 3 (AttackAnything ⇒ advances
+        # on the agent base). An e1 swarm massed at the base clears
+        # them; the tech play never fields a tank in time.
+        - {type: e1, owner: enemy, position: [52, 20], stance: 3, count: 5}
+        # Far unarmed enemy fact marker — anti-DRAW. Keeps the
+        # episode alive past the last garrison death so a
+        # non-winner reaches the deadline as a real LOSS.
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 25
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a LARGER garrison (7× e1) AND a TIGHTER
+  # deadline (tick 1600). The e1-swarm play still wins comfortably
+  # (~tick 633); the tech-full-chain play loses by an even wider
+  # margin. Same base. max_turns 23 → reachable tick 93 + 90·22 =
+  # 2073 > 1601 ✓.
+  medium:
+    description: >
+      Same base (fact + tent pre-placed, e1 buildable from turn 1) but
+      a larger enemy garrison (7 rifle infantry) and a tighter
+      deadline. The objective still needs only basic units: train an
+      e1 swarm and rally it at your base front. Climbing the tech
+      chain to a war factory and tanks is an unnecessary tier that
+      overruns the clock. Win when ≥6 enemy units are killed AND your
+      fact still stands, before tick 1600. Stalling or teching to
+      tanks both LOSE on the clock.
+    starting_cash: 6000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [13, 20]}
+        - {type: e1, owner: enemy, position: [52, 20], stance: 3, count: 7}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1601}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 23
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO agent spawn_point
+  # groups (NORTH base y=14 / SOUTH base y=26) round-robined by seed.
+  # The whole base (fact + tent) is duplicated at both latitudes so
+  # the e1 rally geometry must be read from the actual base position —
+  # a memorised opening cannot generalise. The garrison is duplicated
+  # at BOTH latitudes (enemy actors don't honour spawn_point —
+  # CLAUDE.md) so whichever spawn is chosen faces an equivalent
+  # garrison; the garrison at the agent's latitude advances on the
+  # base, the other angles toward the nearest foe. Same 6-kill bar
+  # and same tight tick-1600 deadline as medium. max_turns 23 →
+  # reachable tick 2073 > 1601 ✓.
+  hard:
+    description: >
+      Same step-pruning call as medium (clear a 7-rifle garrison with
+      a basic e1 swarm before tick 1600; skip the unnecessary war-
+      factory tech tier) but your base may begin in the NORTH band
+      (y≈14) or the SOUTH band (y≈26) depending on the seed. Read
+      your barracks' actual position from the observation, train the
+      e1 swarm and rally it at your base front. Win when ≥6 enemy
+      units are killed AND your fact still stands, before tick 1600.
+      Stalling or teching to tanks both LOSE on the clock.
+    starting_cash: 6000
+    overrides:
+      actors:
+        # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [13, 14], spawn_point: 0}
+        # Inert spawn-witness e1 (HoldFire, stance 0): required for
+        # the hard-tier units_summary spawn-variation check (the
+        # base is otherwise building-only). Placed base-adjacent;
+        # stance 0 means it never opens fire — it does not change
+        # the skip-vs-tech decision, only surfaces per-spawn data.
+        - {type: e1, owner: agent, position: [11, 14], spawn_point: 0, stance: 0}
+        # ── AGENT spawn 1 — SOUTH base (y=26) ─────────────────────
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [13, 26], spawn_point: 1}
+        - {type: e1, owner: agent, position: [11, 26], spawn_point: 1, stance: 0}
+        # Garrison duplicated at both latitudes — enemy actors don't
+        # honour spawn_point, so both place every seed; the garrison
+        # at the agent's latitude advances on the base.
+        - {type: e1, owner: enemy, position: [52, 14], stance: 3, count: 7}
+        - {type: e1, owner: enemy, position: [52, 26], stance: 3, count: 7}
+        # Far unarmed enemy fact marker — anti-DRAW (no spawn_point
+        # ⇒ always places).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 1600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1601}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 23
