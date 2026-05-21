@@ -1,0 +1,334 @@
+# def-walls-vs-towers — Active Defense Beats Passive Walls
+#
+# REASONING focus: PASSIVE-OBSTACLE vs ACTIVE-DEFENSE mitigation. The
+# agent has ONE budget and must choose how to spend it against an
+# incoming rush:
+#   • PASSIVE  — brik concrete walls (200cr each, HP 40000, NO weapon):
+#     an inert barrier. Walls slow an attacker down and channel it, but
+#     they fire nothing — they produce ZERO kill output. A walled-off
+#     base merely delays the rush; the wall neutralises nothing.
+#   • ACTIVE   — gun turrets (800cr each, TurretGun armament, anti-
+#     ground fire): a tower that actually KILLS the attacking band.
+#     Active defence destroys the threat instead of merely delaying it.
+#
+# The budget funds EITHER ~16 walls OR ~4 gun turrets — never both. The
+# win predicate makes the choice load-bearing: it requires a KILL quota
+# (`units_killed_gte`) that ONLY the active gun turrets can deliver. A
+# walls-only spend produces 0 kills → fails the kill clause and the
+# episode times out → LOSS. A stall spends nothing → the rush razes the
+# fact → LOSS. Only the intended gun turrets satisfy count + kill +
+# fact-alive.
+#
+# Real-world anchor:
+#   • security architecture — passive vs active mitigation: an air-gap
+#     / firewall ACL / network segmentation slows and channels an
+#     intruder but neutralises nothing; an IPS / active-response EDR
+#     actually terminates the malicious process. A pure-segmentation
+#     posture with no active response only delays a breach.
+#   • military fortification — a ditch, a wall, an obstacle belt
+#     CHANNELS and DELAYS an assault, but a fortification plan that
+#     omits the covering FIRES (gun emplacements, pillboxes) the
+#     obstacle is supposed to funnel the enemy INTO is a dead fort:
+#     doctrine pairs every obstacle with interlocking fires.
+#
+# Discrimination (four-script bar — scripted, no model needed):
+#   • stall (observe-only): spends nothing; the rush wave razes the
+#     fact → fact-alive fail clause fires → LOSS (`after_ticks` is a
+#     backstop so a staller that somehow keeps the fact also times out
+#     — no draw degeneracy).
+#   • walls-only (16 brik strung across the attack lane): the wall
+#     channels and delays the rush but kills NOTHING — the
+#     `units_killed_gte` clause is never satisfied (0 kills) so the
+#     win never latches and the episode runs out the clock → LOSS via
+#     `after_ticks`. A real reachable LOSS, not a draw.
+#   • pure-army (only e1, no defensive buildings): FAILS the gun count
+#     clause; a thin home-trained rifle screen cannot out-trade the
+#     heavier rush band either → fact often falls → LOSS.
+#   • intended TOWERS (4 gun turrets wrapping the fact): TurretGun fire
+#     shreds the rush — count + kill + fact-alive + within_ticks all
+#     satisfied → WIN.
+#
+# Why the spec works (engine combat sheet, per CLAUDE.md):
+#   • brik = concrete wall (^Wall base in the RA ruleset; cost 200cr;
+#     HP 40000; 1×1 footprint; NO Armament ⇒ inert, fires nothing;
+#     buildable in the Defense queue). Verified to place via build +
+#     place_building and to deal zero damage (walls-only kills = 0).
+#   • gun = gun turret (^Defense base; cost 800cr; Armament Weapon
+#     TurretGun, damage 6000; classify_defense ⇒ GroundTurret so the
+#     engine's auto-target loop fires it at the nearest in-range
+#     hostile). Defense queue. Verified: an agent-built gun cluster
+#     kills the whole rush wave with no pre-placed help.
+#   • Budget is exactly 3200cr ⇒ 16 brik (16×200) OR 4 gun (4×800).
+#     The two options are mutually exclusive — there is no cash to do
+#     both, so the agent must commit to ACTIVE defence.
+#   • NO pre-placed agent combat units — the pre-placed base is only
+#     fact + tent + 2×powr. If defenders were pre-placed they would
+#     rack up the kills for free and a walls-only spend would pass the
+#     kill clause off them; the discrimination requires the agent's
+#     OWN built defences to be the sole source of kill output.
+#   • The rush arrives as a `scheduled_events: spawn_actors` wave at a
+#     fixed tick (per level), AFTER the agent has had time to build 4
+#     gun turrets serially (~tick 1980 for the 4th). This makes the
+#     race fair: the intended build comfortably completes before the
+#     wave, while a staller / walls-only spend still cannot satisfy
+#     the kill quota.
+#   • `units_killed_gte:K` is the load-bearing clause: walls produce 0
+#     kills, gun turrets produce many. This is the predicate that
+#     makes ACTIVE defence (not passive obstruction) the only winning
+#     play.
+#   • `building_count_gte:{fact,1}` (PRESENT-TENSE) is the fact-alive
+#     check — `has_building` is a one-shot ever-seen set that stays
+#     true after the fact is razed (documented CLAUDE.md footgun).
+#   • `after_ticks: BUDGET+1` fail clause is reachable within max_turns
+#     (no interrupts ⇒ exactly 90 ticks/step ⇒ max tick =
+#     93+90·(N-1)); a non-finisher (stall, walls-only) hits it and
+#     LOSES rather than draws.
+#   • A persistent unarmed enemy `fact` at (120,20) keeps the episode
+#     alive past full rush elimination so the win/fail evaluator sees
+#     the terminal frame (no DRAW collapse on enemy-wipe auto-done).
+#   • The `rusher` bot relentlessly charges the agent's centroid (the
+#     fact) — so the scheduled wave converges on the protected asset
+#     whatever defence is built in front of it.
+
+meta:
+  id: def-walls-vs-towers
+  title: 'Defense Doctrine — Active Towers Beat Passive Walls'
+  capability: reasoning
+  real_world_meaning: >
+    One budget, one incoming rush, two ways to spend it. PASSIVE walls
+    (brik — 200cr, no weapon) are an inert barrier: they slow and
+    channel an attacker but kill nothing, so a walled-off base only
+    delays the rush. ACTIVE towers (gun turrets — 800cr, anti-ground
+    fire) actually destroy the attacking band. The budget funds EITHER
+    ~16 walls OR ~4 turrets, never both. The win predicate requires a
+    KILL quota only the turrets can deliver, so spending the budget on
+    inert walls — however many — LOSES, and building the active
+    turrets WINS.
+  robotics_analogue: >
+    Security architecture, passive vs active mitigation: network
+    segmentation, an air-gap, or a firewall ACL slows and channels an
+    intruder but neutralises nothing; an IPS or active-response EDR
+    actually terminates the malicious process. A posture built only on
+    passive obstruction merely delays a breach — defence in depth must
+    pair every obstacle with an active responder. Likewise military
+    fortification doctrine: an obstacle belt (ditch, wall, wire) only
+    DELAYS and CHANNELS an assault; it is dead weight unless paired
+    with the covering FIRES the obstacle funnels the enemy into.
+  benchmark_anchor:
+    - 'security architecture'
+    - 'passive vs active mitigation'
+    - 'military fortification'
+  author: openra-bench
+
+# rush-hour-arena (128×40, playable x in [2..126], y in [2..38]). Agent
+# base on the west (fact at (10,20) + tent + 2×powr, NO pre-placed
+# combat units); the rush wave is injected mid-east via a scheduled
+# spawn_actors event and the rusher bot charges the agent centroid (the
+# fact). The agent must spend its one budget on ACTIVE gun turrets that
+# kill the rush — not on inert brik walls that only delay it.
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: rusher}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # No interrupts — the passive-vs-active choice is a STATIC up-front
+  # decision (the threat axis is known: the rusher always charges the
+  # fact). Disabling interrupts also makes the tick budget
+  # deterministic (exactly 90 ticks/step ⇒ max_turns is a hard tick
+  # budget the `after_ticks` fail clause reliably bites in).
+  interrupts: {}
+  termination:
+    max_ticks: 12000
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ── the bare passive-vs-active choice. Budget 3200cr = 16
+  # brik (passive) OR 4 gun turrets (active). The rush wave (8×e1) is
+  # injected at tick 1800 — after the intended 4-gun build completes
+  # (~tick 1980 for the 4th, comfortably within reach; the first 3
+  # are up by ~1530 so the wave is engaged immediately). Win requires
+  # 4 gun built AND ≥4 kills AND the fact alive. A walls-only spend
+  # kills 0 → fails the kill clause → the win never latches → LOSS via
+  # `after_ticks`. Stall loses (fact razed). max_turns 60 ⇒ reachable
+  # tick 93+90·59 = 5403; deadline 5400.
+  easy:
+    description: >
+      A rusher band of 8 rifle infantry will charge your construction
+      yard (fact, at (10,20)). You have ONE budget of 3200cr — enough
+      for EITHER ~16 concrete walls (brik, 200cr, no weapon — an inert
+      barrier) OR 4 gun turrets (gun, 800cr each — active anti-ground
+      towers that KILL). Build 4 gun turrets wrapping the fact so their
+      fire shreds the rush. Win requires 4 gun turrets built, at least
+      4 enemy units killed, and the fact still standing before tick
+      5400. Walls only delay the rush — they kill nothing, so a
+      walls-only spend FAILS the kill bar. Stall and pure-army also
+      LOSE.
+    starting_cash: 3200
+    overrides:
+      actors:
+        # Pre-placed agent base — fact + tent + 2×powr. NO combat
+        # units near the base: the agent's built defences must be the
+        # sole source of kill output, or a walls-only spend would pass
+        # the kill clause off pre-placed defenders. Two powr cover the
+        # 4-gun power draw (4×-40 = -160; 2×powr = +200).
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [6,  18]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        - {type: powr, owner: agent, position: [6,  16]}
+        # ONE non-combatant agent e1 parked in the far SW corner,
+        # nowhere near the y=20 rush lane or the fact. It exists only
+        # so `units_summary` is non-empty (hard-tier env-reset check);
+        # it never reaches combat, contributes ZERO kills, and so does
+        # not let a walls-only / stall play pass the kill clause.
+        - {type: e1,   owner: agent, position: [3, 36], stance: 2}
+        # Unarmed high-HP marker (anti-DRAW): keeps the episode alive
+        # past full rush elimination so the win/fail check fires.
+        - {type: fact, owner: enemy, position: [120, 20]}
+      # Scheduled rush wave — injected at tick 1800, mid-east on the
+      # y=20 lane. The rusher bot charges the agent centroid (the
+      # fact). 8×e1 overwhelms a passive wall / pure-army defence but
+      # a cluster of 4 active gun turrets shreds it.
+      scheduled_events:
+        - tick: 1800
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 8}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: gun, n: 4}}
+        - {units_killed_gte: 4}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 axis: heavier rush (8×e1 + 2×e3 rocket soldiers)
+  # AND a higher kill bar (6). Same budget (3200cr = 16 brik OR 4
+  # gun). The heavier band means a walls-only spend channels for
+  # longer but still kills nothing, and pure-army is out-traded
+  # harder; only the active gun cluster produces enough kill output to
+  # clear the bar AND keep the fact. max_turns 60 ⇒ reachable tick
+  # 5403; deadline 5400.
+  medium:
+    description: >
+      A heavier rush — 8 rifle infantry + 2 rocket soldiers — will
+      charge your construction yard (fact, at (10,20)). One budget of
+      3200cr: EITHER ~16 inert concrete walls (brik) OR 4 active gun
+      turrets (gun). Build 4 gun turrets wrapping the fact. Win
+      requires 4 gun turrets built, at least 6 enemy units killed, and
+      the fact still standing before tick 5400. Walls kill nothing
+      (they only delay) so a walls-only spend FAILS the kill bar;
+      stall and pure-army also LOSE.
+    starting_cash: 3200
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [6,  18]}
+        - {type: powr, owner: agent, position: [6,  22]}
+        - {type: powr, owner: agent, position: [6,  16]}
+        # Non-combatant SW-corner e1 (see easy) — non-empty
+        # units_summary, zero kill contribution.
+        - {type: e1,   owner: agent, position: [3, 36], stance: 2}
+        # Anti-DRAW marker.
+        - {type: fact, owner: enemy, position: [120, 20]}
+      # Heavier rush wave: 8×e1 + 2×e3, all on the y=20 lane.
+      scheduled_events:
+        - tick: 1800
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 8}
+            - {type: e3, owner: enemy, position: [62, 20], stance: 3, count: 2}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: gun, n: 4}}
+        - {units_killed_gte: 6}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── HARD ── +1 axis: TWO seed-driven agent spawn_point groups so the
+  # fact (and therefore the turret cluster) FLIPS between NORTH y=14
+  # and SOUTH y=26 per seed. The win predicate is the same (count +
+  # kill + fact-alive + within_ticks) but the model must READ the
+  # fact's latitude from observation and place the turrets relative to
+  # it — a memorised "build turrets near (10,20)" plan does not work
+  # because the fact never sits at y=20 on hard. The scheduled wave is
+  # injected at BOTH candidate latitudes (the spawn_actors list is not
+  # spawn_point-filtered); the rusher charges the agent centroid so it
+  # converges on whichever fact is present this seed. Kill bar 6
+  # (the on-latitude wave is 7 units — bar 6 leaves a one-unit margin
+  # so a slightly imperfect turret cluster still clears it, while a
+  # walls-only spend at 0 kills is nowhere near).
+  # max_turns 60 ⇒ reachable tick 5403; deadline 5400.
+  hard:
+    description: >
+      The construction yard (fact) flips between NORTH (y=14) and SOUTH
+      (y=26) by seed; the turret cluster must follow. One budget of
+      3200cr: EITHER ~16 inert concrete walls (brik) OR 4 active gun
+      turrets (gun). Build 4 gun turrets wrapping the CURRENT fact
+      (either (10,14) or (10,26) — read it from the observation). Win
+      requires 4 gun turrets built, at least 6 enemy units killed, and
+      the fact still standing before tick 5400. A walls-only spend
+      kills nothing; stall and pure-army also LOSE.
+    starting_cash: 3200
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base. Fact at (10,14); tent/powr WEST.
+        # The non-combatant corner e1 parks in the far SW corner,
+        # well clear of the y=14 rush lane (zero kill contribution).
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [6,  12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  16], spawn_point: 0}
+        - {type: e1,   owner: agent, position: [3, 36], stance: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH base (mirror across y=20). The
+        # non-combatant corner e1 parks in the far NW corner, well
+        # clear of the y=26 rush lane.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [6,  24], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  22], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [3,  4], stance: 2, spawn_point: 1}
+        # Anti-DRAW marker on the symmetry axis.
+        - {type: fact, owner: enemy, position: [120, 20]}
+      # The scheduled wave is staged at BOTH candidate latitudes (y=14
+      # AND y=26) — the spawn_actors list is not spawn_point-filtered,
+      # so both bands always inject. The rusher charges the agent
+      # centroid so the band whose latitude matches the active fact
+      # converges on it; the on-latitude band alone is heavy enough to
+      # overwhelm a passive / mis-placed defence.
+      scheduled_events:
+        - tick: 1800
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [60, 14], stance: 3, count: 6}
+            - {type: e3, owner: enemy, position: [62, 14], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [60, 26], stance: 3, count: 6}
+            - {type: e3, owner: enemy, position: [62, 26], stance: 3, count: 1}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: gun, n: 4}}
+        - {units_killed_gte: 6}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
