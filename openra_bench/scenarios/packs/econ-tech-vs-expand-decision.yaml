@@ -1,0 +1,296 @@
+# econ-tech-vs-expand-decision — capital allocation: tech building
+# vs economic expansion (Wave-12).
+#
+# REASONING capability. One indivisible budget, two mutually
+# exclusive ways to spend it:
+#
+#   (A) TECH   — build a war factory (weap, $2000): a capability
+#       investment. It unlocks the vehicle tech tier, but it is a
+#       NON-REVENUE structure — it generates ZERO income, and within
+#       the planning horizon of this regime it pays nothing back.
+#   (B) EXPAND — buy a SECOND ore harvester ($1100, the dominant
+#       slice of the budget) so the running refinery is fed by two
+#       collectors instead of one. A second harvester roughly DOUBLES
+#       gathering throughput; the extra income compounds over the
+#       whole episode.
+#
+# The regime is FIXED and the win predicate is an ECONOMY target
+# (`economy_value_gte` — cash + stored ore — by a deadline). One
+# answer is correct for this regime: there is no near-term combat
+# demand the tech tier must satisfy (the only enemy is a token,
+# far-off, passive garrison that never attacks inside the econ
+# window), so the regime rewards COMPOUNDING the economy. EXPAND
+# clears the EV bar; TECH sinks the budget into a structure that
+# returns nothing and the economy never reaches the target → LOSS.
+# This is the classic capex-allocation trap: do not buy capability
+# the regime does not yet demand when the same budget, spent on
+# capacity, compounds.
+#
+# Real-world anchors:
+#   • SC2 tech-vs-expand: the macro decision between teching up and
+#     taking another base — the right call is set by the opponent's
+#     timing. When no timing attack is incoming, expand.
+#   • PlanBench resource-allocation: pick the allocation that
+#     satisfies the goal, not merely some allocation.
+#   • Capex allocation / capital budgeting: a non-revenue capability
+#     purchase vs a capacity expansion whose throughput compounds —
+#     when the planning horizon has no demand the capability serves,
+#     the capacity investment dominates on NPV.
+#
+# Discrimination (four-policy bar — scripted, no model needed):
+#   • stall (observe-only): no income action — the economy idles at
+#     the starting reserve, far below the EV bar → the `after_ticks`
+#     deadline bites as a real reachable timeout LOSS.
+#   • build-tech (build + place the war factory, $2000): the budget
+#     is sunk into a non-revenue structure; with the reserve drained
+#     the single harvester's income alone cannot reach the EV bar →
+#     LOSS via `after_ticks`. A real reachable LOSS, not a draw.
+#   • under-spend / wrong-line (buy a non-revenue unit / partial
+#     spend): the economy still misses the bar → LOSS.
+#   • intended EXPAND (build('harv') early — a second harvester):
+#     gathering throughput roughly doubles; the compounded income
+#     clears the EV bar AND keeps the construction yard intact →
+#     WIN, comfortably inside the deadline.
+#
+# Engine facts used (CLAUDE.md / prompt_v2 codex / verified against
+# the installed openra_train wheel, 2026-05-20):
+#   • harv ($1100): an ore harvester; build requires fact + powr +
+#     weap (the Vehicle queue host). The war factory is PRE-PLACED,
+#     so the harvester buy is actionable on turn 1 — the EXPAND
+#     option needs no prior tech step.
+#   • A SECOND weap is the TECH option: cost $2000, prereq proc
+#     (pre-placed). `place_building` has no adjacency requirement
+#     (CLAUDE.md) so the tech LOSS is from the cash sink, not from
+#     placement difficulty.
+#   • Income on rush-hour-arena from the near patches is ~1.1
+#     cash/tick per harvester after a ~450-tick warmup; a second
+#     harvester roughly doubles it. The EV bars are set ABOVE the
+#     one-harvester ceiling and ABOVE a tech-drained economy, but
+#     BELOW a two-harvester economy — so only EXPAND clears the bar.
+#   • `economy_value_gte` reads cash + stored ore; building the war
+#     factory deducts $2000 so the tech play visibly craters.
+#   • Tick alignment (~90 ticks/turn): within_ticks ≤ 93+90·
+#     (max_turns−1); fail after_ticks = within_ticks+1 ⇒ a
+#     non-finisher is a real reachable LOSS, never a DRAW.
+#   • A far inert passive enemy actor keeps the engine from
+#     auto-`done`ing on no-enemy-actors (CLAUDE.md). It is
+#     stance:0 and far from the base so it never influences the run
+#     — the "enemy-timing regime" is encoded by its irrelevance:
+#     no attack lands inside the econ window, so teching is
+#     premature.
+#   • Hard tier: two agent spawn_point groups (NORTH y=10..14 /
+#     SOUTH y=28..32), each carrying its own fact+proc+powr+weap+
+#     harv and a symmetric near-patch pair so the income economics
+#     are identical per spawn — a memorised "build at (x,y)"
+#     opening cannot generalise (spawn_point filters AGENT actors
+#     only; neutral mines place every seed).
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_econ_tech_vs_expand_decision.py -q
+
+meta:
+  id: econ-tech-vs-expand-decision
+  title: 'Capital Allocation — Tech Building or Economic Expansion?'
+  capability: reasoning
+  real_world_meaning: >
+    One indivisible budget funds EITHER a tech building (a war
+    factory — a capability investment that generates no income) OR an
+    economic expansion (a second ore harvester that roughly doubles
+    gathering throughput). The regime is fixed: there is no near-term
+    combat demand the tech tier must satisfy, so the budget compounds
+    best as capacity. The win is an economy target by a deadline —
+    expanding clears it; sinking the budget into the non-revenue tech
+    building leaves the economy short. The pack frames the classic
+    tech-vs-expand decision: do not buy capability the regime does
+    not yet demand when the same budget, spent on capacity,
+    compounds.
+  robotics_analogue: >
+    Capital budgeting for an autonomous operation: the same budget
+    buys EITHER a new capability module that the current mission
+    profile does not call for OR an extra collector that compounds
+    throughput over the planning horizon. With no demand the new
+    capability serves inside the horizon, the capacity expansion
+    dominates on payback — invest in throughput, not in idle
+    capability.
+  benchmark_anchor:
+    - "SC2 tech-vs-expand"
+    - "PlanBench resource-allocation"
+    - "capex allocation"
+    - "capital budgeting"
+  author: openra-bench
+
+base_map: rush-hour-arena
+# EXACTLY enough for EITHER one harvester ($1100, EXPAND) OR one war
+# factory ($2000, TECH) — never both. The budget equates to a single
+# coherent capital allocation.
+starting_cash: 2000
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────
+  # The bare tech-vs-expand decision. A running economy (fact + proc
+  # + powr + weap + 1× harv + 2 near patches). The budget ($2000)
+  # buys EITHER a second harvester ($1100) OR a second war factory
+  # ($2000). Win when economy value reaches 5200 by tick 2700 with
+  # the construction yard intact. One harvester tops out near 4100 —
+  # short of the bar. Building the war factory sinks the whole
+  # budget into a non-revenue structure → the economy never reaches
+  # 5200. Only an early second-harvester buy clears the bar.
+  easy:
+    description: >
+      A running economy (1× harvester + refinery + war factory + 2
+      ore patches) and a budget of 2000 cr. That budget funds EITHER
+      a SECOND ore harvester (build harv, 1100 cr — roughly doubles
+      gathering income) OR a SECOND war factory (build weap, 2000 cr
+      — a tech building that generates no income). Win when economy
+      value (cash + stored ore) reaches 5200 AND your construction
+      yard is intact, before tick 2700. A single harvester tops out
+      near 4100 by the deadline — it cannot reach the bar. The war
+      factory returns nothing; sinking the budget into it leaves the
+      economy short. The intended play is to EXPAND — build('harv')
+      early so the doubled income compounds and clears the bar.
+      Stalling, building the war factory, or under-spending all
+      LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [8, 22]}
+        - {type: weap, owner: agent, position: [16, 22]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Far inert passive enemy marker (anti-DRAW). stance:0 + far
+        # corner ⇒ it never attacks inside the econ window — the
+        # "enemy-timing regime" that makes teching premature.
+        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+    win_condition:
+      all_of:
+        - economy_value_gte: 5200
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 2700
+    # within_ticks ≤ 93+90·29 = 2703 ⇒ deadline bites inside
+    # max_turns; after_ticks = within_ticks+1 ⇒ a non-finisher is a
+    # real reachable LOSS, not a draw.
+    fail_condition:
+      any_of:
+        - after_ticks: 2701
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable: the EV bar tightens relative to the
+  # horizon. The bar (7300 EV by tick 3600) clears comfortably for an
+  # early second-harvester buy but not for a single harvester and not
+  # for a tech-drained economy. The decision is identical; the margin
+  # is thinner.
+  medium:
+    description: >
+      Same running economy and the same 2000 cr budget — EITHER a
+      second harvester (build harv, 1100 cr) OR a second war factory
+      (build weap, 2000 cr, no income). Win when economy value
+      reaches 7300 AND your construction yard is intact, before tick
+      3600. One harvester tops out near 5100 by the deadline — well
+      short. Sinking the budget into the war factory leaves the
+      economy short too. Only an early EXPAND — build('harv') — lets
+      the doubled income compound past the bar. Stalling, building
+      the war factory, or under-spending all LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [8, 22]}
+        - {type: weap, owner: agent, position: [16, 22]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+    win_condition:
+      all_of:
+        - economy_value_gte: 7300
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 3600
+    # within_ticks ≤ 93+90·39 = 3603 ⇒ reachable in max_turns;
+    # after_ticks = within_ticks+1 ⇒ a non-finisher is a real LOSS.
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 40
+
+  # ── HARD ────────────────────────────────────────────────────────
+  # +2 controlled variables vs medium:
+  #   1. The EV bar tightens further (10200 EV by tick 4500) — the
+  #      tech-drained / single-harvester economies miss by a wide
+  #      margin; only an early EXPAND clears it.
+  #   2. TWO seed-driven AGENT spawn_point groups (NORTH y=10..14 /
+  #      SOUTH y=28..32), each carrying its own fact+proc+powr+weap+
+  #      harv and a symmetric near-patch pair, so the income
+  #      economics are identical per spawn — a memorised "build at
+  #      (8,18)" opening cannot generalise. The neutral mines place
+  #      every seed (spawn_point filters AGENT actors only); each
+  #      spawn group has its own near-patch pair.
+  hard:
+    description: >
+      Same running economy and the same 2000 cr budget — EITHER a
+      second harvester (build harv, 1100 cr) OR a second war factory
+      (build weap, 2000 cr, no income). Win when economy value
+      reaches 10200 AND your construction yard is intact, before
+      tick 4500. One harvester and a tech-drained economy both miss
+      the bar by a wide margin. Only an early EXPAND — build('harv')
+      — compounds past it. The base latitude varies by seed so a
+      memorised opening cannot generalise; the tech-vs-expand
+      decision is identical at either spawn. Stalling, building the
+      war factory, or under-spending all LOSE.
+    overrides:
+      actors:
+        # ── spawn 0 — NORTH base (y=10..14) ───────────────────────
+        - {type: fact, owner: agent, position: [8, 10],  spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 14],  spawn_point: 0}
+        - {type: weap, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 10]}
+        - {type: mine, owner: neutral, position: [22, 14]}
+        # ── spawn 1 — SOUTH base (y=28..32) ───────────────────────
+        - {type: fact, owner: agent, position: [8, 28],  spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 32],  spawn_point: 1}
+        - {type: weap, owner: agent, position: [16, 32], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 28]}
+        - {type: mine, owner: neutral, position: [22, 32]}
+        # Far inert passive enemy marker (anti-DRAW) on the symmetry
+        # axis — never attacks inside the econ window.
+        - {type: e1, owner: enemy, position: [120, 20], stance: 0}
+    win_condition:
+      all_of:
+        - economy_value_gte: 10200
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 4500
+    # within_ticks ≤ 93+90·49 = 4503 ⇒ reachable in max_turns;
+    # after_ticks = within_ticks+1 ⇒ a non-finisher is a real LOSS.
+    fail_condition:
+      any_of:
+        - after_ticks: 4501
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 50

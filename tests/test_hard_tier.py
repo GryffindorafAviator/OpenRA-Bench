@@ -1449,6 +1449,7 @@ UPGRADED = [
     "def-tower-line-vs-cluster",  # hard: 2 agent spawn_point groups
     "coord-cover-and-move",  # hard: 2 agent spawn_point groups
     "combat-kite-and-pull",  # hard: 2 agent spawn_point groups (Wave-12)
+    "econ-tech-vs-expand-decision",  # hard: 2 agent spawn_point groups (Wave-12)
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
