@@ -67,12 +67,33 @@ def _save_only(rs, C):
     return [C.harvest([str(h["id"])], 22, int(h["cell_y"])) for h in harvs]
 
 
+def _engage(rs, C, cmds):
+    """Append an explicit attack order driving every pre-placed 2tnk
+    onto the nearest garrison e1. The pre-placed tanks are stance:0
+    (HoldFire) — they never auto-engage, so an explicit attack_unit is
+    REQUIRED to score kills (the kill bar stays load-bearing after the
+    engine stance fix). Falls back to attack_move toward the patch
+    column while no garrison unit is yet visible."""
+    units = rs.get("units_summary", []) or []
+    tanks = [u for u in units if u.get("type") == "2tnk"]
+    if not tanks:
+        return cmds
+    tank_ids = [str(u["id"]) for u in tanks]
+    targets = [e for e in (rs.get("enemy_summary") or [])
+               if e.get("type") == "e1"]
+    if targets:
+        cmds.append(C.attack_unit(tank_ids, str(targets[0]["id"])))
+    else:
+        cmds.append(C.attack_move(tank_ids, 40, int(tanks[0]["cell_y"])))
+    return cmds
+
+
 def _burn_all(rs, C):
-    """Chain 2tnk + e1 + place pbox + place powr until cash → 0.
-    Tank-only kills via attack-move are racked up but cash drops
-    below MIN (~0) at the latch tick → LOSS on the lower-cash bound.
-    On easy / medium / hard the burn-rate is sufficient to blow the
-    floor before income can refill above MIN."""
+    """Chain 2tnk + e1 + place pbox + place powr until cash → 0 while
+    also engaging the garrison. Cash drops below MIN (~0-44) at the
+    latch tick → LOSS on the lower-cash bound. On easy / medium / hard
+    the burn-rate is sufficient to blow the floor before income can
+    refill above MIN."""
     units = rs.get("units_summary", []) or []
     own_b = rs.get("own_buildings") or []
     fy = 22
@@ -89,37 +110,26 @@ def _burn_all(rs, C):
     cmds.append(C.place_building("pbox", 24, fy))
     cmds.append(C.build("powr"))
     cmds.append(C.place_building("powr", 24, fy + 2))
-    tanks = [u for u in units if u.get("type") == "2tnk"]
-    if tanks:
-        cmds.append(C.attack_move([str(u["id"]) for u in tanks], 40, fy))
-    return cmds
+    return _engage(rs, C, cmds)
 
 
 def _tank_only(rs, C):
     """Use the pre-placed tanks WITHOUT building anything more.
     Harvest income lifts cash above MAX while kills clear the bar →
-    LOSS on the upper-cash bound on EVERY tier (easy ≤ 2400; medium
+    LOSS on the upper-cash bound on EVERY tier (easy ≤ 1800; medium
     ≤ 1500; hard ≤ 1800). This is the "save while attacking" play —
     the BURN-RATE teeth catch it."""
     units = rs.get("units_summary", []) or []
-    own_b = rs.get("own_buildings") or []
-    fy = 22
-    for b in own_b:
-        if b.get("type") == "fact":
-            fy = int(b["cell_y"])
-            break
     harvs = [u for u in units if u.get("type") == "harv"]
-    tanks = [u for u in units if u.get("type") == "2tnk"]
     cmds = [C.harvest([str(h["id"])], 22, int(h["cell_y"])) for h in harvs]
-    if tanks:
-        cmds.append(C.attack_move([str(u["id"]) for u in tanks], 40, fy))
-    return cmds
+    return _engage(rs, C, cmds)
 
 
 def _intended_lean(rs, C):
-    """The intended burn-rate capability: attack-move the pre-placed
-    tanks east AND queue 2× 2tnk from the war factory on turn 1 to
-    burn down cash at the operating rate, AND harvest both harvs.
+    """The intended burn-rate capability: drive the pre-placed tanks
+    onto the garrison (attack_unit — the stance:0 tanks need an
+    explicit order) AND queue 2× 2tnk from the war factory on turn 1
+    to burn down cash at the operating rate, AND harvest both harvs.
     Cash settles inside the band as the kill bar fires — wins every
     tier and every hard seed (verified scripted run_level)."""
     # Per-call turn counter via attribute on the function itself
@@ -128,21 +138,12 @@ def _intended_lean(rs, C):
     _intended_lean._n = n
 
     units = rs.get("units_summary", []) or []
-    own_b = rs.get("own_buildings") or []
-    fy = 22
-    for b in own_b:
-        if b.get("type") == "fact":
-            fy = int(b["cell_y"])
-            break
     harvs = [u for u in units if u.get("type") == "harv"]
-    tanks = [u for u in units if u.get("type") == "2tnk"]
     cmds = [C.harvest([str(h["id"])], 22, int(h["cell_y"])) for h in harvs]
     if n == 1:
         cmds.append(C.build("2tnk"))
         cmds.append(C.build("2tnk"))
-    if tanks:
-        cmds.append(C.attack_move([str(u["id"]) for u in tanks], 40, fy))
-    return cmds
+    return _engage(rs, C, cmds)
 
 
 def _reset_lean():

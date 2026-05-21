@@ -61,21 +61,34 @@
 #     the tick budget — the decision under test is BURN-RATE on
 #     cash, not tank-build-then-drive timing.
 #
-# Bar (CLAUDE.md "no defect, no cheat, no draw" — verified seeds 1-4
-# across every tier on the installed wheel):
+# Bar (CLAUDE.md "no defect, no cheat, no draw" — recalibrated and
+# verified seeds 1-4 across every tier on the installed wheel after the
+# engine balance fixes — stance semantics + power-signal recompute):
 #   • stall (observe only) — kills=0 ⇒ LOSS every tier / every seed.
 #   • save-all (harvest only, never build, never attack) — kills=0
 #     AND cash drifts well above MAX ⇒ LOSS every tier / every seed.
-#   • burn-all (chain 2tnk + e1 + place pbox/powr until cash hits 0)
-#     ⇒ cash falls below MIN at the latch tick ⇒ LOSS every tier /
+#   • burn-all (chain 2tnk + e1 + place pbox/powr until cash hits 0,
+#     while engaging the garrison) ⇒ cash falls below MIN (~0-270) at
+#     the latch tick ⇒ LOSS every tier / every seed.
+#   • tank-only (drive the pre-placed tanks onto the garrison WITHOUT
+#     building anything; hoard cash via harvest) ⇒ kills bar met but
+#     cash overflows MAX ⇒ LOSS every tier / every seed.
+#   • intended LEAN (attack_unit the pre-placed tanks onto the
+#     garrison + queue 2× 2tnk on turn 1; harvest both harvs) ⇒ cash
+#     settles inside the band, kills clear the bar ⇒ WIN every tier /
 #     every seed.
-#   • tank-only (use the pre-placed tanks WITHOUT building anything;
-#     hoard cash via harvest) ⇒ kills bar met but cash overflows MAX
-#     ⇒ LOSS on medium and hard (and on easy with the band tightened
-#     to ≤2400 so tank-only's ~2500 ending also fails).
-#   • intended LEAN (attack-move pre-placed tanks east + queue 2× 2tnk
-#     on turn 1; harvest both harvs) ⇒ cash settles inside the band,
-#     kills clear the bar ⇒ WIN every tier / every seed.
+#
+# Engine-balance-fix recalibration notes (2026-05):
+#   • The pre-placed strike tanks are stance:0 (HoldFire). After the
+#     stance fix a default-stance tank auto-hunts the garrison and
+#     clears the kill bar for free (stall would WIN); stance:0 forces
+#     an explicit attack order, restoring the kill-bar teeth.
+#   • The garrison e1 are stance:2 (Defend) — they hold the patch and
+#     never charge the base, so the kill bar requires the agent to
+#     drive the strike force in.
+#   • A 2nd powr is pre-placed (200 provided vs 110 drawn). After the
+#     power-signal recompute a single powr left the base power-starved
+#     and the Vehicle queue THROTTLED — queued 2tnk never completed.
 #
 # Validate (no model / no network):
 #   python3 -m pytest tests/test_econ_burn_rate_management.py -q
@@ -140,25 +153,36 @@ base:
   termination:
     max_ticks: 40000
   actors:
-    # Pre-placed production base (fact + proc + powr + tent + weap +
+    # Pre-placed production base (fact + proc + 2× powr + tent + weap +
     # fix) gives the agent EVERY relevant production lever on turn 1:
     # tent for infantry, weap+fix for 2tnk vehicles, place_building
-    # for fast-burn dials (powr/pbox). 2× harv on 2× near mines
-    # supply the ~190 cr/turn income that sets the burn-rate
-    # baseline. 3× pre-placed 2tnk make the kill bar reachable inside
-    # the tick budget without requiring tank-build-then-drive timing
-    # (the decision under test is BURN-RATE, not opening tempo).
+    # for fast-burn dials (powr/pbox). TWO powr (200 provided) cover
+    # the base's 110 power draw — after the engine power-signal fix
+    # (pre-placed building power now counts) a single powr left the
+    # base at a 100/110 deficit that THROTTLED the Vehicle queue, so
+    # queued 2tnk never completed; the 2nd powr keeps production
+    # un-throttled so the burn-rate decision is the only variable.
+    # 2× harv on 2× near mines supply the ~190 cr/turn income that
+    # sets the burn-rate baseline. 3× pre-placed 2tnk make the kill
+    # bar reachable inside the tick budget without requiring
+    # tank-build-then-drive timing (the decision under test is
+    # BURN-RATE, not opening tempo). The pre-placed tanks are
+    # stance:0 (HoldFire) — after the engine stance fix a default
+    # tank would auto-hunt the garrison and clear the kill bar for
+    # free; stance:0 forces an explicit attack order so the kill bar
+    # stays load-bearing.
     - {type: fact, owner: agent, position: [10, 22]}
     - {type: proc, owner: agent, position: [12, 18]}
     - {type: powr, owner: agent, position: [14, 22]}
+    - {type: powr, owner: agent, position: [16, 18]}
     - {type: tent, owner: agent, position: [10, 18]}
     - {type: weap, owner: agent, position: [16, 22]}
     - {type: fix,  owner: agent, position: [18, 22]}
     - {type: harv, owner: agent, position: [14, 18]}
     - {type: harv, owner: agent, position: [14, 20]}
-    - {type: 2tnk, owner: agent, position: [20, 19]}
-    - {type: 2tnk, owner: agent, position: [20, 20]}
-    - {type: 2tnk, owner: agent, position: [20, 21]}
+    - {type: 2tnk, owner: agent, position: [20, 19], stance: 0}
+    - {type: 2tnk, owner: agent, position: [20, 20], stance: 0}
+    - {type: 2tnk, owner: agent, position: [20, 21], stance: 0}
     - {type: mine, owner: neutral, position: [22, 18]}
     - {type: mine, owner: neutral, position: [22, 20]}
     # Inert far enemy marker — anti-DRAW (per CLAUDE.md engine auto-
@@ -170,57 +194,62 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Loose cash band [200, 2400], small kill bar (K=2). A single small
+  # Loose cash band [400, 1800], small kill bar (K=2). A single small
   # garrison (3× e1) sits at x=40 (close enough that the pre-placed
-  # tank trio reaches them in ~3-4 turns). The window is wide enough
-  # to forgive a range of modest spends but tight enough that pure
-  # tank-rush WITHOUT any production spend (cash drifts to ~2500 over
-  # 14 turns of harvest) falls just above the 2400 ceiling.
+  # tank trio reaches them in ~3-4 turns once ordered in). The window
+  # is wide enough to forgive a range of modest spends but tight
+  # enough that tank-only WITHOUT any production spend (cash drifts to
+  # ~3500 of harvest income) overshoots the 1800 ceiling, while
+  # blowing the bank on pbox/powr drops cash (~270) below the 400
+  # floor.
   easy:
     description: >
       Manage your cash burn rate. You have a productive base (fact,
-      proc, powr, tent, weap, war-factory + service depot), 3 pre-
+      proc, 2× powr, tent, weap, war-factory + service depot), 3 pre-
       placed medium tanks, 2 harvesters on 2 ore patches, and $1500
       to start. Your refinery yields about $190/turn of income.
       Defeat the small enemy garrison at the centre (kill ≥2 enemy
-      units) AND finish with cash IN the band [200, 2400] AND keep
+      units) AND finish with cash IN the band [400, 1800] AND keep
       your construction yard standing — within tick 1200. Stalling
       (build nothing, never attack) or pure-hoarding (only harvest)
-      leaves cash ABOVE 2400 with 0 kills → LOSS. Just sending the
-      pre-placed tanks without spending lands cash near 2500 → LOSS.
-      Blowing the bank on every unit and pillbox you can queue drops
-      cash BELOW 200 → LOSS. A balanced commit (engage with the
-      existing tanks AND queue a few more medium tanks to draw down
-      the surplus) settles cash inside the band as kills clear the
-      bar.
+      leaves cash ABOVE 1800 with 0 kills → LOSS. Just sending the
+      pre-placed tanks without spending lets harvest income lift cash
+      above 1800 → LOSS. Blowing the bank on every unit and pillbox
+      you can queue drops cash BELOW 400 → LOSS. A balanced commit
+      (engage with the existing tanks AND queue a few more medium
+      tanks to draw down the surplus) settles cash inside the band as
+      kills clear the bar.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 22]}
         - {type: proc, owner: agent, position: [12, 18]}
         - {type: powr, owner: agent, position: [14, 22]}
+        - {type: powr, owner: agent, position: [16, 18]}
         - {type: tent, owner: agent, position: [10, 18]}
         - {type: weap, owner: agent, position: [16, 22]}
         - {type: fix,  owner: agent, position: [18, 22]}
         - {type: harv, owner: agent, position: [14, 18]}
         - {type: harv, owner: agent, position: [14, 20]}
-        - {type: 2tnk, owner: agent, position: [20, 19]}
-        - {type: 2tnk, owner: agent, position: [20, 20]}
-        - {type: 2tnk, owner: agent, position: [20, 21]}
+        - {type: 2tnk, owner: agent, position: [20, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 20], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 21], stance: 0}
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 20]}
-        # Small central enemy garrison (3× e1, stance 3 — fires on
-        # contact). Killing ≥2 clears the bar. Sits at x=40 so the
-        # pre-placed strike force at x=20 reaches them in ~3-4 turns,
-        # well inside the 14-turn budget.
-        - {type: e1, owner: enemy, position: [40, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 21], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 22], stance: 3}
+        # Small central enemy garrison (3× e1, stance 2 — Defend:
+        # fires when something is in weapon range but never advances).
+        # Killing ≥2 clears the bar. Sits at x=40 — the agent must
+        # send the pre-placed tanks (stance:0, no auto-engage) with an
+        # explicit attack order to score the kills, so the kill bar
+        # stays load-bearing after the engine stance fix.
+        - {type: e1, owner: enemy, position: [40, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 22], stance: 2}
         - {type: fact, owner: enemy, position: [124, 36]}
     win_condition:
       all_of:
         - {units_killed_gte: 2}
-        - {cash_gte: 200}
-        - {not: {cash_gte: 2401}}
+        - {cash_gte: 400}
+        - {not: {cash_gte: 1801}}
         - {building_count_gte: {type: fact, n: 1}}
         - {within_ticks: 1200}
     fail_condition:
@@ -247,7 +276,7 @@ levels:
       (engage without spending) lands cash above 1500 → LOSS. All-
       out spending (4+ tanks + extra buildings) drops cash BELOW
       the 400 floor → LOSS. The narrow band ([400, 1500] = 1100
-      wide vs easy's [200, 2400] = 2200 wide) makes the operating-
+      wide vs easy's [400, 1800] = 1400 wide) makes the operating-
       rate decision load-bearing — only a sustained 2-3 tank
       commit at the income-replenishment rate hits the band on the
       kill-bar turn.
@@ -256,24 +285,27 @@ levels:
         - {type: fact, owner: agent, position: [10, 22]}
         - {type: proc, owner: agent, position: [12, 18]}
         - {type: powr, owner: agent, position: [14, 22]}
+        - {type: powr, owner: agent, position: [16, 18]}
         - {type: tent, owner: agent, position: [10, 18]}
         - {type: weap, owner: agent, position: [16, 22]}
         - {type: fix,  owner: agent, position: [18, 22]}
         - {type: harv, owner: agent, position: [14, 18]}
         - {type: harv, owner: agent, position: [14, 20]}
-        - {type: 2tnk, owner: agent, position: [20, 19]}
-        - {type: 2tnk, owner: agent, position: [20, 20]}
-        - {type: 2tnk, owner: agent, position: [20, 21]}
+        - {type: 2tnk, owner: agent, position: [20, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 20], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 21], stance: 0}
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 20]}
-        # Larger centre garrison: 5× e1 at x=40. The pre-placed
-        # strike force at x=20 reaches them in ~3-4 turns; kill bar
-        # 3 clears comfortably inside the 12-turn budget.
-        - {type: e1, owner: enemy, position: [40, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 21], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 22], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 23], stance: 3}
+        # Larger centre garrison: 5× e1 at x=40, stance 2 (Defend —
+        # holds position, fires only when in weapon range). The agent
+        # must drive the pre-placed strike force (stance:0) into them
+        # with an explicit attack order; kill bar 3 clears comfortably
+        # inside the 12-turn budget.
+        - {type: e1, owner: enemy, position: [40, 19], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 21], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 23], stance: 2}
         - {type: fact, owner: enemy, position: [124, 36]}
     win_condition:
       all_of:
@@ -316,29 +348,33 @@ levels:
     overrides:
       actors:
         # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
+        # Two powr per spawn (200 provided vs 110 drawn) — keeps the
+        # Vehicle queue un-throttled after the engine power-signal fix.
         - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
         - {type: proc, owner: agent, position: [12, 12], spawn_point: 0}
         - {type: powr, owner: agent, position: [14, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [12, 10], spawn_point: 0}
         - {type: tent, owner: agent, position: [10, 12], spawn_point: 0}
         - {type: weap, owner: agent, position: [16, 14], spawn_point: 0}
         - {type: fix,  owner: agent, position: [18, 14], spawn_point: 0}
         - {type: harv, owner: agent, position: [16, 12], spawn_point: 0}
         - {type: harv, owner: agent, position: [16, 13], spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [20, 13], spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [20, 14], spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [20, 15], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 14], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 15], stance: 0, spawn_point: 0}
         # ── AGENT spawn 1 — SOUTH base (y=26) ─────────────────────
         - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
         - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
         - {type: powr, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [12, 30], spawn_point: 1}
         - {type: tent, owner: agent, position: [10, 28], spawn_point: 1}
         - {type: weap, owner: agent, position: [16, 26], spawn_point: 1}
         - {type: fix,  owner: agent, position: [18, 26], spawn_point: 1}
         - {type: harv, owner: agent, position: [16, 28], spawn_point: 1}
         - {type: harv, owner: agent, position: [16, 27], spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [20, 25], spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [20, 26], spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [20, 27], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 26], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 27], stance: 0, spawn_point: 1}
         # Two mine pairs — one per spawn row. The spawn_point filter
         # applies only to AGENT actors (CLAUDE.md), so both pairs
         # always place; the spawn-matched pair feeds the spawn-matched
@@ -348,19 +384,20 @@ levels:
         - {type: mine, owner: neutral, position: [22, 27]}
         - {type: mine, owner: neutral, position: [22, 28]}
         # NORTH garrison (6× e1) at y=14 — always places at x=40.
-        - {type: e1, owner: enemy, position: [40, 13], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 14], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 15], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 12], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 16], stance: 3}
-        - {type: e1, owner: enemy, position: [42, 14], stance: 3}
+        # stance 2 (Defend) — holds the patch, no auto-charge.
+        - {type: e1, owner: enemy, position: [40, 13], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 14], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 15], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 12], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 16], stance: 2}
+        - {type: e1, owner: enemy, position: [42, 14], stance: 2}
         # SOUTH garrison (6× e1) at y=26 — always places at x=40.
-        - {type: e1, owner: enemy, position: [40, 25], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 26], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 27], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 24], stance: 3}
-        - {type: e1, owner: enemy, position: [40, 28], stance: 3}
-        - {type: e1, owner: enemy, position: [42, 26], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 25], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 26], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 27], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 24], stance: 2}
+        - {type: e1, owner: enemy, position: [40, 28], stance: 2}
+        - {type: e1, owner: enemy, position: [42, 26], stance: 2}
         # Anti-DRAW far enemy marker (always places).
         - {type: fact, owner: enemy, position: [124, 36]}
     win_condition:
