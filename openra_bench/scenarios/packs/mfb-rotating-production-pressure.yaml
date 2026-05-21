@@ -83,7 +83,7 @@
 #
 # WIN PREDICATE
 #   all_of:
-#     - unit_type_count_gte: {type: 2tnk, n: 6}   # built the army
+#     - unit_type_count_gte: {type: 2tnk, n: 4}   # built the army (alive at the gate)
 #     - building_count_gte:  {type: weap, n: 2}   # BOTH war factories alive
 #     - building_count_gte:  {type: fact, n: 2}   # BOTH Construction Yards alive
 #     - within_ticks: T                            # on the clock
@@ -254,9 +254,30 @@ levels:
             - {type: e1, owner: enemy, position: [88, 19], stance: 3, count: 3}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        # ≥4 medium tanks ALIVE — verifies the army was actually
+        # built (a stall has zero). This is a PRESENT-TENSE alive
+        # count, and because the win is gated behind `after_ticks`
+        # (below) it is evaluated AFTER both raids, by which time
+        # the intended six-tank rotation has typically taken 1-2
+        # combat losses defending the heavier hard raids — so the
+        # threshold is 4, not 6 (six was satisfiable only before
+        # the gate, when no tank had yet died). The real
+        # discriminator is the BOTH-bases-alive pair of clauses
+        # below; this clause only rules out a no-army play.
+        - {unit_type_count_gte: {type: 2tnk, n: 4}}
         - {building_count_gte: {type: weap, n: 2}}
         - {building_count_gte: {type: fact, n: 2}}
+        # WIN GATE — the win cannot fire until tick 4500, well after
+        # an UNDEFENDED base's war factory has been razed by its raid
+        # (a stalled base loses its weap by tick ~3963 even on the
+        # lightest easy raid). Parallel production (engine fix: two
+        # war factories tick the vehicle queue 2x) finishes six tanks
+        # by tick ~1700 — without this gate a build-everything-at-one-
+        # base play would satisfy the win before the OTHER base's raid
+        # ever lands, inverting the bar. Gating behind the raze tick
+        # makes the discriminator purely "did BOTH bases keep their
+        # war factory", not "who finished six tanks first".
+        - {after_ticks: 4500}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
@@ -309,9 +330,30 @@ levels:
             - {type: e1, owner: enemy, position: [88, 19], stance: 3, count: 5}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        # ≥4 medium tanks ALIVE — verifies the army was actually
+        # built (a stall has zero). This is a PRESENT-TENSE alive
+        # count, and because the win is gated behind `after_ticks`
+        # (below) it is evaluated AFTER both raids, by which time
+        # the intended six-tank rotation has typically taken 1-2
+        # combat losses defending the heavier hard raids — so the
+        # threshold is 4, not 6 (six was satisfiable only before
+        # the gate, when no tank had yet died). The real
+        # discriminator is the BOTH-bases-alive pair of clauses
+        # below; this clause only rules out a no-army play.
+        - {unit_type_count_gte: {type: 2tnk, n: 4}}
         - {building_count_gte: {type: weap, n: 2}}
         - {building_count_gte: {type: fact, n: 2}}
+        # WIN GATE — the win cannot fire until tick 4500, well after
+        # an UNDEFENDED base's war factory has been razed by its raid
+        # (a stalled base loses its weap by tick ~3963 even on the
+        # lightest easy raid). Parallel production (engine fix: two
+        # war factories tick the vehicle queue 2x) finishes six tanks
+        # by tick ~1700 — without this gate a build-everything-at-one-
+        # base play would satisfy the win before the OTHER base's raid
+        # ever lands, inverting the bar. Gating behind the raze tick
+        # makes the discriminator purely "did BOTH bases keep their
+        # war factory", not "who finished six tanks first".
+        - {after_ticks: 4500}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
@@ -323,18 +365,31 @@ levels:
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 controlled variable on top of medium: TWO seed-driven agent
   # spawn_point groups round-robined by seed (CLAUDE.md hard-tier
-  # contract). Group 0 — both bases on the y≈14..18 (NORTH) band;
-  # group 1 — both bases on the y≈24..28 (SOUTH) band. Each raid
-  # band is duplicated across BOTH spawn groups at the matching
-  # latitude (raid actors carry `spawn_point` so the per-owner
-  # filter keeps only the band for the chosen seed). A memorised
-  # base latitude cannot generalise; the rotate-to-the-hot-base
-  # DOCTRINE still does.
+  # contract). Both groups keep the proven easy/medium base geometry
+  # — a produced tank's exit cell is fixed one cell NORTH of its war
+  # factory and the raid approaches laterally on the y=19 base
+  # latitude, so the raid-vs-garrison combat is identical to the
+  # easy/medium layout where it is known to hold. The seed-driven
+  # variable is the EAST base COLUMN: group 0 — EAST base war
+  # factory at x=84 (the easy/medium column); group 1 — EAST base
+  # war factory shifted 4 cells west to x=80. The WEST base is
+  # identical in both groups. The shift stays in open mid-map
+  # terrain (no cordon-edge compression) and the east raid spawn
+  # (x=88) stays EAST of the EAST war factory under either seed
+  # (x=88 > x=84 and x=88 > x=80), so the raider `hunt` locks the
+  # war factory and the produced garrison (Defend stance, spawned
+  # at the weap) intercepts it the same way per seed. An earlier
+  # draft varied the base LATITUDE — but the tank exit cell is
+  # fixed NORTH of the weap, so a raid at a non-base latitude
+  # landed on the wrong side of the exit cell and broke the
+  # intended-defence bar; varying only the EAST column keeps the
+  # proven lateral geometry intact while still giving two distinct
+  # seed-driven starts so a memorised opening cannot generalise.
   hard:
     description: >
       You own TWO complete bases — a WEST base and an EAST base,
       each a Construction Yard + War Factory + Refinery + Power
-      Plant. The exact LATITUDE of both bases varies per seed.
+      Plant. The exact COLUMN of the EAST base varies per seed.
       Enemy raids ALTERNATE: a raid band hits the WEST base at
       tick 300, then a heavier raid band hits the EAST base at
       tick 1500. Your only defence is the medium tanks you build;
@@ -345,35 +400,40 @@ levels:
       medium tanks AND keep BOTH war factories AND BOTH
       Construction Yards alive AND finish before tick 5400.
       Stalling, building the whole army at one base, and
-      latitude-memorised openings all lose.
+      column-memorised openings all lose.
     overrides:
       actors:
-        # ── spawn_point 0 — both bases on the NORTH band (y≈10..18).
-        # `fix` is placed at the OUTER (north) edge, far from the
-        # y=20 raid mid-band, so `weap` stays the building nearest
-        # each raid spawn and the raiders lock onto the war factory.
-        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
-        - {type: weap, owner: agent, position: [14, 14], spawn_point: 0}
-        - {type: fix,  owner: agent, position: [10, 10], spawn_point: 0}
-        - {type: proc, owner: agent, position: [10, 18], spawn_point: 0}
-        - {type: powr, owner: agent, position: [15, 18], spawn_point: 0}
-        - {type: fact, owner: agent, position: [80, 14], spawn_point: 0}
-        - {type: weap, owner: agent, position: [84, 14], spawn_point: 0}
-        - {type: fix,  owner: agent, position: [80, 10], spawn_point: 0}
-        - {type: proc, owner: agent, position: [80, 18], spawn_point: 0}
-        - {type: powr, owner: agent, position: [85, 18], spawn_point: 0}
-        # ── spawn_point 1 — both bases on the SOUTH band (y≈24..32).
-        # `fix` at the OUTER (south) edge — same rationale.
-        - {type: fact, owner: agent, position: [10, 24], spawn_point: 1}
-        - {type: weap, owner: agent, position: [14, 24], spawn_point: 1}
-        - {type: fix,  owner: agent, position: [10, 30], spawn_point: 1}
-        - {type: proc, owner: agent, position: [10, 28], spawn_point: 1}
-        - {type: powr, owner: agent, position: [15, 28], spawn_point: 1}
-        - {type: fact, owner: agent, position: [80, 24], spawn_point: 1}
-        - {type: weap, owner: agent, position: [84, 24], spawn_point: 1}
-        - {type: fix,  owner: agent, position: [80, 30], spawn_point: 1}
-        - {type: proc, owner: agent, position: [80, 28], spawn_point: 1}
-        - {type: powr, owner: agent, position: [85, 28], spawn_point: 1}
+        # ── WEST base — identical in BOTH spawn groups (duplicated
+        # so the per-owner spawn_point filter keeps it under either
+        # seed). `weap` sits east of the rest of the base, closest
+        # to the west raid spawn (x=18), so the `hunt` raiders lock
+        # onto the war factory.
+        - {type: fact, owner: agent, position: [10, 19], spawn_point: 0}
+        - {type: weap, owner: agent, position: [14, 19], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [10, 16], spawn_point: 0}
+        - {type: proc, owner: agent, position: [10, 23], spawn_point: 0}
+        - {type: powr, owner: agent, position: [15, 23], spawn_point: 0}
+        - {type: fact, owner: agent, position: [10, 19], spawn_point: 1}
+        - {type: weap, owner: agent, position: [14, 19], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [10, 16], spawn_point: 1}
+        - {type: proc, owner: agent, position: [10, 23], spawn_point: 1}
+        - {type: powr, owner: agent, position: [15, 23], spawn_point: 1}
+        # ── spawn_point 0 — EAST base war factory at x=84 (the
+        # easy/medium column).
+        - {type: fact, owner: agent, position: [80, 19], spawn_point: 0}
+        - {type: weap, owner: agent, position: [84, 19], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [80, 16], spawn_point: 0}
+        - {type: proc, owner: agent, position: [80, 23], spawn_point: 0}
+        - {type: powr, owner: agent, position: [85, 23], spawn_point: 0}
+        # ── spawn_point 1 — EAST base war factory shifted 4 cells
+        # west to x=80 (a distinct seed-driven start). Same internal
+        # geometry, same y=19 latitude; the raid spawn (x=88) stays
+        # east of the war factory so the combat is identical.
+        - {type: fact, owner: agent, position: [76, 19], spawn_point: 1}
+        - {type: weap, owner: agent, position: [80, 19], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [76, 16], spawn_point: 1}
+        - {type: proc, owner: agent, position: [76, 23], spawn_point: 1}
+        - {type: powr, owner: agent, position: [81, 23], spawn_point: 1}
         # Inert enemy `fact` marker — duplicated across BOTH spawn
         # groups (the per-owner spawn_point filter keeps only the
         # chosen seed's enemy actors; a marker without spawn_point
@@ -382,30 +442,53 @@ levels:
         - {type: fact, owner: enemy, position: [122, 36], spawn_point: 1}
       # Raid bands. CRITICAL: `scheduled_events` SpawnActors are
       # injected by `env.rs::apply_spawn_actors`, which does NOT
-      # apply the `spawn_point` filter (that filter only runs on
-      # the INITIAL actor list in `oramap.rs::expand_scenario_
-      # actors`). So a raid actor must NOT declare `spawn_point` —
-      # every actor in the event list spawns unconditionally. Each
-      # raid band therefore spawns at a single FIXED cell on the
-      # y=20 mid-band (between the NORTH y≈14 and SOUTH y≈24 base
-      # latitudes). The `hunt` bot routes each raider to its
-      # nearest foe — the actual base for this seed (north or
-      # south) — so the alternating raid pattern is identical on
-      # both spawn groups while the agent's base latitude varies.
+      # apply the `spawn_point` filter (that filter only runs on the
+      # INITIAL actor list in `oramap.rs::expand_scenario_actors`).
+      # So a raid actor must NOT declare `spawn_point` — every actor
+      # in the event list spawns unconditionally. Each raid band
+      # spawns laterally on the y=19 base latitude at a fixed cell
+      # (west raid x=18, east raid x=88); the `hunt` bot routes each
+      # raider to its nearest foe — the war factory of the base for
+      # this seed — so the alternating raid pattern is identical on
+      # both spawn groups while the EAST base column varies. The
+      # east raid spawn stays EAST of the EAST war factory under
+      # either seed (x=88 > x=84 and x=88 > x=80), keeping the raid
+      # on the same side as the produced tank's exit cell.
       scheduled_events:
         - tick: 300
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [18, 20], stance: 3, count: 5}
+            - {type: e1, owner: enemy, position: [18, 19], stance: 3, count: 5}
         - tick: 1500
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [88, 20], stance: 3, count: 5}
+            - {type: e1, owner: enemy, position: [88, 19], stance: 3, count: 5}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        # ≥4 medium tanks ALIVE — verifies the army was actually
+        # built (a stall has zero). This is a PRESENT-TENSE alive
+        # count, and because the win is gated behind `after_ticks`
+        # (below) it is evaluated AFTER both raids, by which time
+        # the intended six-tank rotation has typically taken 1-2
+        # combat losses defending the heavier hard raids — so the
+        # threshold is 4, not 6 (six was satisfiable only before
+        # the gate, when no tank had yet died). The real
+        # discriminator is the BOTH-bases-alive pair of clauses
+        # below; this clause only rules out a no-army play.
+        - {unit_type_count_gte: {type: 2tnk, n: 4}}
         - {building_count_gte: {type: weap, n: 2}}
         - {building_count_gte: {type: fact, n: 2}}
+        # WIN GATE — the win cannot fire until tick 4500, well after
+        # an UNDEFENDED base's war factory has been razed by its raid
+        # (a stalled base loses its weap by tick ~3963 even on the
+        # lightest easy raid). Parallel production (engine fix: two
+        # war factories tick the vehicle queue 2x) finishes six tanks
+        # by tick ~1700 — without this gate a build-everything-at-one-
+        # base play would satisfy the win before the OTHER base's raid
+        # ever lands, inverting the bar. Gating behind the raze tick
+        # makes the discriminator purely "did BOTH bases keep their
+        # war factory", not "who finished six tanks first".
+        - {after_ticks: 4500}
         - {within_ticks: 5400}
     fail_condition:
       any_of:

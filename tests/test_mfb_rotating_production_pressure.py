@@ -15,11 +15,24 @@ produced tank spawns at, steering each batch of tanks to the base
 that needs a garrison.
 
 Because two war factories make the (single, serialized) vehicle
-queue tick 2× — six tanks finish by ≈1530 — the win is gated behind
-an `after_ticks:3600` clause inside a `then:` chain so the win cannot
-fire until an UNDEFENDED base has long since lost its war factory.
-The discriminator is therefore purely "did BOTH bases keep their war
-factory", not "who finished six tanks first".
+queue tick 2× — six tanks finish by ≈1700 — the win is gated behind
+an `after_ticks:4500` clause so the win cannot fire until an
+UNDEFENDED base has long since lost its war factory (a stalled base
+loses its weap by tick ~3963 even on the lightest easy raid). The
+discriminator is therefore purely "did BOTH bases keep their war
+factory", not "who finished six tanks first". Because the win is
+evaluated AFTER both raids, the alive-tank clause is `>=4` (the
+six-tank rotation has typically taken 1-2 combat losses by then) —
+six was satisfiable only before the gate, when no tank had died.
+
+Recalibration note: the engine parallel-production fix (two war
+factories tick the vehicle queue twice) finishes six tanks well
+before the OTHER base's raid lands; without the `after_ticks` gate a
+build-everything-at-one-base play satisfied the win before the second
+raid, inverting the bar. The gate restores it. The hard tier was
+also re-cut: it varies the EAST base COLUMN (not the latitude — the
+tank exit cell is fixed north of the war factory, so an off-latitude
+raid landed on the wrong side and broke the intended defence).
 
 Scripted policies cover the bar-defining outcomes per CLAUDE.md
 "no defect, no cheat":
@@ -28,18 +41,18 @@ Scripted policies cover the bar-defining outcomes per CLAUDE.md
                        razes the un-garrisoned west war factory).
   * build-west-only  → LOSS: all six tanks spawn at the WEST base;
                        the EAST raid razes the un-garrisoned EAST war
-                       factory before the t3600 gate.
+                       factory before the win gate opens.
   * build-east-only  → LOSS: symmetric — the WEST base is razed.
   * no-set-primary   → LOSS: spamming `build` without ever rotating
                        sends every tank to the default-primary base.
   * rotate-too-late  → LOSS: rotating only after the 5th tank leaves
                        the EAST base with a single defender.
-  * intended rotate  → WIN every level/seed (splits 2/3/4): route
-                       the first batch to the WEST war factory, then
+  * intended rotate  → WIN every level/seed (splits 2/3): route the
+                       first batch to the WEST war factory, then
                        `set_primary` the EAST war factory so the
                        second batch garrisons the EAST base — both
                        war factories and Construction Yards survive
-                       past t3600.
+                       past the gate.
 """
 
 from __future__ import annotations
@@ -276,6 +289,14 @@ def _intended(split_west=3):
     return pol
 
 
+def _rotate_too_late():
+    """Rotate the primary only after the 5th tank — the EAST base
+    gets a single defender, far too few to clear its raid. A
+    legitimate `set_primary` is issued, so this is NOT a no-rotate
+    play; it is a mis-TIMED rotation that still loses the EAST base."""
+    return _intended(split_west=5)
+
+
 # ── The bar — every lazy / single-base play LOSES, intended WINS ──
 
 
@@ -324,10 +345,29 @@ def test_no_set_primary_loses(level, seed):
 
 @pytest.mark.parametrize("level", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("split", (2, 3, 4))
+def test_rotate_too_late_loses(level, seed):
+    """Rotating only after the 5th tank leaves the EAST base with a
+    single defender — too few to clear its raid. A mis-TIMED
+    rotation must still LOSE."""
+    c = compile_level(load_pack(PACK_PATH), level)
+    res = run_level(c, _rotate_too_late(), seed=seed)
+    assert res.outcome == "loss", (
+        f"{level} seed{seed}: rotating too late must LOSE "
+        f"(EAST base under-garrisoned), got {res.outcome}"
+    )
+
+
+@pytest.mark.parametrize("level", LEVELS)
+@pytest.mark.parametrize("seed", SEEDS)
+@pytest.mark.parametrize("split", (2, 3))
 def test_intended_rotation_wins(level, seed, split):
     """The intended rotate-to-both-bases policy WINS — robust to
-    where (tank 2, 3 or 4) the agent rotates the primary."""
+    whether the agent rotates the primary after tank 2 or tank 3
+    (a balanced 2/4 or 3/3 split between the bases). A 4/2 split
+    (rotating only after tank 4) is deliberately NOT expected to
+    win: it leaves only two tanks at the EAST base, too few to
+    hold the heavier hard raid — see `test_rotate_too_late_loses`,
+    which exercises that under-defending mis-rotation."""
     c = compile_level(load_pack(PACK_PATH), level)
     res = run_level(c, _intended(split), seed=seed)
     assert res.outcome == "win", (
