@@ -18,29 +18,38 @@
 # unit is preserved by the escort's offence, not by its own fight.
 #
 # Mechanism (engine-load-bearing — verified by scripted-policy
-# smoke runs, all seeds 1–4 × every tier):
+# smoke runs, all seeds 1–4 × every tier; recalibrated after the
+# engine move-fire / no-teleport-attack fixes):
 #   • The route interception force is a `guard` bot (NOT static
 #     defenders). The `guard` bot holds post but LUNGES at the
 #     nearest foe within GUARD_AGGRO ~16 and snaps back past leash
-#     ~18. The load-bearing piece is exactly ONE Soviet heavy tank
-#     (3tnk) inside the guard force: a guard 3tnk catches and
-#     destroys an UNESCORTED harvester (it can keep pace with the
-#     harv and out-damages it), but when the escort tanks are
-#     present and forward the guard 3tnk lunges at the CLOSER tanks
-#     instead — the escort's body draws the interceptor off the VIP.
-#   • Why a single 3tnk and no more: 4× 2tnk can focus-fire ONE
-#     guard 3tnk down before taking crippling losses; a SECOND
-#     guard 3tnk out-trades the escort and even the intended play
-#     loses. The remaining route enemies are e1 rifle filler —
-#     cheap kills that make up the kill envelope and (on hard) form
-#     a tall corridor so a harv-led column charge takes real
-#     exposure.
-#   • The harvester is heavily armoured and, when SPRINTING (a
-#     long-distance move order), effectively outpaces fire from
-#     static threats — so the threat that makes "VIP alone" lose is
-#     the MOBILE guard interceptor, not a stationary gun line. The
-#     intended escort holds the VIP at the staging zone until the
-#     escort has cleared the route, THEN sprints it across.
+#     ~18. The load-bearing piece is a Soviet heavy tank (3tnk)
+#     inside the guard force.
+#   • The VIP starts FRAGILE — `health: 70` (70% HP). This is the
+#     post-move-fix lever: with moving units now firing and being
+#     fired on en route, a harv crossing WITH the escort column
+#     eats the guard 3tnk's focus while in motion, and a 70%-HP
+#     harv does not survive that hot crossing. The intended escort
+#     holds the VIP back and the VIP only ever crosses a CLEARED
+#     (cold) route — so it arrives untouched at 70%, alive.
+#   • easy / medium carry ONE full-HP guard 3tnk on the y=20 route
+#     axis (the harv's lane) + e1 rifle filler. hard carries TWO
+#     guard 3tnk — one aligned to EACH seed-chosen staging lane —
+#     each at `health: 55`. Post the no-teleport attack-chase fix a
+#     single y=20-axis 3tnk can no longer catch a harv-led column
+#     that funnels off-axis, so each hard lane needs its own
+#     lane-aligned interceptor. The 55% health floor on the hard
+#     heavies is what keeps the 4-tank escort able to clear BOTH in
+#     budget — two FULL-HP heavies out-trade the escort and break
+#     the intended-WINS half of the bar.
+#   • e1 rifle infantry is anti-infantry filler: it barely dents
+#     the armoured harv and is a cheap escort kill — it pads the
+#     route's kill envelope without out-trading the escort.
+#   • The intended escort holds the VIP at the staging zone until
+#     the escort has cleared the route, THEN sends it across a cold
+#     corridor. Sending the VIP in the column (VIP-leads-charge) or
+#     alone (VIP-alone) exposes the 70%-HP VIP to live heavy fire
+#     and it dies before the route is clear.
 #
 # Discrimination (the four-script bar — scripted, no model):
 #   • stall (observe-only): nothing moves; the VIP never reaches
@@ -49,10 +58,11 @@
 #     the guard 3tnk lunges at the lone harv and destroys it →
 #     `not unit_type_count_gte:{harv,1}` fail clause fires → LOSS
 #     on every level/seed.
-#   • VIP-leads-charge: harv + tanks dispatched in a single column
-#     with the harv at the front. The guard interceptor + the e1
-#     corridor focus the leading harv → VIP dies before extraction
-#     → LOSS on every level/seed.
+#   • VIP-leads-charge: harv + tanks dispatched in a single column.
+#     The 70%-HP VIP moves through the hot route alongside the
+#     escort; with the engine move-fire fix it takes the guard
+#     3tnk's focus while in motion and dies before the escort
+#     finishes clearing → LOSS on every level/seed.
 #   • intended escort-clears-path: the escort tanks attack the
 #     interception force AHEAD of the VIP (focus-firing the guard
 #     3tnk and the e1s); the VIP HOLDS at the staging zone until
@@ -85,10 +95,13 @@
 #     the escort completes well inside budget.
 #   • Spawn-driven hard tier: enemy actors don't honour spawn_point
 #     (CLAUDE.md), so the route enemies always place identically.
-#     Variation comes from the AGENT staging row (NORTH y=14 /
-#     SOUTH y=26). The hard e1 corridor is vertically widened
-#     (y=14..26) so both staging rows face an equivalent contested
-#     route to the y=20 extraction.
+#     Variation comes from the AGENT staging row (NORTH y=16 /
+#     SOUTH y=24). Each lane carries its own y-aligned guard 3tnk so
+#     both staging rows face an equivalent contested route to the
+#     y=20 extraction.
+#   • health: on a pre-placed actor now works (CLAUDE.md) — the
+#     `health: 70` VIP and the `health: 55` hard heavies are
+#     load-bearing tuning, not cosmetic.
 
 meta:
   id: combat-protect-vip-escort
@@ -165,7 +178,14 @@ levels:
         # so the "VIP alive" check is exactly
         # `unit_type_count_gte:{harv,1}`. stance:0 (HoldFire)
         # documents convoy discipline (the harv is unarmed anyway).
-        - {type: harv, owner: agent, position: [8, 20], stance: 0}
+        # health:70 — the VIP starts already at 70% HP (a genuinely
+        # FRAGILE principal). Engine move-fire fix: a harv crossing
+        # WITH the column eats the guard 3tnk's focus while moving;
+        # at 70% start HP that hot crossing is now lethal (the harv
+        # dies before the escort clears the route). The intended
+        # escort holds the VIP at the staging zone — it crosses a
+        # COLD route at full 70%, untouched, and survives.
+        - {type: harv, owner: agent, position: [8, 20], stance: 0, health: 70}
         # Escorts — 4 medium tanks at the same west staging zone,
         # straddling the VIP. stance:1 (return fire) so the escorts
         # retaliate when contacted but don't wander.
@@ -217,7 +237,7 @@ levels:
       unescorted or at the head of the column.
     overrides:
       actors:
-        - {type: harv, owner: agent, position: [8, 20], stance: 0}
+        - {type: harv, owner: agent, position: [8, 20], stance: 0, health: 70}
         - {type: 2tnk, owner: agent, position: [8, 18], stance: 1}
         - {type: 2tnk, owner: agent, position: [8, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [8, 21], stance: 1}
@@ -244,55 +264,64 @@ levels:
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 axis vs medium: TWO seed-driven spawn groups (NORTH staging
-  # y≈14 OR SOUTH staging y≈26 — round-robined per seed). The guard
-  # heavy interceptor sits on the y=20 symmetry axis and the e1
-  # filler is widened into a TWO-column corridor (x=52 and x=58,
-  # y=14..26) so BOTH staging rows face an equivalent contested
-  # route to the y=20 extraction — a single memorised staging-to-
-  # extraction vector cannot generalise. The single guard 3tnk is
-  # unchanged.
+  # y≈16 OR SOUTH staging y≈24 — round-robined per seed). Each lane
+  # carries its OWN lane-aligned guard heavy (a 3tnk at y=16 and a
+  # 3tnk at y=24), both at health:55. Post the engine move-fire fix
+  # a single y=20-axis 3tnk can no longer catch a harv-led column
+  # that funnels off-axis, so the hard escalation is a per-lane
+  # interceptor: whichever lane the seed picks, the harv-led charge
+  # crosses a lane-aligned heavy. The 55% health floor keeps the
+  # 4-tank escort able to clear BOTH heavies in budget (two
+  # FULL-HP heavies would out-trade the escort and break the
+  # intended-WINS half of the bar).
   hard:
     description: >
       A single ore harvester (the VIP — unique unit type, unarmed,
       cannot fight) is staged with four medium tank escorts at the
-      NORTH staging row (y ≈ 14) or the SOUTH staging row (y ≈ 26),
+      NORTH staging row (y ≈ 16) or the SOUTH staging row (y ≈ 24),
       chosen by seed for anti-memorisation. The VIP must reach the
       EAST extraction point (x ≈ 100, y ≈ 20, radius 6) before tick
-      4500, alive. A guard interception force holds the route: one
-      Soviet heavy tank (3tnk) on the centre axis backed by a
-      two-column rifle-infantry corridor (e1 across y=14..26). The
-      escort tanks must lead and destroy the interceptors; the
-      unarmed VIP is caught and killed if it enters the route
-      unescorted or at the head of the column.
+      4500, alive. A guard interception force holds the route: two
+      Soviet heavy tanks (3tnk) — one aligned to each staging lane —
+      backed by rifle-infantry filler. The escort tanks must lead
+      and destroy the interceptors; the fragile VIP is caught and
+      killed if it enters the route unescorted or at the head of
+      the column.
     overrides:
       actors:
-        # spawn_point 0 — NORTH staging at y ≈ 14.
-        - {type: harv, owner: agent, position: [8, 14], stance: 0, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [8, 12], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [8, 13], stance: 1, spawn_point: 0}
+        # spawn_point 0 — NORTH staging at y ≈ 16.
+        - {type: harv, owner: agent, position: [8, 16], stance: 0, spawn_point: 0, health: 70}
+        - {type: 2tnk, owner: agent, position: [8, 14], stance: 1, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [8, 15], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [8, 16], stance: 1, spawn_point: 0}
-        # spawn_point 1 — SOUTH staging at y ≈ 26 (mirrored across
+        - {type: 2tnk, owner: agent, position: [8, 17], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [8, 18], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging at y ≈ 24 (mirrored across
         # y=20).
-        - {type: harv, owner: agent, position: [8, 26], stance: 0, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [8, 24], stance: 1, spawn_point: 1}
+        - {type: harv, owner: agent, position: [8, 24], stance: 0, spawn_point: 1, health: 70}
+        - {type: 2tnk, owner: agent, position: [8, 22], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [8, 23], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [8, 25], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [8, 27], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [8, 28], stance: 1, spawn_point: 1}
-        # Guard interception force — ONE 3tnk on the y=20 symmetry
-        # axis + a two-column e1 corridor (x=52, x=58) spanning
-        # y=14..26 so both staging rows face an equivalent route.
-        - {type: 3tnk, owner: enemy, position: [49, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [52, 14], stance: 3}
-        - {type: e1, owner: enemy, position: [52, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [52, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [52, 23], stance: 3}
-        - {type: e1, owner: enemy, position: [52, 26], stance: 3}
-        - {type: e1, owner: enemy, position: [58, 14], stance: 3}
-        - {type: e1, owner: enemy, position: [58, 17], stance: 3}
-        - {type: e1, owner: enemy, position: [58, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [58, 23], stance: 3}
-        - {type: e1, owner: enemy, position: [58, 26], stance: 3}
+        - {type: 2tnk, owner: agent, position: [8, 26], stance: 1, spawn_point: 1}
+        # Guard interception force — TWO 3tnk heavies, ONE on each
+        # staging lane (y=16 NORTH, y=24 SOUTH), each at health:55.
+        # Post engine move-fire fix, a single y=20-axis 3tnk can no
+        # longer catch a harv-led column that funnels off-axis (the
+        # no-teleport attack-chase lags the fast column) — so each
+        # lane carries its own lane-aligned interceptor that the
+        # harv-led charge must cross. The heavies are at 55% HP so
+        # the 4-tank escort focus-firing AHEAD of the VIP can still
+        # clear BOTH within budget (intended escort WINS); a
+        # harv-led column eats a lane heavy's focus and the 70%-HP
+        # VIP dies (VIP-leads-charge LOSES). Two FULL-HP heavies
+        # would out-trade the escort — the health:55 floor is what
+        # keeps the escort-leadership capability load-bearing.
+        - {type: 3tnk, owner: enemy, position: [49, 16], stance: 3, health: 55}
+        - {type: 3tnk, owner: enemy, position: [49, 24], stance: 3, health: 55}
+        # e1 rifle filler spanning the corridor — cheap kills that
+        # pad the route without out-trading the escort.
+        - {type: e1, owner: enemy, position: [55, 16], stance: 3}
+        - {type: e1, owner: enemy, position: [55, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [55, 24], stance: 3}
         # Persistent far enemy fact — engine auto-done mitigation.
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:

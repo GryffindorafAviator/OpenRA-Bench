@@ -8,11 +8,15 @@ The bar (binding, applied seeds 1..4 on every level):
   degeneracy: after_ticks 4501 ≤ 93 + 90·(max_turns − 1));
 - hard ships ≥2 `spawn_point` groups (seed-driven start variation).
 
-The route threat is a `guard` bot interception force: exactly ONE
-Soviet heavy tank (3tnk) — which lunges at and destroys an
-unescorted harvester — plus e1 rifle filler. The escort must
-destroy the interceptors AHEAD of the VIP and hold the VIP back
-until the route is clear, then sprint it across.
+The route threat is a `guard` bot interception force built around
+the Soviet heavy tank (3tnk): easy/medium carry ONE full-HP 3tnk
+on the route axis, hard carries TWO at health:55 — one aligned to
+each seed-chosen staging lane — plus e1 rifle filler. The VIP
+itself starts fragile at health:70: a harv crossing the hot route
+in the column eats live heavy fire (engine move-fire fix) and
+dies. The escort must destroy the interceptors AHEAD of the VIP
+and hold the VIP back until the route is clear (cold), then sprint
+it across.
 
 Validation is scripted (no model / network).
 """
@@ -221,15 +225,23 @@ def test_route_threat_is_a_guard_bot():
     )
 
 
-def test_exactly_one_guard_heavy_interceptor():
-    """The load-bearing anti-VIP threat is exactly ONE Soviet heavy
-    tank (3tnk) inside the guard force: a guard 3tnk catches and
-    destroys an unescorted harvester, but 4× 2tnk can focus it down
-    before crippling losses. A SECOND 3tnk would out-trade the
-    escort and break the intended-WINS half of the bar — so the
-    count is pinned at exactly 1 on every level."""
+def test_guard_heavy_interceptor_count_and_health():
+    """The load-bearing anti-VIP threat is the guard Soviet heavy
+    tank (3tnk).
+
+    easy / medium carry exactly ONE full-HP 3tnk on the y=20 route
+    axis — the harv's lane — so a harv-led column crossing eats its
+    focus and the 70%-HP VIP dies, while a 4× 2tnk escort can still
+    focus that one heavy down.
+
+    hard carries TWO 3tnk — one aligned to each seed-chosen staging
+    lane — because post the engine no-teleport attack-chase fix a
+    single y=20-axis heavy can no longer catch a harv-led column
+    that funnels off-axis. Both hard heavies are at health:55 so the
+    4-tank escort can still clear BOTH within budget; two FULL-HP
+    heavies would out-trade the escort and break intended-WINS."""
     pack = load_pack(PACK_PATH)
-    for lvl in ("easy", "medium", "hard"):
+    for lvl in ("easy", "medium"):
         c = compile_level(pack, lvl)
         heavies = [
             a for a in c.scenario.actors
@@ -239,6 +251,46 @@ def test_exactly_one_guard_heavy_interceptor():
             f"{lvl}: must have exactly ONE guard 3tnk interceptor; "
             f"got {len(heavies)}"
         )
+        assert heavies[0].health == 100, (
+            f"{lvl}: the single route 3tnk is a full-HP heavy; "
+            f"got health={heavies[0].health}"
+        )
+    c = compile_level(pack, "hard")
+    heavies = [
+        a for a in c.scenario.actors
+        if a.owner == "enemy" and a.type == "3tnk"
+    ]
+    assert len(heavies) == 2, (
+        f"hard: must have TWO lane-aligned guard 3tnk interceptors; "
+        f"got {len(heavies)}"
+    )
+    for h in heavies:
+        assert h.health == 55, (
+            f"hard: each lane 3tnk must be at health:55 so the escort "
+            f"can clear both in budget; got health={h.health}"
+        )
+
+
+def test_vip_starts_fragile():
+    """The VIP starts at health:70 — a genuinely fragile principal.
+    Post the engine move-fire fix this is the load-bearing lever: a
+    harv crossing the hot route WITH the column eats live heavy fire
+    in motion and a 70%-HP harv does not survive it. The intended
+    escort holds the VIP back so it only ever crosses a cleared cold
+    route — arriving untouched at 70%, alive."""
+    pack = load_pack(PACK_PATH)
+    for lvl in ("easy", "medium", "hard"):
+        c = compile_level(pack, lvl)
+        harvs = [
+            a for a in c.scenario.actors
+            if a.owner == "agent" and a.type == "harv"
+        ]
+        assert harvs, f"{lvl}: no VIP harv found"
+        for h in harvs:
+            assert h.health == 70, (
+                f"{lvl}: the VIP must start fragile at health:70; "
+                f"got health={h.health}"
+            )
 
 
 def test_interrupts_disabled_so_time_budget_is_real():
