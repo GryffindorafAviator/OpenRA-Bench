@@ -13,22 +13,34 @@
 # Concretely: the agent owns TWO bases (fact+proc each) at WEST (24,20)
 # and EAST (78,20), each with a small tank garrison; a 5-unit flex
 # squad parks at the centre (51,20). A scripted `hunt` enemy pushes
-# BOTH bases simultaneously, asymmetrically — one push is light, one
-# is heavy. The HEAVY push is large enough to roll the east base's
-# garrison plus any half-flex; the LIGHT push is small enough that
-# garrison + FULL flex defeats it before it cracks the west fact.
+# BOTH bases simultaneously, asymmetrically — one push is light
+# (WEST, 16 rifles), one is heavy (EAST, 34-42 rifles). The HEAVY
+# push fully razes the east base even against a wrong-side
+# consolidation; the LIGHT push overruns a bare WEST garrison but
+# the WEST garrison + FULL flex holds it past the survival floor.
 # The win is keeping fact+proc alive at AT LEAST ONE base in the
 # [after_ticks, within_ticks] band; the loss is the timeout (5401)
-# OR no fact buildings remaining (both bases razed).
+# OR no complete base left (no fact OR no proc — both bases razed).
 #
-#   * Stall ⇒ west garrison alone falls to the light push (engine
-#     defensive AI is weak on stationary tanks vs ranged infantry,
-#     verified empirically — see SCENARIO_QUALITY footgun); east
-#     garrison falls to the heavy push ⇒ both razed ⇒ LOSS.
+# RECALIBRATION (engine combat rebalance): the rebalance hugely
+# strengthened stationary defenders, so the original light/heavy
+# pushes (4 / 8-12 rifles) no longer threatened the garrisons and
+# the bar inverted. Re-tuned: pushes scaled up (WEST 16, EAST
+# 36 easy / 42 medium / 34 hard); `enemy_units_killed` termination
+# dropped (it auto-`done`d the episode the instant the agent cleared
+# a push, often before the survival floor → DRAW); a `not proc:1`
+# fail clause added; a persistent unarmed enemy `fact` marker added
+# (anti auto-DRAW); the hard survival floor moved to tick 2400.
+#
+#   * Stall ⇒ west garrison alone is overrun by the light push;
+#     east garrison falls to the heavy push ⇒ both razed ⇒ LOSS.
 #   * Split-defend (half flex to each side) ⇒ each base gets too few
 #     reinforcements; both fall ⇒ LOSS.
 #   * Reinforce-both-back-and-forth ⇒ flex never lands long enough
 #     anywhere to make the trade; both fall ⇒ LOSS.
+#   * Consolidate flex on the WRONG (heavy EAST) side ⇒ the heavy
+#     push razes the east base anyway AND the un-garrisoned west
+#     base falls ⇒ every refinery lost ⇒ LOSS.
 #   * Consolidate flex on the WEST (light) side ⇒ west holds, east
 #     base falls (conceded by design) ⇒ ONE base saved ⇒ WIN.
 #
@@ -81,7 +93,15 @@ base:
   termination:
     max_ticks: 12000
     agent_units_killed: true
-    enemy_units_killed: true
+    # enemy_units_killed is deliberately OFF. The win is a
+    # SURVIVAL-BAND check ([after_ticks 3000, within_ticks 5400]):
+    # the held base must still own fact+proc inside that window. The
+    # engine combat rebalance made the agent's consolidated force
+    # strong enough to eventually grind down even a heavy push — so
+    # an `enemy_units_killed` auto-`done` ended the episode the
+    # moment the last raider fell, often BEFORE tick 3000, collapsing
+    # a held-base run to a DRAW. With it off, the episode runs until
+    # the survival-band win fires or the deadline LOSS bites.
 
 levels:
 
@@ -136,15 +156,25 @@ levels:
         - {type: 2tnk, owner: agent, position: [51, 20], stance: 3, count: 2, health: 100}
         - {type: 1tnk, owner: agent, position: [51, 22], stance: 3, count: 2, health: 100}
         - {type: jeep, owner: agent, position: [51, 18], stance: 3, health: 100}
-        # ── WEST enemy push (LIGHT) — far west edge so a stalling
-        # garrison can't keep west fact alive past the late checkpoint
-        # without the flex squad's help.
-        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 4, health: 100}
-        # ── EAST enemy push (HEAVY, easy size) — strong but tractable;
-        # easy's heavy push is smaller than medium/hard's, so the
-        # asymmetry is more obvious and the saved side is more
-        # forgiving.
-        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 8, health: 100}
+        # ── WEST enemy push (LIGHT) — far west edge. Sized (16 e1)
+        # so the WEST garrison ALONE is overrun (a staller loses the
+        # west base) but the WEST garrison + consolidated flex holds
+        # it past the survival floor. Re-tuned UP from 4 after the
+        # engine combat rebalance hugely strengthened stationary
+        # defenders — a 4-rifle push no longer threatens even a bare
+        # garrison.
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 16, health: 100}
+        # ── EAST enemy push (HEAVY) — far east edge. Sized (36 e1)
+        # so it FULLY razes the east base (fact + proc) even against
+        # a wrong-side consolidation: the heavy side is genuinely
+        # unsavable. Re-tuned UP from 8 for the same combat-rebalance
+        # reason — 8 rifles were beatable by the consolidated force.
+        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 36, health: 100}
+        # Persistent unarmed enemy `fact` marker far off-map (anti
+        # auto-DRAW): keeps the episode alive past the survival floor
+        # so the building-survival win/fail evaluates instead of the
+        # engine auto-`done`ing the instant the last raider falls.
+        - {type: fact, owner: enemy, position: [150, 5]}
     # Survival band [after_ticks 3000, within_ticks 5400]: the saved
     # base must still have fact+proc inside this window, so a turn-1
     # snapshot of "both still alive" cannot win. Reachable within
@@ -162,20 +192,21 @@ levels:
           - after_ticks: 3000
           - within_ticks: 5400
     # Timeout is a real reachable LOSS: max_turns 65 → tick reach 5853
-    # ≥ 5401 (after_ticks fail). Losing both `fact` (both bases razed
-    # before timeout) LOSES immediately. The `not own_units_gte:1`
-    # clause closes the DRAW degeneracy where a misplay wipes the
-    # mobile force while one fact partially survives without its proc:
-    # the engine's `agent_units_killed` termination fires `done=True`
-    # before tick 5401, the building_count fail is unmet (one fact
-    # alive), the win is unmet (saved base needs both fact AND proc)
-    # — without the units-wiped clause the run silently DRAWS. With
-    # it, the post-step win/fail check converts the same state into a
-    # real reachable LOSS.
+    # ≥ 5401 (after_ticks fail). The fail fires the moment the agent
+    # has no COMPLETE base left — `not fact:1` OR `not proc:1`. The
+    # `not proc:1` clause is the load-bearing one: a wrong-side
+    # consolidate (defend the HEAVY east) loses BOTH refineries (the
+    # un-garrisoned west proc and the over-run east proc) — without
+    # the proc clause that play kept a lone fact alive, satisfying
+    # neither the win (needs fact+proc as a PAIR) nor `not fact:1`,
+    # and silently DREW. With `not proc:1`, losing every refinery is
+    # an immediate, real LOSS. The `not own_units_gte:1` clause
+    # likewise converts a full force-wipe into a reachable LOSS.
     fail_condition:
       any_of:
         - after_ticks: 5401
         - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
         - not: {own_units_gte: 1}
     max_turns: 65
 
@@ -217,10 +248,15 @@ levels:
         - {type: 2tnk, owner: agent, position: [51, 20], stance: 3, count: 2, health: 100}
         - {type: 1tnk, owner: agent, position: [51, 22], stance: 3, count: 2, health: 100}
         - {type: jeep, owner: agent, position: [51, 18], stance: 3, health: 100}
-        # ── WEST enemy push (LIGHT) ──
-        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 4, health: 100}
-        # ── EAST enemy push (HEAVY) — bigger than easy ──
-        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 12, health: 100}
+        # ── WEST enemy push (LIGHT) — same 16-rifle band as easy:
+        # overruns a bare garrison, held by the consolidated force.
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 16, health: 100}
+        # ── EAST enemy push (HEAVY) — heavier than easy (42 vs 36):
+        # the heavy-side trade is even more clearly unsavable, so a
+        # mis-commit is punished harder.
+        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 42, health: 100}
+        # Persistent unarmed enemy `fact` marker (anti auto-DRAW).
+        - {type: fact, owner: enemy, position: [150, 5]}
     # Same survival band as easy; max_turns 60 → tick reach 5403 ≥ 5401.
     win_condition:
       any_of:
@@ -234,11 +270,15 @@ levels:
           - building_in_region: {x: 78, y: 20, radius: 8, type: proc, count: 1}
           - after_ticks: 3000
           - within_ticks: 5400
-    # Same DRAW-closing units-wiped fail as easy (see easy notes).
+    # Same fail as easy: no complete base (`not fact:1` OR
+    # `not proc:1`) or a full force-wipe is an immediate real LOSS;
+    # `after_ticks 5401` is the reachable timeout. See the easy
+    # fail note for why `not proc:1` is the load-bearing clause.
     fail_condition:
       any_of:
         - after_ticks: 5401
         - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
         - not: {own_units_gte: 1}
     max_turns: 60
 
@@ -323,42 +363,76 @@ levels:
         - {type: 2tnk, owner: agent, position: [48, 20], stance: 3, count: 2, health: 100, spawn_point: 0}
         - {type: 1tnk, owner: agent, position: [48, 22], stance: 3, count: 2, health: 100, spawn_point: 0}
         - {type: jeep, owner: agent, position: [48, 18], stance: 3, health: 100, spawn_point: 0}
-        # ── Flex squad, spawn_point 1 — pre-positioned EAST of centre,
-        # FURTHER from the weak-side base: a real "wrong-side" start
-        # that punishes a memorised "always commit to wherever I
-        # spawn" heuristic. Forces the model to read the enemy mass.
-        - {type: 2tnk, owner: agent, position: [60, 20], stance: 3, count: 2, health: 100, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [60, 22], stance: 3, count: 2, health: 100, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [60, 18], stance: 3, health: 100, spawn_point: 1}
-        # ── WEST enemy push (LIGHT) — far west ──
-        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 4, health: 100}
-        # ── EAST enemy push (HEAVY) — far east, same as medium ──
-        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 12, health: 100}
-    # Same survival band PLUS a strict attrition cap
-    # (units_lost_lte:8): the saved base must still have fact+proc at
-    # the late checkpoint AND the consolidate cannot have bled the
-    # garrison dry. A Pyrrhic save that loses more than 8 units
-    # (over half the force) is a LOSS.
+        # ── Flex squad, spawn_point 1 — pre-positioned EAST of centre
+        # (x=54), on the far side of the centre line from the weak
+        # WEST base: a "wrong-side" start that punishes a memorised
+        # "always commit to wherever I spawn" heuristic and forces
+        # the model to read the enemy mass. Kept at x=54 (not the
+        # far x=60 of an earlier draft) so the flex still has enough
+        # travel time to join the WEST consolidation before the
+        # conceded-east push's survivors cross the map — the engine
+        # combat rebalance made those survivors numerous enough that
+        # a too-distant flex arrived after the WEST base was already
+        # being overrun.
+        - {type: 2tnk, owner: agent, position: [54, 20], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [54, 22], stance: 3, count: 2, health: 100, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [54, 18], stance: 3, health: 100, spawn_point: 1}
+        # ── WEST enemy push (LIGHT) — far west, same 16-rifle band
+        # as easy/medium.
+        - {type: e1, owner: enemy, position: [5, 20], stance: 3, count: 16, health: 100}
+        # ── EAST enemy push (HEAVY) — far east, 34-rifle band.
+        # Slightly lighter than medium's 42: hard's seed-varied flex
+        # start (spawn_point 1 starts the flex EAST of centre) gives
+        # the WEST consolidation less travel time, and after the
+        # conceded EAST base falls the heavy push's survivors march
+        # on the held WEST base — at 42 those survivors arrived in
+        # such force they overran the WEST base before the survival
+        # floor on the slower spawn group. 34 still fully razes the
+        # conceded EAST base (a wrong-side consolidate loses every
+        # refinery) but leaves the held WEST base winnable.
+        - {type: e1, owner: enemy, position: [155, 21], stance: 3, count: 34, health: 100}
+        # Persistent unarmed enemy `fact` marker (anti auto-DRAW).
+        # Enemy actors do not honour spawn_point, so a single marker
+        # (no spawn_point) places under either seed.
+        - {type: fact, owner: enemy, position: [150, 5]}
+    # Survival band [after_ticks 2400, within_ticks 5400] PLUS a
+    # strict attrition cap (units_lost_lte:18). The survival FLOOR
+    # is 2400 (earlier than easy/medium's 3000): hard's seed-varied
+    # flex start slows the WEST consolidation, and the conceded-EAST
+    # push's survivors march on the held WEST base — so the held
+    # base must register the win BEFORE those survivors finish
+    # crossing the map. 2400 is still well past the tick where a
+    # stalling / splitting / oscillating play has lost both bases
+    # (those collapse by tick ~1700), so it stays anti-degenerate.
+    # The attrition cap was re-tuned UP from 8 after the engine
+    # combat rebalance — defending the consolidated base against
+    # the (now necessarily larger) 16-rifle west push costs ~11-14
+    # units, so 8 was no longer survivable by any winning play; 18
+    # still rules out a near-total wipe (the agent fields 28 units
+    # across both bases plus the flex) while leaving the genuine
+    # consolidate-and-hold play winnable.
     win_condition:
       any_of:
         - all_of:
           - building_in_region: {x: 24, y: 20, radius: 8, type: fact, count: 1}
           - building_in_region: {x: 24, y: 20, radius: 8, type: proc, count: 1}
-          - after_ticks: 3000
+          - after_ticks: 2400
           - within_ticks: 5400
-          - units_lost_lte: 8
+          - units_lost_lte: 18
         - all_of:
           - building_in_region: {x: 78, y: 20, radius: 8, type: fact, count: 1}
           - building_in_region: {x: 78, y: 20, radius: 8, type: proc, count: 1}
-          - after_ticks: 3000
+          - after_ticks: 2400
           - within_ticks: 5400
-          - units_lost_lte: 8
-    # Same DRAW-closing units-wiped fail as easy/medium (see easy notes)
-    # plus the hard-tier attrition cap.
+          - units_lost_lte: 18
+    # Same fail as easy/medium (`not fact:1` OR `not proc:1` — no
+    # complete base — OR a force-wipe OR the timeout) plus the
+    # hard-tier attrition cap.
     fail_condition:
       any_of:
         - after_ticks: 5401
         - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
         - not: {own_units_gte: 1}
-        - not: {units_lost_lte: 8}
+        - not: {units_lost_lte: 18}
     max_turns: 60

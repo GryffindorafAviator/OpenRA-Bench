@@ -7,6 +7,21 @@ reachable LOSS. This file checks each of those, the schema-level
 properties (spawn_point contract for hard, fail_condition shape,
 benchmark anchors), and that the win/fail predicate tree is in the
 right band (after_ticks ≤ within_ticks ≤ reachable-tick).
+
+Recalibration note: the engine combat rebalance hugely strengthened
+stationary defenders, breaking the original bar — the light/heavy
+pushes (4 / 8-12 rifles) no longer threatened the buffed garrisons,
+and an `enemy_units_killed` auto-`done` ended the episode (DRAW)
+the instant the agent cleared a push, before the survival floor.
+The pack was re-tuned: pushes scaled up (WEST 16 / EAST 36-42 /
+hard EAST 34), `enemy_units_killed` termination dropped (the win is
+a survival-band check), a `not proc:1` fail clause added (a
+wrong-side consolidate loses every refinery — without it that play
+kept a lone fact and silently DREW), a persistent unarmed enemy
+`fact` marker added (anti auto-DRAW), the hard survival floor moved
+to tick 2400 and its attrition cap to 18. The capability stays
+load-bearing — stall / split / oscillate / wrong-side consolidate
+all LOSE; only consolidate-on-the-light-side WINS.
 """
 
 from __future__ import annotations
