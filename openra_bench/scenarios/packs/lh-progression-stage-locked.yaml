@@ -1,0 +1,386 @@
+# lh-progression-stage-locked.yaml
+#
+# REASONING capability — Wave-10 long-horizon PERT-style stage-locked
+# progression. A FIVE-stage `then:` happened-before chain where each
+# stage gates the next, so skipping is impossible BY CONSTRUCTION:
+#
+#   STAGE 1 (POWER):  has_building: powr    — power online
+#   STAGE 2 (INTAKE): has_building: proc    — refinery (resource intake)
+#   STAGE 3 (CAPITAL):economy_value_gte: M  — accumulate capital reserve
+#   STAGE 4 (TECH):   has_building: weap    — war factory (tech unlock)
+#   STAGE 5 (ACTION): units_killed_gte: K   — commit to terminal action
+#
+# The Wave-2 `then:` composite latches clause-by-clause: clause k+1 is
+# only credited AFTER clause k has been observed-true at least once.
+# This is the PERT/CPM critical path — every milestone is a node whose
+# predecessor must finish before it can start earning credit. A policy
+# that skips a stage cannot advance the latch past the skipped index;
+# the chain NEVER completes and the episode forfeits on the clock.
+#
+# Why each stage genuinely gates the next:
+#   - STAGE 1→2: proc costs 1400 and has prereq `anypower` — the
+#     engine itself refuses proc until powr exists. The `then:` latch
+#     additionally refuses to credit a (pre-placed) proc until powr
+#     has latched first.
+#   - STAGE 2→3: economy_value M is tuned ABOVE starting_cash, so the
+#     capital reserve cannot be reached without the harvest income
+#     that ONLY the built proc brings online (proc auto-spawns a harv
+#     on the near ore patch). Skip proc ⇒ M never clears.
+#   - STAGE 3→4: weap costs 2000 with prereq `proc`. Reaching the M
+#     reserve first guarantees the cash to afford weap; a policy that
+#     rushes weap before the reserve has to spend down below M and
+#     STAGE 3 (which the latch demands FIRST) can never latch after.
+#   - STAGE 4→5: the kills are scored by the pre-placed strike force
+#     against HOLD-FIRE (stance:0) enemy defenders. A "rush the
+#     defenders and kill K early" play DOES score kills — but the
+#     `then:` latch will not credit them toward STAGE 5 until
+#     powr → proc → M → weap have latched IN ORDER. Out-of-order
+#     completion stalls the chain forever.
+#
+# Engine-verified tech tree (vendor/OpenRA/mods/ra/rules/structures.yaml,
+# cross-checked in build-sequence-tech-fastest):
+#   - POWR  cost  300, Prerequisites: <none>     (provides anypower)
+#   - PROC  cost 1400, Prerequisites: anypower   (needs powr)
+#   - WEAP  cost 2000, Prerequisites: proc       (needs proc)
+# Optimal-path total = 3700 credits. A pre-placed harv on a near
+# `mine` yields ~95 cr/turn sustained (lh-econ-army-victory ENGINE
+# NOTE #1) once the proc exists to receive the dropoffs.
+#
+# Bar (CLAUDE.md — real LOSS, never DRAW; verified scripted, seeds
+# 1-4, every level):
+#   - stall (observe-only)              ⇒ LOSS on every level + seed
+#   - skip-a-stage (never build powr ⇒  ⇒ LOSS on every level + seed
+#     STAGE 1 never latches AND the
+#     engine refuses proc; build but
+#     never engage ⇒ STAGE 5 unmet)
+#   - hunt-everything brute             ⇒ LOSS on every level + seed
+#     (razes a sentinel `fact`)
+#   - intended ordered progression      ⇒ WIN  on every level + seed
+# fail_condition uses `after_ticks: T+1` (reachable inside max_turns —
+# engine ~90 ticks/turn ⇒ tick ≤ 93+90·(N-1) = 6303 ≥ 6001) so a
+# non-finisher LOSES on the clock; `not building_count_gte: fact`
+# catches a razed agent base; `enemy_buildings_destroyed_gte: 1`
+# makes a hunt-everything brute LOSE the instant it razes a sentinel
+# `fact` (instead of the engine auto-`done` collapsing the run to a
+# DRAW) — STAGE 5 is a UNIT-kill stage, not a base-raze.
+#
+# Real-world anchors:
+#   - PERT critical path / PERT-CPM project management (each milestone
+#     node gates its successor; the chain length is the critical path)
+#   - PlanBench staged dependencies (a downstream goal literal cannot
+#     be achieved before its precondition literal)
+#   - long SOP / phased operation execution
+#
+# ENGINE NOTES (per CLAUDE.md):
+#   - `then:` advances clause-by-clause; a latched earlier clause
+#     stays latched even if its predicate later goes false (e.g. the
+#     M reserve gets spent down) — only the FIRST observation order
+#     matters.
+#   - `bot_type: ''` (no scripted bot) — the enemy defenders are
+#     static so the anti-stall pressure is purely the `within_ticks`
+#     clock, not incoming raiders. The chain must be EXECUTED, not
+#     merely survived.
+#   - Two enemy `fact` SENTINELS persist past any defender kill so
+#     the engine does NOT auto-`done` on enemy-elimination before the
+#     `then:` chain + within_ticks evaluate (CLAUDE.md auto-terminate
+#     footgun). They are unarmed and sit FAR EAST, well separated
+#     from the mid-east kill cluster, so the intended strike force
+#     (which stops once K kills land and the chain completes) never
+#     reaches them; a hunt-everything brute does and trips the
+#     `enemy_buildings_destroyed_gte` fail clause.
+#   - The pre-placed agent `2tnk` are `stance: 0` (HoldFire) so a
+#     stall policy can't win for free by the engine auto-hunting the
+#     army across the map (a scenario-declared combat unit otherwise
+#     auto-advances). STAGE 5 needs the explicit `set_stance(3)` +
+#     `attack_move` verbs — a real load-bearing action.
+#   - `proc` auto-spawns a harvester on the near `mine`; `harvest`
+#     is in the tool list so the policy can kickstart the auto-cycle.
+#
+# Validate:
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m pytest tests/test_lh_progression_stage_locked.py -q
+
+meta:
+  id: lh-progression-stage-locked
+  title: 'Stage-Locked Progression — PERT Critical-Path 5-Stage Chain'
+  capability: reasoning
+  real_world_meaning: >
+    A long single-episode operation whose final win depends on FIVE
+    milestones being observed-true in strict order: bring power online
+    (powr), stand up resource intake (proc), accumulate a capital
+    reserve (economy_value ≥ M), unlock the tech tier (weap), then
+    commit to terminal action (≥ K kills). The Wave-2 `then:` composite
+    is a PERT critical path — each milestone node gates its successor,
+    so skipping a stage is impossible by construction: the latch
+    cannot advance past a stage that was never observed true, and the
+    chain never completes. Only the intended ordered progression wins
+    inside the tick budget; any stage-skip or stall forfeits on the
+    clock.
+  robotics_analogue: >
+    PERT/CPM critical-path execution of a staged operation: a mission
+    runs through power-up, resource intake, capital/charge reserve,
+    capability unlock and terminal action, and the credit at episode
+    end requires every stage to have happened in sequence inside one
+    budget window. A downstream task cannot start — and cannot earn
+    credit — until its upstream predecessor has finished; an
+    out-of-order or skipped stage forfeits the whole staged plan.
+  benchmark_anchor:
+    - "PERT critical path"
+    - "PlanBench staged dependencies"
+    - "project management"
+    - "PERT/CPM project management"
+    - "PlanBench long-sequencing"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Loose-bar rehearsal of the 5-stage chain. Generous cash and clock;
+  # the chain still bites: skip powr ⇒ STAGE 1 never latches AND the
+  # engine refuses proc; skip proc ⇒ STAGE 2 never latches AND the M
+  # reserve can't accrue (no harvest income); rush weap before the M
+  # reserve ⇒ STAGE 3 can never latch after the spend; pump kills
+  # early ⇒ the latch won't credit them until the four building/
+  # capital stages have latched IN ORDER. Only the ordered play WINS.
+  easy:
+    description: >
+      Pre-placed: agent base — fact only — at the west, with one
+      harvester parked beside a near ore patch, plus 4 medium tanks
+      (2tnk) for the terminal action. A cluster of HOLD-FIRE enemy
+      rifle soldiers sits at mid-east (your kill targets); two inert
+      enemy `fact` markers sit further east. The FIVE stages
+      (`then:` chain) are: (1) build a power plant (powr), (2) build
+      a refinery (proc), (3) reach economy value ≥ 3500 (cash + ore),
+      (4) build a war factory (weap), (5) destroy ≥ 2 enemy UNITS.
+      Stages MUST happen IN THIS ORDER — the `then:` latch cannot
+      advance past a skipped stage, so any skip or stall LOSES on the
+      clock. STAGE 5 is a unit-kill stage: razing an enemy building
+      forfeits. All within 6000 ticks.
+    starting_cash: 3000
+    overrides:
+      actors:
+        # Agent base — fact ONLY. powr and proc are STAGE 1 / STAGE 2
+        # of the chain and must be built by the agent.
+        - {type: fact, owner: agent, position: [10, 18]}
+        # Pre-placed harv parked at the ore patch — once the agent
+        # builds proc the harv has a refinery to drop off at and
+        # income comes online (STAGE 3's capital reserve).
+        - {type: harv, owner: agent, position: [20, 18]}
+        # 4 pre-placed medium tanks — the strike force for STAGE 5.
+        # Pre-placed because building an army is NOT one of the five
+        # stages; the chain's axis is the powr→proc→capital→weap→kill
+        # progression, not force production.
+        - {type: 2tnk, owner: agent, position: [18, 22], stance: 0}
+        - {type: 2tnk, owner: agent, position: [18, 24], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 22], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 24], stance: 0}
+        # Near ore patch — the built proc auto-spawns a second harv
+        # here and the pre-placed harv cycles to it.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # Enemy KILL-TARGET cluster — 3 HOLD-FIRE riflemen at mid-east.
+        # stance:0 ⇒ they hold fire and do not path west, so the
+        # agent's strike force must come to them. These are the ONLY
+        # legitimate STAGE-5 targets (units, not buildings).
+        - {type: e1,   owner: enemy, position: [90, 30], stance: 0}
+        - {type: e1,   owner: enemy, position: [90, 32], stance: 0}
+        - {type: e1,   owner: enemy, position: [90, 28], stance: 0}
+        # SENTINEL enemy facts — two unarmed `fact` markers far to the
+        # EAST, well separated from the kill cluster, that keep the
+        # engine from auto-`done`ing on enemy-elimination before the
+        # `then:` chain + within_ticks evaluate (CLAUDE.md auto-
+        # terminate footgun). They are NOT targets: razing ANY enemy
+        # building is an instant LOSS (fail_condition) — STAGE 5 is a
+        # UNIT-kill stage, not a base-raze. A brute that hunts the
+        # whole map and razes a fact trips the fail clause and LOSES
+        # rather than ending the episode in a draw.
+        - {type: fact, owner: enemy, position: [120, 12]}
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: stage-locked-easy
+            clauses:
+              - {has_building: powr}              # STAGE 1: power
+              - {has_building: proc}              # STAGE 2: intake
+              - {economy_value_gte: 3500}         # STAGE 3: capital
+              - {has_building: weap}              # STAGE 4: tech
+              - {units_killed_gte: 2}             # STAGE 5: action
+        - within_ticks: 6000
+    fail_condition:
+      any_of:
+        - {after_ticks: 6001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        # Razing ANY enemy building forfeits — STAGE 5 is a unit-kill
+        # stage. A hunt-everything brute razes the sentinel facts and
+        # LOSES here (instead of auto-`done` collapsing to a draw).
+        - {enemy_buildings_destroyed_gte: 1}
+    max_turns: 70
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: tighter cash (2200) + a larger capital
+  # reserve (M=3000) + tighter clock (60 turns) + K=3. The starting
+  # cash no longer covers powr+proc+weap outright, so the M reserve
+  # genuinely depends on harvest income accruing AFTER proc is built —
+  # which sharpens the STAGE 2→3 gate. The chain shape is identical to
+  # easy (5 stages, same kinds); the difficulty axis is the tighter
+  # capital bar and clock, not a new stage kind.
+  medium:
+    description: >
+      Pre-placed: agent base — fact only — at the west, with one
+      harvester beside a near ore patch, plus 4 medium tanks (2tnk).
+      A cluster of 4 HOLD-FIRE rifle/rocket soldiers sits at mid-east
+      (your kill targets); two inert enemy `fact` markers sit further
+      east. The FIVE stages (`then:` chain) are: (1) power plant
+      (powr), (2) refinery (proc), (3) economy value ≥ 3000 (cash +
+      ore), (4) war factory (weap), (5) destroy ≥ 3 enemy UNITS.
+      Stages MUST happen IN STRICT ORDER — starting cash alone cannot
+      fund powr + proc + weap, so the capital reserve REQUIRES harvest
+      income that only the built proc brings online. Skipping or
+      reordering any stage LOSES on the clock; razing an enemy
+      building forfeits. All within 6000 ticks.
+    starting_cash: 2200
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: harv, owner: agent, position: [20, 18]}
+        - {type: 2tnk, owner: agent, position: [18, 22], stance: 0}
+        - {type: 2tnk, owner: agent, position: [18, 24], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 22], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 24], stance: 0}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # Enemy KILL-TARGET cluster — 4 HOLD-FIRE rifle/rocket soldiers
+        # at mid-east (the K=3 kill stage is generously satisfiable).
+        # stance:0 ⇒ HoldFire (they do not path west; the agent must
+        # come to them). The ONLY legitimate STAGE-5 targets.
+        - {type: e1,   owner: enemy, position: [90, 28], stance: 0}
+        - {type: e1,   owner: enemy, position: [90, 30], stance: 0}
+        - {type: e1,   owner: enemy, position: [90, 32], stance: 0}
+        - {type: e3,   owner: enemy, position: [92, 30], stance: 0}
+        # SENTINEL enemy facts — far east, well separated from the
+        # kill cluster. Keep the engine alive (no auto-`done`); razing
+        # ANY enemy building is an instant LOSS (fail_condition).
+        - {type: fact, owner: enemy, position: [120, 12]}
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: stage-locked-medium
+            clauses:
+              - {has_building: powr}              # STAGE 1: power
+              - {has_building: proc}              # STAGE 2: intake
+              - {economy_value_gte: 3000}         # STAGE 3: capital
+              - {has_building: weap}              # STAGE 4: tech
+              - {units_killed_gte: 3}             # STAGE 5: action
+        - within_ticks: 6000
+    fail_condition:
+      any_of:
+        - {after_ticks: 6001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {enemy_buildings_destroyed_gte: 1}
+    max_turns: 70
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: ≥2 agent spawn_point groups (NORTH y=14 /
+  # SOUTH y=26) round-robined by seed. The base layout and the
+  # spawn-matched ore patch flip per seed, so a memorised "place powr
+  # at (14,18)" opening misses one of the two spawn groups. The chain
+  # shape stays the FIVE-stage powr→proc→capital→weap→kill progression
+  # (same kinds as easy/medium); cash and clock match the extra
+  # travel-time cost from the off-axis spawn. K=3.
+  hard:
+    description: >
+      Pre-placed: agent base — fact only — at the west, round-robined
+      between a NORTH base (y=14) and a SOUTH base (y=26) by seed,
+      with one harvester beside a spawn-matched ore patch and 4 medium
+      tanks (2tnk). A cluster of 5 HOLD-FIRE soldiers sits at mid-east
+      (your kill targets); two inert enemy `fact` markers sit further
+      east. The FIVE stages (`then:` chain) are: (1) power plant
+      (powr), (2) refinery (proc), (3) economy value ≥ 3000 (cash +
+      ore), (4) war factory (weap), (5) destroy ≥ 3 enemy UNITS.
+      Stages MUST happen IN STRICT ORDER — the `then:` latch cannot
+      advance past a skipped stage. The seed-varied spawn means a
+      memorised opening cannot generalise. Skipping or reordering any
+      stage LOSES on the clock; razing an enemy building forfeits.
+      All within 6000 ticks.
+    starting_cash: 2400
+    overrides:
+      actors:
+        # NORTH base spawn (spawn_point 0)
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [20, 14], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [18, 16], spawn_point: 0, stance: 0}
+        - {type: 2tnk, owner: agent, position: [18, 18], spawn_point: 0, stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 16], spawn_point: 0, stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 18], spawn_point: 0, stance: 0}
+        # SOUTH base spawn (spawn_point 1)
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [20, 26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [18, 24], spawn_point: 1, stance: 0}
+        - {type: 2tnk, owner: agent, position: [18, 22], spawn_point: 1, stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 24], spawn_point: 1, stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 22], spawn_point: 1, stance: 0}
+        # Spawn-matched ore patches (neutral; always place regardless
+        # of spawn_point — CLAUDE.md engine footgun). The active
+        # spawn's harv cycles to its own row's patch.
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 16]}
+        - {type: mine, owner: neutral, position: [22, 26]}
+        - {type: mine, owner: neutral, position: [22, 24]}
+        # Enemy KILL-TARGET cluster — 5 HOLD-FIRE soldiers at mid-east
+        # (the K=3 kill stage is generously satisfiable from either
+        # spawn). stance:0 ⇒ HoldFire. Enemies always place (enemy
+        # actors don't honour spawn_point — CLAUDE.md). Centred on
+        # y=20 so the travel cost is symmetric for the NORTH (y=14)
+        # and SOUTH (y=26) agent spawns. The ONLY legitimate STAGE-5
+        # targets.
+        - {type: e1,   owner: enemy, position: [90, 18], stance: 0}
+        - {type: e1,   owner: enemy, position: [90, 20], stance: 0}
+        - {type: e1,   owner: enemy, position: [90, 22], stance: 0}
+        - {type: e3,   owner: enemy, position: [92, 19], stance: 0}
+        - {type: e3,   owner: enemy, position: [92, 21], stance: 0}
+        # SENTINEL enemy facts — far east, well separated from the
+        # kill cluster. Keep the engine alive (no auto-`done`); razing
+        # ANY enemy building is an instant LOSS (fail_condition) so a
+        # hunt-everything brute LOSES rather than drawing.
+        - {type: fact, owner: enemy, position: [120, 8]}
+        - {type: fact, owner: enemy, position: [125, 4]}
+    win_condition:
+      all_of:
+        - then:
+            id: stage-locked-hard
+            clauses:
+              - {has_building: powr}              # STAGE 1: power
+              - {has_building: proc}              # STAGE 2: intake
+              - {economy_value_gte: 3000}         # STAGE 3: capital
+              - {has_building: weap}              # STAGE 4: tech
+              - {units_killed_gte: 3}             # STAGE 5: action
+        - within_ticks: 6000
+    fail_condition:
+      any_of:
+        - {after_ticks: 6001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {enemy_buildings_destroyed_gte: 1}
+    max_turns: 70

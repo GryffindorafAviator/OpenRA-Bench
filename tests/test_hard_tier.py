@@ -1123,6 +1123,20 @@ UPGRADED = [
     # duplicated at both spawn columns (neutral actors don't honour
     # spawn_point — CLAUDE.md).
     "econ-resource-trade-with-self",
+    # Wave-10 REASONING long-horizon pack — PERT-style stage-locked
+    # progression (PERT critical path / PlanBench staged-dependencies
+    # / project-management anchor). A five-stage `then:` chain
+    # (powr → proc → economy_value M → weap → K kills) where each
+    # stage gates the next, so skipping is impossible by
+    # construction. Hard tier defines two agent spawn_point groups
+    # (NORTH base y=14 / SOUTH base y=26) round-robined by seed; the
+    # base layout and spawn-matched ore patches flip per seed so a
+    # memorised "place powr at (14,18)" opening misses one of the two
+    # spawn groups. The mid-east kill cluster + far-east sentinel
+    # facts always place (enemy actors don't honour spawn_point —
+    # CLAUDE.md), centred on y=20 so travel cost is symmetric across
+    # the two spawns.
+    "lh-progression-stage-locked",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
