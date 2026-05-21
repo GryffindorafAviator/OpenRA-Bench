@@ -128,6 +128,31 @@ A scenario is defective if any of the following hold:
   with hidden enemies that must be discovered without combat, set
   the HIDDEN actors to `stance:0` themselves (defender side, not
   scout side).
+- **Stance semantics are now four behaviourally-distinct gates**
+  (engine fix, pinned by
+  `OpenRA-Rust/openra-sim/tests/test_stance_semantics.rs` +
+  `tests/test_stance_semantics_python.py`):
+  - `stance:0` HoldFire — never auto-engages, even when attacked.
+  - `stance:1` ReturnFire — auto-engages an in-range enemy **only
+    after itself taking hostile fire** within a 60-tick window
+    (`recently_received_fire` gate). A stance:1 unit next to a
+    passive (`stance:0`) enemy holds fire indefinitely — it does
+    NOT open fire first. This is the load-bearing distinction the
+    `combat-stance-mgmt-attack` / `def-stance-mgmt-hold-then-attack`
+    packs exploit.
+  - `stance:2` Defend (the default when `stance:` is omitted) —
+    auto-fires on the closest in-range enemy but never advances.
+  - `stance:3` AttackAnything — auto-fires on in-range enemies AND,
+    when none are in weapon range, **advances toward the nearest
+    visible enemy** (the "hunt" path: `order_move` toward the
+    target, then the next-tick scan promotes the encounter to
+    Attack). This is the only stance that opens new engagements by
+    moving — a scattered-enemy map can be cleared by a single
+    stance:3 hunter chaining one hunt move per kill.
+  Explicit agent orders (`attack_unit` / `attack_move`) always
+  override stance. A stance flip is a real load-bearing verb:
+  `set_stance(units, 3)` converts an idle ReturnFire formation
+  into an active hunter.
 - **`pbox` costs 600** (not the 400 some old specs assumed);
   defense and infantry are SEPARATE production queues so an
   efficient policy queues `build('pbox')` and `build('e1')` in
@@ -152,8 +177,8 @@ A scenario is defective if any of the following hold:
 ## Engine blockers: fix the engine, do not compromise the pack
 
 When authoring a pack you may discover that the intended capability
-cannot be expressed in the current engine — e.g. `power_down` is a
-no-op, `stance:1` doesn't act as ReturnFire, enemy actors don't
+cannot be expressed in the current engine — e.g. an order is a
+no-op, a stance doesn't behave as advertised, enemy actors don't
 honour `spawn_point`, there is no mid-episode scripted-event hook,
 or some specific order/predicate isn't surfaced. **The correct move
 is to fix the engine, not to retire the pack, weaken the bar, or

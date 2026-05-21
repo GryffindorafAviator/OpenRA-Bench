@@ -779,6 +779,22 @@ UPGRADED = [
     # same fact column (x=10) so the doctrine generalises but a
     # memorised "fire when enemy reaches (40,20)" cell cannot.
     "def-stance-mgmt-hold-then-attack",
+    # Wave-9 ACTION pack — stance-flip HUNT authorisation (military ROE
+    # escalation / SC2 stance micro anchor). 4× 2tnk pre-staged at the
+    # west edge on stance:1 (ReturnFire); scattered enemies (e1 + 1tnk)
+    # on stance:0 across the eastern half DO NOT attack the formation,
+    # so return-fire never opens. The agent MUST `set_stance(units, 3)`
+    # to escalate to AttackAnything; the engine's stance:3 hunt path
+    # then advances each tank to the nearest visible enemy and wipes
+    # them out. Hard defines TWO agent spawn_point groups (NORTH
+    # y=14..16 vs SOUTH y=24..26) round-robined by seed; the scatter
+    # is in y across the eastern half (enemy actors don't honour
+    # spawn_point — CLAUDE.md) so each spawn faces a different hunt
+    # vector to the same kill set. Ships alongside the engine fix
+    # (stance:1 true return-fire only, stance:3 advances toward
+    # visible enemies) pinned by
+    # `OpenRA-Rust/openra-sim/tests/test_stance_semantics.rs`.
+    "combat-stance-mgmt-attack",
     # Wave-8 REASONING pack — bypass a prepared frontal line via a far
     # off-axis fog lane and strike the undefended HQ from behind (SC2
     # hidden assault / military surprise attack / fog warfare anchor).
@@ -983,6 +999,24 @@ UPGRADED = [
     # declares no spawn_points (see openra-train/src/env.rs
     # `new_with_spawn_point`).
     "adv-rps-counter-pick",
+    # Engine-fix pack (power_down + power_provided_gte). Hard tier
+    # defines two agent spawn_point groups (NORTH y≈12 / SOUTH y≈28)
+    # round-robined by seed; the base composition (powr + 7 drainers)
+    # is identical across spawns so the load-shed decision logic is
+    # the same, but the building IDs to target with `power_down` are
+    # at spawn-specific coords — a memorised "id=N" sequence cannot
+    # generalise. Per-group inert HoldFire e1 spawn-witness surfaces
+    # the variation via units_summary.
+    "build-power-down-defensive",
+    # Wave-9 engine-fix pack: the FIRST pack to use the new
+    # `scheduled_events:` mid-episode hook (oramap.rs
+    # ScheduledEventKind::SpawnActors fired by the env per-tick after
+    # process_frame). Hard tier defines two agent spawn_point groups
+    # (NORTH y=14 / SOUTH y=26) round-robined by seed; the enemy
+    # initial swarm + scheduled tank reinforcement at tick 1500 stay
+    # fixed so the perception-cycle doctrine is what generalises, not
+    # a memorised base-latitude opening.
+    "scout-cycle-keep-info-fresh",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

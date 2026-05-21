@@ -1,0 +1,405 @@
+# Validate: python -m openra_bench.scenarios.validate packs/build-power-down-defensive.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# BUILD-POWER-DOWN-DEFENSIVE — Mid-phase Group I REASONING:
+#   load-shedding under an active power constraint (operational runbook
+#   discipline). The pack tests that the agent reacts to a low-power
+#   state by TOGGLING POWER OFF on non-essential structures (via the
+#   `power_down` command), restoring positive surplus WITHOUT selling
+#   any building. A model that stalls leaves the grid overdrawn and
+#   times out; a model that SELLS the same buildings to free the load
+#   destroys structures it cannot rebuild within budget; a model that
+#   power-downs the lone Power Plant collapses provided power and also
+#   loses on the `power_provided_gte` floor.
+#
+# Real-world anchor: electrical-grid load-shedding playbook. When the
+# generator(s) cannot cover total load — single generator down,
+# unplanned demand spike, brown-out — operators TURN OFF non-critical
+# loads first (air handlers, decorative lighting) BEFORE shedding
+# essential lines (life-safety, refrigeration). Selling/decommissioning
+# is wrong because the grid will recover and the load will be needed
+# again; the operator must SHED reversibly. Benchmark anchor:
+# PlanBench reversible-action planning; lmgame-Bench resource
+# constraint reasoning; SC2LE power-management.
+#
+# Engine fix this pack PROVES (engine-fix worktree, commit ae826ea):
+#   1. Pre-placed buildings now contribute to `power_provided` /
+#      `power_drained` (previously only `order_place_building`
+#      updated the PowerManager trait — CLAUDE.md historical pitfall).
+#   2. `PowerDown` order toggles `World.powered_down` and live snapshot
+#      omits a powered-down building's contribution from BOTH provided
+#      and drained totals (so power_down on a powr reduces provided;
+#      power_down on a proc/tent/barr reduces drained).
+#   3. The new `power_provided_gte` predicate reads
+#      `signals.power_provided` (gross, ignores drains) — used here as
+#      the anti-cheat floor: powering-down the lone Power Plant ALSO
+#      fails the win, so the agent cannot trivially zero the surplus
+#      by killing supply.
+#
+# Engine facts used (verified against the installed openra_train wheel
+# with the vendored Red Alert ruleset):
+#
+#   * powr (Power Plant)  provides +100 power, cost 300
+#   * apwr (Adv Power)    provides +200, cost 500 (not used here)
+#   * proc (Ore Refinery) drains  -30  (and auto-spawns a harv)
+#   * tent (Allied Barracks) drains -20
+#   * barr (Soviet Barracks) drains -20
+#   * weap (War Factory)  drains  -30
+#   * dome (Radar Dome)   drains  -40
+#
+# Tick alignment (CLAUDE.md): engine advances ~90 ticks per decision
+# turn, so within_ticks ≤ 93 + 90·(max_turns − 1) must hold. The
+# fail_condition uses after_ticks = within_ticks + 1 so a non-finisher
+# LOSES on the very next tick after the window closes (no DRAW).
+#
+# Anti-DRAW: a persistent unarmed enemy `fact` far east keeps the
+# engine from auto-`done`-ing on enemy elimination (the agent has no
+# offensive tools, so the enemy `fact` survives).
+
+meta:
+  id: build-power-down-defensive
+  title: 'Power Down Non-Essentials Under Load — Reversible Load-Shedding'
+  capability: reasoning
+  real_world_meaning: >
+    Grid load-shedding under a generator-down state: the agent starts
+    with insufficient generation to cover its installed load (one Power
+    Plant supplies 100 power; the installed drains total ~140), so the
+    grid runs at NEGATIVE surplus from tick 0 (the engine slows
+    production 50% in this state). The agent must REVERSIBLY shed
+    non-essential loads via `power_down` (toggle the building off) so
+    that provided ≥ drained — WITHOUT selling structures it will need
+    later. Selling fails the `has_building` clauses on the load-bearing
+    structures it ostensibly needs to keep around; powering-down the
+    lone Power Plant collapses provided power and fails the
+    `power_provided_gte:100` floor; stalling never restores surplus
+    and times out.
+  robotics_analogue: >
+    Datacentre load-shedding when one generator trips: the operator
+    must turn OFF non-critical lines (cosmetic lighting, secondary HVAC)
+    so the surviving generator can carry the essential ones (life
+    safety, core compute), WITHOUT decommissioning the shed equipment
+    (it will be re-enabled the moment the second generator comes back).
+    The correct primitive is a reversible disable, not a destructive
+    one — this is exactly the `power_down` toggle vs `sell`.
+  benchmark_anchor:
+    - "PlanBench reversible-action planning"
+    - "operations runbook / load-shedding"
+    - "SC2 power management"
+    - "lmgame-Bench resource-constraint reasoning"
+  author: openra-bench-engine-fix
+
+base_map: rush-hour-arena
+starting_cash: 1000
+
+base:
+  # Pure load-shed test: the agent must NOT build new power. The
+  # decision is exclusively the `power_down` toggle on the non-
+  # essential drainers. We also expose `sell` so a destructive-policy
+  # baseline can be tested (and shown to LOSE because it razes the
+  # has_building clauses).
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+  tools:
+    - observe
+    - power_down
+    - sell
+    - stop
+  spawn_mcvs: false
+  planning: true
+  termination:
+    max_ticks: 8000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Starting state: 1 powr (+100) and FIVE drainers totalling −140 =
+  # surplus −40 (low-power, production slowed). Agent must power_down
+  # any combination of drainers that sheds ≥40 of load (e.g. tent+barr
+  # for −40 exact, or just dome for −40 exact, or weap+tent for −50).
+  # All such combos keep ≥100 power_provided (the powr stays on) and
+  # leave proc + the load-bearing structures standing. max_turns 40 →
+  # reachable tick 93 + 90·39 = 3603 > 3600 ✓.
+  easy:
+    description: >
+      Your base is OVERDRAWN: 1 Power Plant (powr, +100) carries five
+      drainers — proc (−30), tent (−20), barr (−20), weap (−30),
+      dome (−40) = drained 140, surplus −40 (production runs at 50%
+      speed in low-power). Restore power_surplus_gte:0 by powering
+      DOWN any combination of NON-ESSENTIAL drainers (tent + barr
+      sheds 40 exactly; weap alone sheds 30; dome alone sheds 40).
+      Do NOT sell anything — proc, tent, barr, weap, dome, fact must
+      remain standing. Do NOT power_down the lone powr — provided
+      power must stay ≥100. Deadline tick 3600.
+    starting_cash: 1000
+    overrides:
+      actors:
+        # Anchor base: fact on the west.
+        - type: fact
+          owner: agent
+          position: [10, 18]
+        # Single power plant (+100) — the lone generator.
+        - type: powr
+          owner: agent
+          position: [14, 18]
+        # Five drainers, total −140. Surplus = −40 → low power.
+        - type: proc
+          owner: agent
+          position: [10, 22]
+        - type: tent
+          owner: agent
+          position: [14, 22]
+        - type: barr
+          owner: agent
+          position: [18, 22]
+        - type: weap
+          owner: agent
+          position: [10, 26]
+        - type: dome
+          owner: agent
+          position: [14, 26]
+        # Persistent unarmed enemy marker — anti-DRAW.
+        - type: fact
+          owner: enemy
+          position: [120, 20]
+    win_condition:
+      all_of:
+        # Surplus restored (≥0). Only achievable by shedding load,
+        # since the agent cannot build new power.
+        - power_surplus_gte: 0
+        # Provided power floor — powering-down the lone powr to "fix"
+        # the surplus by zeroing both sides also fails this clause.
+        - power_provided_gte: 100
+        # Every drained structure must REMAIN STANDING (selling would
+        # also reduce drained — but it's destructive, which is the
+        # whole anti-cheat point of preferring `power_down` over `sell`).
+        # building_count_gte reads the LIVE snapshot (own_buildings) —
+        # selling a building drops the count, failing the clause. The
+        # `has_building` predicate (own_building_types) accumulates and
+        # would stay True even after a sell, so we don't use it here.
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: tent, n: 1}
+        - building_count_gte: {type: barr, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - building_count_gte: {type: dome, n: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 3600
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 40
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: HEAVIER OVERDRAW. We add a second drainer rail so the
+  # overdraw is −90 instead of −40: shedding requires powering down
+  # the right COMBINATION (any single tier-1 drainer alone is no
+  # longer enough — tent OR barr alone sheds 20, dome alone sheds 40,
+  # neither closes the −90 gap on its own). Same constraints (no
+  # selling, no shedding the powr). max_turns 36 → reachable tick
+  # 3243 > 3240 ✓.
+  medium:
+    description: >
+      Same overdrawn base, but heavier load — drainers total 180
+      (proc 30 + tent 20 + barr 20 + weap 30 + dome 40 + fix 30 +
+      hpad 10 = 180). Surplus −80. You must shed ≥80 of load by
+      powering DOWN non-essential drainers (e.g. weap + dome = 70 is
+      NOT enough; weap + dome + tent = 90; dome + tent + barr +
+      hpad = 90; dome + fix = 70 NOT enough; dome + fix + tent =
+      90). No single power_down restores surplus — combinations
+      required. Do NOT sell anything — proc, tent, barr, weap,
+      dome, fix, hpad, fact must remain standing. Provided must
+      stay ≥100 (do not power_down the powr). Deadline tick 3240.
+    starting_cash: 1000
+    overrides:
+      actors:
+        - type: fact
+          owner: agent
+          position: [10, 18]
+        - type: powr
+          owner: agent
+          position: [14, 18]
+        - type: proc
+          owner: agent
+          position: [10, 22]
+        - type: tent
+          owner: agent
+          position: [14, 22]
+        - type: barr
+          owner: agent
+          position: [18, 22]
+        - type: weap
+          owner: agent
+          position: [10, 26]
+        - type: dome
+          owner: agent
+          position: [14, 26]
+        # Heavier draw — two more support buildings.
+        - type: fix
+          owner: agent
+          position: [18, 26]
+        - type: hpad
+          owner: agent
+          position: [22, 22]
+        - type: fact
+          owner: enemy
+          position: [120, 20]
+    win_condition:
+      all_of:
+        - power_surplus_gte: 0
+        - power_provided_gte: 100
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: tent, n: 1}
+        - building_count_gte: {type: barr, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - building_count_gte: {type: dome, n: 1}
+        - building_count_gte: {type: fix, n: 1}
+        - building_count_gte: {type: hpad, n: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 3240
+    fail_condition:
+      any_of:
+        - after_ticks: 3241
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 36
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: TWO spawn_point groups so the agent base latitude flips
+  # by seed (NORTH y=12 / SOUTH y=28). The decision logic is
+  # identical — the agent must read the building IDs from the obs
+  # and power_down by id, so a memorised "id=1001" sequence cannot
+  # generalise. Same overdraw shape as medium (−90), same constraints,
+  # tighter clock. max_turns 36 → reachable tick 3243 > 3240 ✓.
+  #
+  # CLAUDE.md footgun: spawn_point applies ONLY to AGENT actors, and
+  # ANY agent actor with spawn_point causes agent actors WITHOUT
+  # spawn_point to be filtered. So we DUPLICATE the agent base across
+  # both spawn_point groups. The enemy marker has no spawn_point and
+  # always places.
+  hard:
+    description: >
+      Same overdrawn base as medium (surplus −90, shed ≥90 of load by
+      powering DOWN), but the base latitude FLIPS between NORTH (y=12)
+      and SOUTH (y=28) by seed. The building IDs you must target with
+      `power_down` are at the spawn-specific coords — read them from
+      the observation. Do NOT sell anything; do NOT power_down the
+      powr. Deadline tick 3240.
+    starting_cash: 1000
+    overrides:
+      actors:
+        # ── NORTH (spawn_point 0) ─────────────────────────────────
+        - type: fact
+          owner: agent
+          position: [10, 12]
+          spawn_point: 0
+        - type: powr
+          owner: agent
+          position: [14, 12]
+          spawn_point: 0
+        - type: proc
+          owner: agent
+          position: [10, 16]
+          spawn_point: 0
+        - type: tent
+          owner: agent
+          position: [14, 16]
+          spawn_point: 0
+        - type: barr
+          owner: agent
+          position: [18, 16]
+          spawn_point: 0
+        - type: weap
+          owner: agent
+          position: [10, 10]
+          spawn_point: 0
+        - type: dome
+          owner: agent
+          position: [14, 10]
+          spawn_point: 0
+        - type: fix
+          owner: agent
+          position: [18, 12]
+          spawn_point: 0
+        - type: hpad
+          owner: agent
+          position: [22, 14]
+          spawn_point: 0
+        # Inert spawn-witness e1 (CLAUDE.md/test_hard_tier.py contract):
+        # the per-seed start must surface via `units_summary` (the
+        # building-only base would otherwise produce empty units and
+        # break the spawn-variation check). HoldFire stance + no
+        # move/attack tools exposed makes this functionally inert for
+        # the load-shedding decision.
+        - type: e1
+          owner: agent
+          position: [24, 12]
+          stance: 0
+          spawn_point: 0
+        # ── SOUTH (spawn_point 1) ─────────────────────────────────
+        - type: fact
+          owner: agent
+          position: [10, 28]
+          spawn_point: 1
+        - type: powr
+          owner: agent
+          position: [14, 28]
+          spawn_point: 1
+        - type: proc
+          owner: agent
+          position: [10, 32]
+          spawn_point: 1
+        - type: tent
+          owner: agent
+          position: [14, 32]
+          spawn_point: 1
+        - type: barr
+          owner: agent
+          position: [18, 32]
+          spawn_point: 1
+        - type: weap
+          owner: agent
+          position: [10, 26]
+          spawn_point: 1
+        - type: dome
+          owner: agent
+          position: [14, 26]
+          spawn_point: 1
+        - type: fix
+          owner: agent
+          position: [18, 28]
+          spawn_point: 1
+        - type: hpad
+          owner: agent
+          position: [22, 30]
+          spawn_point: 1
+        # Inert spawn-witness e1 for the SOUTH spawn group.
+        - type: e1
+          owner: agent
+          position: [24, 28]
+          stance: 0
+          spawn_point: 1
+        - type: fact
+          owner: enemy
+          position: [120, 20]
+    win_condition:
+      all_of:
+        - power_surplus_gte: 0
+        - power_provided_gte: 100
+        - building_count_gte: {type: proc, n: 1}
+        - building_count_gte: {type: tent, n: 1}
+        - building_count_gte: {type: barr, n: 1}
+        - building_count_gte: {type: weap, n: 1}
+        - building_count_gte: {type: dome, n: 1}
+        - building_count_gte: {type: fix, n: 1}
+        - building_count_gte: {type: hpad, n: 1}
+        - building_count_gte: {type: fact, n: 1}
+        - within_ticks: 3240
+    fail_condition:
+      any_of:
+        - after_ticks: 3241
+        - not: {building_count_gte: {type: fact, n: 1}}
+        - not: {building_count_gte: {type: proc, n: 1}}
+    max_turns: 36
