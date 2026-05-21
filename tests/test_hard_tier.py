@@ -1225,6 +1225,17 @@ UPGRADED = [
     # (scheduled_events do not honour spawn_point), so a memorised
     # opening cannot generalise.
     "maint-repair-priority-order",
+    # Wave-11 REASONING pack — strategic commitment under a fast rush
+    # (SC2 tech-vs-army timing / capex-vs-opex under threat). Tech is
+    # pre-placed; the budget buys EITHER an immediate army (OPEX) OR a
+    # tech investment (CAPEX) that cannot amortise before the rush
+    # razes the base. Hard tier defines two agent spawn_point groups
+    # (NORTH y=12 / SOUTH y=28) round-robined by seed; the full base
+    # (fact+proc+powr+tent+weap) is duplicated under each group and
+    # the two fast rush bands carry no spawn_point so both place
+    # every seed, converging on whichever latitude the seed selected
+    # — a memorised army-placement cell cannot generalise.
+    "lh-tech-rush-vs-army-rush",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

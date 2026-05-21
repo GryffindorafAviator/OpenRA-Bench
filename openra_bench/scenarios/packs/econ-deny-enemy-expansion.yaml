@@ -1,0 +1,326 @@
+# econ-deny-enemy-expansion.yaml
+#
+# REASONING capability — economic denial / expansion denial. The
+# enemy has just taken a SECOND base: a vulnerable refinery (`proc`)
+# plus a harvester (`harv`) at a CONTESTED mid-map ore patch, only
+# LIGHTLY defended (a token rifleman or two). The enemy's MAIN base
+# sits far to the east, heavily fortified. Turtling at home — or
+# only observing — lets the enemy economy snowball uncontested and
+# the clock runs out with the proc still standing. The winning play
+# is the RAID: send the 4-tank strike force forward to the mid-map
+# expansion and raze the `proc` BEFORE the deadline, denying the
+# enemy its economic upside, while keeping ≥2 tanks and your own
+# construction yard alive.
+#
+# Anchor: SC2 expansion denial / economic warfare — the doctrine of
+# punishing a greedy enemy expansion the moment it goes down and is
+# still soft, rather than macro-ing passively at home while the
+# enemy out-economies you. The fortified main far east makes
+# turtling LOOK appealing (the enemy core is too hard to crack in
+# budget, so a passive player rationalises staying home) — the test
+# is recognising that the SOFT expansion, not the hard core, is the
+# decisive target and that it must be hit FORWARD, now.
+#
+# ── The discrimination bar ───────────────────────────────────────
+#   • stall (only observe)            → LOSS. The enemy expansion
+#     `proc` is never touched; `enemy_key_buildings_destroyed_in_
+#     region` is unmet → after_ticks fail.
+#   • turtle / keep the army home     → LOSS. Same: the proc stands;
+#     guarding your own fact scores nothing. The proc-destruction
+#     clause is the ONLY path to a win — staying home can never
+#     satisfy it.
+#   • naive all-in into the patch on the harder tiers  → LOSS.
+#     The thicker expansion garrison (3 e1 + an anti-tank e3) trades
+#     the column down below the ≥2-tank survival floor unless the
+#     raid prioritises the anti-tank rocket soldier — an undirected
+#     attack-move bleeds 3 of 4 tanks.
+#   • intended expansion raid (drive the strike force forward to the
+#     mid-map patch, focus the anti-tank defender, raze the `proc`,
+#     keep ≥2 tanks + your fact) → WIN.
+#
+# ── Why each win clause is load-bearing ──────────────────────────
+#   - `enemy_key_buildings_destroyed_in_region:{...types:[proc]}` —
+#     region-scoped to the EXPANSION patch so razing some OTHER
+#     enemy building (or the far-east main) does not score; only
+#     killing the contested expansion refinery counts.
+#   - `own_units_gte: 2` — a suicidal all-in that trades the whole
+#     column to crack the proc fails the survival floor; the raid
+#     must be efficient against the LIGHT expansion garrison.
+#   - `building_count_gte: {type: fact, n: 1}` — the agent owns a
+#     construction yard at home; throwing it away (or never having
+#     a base to come home to) busts the win. Mirrors the
+#     "don't lose your base to win the raid" discipline.
+#   - `within_ticks` — a raid that dawdles past the deadline draws
+#     no credit; the strike must commit early.
+#
+# ── Engine guardrails (per CLAUDE.md / checklist) ────────────────
+#   - Map: rush-hour-arena (128 × 40, playable x∈[2..126],
+#     y∈[2..38]). Agent base + strike force at the WEST edge
+#     (x≈6..10); enemy EXPANSION at mid-map (≈x=60); enemy MAIN
+#     fortified far east (x≈108).
+#   - The enemy expansion `proc` is the objective; it is a
+#     MustBeDestroyed building. The enemy MAIN base keeps several
+#     MustBeDestroyed buildings (fact + powr) standing AND a
+#     far-corner SENTINEL `fact`, so razing the expansion proc does
+#     NOT trigger engine auto-`done` before the win/fail evaluator
+#     sees the terminal frame. `agent_units_killed` /
+#     `enemy_units_killed` auto-done flags are disabled so the
+#     within_ticks / own_units_gte / building_count predicates
+#     evaluate cleanly on the terminal frame.
+#   - Enemy bot `guard` — leashed defenders hold their post and
+#     lunge only when baited inside the aggro radius. The light
+#     expansion garrison holds at the patch (it does not race the
+#     whole map at the agent), so the raid is a genuine "go out and
+#     hit it" decision, not a "wait for it to come to you".
+#   - The agent's own `fact` + strike tanks are placed at the west
+#     edge; no enemy unit can reach the home fact in budget, so the
+#     `building_count_gte:fact:1` clause is satisfied by any play
+#     that does not itself sacrifice the base — it is an anti-cheat
+#     floor, not a defense minigame.
+#   - All deadlines are reachable within `max_turns`
+#     (tick ≤ 93 + 90·(max_turns−1)); see per-level notes.
+#
+# ── Difficulty axis (one controlled variable per tier) ───────────
+#   easy   — bare expansion-denial skill. LIGHT garrison (1 e1) at
+#            the proc; generous deadline.
+#   medium — +1 axis: thicker expansion garrison (3 e1 + 1 e3) and
+#            a tighter deadline; the raid must be cleaner & faster.
+#   hard   — +1 more: TWO seed-driven agent spawn_point groups
+#            (NORTH staging vs SOUTH staging) round-robin the start
+#            corner so a memorised raid vector cannot generalise.
+
+meta:
+  id: econ-deny-enemy-expansion
+  title: 'Reasoning — Deny the Enemy Expansion (Raid the Contested Refinery)'
+  capability: reasoning
+  real_world_meaning: >
+    The enemy has just taken a SECOND base — a refinery (proc) and a
+    harvester (harv) at a contested ore patch in the middle of the
+    map — and it is still only lightly defended. The enemy's MAIN
+    base is far to the east, heavily fortified. Turtling at home lets
+    the enemy economy snowball uncontested; throwing the army at the
+    fortified main just gets it shredded. The winning play is the
+    economic raid: drive the four-tank strike force out to the
+    mid-map expansion, raze the refinery before the deadline to deny
+    the enemy its economic upside, and bring ≥2 tanks home with your
+    construction yard intact. The decision under test is recognising
+    that a soft, freshly-placed enemy expansion is the highest-value
+    target on the board — punish it now, do not turtle and do not
+    over-commit into the fortified main.
+  robotics_analogue: >
+    Adversarial resource interdiction: an agent must identify that
+    the opponent's newest, least-defended supply node is the
+    decisive target and dispatch a strike to neutralise it within a
+    deadline — rather than passively defending its own assets while
+    the opponent's resource base compounds, or wastefully assaulting
+    the opponent's hardened core.
+  benchmark_anchor:
+    - "SC2 expansion denial"
+    - "economic warfare"
+    - "resource interdiction"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: guard}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  termination:
+    max_ticks: 12000
+    # Disable BOTH engine auto-`done` flags so the pack's
+    # win_condition / fail_condition (within_ticks band +
+    # own_units_gte + building_count_gte) evaluate to the terminal
+    # frame regardless of mid-episode unit / building state. The
+    # enemy MAIN base + SENTINEL fact keep the building auto-done
+    # from firing when the expansion proc dies; the units flag is a
+    # separate code path the sentinel doesn't cover.
+    agent_units_killed: false
+    enemy_units_killed: false
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare expansion-denial skill. The enemy expansion (proc + harv) at
+  # mid-map (60,20) is LIGHTLY defended — a single rifleman. The
+  # 4-tank strike force razes it cleanly. The enemy MAIN base far
+  # east (108,20) is fortified (pbox + e3 + fact + powr) — too hard
+  # to crack in budget, which makes turtling LOOK appealing. Stall /
+  # turtle LOSE (proc never falls). Generous deadline (within_ticks
+  # 5400, max_turns 72).
+  easy:
+    description: >
+      The enemy has just expanded: a refinery (`proc` at 60,20) and a
+      harvester sit at a contested mid-map ore patch, defended by
+      only ONE enemy rifleman. The enemy's MAIN base is far east
+      (108,20) and heavily fortified (pillbox, rocket infantry,
+      construction yard, power plant). Your four medium tanks (2tnk)
+      and your own construction yard (`fact`) start at the west edge.
+      Turtling at home loses — the only winning move is to RAID the
+      expansion: drive the strike force FORWARD to the proc at
+      (60,20) and raze it before tick 5400, keeping at least 2 tanks
+      and your construction yard
+      alive. Stalling loses (the proc is never destroyed).
+    overrides:
+      actors:
+        # ── AGENT — strike force + home construction yard (WEST) ──
+        - {type: fact, owner: agent, position: [6, 20]}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1}
+        # ── ENEMY EXPANSION (objective) — mid-map, LIGHT garrison ──
+        - {type: proc, owner: enemy, position: [60, 20]}
+        - {type: harv, owner: enemy, position: [63, 20]}
+        - {type: e1,   owner: enemy, position: [60, 24], stance: 2}
+        # ── ENEMY MAIN base — far east, fortified. Too hard to crack
+        # in budget (the "turtle looks reasonable" foil) AND it keeps
+        # MustBeDestroyed buildings standing past the proc's death so
+        # the win/fail evaluator sees the terminal frame.
+        - {type: fact, owner: enemy, position: [108, 20]}
+        - {type: powr, owner: enemy, position: [108, 24]}
+        - {type: pbox, owner: enemy, position: [104, 18]}
+        - {type: pbox, owner: enemy, position: [104, 22]}
+        - {type: e3,   owner: enemy, position: [104, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 16], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 24], stance: 2}
+        # ── SENTINEL — far-corner unarmed enemy fact: keeps the
+        # episode alive past the expansion proc's destruction so the
+        # within_ticks / own_units_gte / building_count predicates
+        # evaluate on the terminal frame.
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 60, y: 20, radius: 6, types: [proc]}
+        - {own_units_gte: 2}
+        - building_count_gte: {type: fact, n: 1}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 72
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: the expansion garrison thickens (1 e1 →
+  # 3 e1 + 1 anti-tank e3) AND the deadline tightens (5400 → 4500,
+  # max_turns 60). The raid must commit early and trade efficiently
+  # — a slow or sloppy strike either misses the deadline or bleeds
+  # below the ≥2-tank survival floor.
+  medium:
+    description: >
+      The enemy expansion (refinery `proc` at 60,20 + a harvester)
+      now carries a heavier garrison: three riflemen and one
+      anti-tank rocket soldier. The enemy MAIN base far east
+      (108,20) is fortified as before. Your four medium tanks and
+      your construction yard start at the west edge. Raid the
+      expansion: drive the strike force FORWARD to the proc at
+      (60,20) and raze it before tick 4500, keeping ≥2 tanks and
+      your construction yard alive. Focus the anti-tank rocket
+      soldier first — a sloppy all-in trades the column down below
+      the survival floor. Turtling at home and stalling both LOSE.
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [6, 20]}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 22], stance: 1}
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1}
+        # ENEMY EXPANSION — heavier garrison (3 e1 + 1 e3).
+        - {type: proc, owner: enemy, position: [60, 20]}
+        - {type: harv, owner: enemy, position: [63, 20]}
+        - {type: e1,   owner: enemy, position: [60, 16], stance: 2}
+        - {type: e1,   owner: enemy, position: [60, 24], stance: 2}
+        - {type: e1,   owner: enemy, position: [56, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [60, 22], stance: 2}
+        # ENEMY MAIN base — far east, fortified.
+        - {type: fact, owner: enemy, position: [108, 20]}
+        - {type: powr, owner: enemy, position: [108, 24]}
+        - {type: pbox, owner: enemy, position: [104, 18]}
+        - {type: pbox, owner: enemy, position: [104, 22]}
+        - {type: e3,   owner: enemy, position: [104, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 16], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 24], stance: 2}
+        # SENTINEL — far-corner unarmed enemy fact.
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 60, y: 20, radius: 6, types: [proc]}
+        - {own_units_gte: 2}
+        - building_count_gte: {type: fact, n: 1}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 more controlled variable: TWO seed-driven agent spawn_point
+  # groups round-robin the staging LATITUDE (NORTH y≈10..16 OR SOUTH
+  # y≈24..30). The enemy layout is the MEDIUM structure, symmetric
+  # across y=20, so the expansion-denial decision is identical from
+  # either spawn — only the raid vector flips per seed (a memorised
+  # "always raid from the north" opening cannot generalise). Per
+  # CLAUDE.md the enemy actors are NOT spawn_point filtered, so the
+  # expansion + main + sentinel place every seed.
+  hard:
+    description: >
+      The enemy expansion (refinery `proc` at 60,20 + a harvester)
+      carries the medium garrison (three riflemen + one anti-tank
+      rocket soldier); the enemy MAIN base far east (108,20) is
+      fortified. Your four medium tanks and your construction yard
+      start at ONE of two west-edge corridors — NORTH (y≈10..16) or
+      SOUTH (y≈24..30), chosen by seed. Raid the expansion: drive
+      the strike force FORWARD to the proc at (60,20), focus the
+      anti-tank rocket soldier, and raze the refinery before tick
+      4500, keeping ≥2 tanks and your construction yard alive.
+      Turtling at home and stalling both LOSE.
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH staging corridor (fact + 4 tanks).
+        - {type: fact, owner: agent, position: [6, 12], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging corridor (mirror across y=20).
+        - {type: fact, owner: agent, position: [6, 28], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 30], stance: 1, spawn_point: 1}
+        # ENEMY EXPANSION — medium garrison (3 e1 + 1 e3).
+        - {type: proc, owner: enemy, position: [60, 20]}
+        - {type: harv, owner: enemy, position: [63, 20]}
+        - {type: e1,   owner: enemy, position: [60, 16], stance: 2}
+        - {type: e1,   owner: enemy, position: [60, 24], stance: 2}
+        - {type: e1,   owner: enemy, position: [56, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [60, 22], stance: 2}
+        # ENEMY MAIN base — far east, fortified.
+        - {type: fact, owner: enemy, position: [108, 20]}
+        - {type: powr, owner: enemy, position: [108, 24]}
+        - {type: pbox, owner: enemy, position: [104, 18]}
+        - {type: pbox, owner: enemy, position: [104, 22]}
+        - {type: e3,   owner: enemy, position: [104, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 16], stance: 2}
+        - {type: e3,   owner: enemy, position: [104, 24], stance: 2}
+        # SENTINEL — far-corner unarmed enemy fact.
+        - {type: fact, owner: enemy, position: [124, 4]}
+    win_condition:
+      all_of:
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 60, y: 20, radius: 6, types: [proc]}
+        - {own_units_gte: 2}
+        - building_count_gte: {type: fact, n: 1}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 2}}
+    max_turns: 60
