@@ -1,0 +1,252 @@
+# build-sequence-tech-cheapest.yaml
+#
+# REASONING capability — Wave-11 build-order optimization (cost-MINIMAL
+# planning). Sibling of `build-sequence-tech-fastest` (which optimizes
+# TIME). Here the binding constraint is MONEY, not the clock: the agent
+# must reach `weap` (war factory) by spending the LEAST cash, on the
+# ONLY affordable prerequisite chain: powr → proc → weap. Starting cash
+# is tuned to EXACTLY the cost of that minimal path with near-zero
+# slack. Any extra structure (a barracks/tent, a pillbox, an infantry
+# unit) bought before weap exhausts the budget — weap can never be
+# funded, the `then:` chain never completes, the episode times out as a
+# real LOSS.
+#
+# Engine-verified tech tree + costs (measured against the live wheel,
+# see tests/test_build_sequence_tech_cheapest.py — cash drains
+# incrementally as a queue progresses):
+#   - POWR  cost  300, Prerequisites: <none>      (provides anypower)
+#   - PROC  cost 1400, Prerequisites: anypower    (needs powr)
+#   - WEAP  cost 2000, Prerequisites: proc        (needs proc)
+#   Total credits on the minimal path = 3700.
+#   - TENT  cost  500  (allied barracks — NOT on weap's prereq chain)
+#   - PBOX  cost  600  (pillbox defense — NOT on weap's prereq chain)
+#   - E1    cost  100  (rifle infantry — needs tent first anyway)
+#
+# Why money — not the clock — is the teeth: there is NO ore on the map
+# and NO harvester income. The starting cash is the ENTIRE budget. The
+# tick deadline T is deliberately GENEROUS (the optimal chain finishes
+# with many turns of slack); a policy does NOT lose by being slow, it
+# loses by being WASTEFUL. A wasteful play spends part of the fixed
+# budget on a non-load-bearing structure, then cannot fund weap —
+# cash hits 0 mid-queue, weap never completes, and because income
+# never flows it can NEVER recover no matter how much time remains.
+# This is the cost-OPTIMAL (vs the sibling's time-OPTIMAL) axis.
+#
+# Budget tuning (starting_cash 3750 — minimal path 3700 + 50 slack):
+#   - minimal  powr(300)+proc(1400)+weap(2000) = 3700  ⇒ 50 left  ⇒ WIN
+#   - +tent    300+500+1400+2000 = 4200  > 3750  ⇒ weap unfunded ⇒ LOSS
+#   - +pbox    300+600+1400+2000 = 4300  > 3750  ⇒ weap unfunded ⇒ LOSS
+#   - +tent+e1 300+500+100+1400+2000 = 4300 > 3750 ⇒ LOSS
+# The 50-credit slack is non-actionable (nothing costs ≤50 except an
+# extra e1 at 100, still unaffordable) — it only absorbs rounding in
+# the incremental queue drain so the minimal path never stalls itself.
+#
+# Bar (CLAUDE.md — no defect, no cheat, no draw):
+#   - stall (observe-only)          ⇒ LOSS on every level + seed
+#   - wasteful-spend (tent/pbox first) ⇒ LOSS on every level + seed
+#     (cash exhausted, weap never built — real timeout LOSS)
+#   - intended powr→proc→weap path  ⇒ WIN  on every level + seed
+# Real LOSS not DRAW: fail_condition `after_ticks: T+1` is reachable
+# inside max_turns (engine ~90 ticks/turn ⇒ tick ≤ 93+90·(N-1)); the
+# `not building_count_gte:fact:1` clause also bites if the construction
+# yard is somehow lost. The pre-placed enemy `fact` far east is an
+# unarmed MustBeDestroyed landmark that keeps the episode alive so a
+# stall really times out (no premature engine auto-done).
+#
+# Real-world anchor:
+#   - PlanBench cost-optimal planning (find the minimum-COST plan that
+#     achieves the goal under a hard budget, not just A plan)
+#   - BOM cost minimization — build only what the next stage strictly
+#     requires; every non-load-bearing line item on the bill of
+#     materials is wasted capital
+#   - Budget-constrained planning — a fixed, non-replenishing budget
+#     funds exactly the critical path and nothing else
+#
+# Validate (no model / no network):
+#   cd /Users/berta/Projects/OpenRA-Bench && \
+#   python3 -m pytest tests/test_build_sequence_tech_cheapest.py -q
+
+meta:
+  id: build-sequence-tech-cheapest
+  title: 'Cheapest War Factory — Cost-Minimal powr → proc → weap Build Order'
+  capability: reasoning
+  real_world_meaning: >
+    Cost-minimal build-order planning under a fixed, non-replenishing
+    budget: the agent must reach the war factory (`weap`) by spending
+    the LEAST cash on the ONLY affordable prerequisite chain
+    (powr → proc → weap). There is no ore and no income — the starting
+    cash is the entire budget, tuned to exactly the cost of the minimal
+    path. Any detour through a non-load-bearing structure (a barracks,
+    a pillbox, an early infantry unit) bloats the bill of materials and
+    exhausts the budget; the war factory can then never be funded.
+    Tests that the model can plan the minimum-COST prerequisite chain —
+    not merely SOME plan that arrives — under a budget that only the
+    cost-minimal plan can afford. Sibling of build-sequence-tech-fastest
+    (the time-optimal axis); here money, not the clock, is the
+    constraint.
+  robotics_analogue: >
+    Capital-minimal commissioning of an autonomous manufacturing cell
+    under a fixed procurement budget: the cell must bring a target
+    machine online by buying only the strictly required upstream
+    stations (power → feedstock → assembly). The budget is fixed and
+    non-replenishing; procuring a non-required station (an extra
+    quality bench, a spare buffer) spends capital that the assembly
+    station then cannot be funded with. Only the minimum-cost
+    precedence chain stays within budget.
+  benchmark_anchor:
+    - "PlanBench cost-optimal"
+    - "BOM cost minimization"
+    - "budget-constrained planning"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  enemy:
+    faction: soviet
+    bot_type: ''
+  tools:
+    - observe
+    - build
+    - place_building
+  planning: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare cost-minimal skill. Generous T = 3200 ticks (max_turns 40 →
+  # reachable 3603). The minimal chain powr→proc→weap finishes well
+  # inside T (time is NOT the teeth). The teeth are the budget: at
+  # starting_cash 3750 the minimal path (3700) just fits; a wasteful
+  # tent/pbox detour overruns the budget so weap is never funded ⇒
+  # the `then:` chain never completes ⇒ after_ticks LOSS. Stall never
+  # builds anything ⇒ LOSS on the same clause.
+  easy:
+    description: >
+      Build a war factory (weap) by spending the LEAST cash, on the
+      ONLY affordable prerequisite chain: powr → proc → weap. Your
+      starting cash ($3750) is a fixed budget — there is no ore and no
+      income, so it is all the money you will ever have. The minimal
+      chain costs exactly $3700 (powr $300 + proc $1400 + weap $2000).
+      Any extra structure bought before weap (a barracks/tent $500, a
+      pillbox $600, an infantry unit) exhausts the budget and weap can
+      never be funded — you LOSE on the clock. The `then:` chain
+      enforces the exact order; placing weap before proc cannot satisfy
+      it (and the engine refuses too: weap's prerequisite is proc).
+    starting_cash: 3750
+    overrides:
+      actors:
+        # Agent base seed — ONE construction yard. Nothing else
+        # pre-placed (no power, no refinery). The minimal chain MUST
+        # be executed by the agent. NO ore patches — the starting
+        # cash is the entire, non-replenishing budget.
+        - {type: fact, owner: agent, position: [10, 18]}
+        # Far-east enemy `fact` landmark — MustBeDestroyed, unarmed
+        # neutral company. Keeps the episode alive so a stall really
+        # times out (not engine auto-done from a stray sentry kill).
+        - {type: fact, owner: enemy, position: [115, 30]}
+    win_condition:
+      all_of:
+        - then:
+            id: bo-easy
+            clauses:
+              - {has_building: powr}
+              - {has_building: proc}
+              - {has_building: weap}
+        - {within_ticks: 3200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 40
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TIGHTER budget. starting_cash 3720 (only
+  # 20 credits of slack over the 3700 minimal path). The minimal
+  # chain still fits; ANY wasteful spend overruns even harder. Same
+  # generous clock T = 3200 — money, not time, remains the teeth.
+  medium:
+    description: >
+      Build a war factory (weap) on the cost-minimal prerequisite
+      chain: powr → proc → weap. Tighter budget — your starting cash
+      ($3720) barely covers the minimal path ($3700: powr $300 +
+      proc $1400 + weap $2000). There is no ore and no income. Any
+      extra structure (tent / pbox / an infantry unit) bought before
+      weap exhausts the budget and weap can never be funded. The
+      `then:` chain enforces the exact order; weap before proc cannot
+      satisfy it.
+    starting_cash: 3720
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 18]}
+        - {type: fact, owner: enemy, position: [115, 30]}
+    win_condition:
+      all_of:
+        - then:
+            id: bo-medium
+            clauses:
+              - {has_building: powr}
+              - {has_building: proc}
+              - {has_building: weap}
+        - {within_ticks: 3200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 40
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: ≥2 spawn_point groups (NORTH y=14 vs
+  # SOUTH y=26 base). Same cost-minimal chain, same tight budget
+  # (3720). The seed-varied spawn means a memorised "place powr at
+  # (14,22)" opening cannot generalise — the agent must compute
+  # placement relative to its actual fact each seed. No ore at either
+  # latitude (the budget is fixed regardless of spawn). Enemy actors
+  # do NOT honour spawn_point (CLAUDE.md), so the lone enemy `fact`
+  # landmark always places.
+  hard:
+    description: >
+      Build a war factory (weap) on the cost-minimal prerequisite
+      chain: powr → proc → weap, from a seed-chosen base (NORTH or
+      SOUTH). Tight budget — starting cash ($3720) barely covers the
+      minimal path ($3700). There is no ore and no income. Any extra
+      structure (tent / pbox / an infantry unit) bought before weap
+      exhausts the budget and weap can never be funded. Placement
+      that memorises one spawn's geometry cannot generalise; compute
+      placement relative to your actual fact each run.
+    starting_cash: 3720
+    overrides:
+      actors:
+        # NORTH spawn (spawn_point 0): fact at y=14.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        # An inert rifleman per spawn group (passive: stance 2 =
+        # Defend; no move_units / attack_unit exposed so the unit
+        # cannot act — the tool surface is build-only). Establishes a
+        # seed-varying AGENT UNIT in `units_summary` so the hard-tier
+        # spawn-variation contract (tests/test_hard_tier.py, which
+        # inspects units not buildings) is satisfied with real
+        # per-spawn data. Note: the e1 is pre-placed (free), it does
+        # NOT spend the budget.
+        - {type: e1,   owner: agent, position: [12, 14], spawn_point: 0, stance: 2}
+        # SOUTH spawn (spawn_point 1): fact at y=26.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: e1,   owner: agent, position: [12, 26], spawn_point: 1, stance: 2}
+        # Far-east enemy fact landmark — keeps the episode alive.
+        - {type: fact, owner: enemy, position: [115, 30]}
+    win_condition:
+      all_of:
+        - then:
+            id: bo-hard
+            clauses:
+              - {has_building: powr}
+              - {has_building: proc}
+              - {has_building: weap}
+        - {within_ticks: 3200}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3201}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 40
