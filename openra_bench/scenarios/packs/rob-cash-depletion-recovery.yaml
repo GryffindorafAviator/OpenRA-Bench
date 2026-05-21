@@ -13,9 +13,9 @@
 # Pack frame: the agent inherits a NORMAL operating economy (fact +
 # proc + 1 harv + 2 mines + a small 3tnk defender squad), with
 # starting_cash = 1400 — exactly enough to rebuild ONE refinery (proc
-# cost 1400). A scripted enemy `hunt` strike (2-3× 4tnk) charges the
-# refinery early in the episode (medium: proc destroyed ~tick 543;
-# hard: proc + tent both destroyed by ~tick 453). The agent must:
+# cost 1400). A scripted enemy `hunt` strike (2-4× 4tnk) charges the
+# refinery early in the episode (medium: proc destroyed ~tick 273;
+# hard: tent destroyed ~tick 183, proc ~tick 273). The agent must:
 #   1. notice the proc died (no income, harv has no place to refine),
 #   2. `build('proc')` and `place_building` it adjacent to the fact
 #      with the indivisible reserve cash,
@@ -29,14 +29,14 @@
 #              never has to rebuild. The bare skill is "commit to
 #              harvest, don't stall, EV bar gets met". `has_building:
 #              proc` is satisfied trivially by the surviving original.
-#   • medium — PROC DESTROYED mid-game (2× 4tnk + 1 own defender;
-#              proc dies ~tick 543 ≈ "~tick 600" target). Agent must
-#              rebuild proc with the 1400 reserve AND redirect harv
-#              back to the patch. Stalling, ignoring the death, or
-#              spending the reserve on army units all LOSE.
-#   • hard   — PROC + TENT BOTH DESTROYED (3× 4tnk + tent placed in
-#              the attack lane at (13,18); proc dies ~tick 453, tent
-#              dies ~tick 273-453). Agent must rebuild proc (1400);
+#   • medium — PROC DESTROYED mid-game (2× 4tnk + 3 own defenders;
+#              proc dies ~tick 273). Agent must rebuild proc with the
+#              1400 reserve AND redirect harv back to the patch.
+#              Stalling, ignoring the death, or spending the reserve
+#              on army units all LOSE.
+#   • hard   — PROC + TENT BOTH DESTROYED (4× 4tnk + tent placed in
+#              the attack lane at (13,18); tent dies ~tick 183, proc
+#              ~tick 273). Agent must rebuild proc (1400);
 #              losing the tent removes the infantry production queue
 #              (an army-rebuild detour is even more unaffordable).
 #              + 2 seed-driven spawn_point groups (NORTH y=14 / SOUTH
@@ -83,23 +83,24 @@
 #     each unit attacks the nearest. With 4tnk attackers placed in
 #     melee range of the proc, the proc becomes the closest enemy
 #     and is engaged on turn 1.
-#  2. Proc strike timing (probe-measured, all attackers at x=14
-#     adjacent to proc at x=12):
-#     - easy:  1× 4tnk + 1 own 3tnk @ x=18 → defender kills 4tnk
+#  2. Proc strike timing (probe-measured 2026-05-20 against the
+#     post-engine-balance-fix wheel, all attackers at x=14 adjacent
+#     to proc at x=12; defenders carry EXPLICIT stance:2 — see fact
+#     #8):
+#     - easy:  1× 4tnk + 2 own 3tnk @ x=18 → defenders kill 4tnk
 #       first; proc SURVIVES the full episode (verified to tick 6303).
 #       Discriminator: stall yields 0 income; intended harvest WINS.
-#     - medium: 2× 4tnk + 3 own 3tnk @ x=18 → proc dies tick 453
-#       (≈ "~tick 600" target); 4tnks then die to the defender ring
-#       so fact and powr SURVIVE → rebuild is feasible.
-#     - hard: 4× 4tnk + tent at (13,*) + 5 own 3tnk → tent dies tick
-#       183, proc tick 273; 4tnks die to the defender ring shortly
-#       after; fact and powr SURVIVE to ~tick 6300 (probe H3).
-#     The defender-vs-attacker ratio (medium: 90 vs 80 dps; hard:
-#     150 vs 160 dps) is tuned so the attackers BARELY land the
-#     building kill and then die — preventing the 4tnks from chain-
-#     killing fact after the proc falls (which would convert the
-#     run to a LOSS via `not building_count_gte:fact` regardless of
-#     the rebuild).
+#     - medium: 2× 4tnk + 3 own 3tnk @ x=18 → proc dies tick 273;
+#       4tnks then die to the defender ring so fact and powr SURVIVE
+#       → rebuild is feasible.
+#     - hard: 4× 4tnk + tent at (13,18) + 5 own 3tnk → tent dies
+#       tick 183, proc tick 273; 4tnks die to the defender ring
+#       shortly after; fact and powr SURVIVE to ~tick 6300.
+#     The defender-vs-attacker ratio is tuned so the attackers land
+#     the building kill and then die — preventing the 4tnks from
+#     chain-killing fact after the proc falls (which would convert
+#     the run to a LOSS via `not building_count_gte:fact` regardless
+#     of the rebuild).
 #  3. Proc cost = 1400 (verified econ-startup-from-scratch.yaml line
 #     135). starting_cash = 1400 funds exactly ONE proc rebuild; any
 #     pre-spend (powr 300 / tent 500 / e1 100) starves the rebuild.
@@ -117,6 +118,16 @@
 #     path (CLAUDE.md auto-done footgun) — once the strike force is
 #     killed, the marker keeps the episode running so the EV bar
 #     can be reached and the deadline can bite as a LOSS.
+#  8. The agent 3tnk defenders carry an EXPLICIT stance:2 (Defend).
+#     After the engine stance-semantics balance fix, an actor with
+#     no `stance:` resolves to the AttackAnything default (stance:3),
+#     which ADVANCES toward any visible enemy — the defenders would
+#     then hunt the far enemy `fact` marker at (120,20), destroy it,
+#     trigger the engine auto-`done` on enemy-elimination, and
+#     collapse the episode to a DRAW (~tick 2700) before the
+#     deadline can bite. stance:2 keeps the defenders rooted: they
+#     auto-fire on the in-range 4tnk strike but never chase the far
+#     marker, so a non-winning play is a real reachable timeout LOSS.
 #  7. Hard tier is registered NOT_APPLICABLE in test_hard_tier.py
 #     (the UPGRADED spawn-variation contract). Reason: the
 #     controlled variable for hard is the STRIKE SEVERITY (proc +
@@ -228,8 +239,17 @@ levels:
         # 60 dps vs the lone 4tnk's 40 dps; the 4tnk dies before it
         # can land lethal damage on the proc (probe-verified: proc
         # SURVIVES the full episode at this attacker:defender ratio).
-        - {type: '3tnk', owner: agent, position: [18, 17]}
-        - {type: '3tnk', owner: agent, position: [18, 19]}
+        # EXPLICIT stance:2 (Defend) — the defenders auto-fire on any
+        # in-range foe but NEVER advance. After the engine
+        # stance-semantics balance fix, an actor with no `stance:`
+        # resolves to the AttackAnything default (stance:3); the
+        # defenders would then HUNT the far enemy `fact` marker at
+        # (120,20), destroy it, trigger the engine auto-`done` on
+        # enemy-elimination, and collapse the episode to a DRAW before
+        # the deadline can bite. stance:2 keeps the marker alive so a
+        # non-winning play is a real reachable timeout LOSS.
+        - {type: '3tnk', owner: agent, position: [18, 17], stance: 2}
+        - {type: '3tnk', owner: agent, position: [18, 19], stance: 2}
         # Two ore patches east of the proc — sustained harvest target.
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 20]}
@@ -258,7 +278,7 @@ levels:
   # ── MEDIUM ───────────────────────────────────────────────────────
   # +1 controlled variable on top of easy: TWO 4tnk attackers vs
   # THREE defenders. The defenders kill the strike force AFTER it
-  # destroys the proc (probe-measured: proc dies tick 453); the
+  # destroys the proc (probe-measured: proc dies tick 273); the
   # 4tnks then die before they can reach the fact, so the rebuild
   # is viable. The agent MUST rebuild the proc with the 1400 reserve
   # and re-issue harvest. Stall (no rebuild) → `building_count_gte:
@@ -270,7 +290,7 @@ levels:
       Same base as easy (fact, powr, proc, 1 harv, 2 mines, $1400
       reserve) but the enemy strike is now TWO heavy tanks adjacent
       to the refinery; even with three light-tank defenders, the
-      refinery is destroyed early in the episode (around tick 450).
+      refinery is destroyed early in the episode (around tick 270).
       The harvester survives but the harvest loop stops because the
       refinery is gone. To recover: queue another Refinery (`build`
       "proc", cost 1400), place it adjacent to the fact, then re-
@@ -293,14 +313,16 @@ levels:
         # defenders/proc first and the harv survives the strike.
         - {type: harv, owner: agent, position: [10, 18]}
         # THREE 3tnk defenders — enough to kill the strike force
-        # AFTER it lands the proc kill. The DPS race is tuned so the
-        # 4tnks reach the proc, destroy it (probe: proc dies tick
-        # 453 ≈ turn 6 ≈ "~tick 600" target), and then die to the
-        # defenders' concentrated 90 dps — fact and powr survive
-        # so the rebuild can fund and the EV bar can be reached.
-        - {type: '3tnk', owner: agent, position: [18, 17]}
-        - {type: '3tnk', owner: agent, position: [18, 18]}
-        - {type: '3tnk', owner: agent, position: [18, 19]}
+        # AFTER it lands the proc kill (probe: proc dies tick 273
+        # post-balance-fix, then the defenders wipe the 4tnks; fact
+        # and powr survive so the rebuild can fund and the EV bar can
+        # be reached). EXPLICIT stance:2 (Defend) — see the easy-tier
+        # comment: without it the defenders default to stance:3, hunt
+        # the far enemy `fact` marker, kill it, and collapse the
+        # episode to a DRAW via engine auto-`done`.
+        - {type: '3tnk', owner: agent, position: [18, 17], stance: 2}
+        - {type: '3tnk', owner: agent, position: [18, 18], stance: 2}
+        - {type: '3tnk', owner: agent, position: [18, 19], stance: 2}
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 20]}
         # MEDIUM strike: two 4tnks staged adjacent to the refinery
@@ -385,13 +407,17 @@ levels:
         # FIVE 3tnk defenders ringed east of the proc — concentrated
         # 150 dps. After the 4tnks land the proc+tent kill, the
         # defenders wipe them so fact and powr remain intact (probe-
-        # verified H3: 4×4tnk vs 5×3tnk → tent dies tick 183, proc
-        # tick 273, fact survives full 70 turns).
-        - {type: '3tnk', owner: agent, position: [18, 16]}
-        - {type: '3tnk', owner: agent, position: [18, 17]}
-        - {type: '3tnk', owner: agent, position: [18, 18]}
-        - {type: '3tnk', owner: agent, position: [18, 19]}
-        - {type: '3tnk', owner: agent, position: [18, 20]}
+        # verified post-balance-fix: tent dies tick 183, proc tick
+        # 273, fact survives full 70 turns). EXPLICIT stance:2
+        # (Defend) — see the easy-tier comment: without it the
+        # defenders default to stance:3, hunt the far enemy `fact`
+        # marker, kill it, and collapse the episode to a DRAW via
+        # engine auto-`done`.
+        - {type: '3tnk', owner: agent, position: [18, 16], stance: 2}
+        - {type: '3tnk', owner: agent, position: [18, 17], stance: 2}
+        - {type: '3tnk', owner: agent, position: [18, 18], stance: 2}
+        - {type: '3tnk', owner: agent, position: [18, 19], stance: 2}
+        - {type: '3tnk', owner: agent, position: [18, 20], stance: 2}
         # Two ore patches east of the proc — sustained harvest target.
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 20]}
