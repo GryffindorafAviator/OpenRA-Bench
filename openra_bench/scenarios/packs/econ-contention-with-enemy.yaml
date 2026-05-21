@@ -46,24 +46,32 @@
 #    targets the nearest agent `harv` each turn; falls back to
 #    nearest combat actor only when no harv is alive. The agent's
 #    pre-ringed defenders (2× 3tnk at x=26 on easy, 3× 3tnk on
-#    medium, 4× 3tnk on hard) auto-engage the inbound raider on
-#    default `Defend` stance — the intended policy is to LEAVE the
+#    medium, 4× 3tnk on hard) are declared `stance: 2` (Defend) so
+#    they HOLD the ring and auto-engage the inbound raider when it
+#    enters weapon range — the intended policy is to LEAVE the
 #    defenders ringed (they do their job automatically) and only
-#    spend orders on harvest commands.
+#    spend orders on harvest commands. NOTE: after the engine stance
+#    fix the omitted-stance default is stance:3 (AttackAnything),
+#    which would make the defenders HUNT and march off east to chase
+#    the enemy flavor harvs, abandoning the harv lane — so the
+#    Defend stance MUST be declared explicitly.
 # 4. The enemy proc + harvs are placed at x=76-80 (far east), well
 #    outside the agent's default sight range at start, so they do
 #    NOT auto-aggro the agent's defender ring before the raider
 #    arrives. Required for the discriminator: a wandering agent
 #    sweep east (the "pure-mine-no-defense + chase enemy proc"
 #    failure mode) is what loses, not a passive ringed defender.
-# 5. Bar tuning (probe_pack.py seed-1..4, scripted policies):
-#      - stall:                   ev=500   lost=0..2 (no harvest)
-#      - pure-mine-no-defense:    ev=500..1500  lost=2..4 (raider unopposed)
-#      - pure-defend:             ev=500   lost=2..4 (no harvest)
-#      - intended-balance:        ev=2500..12500  lost=0..1
-#    Easy bar 2000, medium bar 3500, hard bar 3500. Every non-intended
-#    play falls below the bar (or loses harvs below the required
-#    count); intended clears it by a comfortable margin.
+# 5. Bar tuning (run_level seed-1..4, scripted policies, recalibrated
+#    2026-05 after the engine balance fixes):
+#      - stall:                   ev=500        lost=0..2 (no harvest)
+#      - pure-mine-no-defense:    ev=500..1500  lost=2 (raider unopposed)
+#      - pure-defend:             ev=500        lost=2 (no harvest)
+#      - intended-balance:        ev=2500..3500 lost=0 (harvs survive)
+#    Easy bar 2000, medium bar 3500, hard bar 3500. The intended
+#    economy_value_gte latch fires at turn ~10 (easy) / ~16-17
+#    (medium/hard) — well inside the 61-turn budget. Every
+#    non-intended play falls below the bar (or loses all harvs);
+#    intended clears it every level / every seed.
 # 6. Tick alignment (CLAUDE.md): max_turns=61 ⇒ ceiling tick
 #    93 + 90·60 = 5493. within_ticks=5400 and after_ticks=5401 both
 #    fit; non-finishers LOSE (not draw).
@@ -125,11 +133,15 @@ base:
     - {type: proc, owner: agent, position: [12, 18]}
     - {type: harv, owner: agent, position: [14, 18]}
     - {type: harv, owner: agent, position: [14, 20]}
-    # Two 3tnk defenders ringed east of the contested patch — auto-
-    # engage the raider on default Defend stance; the intended policy
-    # leaves them ringed and only spends orders on `harvest`.
-    - {type: '3tnk', owner: agent, position: [26, 18]}
-    - {type: '3tnk', owner: agent, position: [26, 20]}
+    # Two 3tnk defenders ringed east of the contested patch — stance:2
+    # (Defend) so they HOLD the ring and auto-engage the raider when it
+    # enters weapon range, without advancing. After the engine stance
+    # fix the omitted-stance default is stance:3 (AttackAnything),
+    # which makes the defenders HUNT and march off east to chase the
+    # enemy flavor harvs — abandoning the harv lane. stance:2 restores
+    # the "leave them ringed, only spend orders on harvest" idiom.
+    - {type: '3tnk', owner: agent, position: [26, 18], stance: 2}
+    - {type: '3tnk', owner: agent, position: [26, 20], stance: 2}
     # Shared central ore patch — the contention target.
     - {type: mine, owner: neutral, position: [22, 20]}
     - {type: mine, owner: neutral, position: [22, 22]}
@@ -215,10 +227,11 @@ levels:
         - {type: proc, owner: agent, position: [12, 18]}
         - {type: harv, owner: agent, position: [14, 18]}
         - {type: harv, owner: agent, position: [14, 20]}
-        # MEDIUM: 3 defenders (one more than easy).
-        - {type: '3tnk', owner: agent, position: [26, 18]}
-        - {type: '3tnk', owner: agent, position: [26, 20]}
-        - {type: '3tnk', owner: agent, position: [26, 22]}
+        # MEDIUM: 3 defenders (one more than easy). stance:2 (Defend)
+        # — hold the ring, auto-engage the raider in range.
+        - {type: '3tnk', owner: agent, position: [26, 18], stance: 2}
+        - {type: '3tnk', owner: agent, position: [26, 20], stance: 2}
+        - {type: '3tnk', owner: agent, position: [26, 22], stance: 2}
         - {type: mine, owner: neutral, position: [22, 20]}
         - {type: mine, owner: neutral, position: [22, 22]}
         - {type: proc, owner: enemy, position: [80, 20]}
@@ -283,11 +296,12 @@ levels:
         - {type: harv, owner: agent, position: [14, 18], spawn_point: 0}
         - {type: harv, owner: agent, position: [14, 22], spawn_point: 0}
         # 4-tank ring covers y=18..22 — both raider y-vectors.
-        - {type: '3tnk', owner: agent, position: [26, 18], spawn_point: 0}
-        - {type: '3tnk', owner: agent, position: [26, 20], spawn_point: 0}
-        - {type: '3tnk', owner: agent, position: [26, 22], spawn_point: 0}
+        # stance:2 (Defend) — hold the ring, no auto-hunt.
+        - {type: '3tnk', owner: agent, position: [26, 18], stance: 2, spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [26, 20], stance: 2, spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [26, 22], stance: 2, spawn_point: 0}
         # Rear-guard tank at NORTH y=14 (the spawn-distinguishing unit).
-        - {type: '3tnk', owner: agent, position: [13, 14], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [13, 14], stance: 2, spawn_point: 0}
         - {type: mine, owner: neutral, position: [22, 20], spawn_point: 0}
         - {type: mine, owner: neutral, position: [22, 22], spawn_point: 0}
         # Spawn 1 — SOUTH base (fact/proc at y=26).
@@ -295,11 +309,11 @@ levels:
         - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
         - {type: harv, owner: agent, position: [14, 18], spawn_point: 1}
         - {type: harv, owner: agent, position: [14, 22], spawn_point: 1}
-        - {type: '3tnk', owner: agent, position: [26, 18], spawn_point: 1}
-        - {type: '3tnk', owner: agent, position: [26, 20], spawn_point: 1}
-        - {type: '3tnk', owner: agent, position: [26, 22], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 18], stance: 2, spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 20], stance: 2, spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [26, 22], stance: 2, spawn_point: 1}
         # Rear-guard tank at SOUTH y=26.
-        - {type: '3tnk', owner: agent, position: [13, 26], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [13, 26], stance: 2, spawn_point: 1}
         - {type: mine, owner: neutral, position: [22, 20], spawn_point: 1}
         - {type: mine, owner: neutral, position: [22, 22], spawn_point: 1}
         # Enemy contested zone — DENSER (3 rival harvs + proc).
