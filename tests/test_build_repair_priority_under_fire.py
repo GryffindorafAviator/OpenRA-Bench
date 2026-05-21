@@ -148,19 +148,37 @@ def test_pbox_decoy_is_pre_damaged_every_level():
             )
 
 
-def test_no_agent_combat_units():
-    """The pack carries NO agent combat units — the triage is a pure
-    `repair`-target decision against an unopposed band."""
+def test_no_agent_combat_units_engage():
+    """The pack carries no engaging agent combat units — the triage is
+    a pure `repair`-target decision against an unopposed band. easy /
+    medium are building-only; the hard tier additionally carries one
+    inert HoldFire (stance 0) e1 spawn-witness per spawn group, tucked
+    beside the rear service depot far from every band, purely so the
+    hard-tier `units_summary` spawn-variation contract can observe a
+    seed-varied agent unit. The witness never opens fire and does not
+    change the triage."""
     pack = load_pack(PACK)
     buildings = {"proc", "weap", "pbox", "fix", "fact"}
     for level in LEVELS:
         c = compile_level(pack, level)
-        agent_types = {
-            a.type for a in c.scenario.actors if a.owner == "agent"
-        }
-        assert agent_types <= buildings, (
-            f"{level}: agent must own only buildings, got {agent_types}"
-        )
+        agent_actors = [a for a in c.scenario.actors if a.owner == "agent"]
+        agent_types = {a.type for a in agent_actors}
+        if level == "hard":
+            assert agent_types <= buildings | {"e1"}, (
+                f"hard: agent actors must be buildings + the inert e1 "
+                f"witness, got {agent_types}"
+            )
+            witnesses = [a for a in agent_actors if a.type == "e1"]
+            assert witnesses, "hard: missing inert e1 spawn-witness"
+            for w in witnesses:
+                assert w.stance == 0, (
+                    f"hard: e1 witness must be HoldFire (stance 0), "
+                    f"got stance {w.stance}"
+                )
+        else:
+            assert agent_types <= buildings, (
+                f"{level}: agent must own only buildings, got {agent_types}"
+            )
 
 
 @pytest.mark.parametrize("level", LEVELS)
