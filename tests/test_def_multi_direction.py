@@ -3,10 +3,21 @@
 REASONING capability — DISTRIBUTED DEFENSE across three concurrent
 attack lanes (NORTH y=8, MID y=20, SOUTH y=32 — or the spawn-rotated
 hard-tier equivalents). The load-bearing predicate is THREE
-`units_in_region_gte` defensive-zone clauses, each requiring ≥2
-tanks: any concentration policy satisfies one clause and fails the
-other two, AND the unopposed lanes' rushers raze the construction
+`units_in_region_gte` defensive-zone clauses, each requiring ≥1
+tank: any concentration policy satisfies one clause and fails the
+other two, AND the unopposed lanes' bands raze the construction
 yard (`has_building:fact` also bites).
+
+The enemy uses the `hunt` bot (each unit attacks the nearest agent
+unit) so a band placed in lane Y engages whatever defenders the
+agent allocated to lane Y — the three lanes are genuinely
+independent. Agent tanks are `stance:2` (Defend): they auto-fire
+on an in-range enemy but never advance, so the agent must actively
+order each lane's pair to engage its band. (Both `rusher` →
+`hunt` and `stance:3` → `stance:2` are recalibrations after the
+engine balance pass: under the corrected stance semantics a
+`stance:3` cluster auto-hunts the whole map, so a stall policy
+cleared every band for free and the no-cheat bar broke.)
 
 The bar:
 
@@ -15,10 +26,9 @@ The bar:
   headroom on top of the 2-per-zone doctrine); concentration
   policies satisfy at most one zone and fail the other two.
 * `units_killed_gte: N` paired with the band sizes so an active
-  2/2/2 defence clears the bar comfortably while stall / wrong-
-  concentration do not (kills mostly come from the bot's rusher
-  funnel reaching whichever cluster the agent left at the centre,
-  but the zone clauses still gate the win).
+  2/2/2 defence — the intended policy actively `attack_unit`s the
+  band in each lane — clears the bar comfortably while stall /
+  wrong-concentration do not.
 * `units_lost_lte: 3` (medium + hard) ⇒ attrition cap so a sloppy
   intercept that bleeds the line busts even if the zone clauses
   hold.
@@ -63,10 +73,11 @@ SEEDS = (1, 2, 3, 4)
 
 
 def stall(rs, C):
-    """Observe-only. Tanks stay at central staging, never reach the
-    (25, *) defensive zones; auto-engagement at stance:3 racks up
-    some kills as the MID band arrives, but the N and S waves walk
-    untouched to the fact and raze it → LOSS."""
+    """Observe-only. Tanks stay clustered at central staging, never
+    reach the (25, *) defensive zones; stance:2 auto-fires only on
+    whatever closes into the static knot, but the three concurrent
+    `hunt` bands overwhelm the cluster and raze the fact → LOSS
+    (`not has_building:fact`, all three zone clauses also empty)."""
     return [C.observe()]
 
 
@@ -97,12 +108,16 @@ def make_concentrate(zone_y):
 
 
 def make_intended():
-    """Stable per-tank 2/2/2 assignment across the three matching
-    defensive zones (N / MID / S relative to the agent's actual base
-    latitude — read from the fact's cell_y so the hard-tier spawn
-    rotation generalises). On the first call, sort tank ids, detect
-    base latitude from the fact position, and assign 2 tanks per
-    lane. Reissue commands only for tanks still alive."""
+    """Lane-aware 2/2/2 distributed defence. On the first call, sort
+    tank ids, detect base latitude from the tank cluster's median y
+    (so the hard-tier spawn rotation generalises), and assign 2
+    tanks per lane (N / MID / S). Each turn: every lane's pair
+    `attack_unit`s the nearest `hunt` band member in its own
+    latitude band; if no enemy is in the lane it falls back to
+    `attack_move` onto the lane's defensive zone at x=25. Because
+    the tanks are `stance:2` (Defend, never advance), the agent
+    must issue the engagement orders actively — auto-fire alone
+    does not close on the band."""
 
     state = {"assignments": None}
 
@@ -134,10 +149,24 @@ def make_intended():
                 ("S", s_zone): ids[2 * two:],
             }
         alive = set(ids)
+        enemies = [
+            e for e in rs.get("enemy_summary", [])
+            if e.get("type") == "e1"
+        ]
         cmds = []
         for (_lane, zy), tids in state["assignments"].items():
             live = [i for i in tids if i in alive]
-            if live:
+            if not live:
+                continue
+            lane_enemies = [
+                e for e in enemies if abs(e["cell_y"] - zy) <= 8
+            ]
+            if lane_enemies:
+                tgt = min(
+                    lane_enemies, key=lambda e: abs(e["cell_y"] - zy)
+                )
+                cmds.append(C.attack_unit(live, str(tgt["id"])))
+            else:
                 cmds.append(C.attack_move(live, target_x=25, target_y=zy))
         return cmds or [C.observe()]
 
@@ -157,21 +186,25 @@ def test_pack_loads_and_metadata_is_complete():
     assert "distributed-systems load balancing" in joined, anchors
     assert "graph min-cut" in joined, anchors
     assert "military multi-front" in joined, anchors
-    # Rusher bot wired through to the engine for every level.
+    # `hunt` bot wired through to the engine for every level: each
+    # band attacks the nearest agent unit, so a band in lane Y
+    # engages whatever defenders the agent allocated to lane Y —
+    # the three lanes are genuinely independent threats. (`rusher`
+    # pooled all bands onto the centroid; it was retired in the
+    # post-engine-balance recalibration — see pack docstring.)
     for lvl in LEVELS:
         c = compile_level(pack, lvl)
         assert c.map_supported
         enemy = c.scenario.enemy
         bot = getattr(enemy, "bot_type", None) or getattr(enemy, "bot", None)
-        # `rusher`: bands converge on the agent centroid. The
-        # distributed-defence test is enforced by the THREE
-        # `units_in_region_gte` zone clauses in the win predicate
-        # (a concentration satisfies one zone and fails two);
-        # `hunt` was smoke-tested but leaves the e1 bands idle at
-        # spawn for most of the tick budget so neither the kill bar
-        # nor the engagement-mediated zone-coverage attrition fire
-        # (see pack docstring).
-        assert str(bot).lower() == "rusher", (lvl, bot)
+        assert str(bot).lower() == "hunt", (lvl, bot)
+        # Agent tanks must be stance:2 (Defend) — never auto-advance,
+        # so a stall cluster cannot self-deliver across the map.
+        tank_stances = {
+            a.stance for a in c.scenario.actors
+            if a.type == "2tnk" and a.owner == "agent"
+        }
+        assert tank_stances == {2}, (lvl, tank_stances)
 
 
 @pytest.mark.parametrize("level", LEVELS)
