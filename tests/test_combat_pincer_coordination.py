@@ -103,9 +103,13 @@ def test_predicates_per_level():
     pack = load_pack(PACK_PATH)
     expectations = {
         # (kill_bar, region_n, lost_cap, within, after_fail)
+        # Kill bar is 6 on every level — the engine's units_killed
+        # accounting can credit as few as 6 of the 8 cluster enemies on
+        # medium/hard, so the kill bar is the robustly-reachable floor;
+        # the region clause + attrition cap are the load-bearing teeth.
         "easy":   (6, 4, 2, 4500, 4501),
-        "medium": (8, 4, 2, 4500, 4501),
-        "hard":   (8, 4, 2, 4500, 4501),
+        "medium": (6, 4, 2, 4500, 4501),
+        "hard":   (6, 4, 2, 4500, 4501),
     }
     for lvl, (kb, n, cap, w, af) in expectations.items():
         c = compile_level(pack, lvl)
@@ -220,10 +224,13 @@ def test_hard_has_two_spawn_point_groups():
 # ── engine-driven scripted policies ─────────────────────────────────
 
 
-def _split_squads(rs):
-    """Return (north_ids, south_ids) — split agent 2tnk units by
-    latitude. The agent's two staging latitudes are y≈8 (north) and
-    y≈32 (south); the cluster sits at y=20."""
+def _initial_split(rs):
+    """Classify the agent's 2tnk units into (north_ids, south_ids) by
+    their TURN-1 staging latitude — north y<20, south y>20. The two
+    staging latitudes vary by seed on hard, but every layout keeps one
+    squad north and one south of y=20. Squad membership is captured
+    once and tracked by id thereafter (a latitude re-split each turn
+    is unstable once the prongs converge on the central cluster)."""
     n_ids, s_ids = [], []
     for u in (rs.get("units_summary") or []):
         if str(u.get("type", "")).lower() != "2tnk":
@@ -235,38 +242,58 @@ def _split_squads(rs):
     return n_ids, s_ids
 
 
+def _live(rs, ids):
+    """Filter an id list to the units still alive this turn."""
+    alive = {str(u["id"]) for u in (rs.get("units_summary") or [])}
+    return [i for i in ids if i in alive]
+
+
 def _stall(rs, Command):
     """Pure observe — agent units never engage → kill bar unmet AND
     region clause unmet → after_ticks LOSS."""
     return [Command.observe()]
 
 
-def _single_squad_a(rs, Command):
-    """Send only the NORTH squad; hold the SOUTH squad. Even if A
-    clears the cluster on its own, only 3 tanks can be in the
+def _make_single_squad_a():
+    """Send only Squad A (the NORTH squad); hold Squad B. Even if A
+    clears the cluster on its own, only 3 tanks can ever be in the
     objective region → `units_in_region_gte:{n:4}` cannot be
-    satisfied → LOSS. On medium/hard the cluster's enemy 2tnks also
-    shred A → units_lost_lte:2 busts as a second teeth."""
-    a, b = _split_squads(rs)
-    cmds = []
-    if a:
-        cmds.append(Command.attack_move(a, 50, 20))
-    if b:
-        cmds.append(Command.stop(b))
-    return cmds or [Command.observe()]
+    satisfied → LOSS. On medium/hard the cluster's anti-armour mass
+    also shreds the lone 3-tank squad → units_lost_lte:2 busts as a
+    second teeth. Squad membership is latched on turn 1."""
+    state = {"a": None, "b": None}
+
+    def policy(rs, Command):
+        if state["a"] is None:
+            state["a"], state["b"] = _initial_split(rs)
+        a = _live(rs, state["a"])
+        b = _live(rs, state["b"])
+        cmds = []
+        if a:
+            cmds.append(Command.attack_move(a, 50, 20))
+        if b:
+            cmds.append(Command.stop(b))
+        return cmds or [Command.observe()]
+
+    return policy
 
 
 def _make_sequenced_a_then_b_late(delay_turns=20):
-    """Squad A commits first; Squad B holds for `delay_turns` then
-    advances. The cluster shreds A in detail before B arrives →
-    units_lost_lte:2 busts on medium/hard. On easy with no enemy
-    armour A may clear the cluster cleanly and B walks in → may WIN
-    (acceptable per the inert-easy-teeth convention)."""
-    state = {"turn": 0}
+    """Squad A commits first; Squad B holds for `delay_turns` turns
+    then advances. The cluster shreds the lone Squad A (loses all 3
+    tanks) before B arrives → units_lost_lte:2 busts on medium/hard →
+    LOSS. On easy (lighter cluster, no enemy armour) A may clear the
+    cluster cleanly and B walks in → may WIN (acceptable per the
+    SCENARIO_REVIEW_CHECKLIST inert-easy-teeth convention). Squad
+    membership is latched on turn 1 by id."""
+    state = {"a": None, "b": None, "turn": 0}
 
     def policy(rs, Command):
         state["turn"] += 1
-        a, b = _split_squads(rs)
+        if state["a"] is None:
+            state["a"], state["b"] = _initial_split(rs)
+        a = _live(rs, state["a"])
+        b = _live(rs, state["b"])
         cmds = []
         if a:
             cmds.append(Command.attack_move(a, 50, 20))
@@ -280,18 +307,27 @@ def _make_sequenced_a_then_b_late(delay_turns=20):
     return policy
 
 
-def _intended_pincer_sync(rs, Command):
+def _make_intended_pincer_sync():
     """Both squads attack_move the cluster on turn 1. The two squads
-    are equidistant from the cluster (~45 cells each) so a naive
-    simultaneous launch arrives together; mass DPS clears the
-    cluster in ~6s before either side bleeds out."""
-    a, b = _split_squads(rs)
-    cmds = []
-    if a:
-        cmds.append(Command.attack_move(a, 50, 20))
-    if b:
-        cmds.append(Command.attack_move(b, 50, 20))
-    return cmds or [Command.observe()]
+    stage at opposing latitudes roughly equidistant from the cluster,
+    so a naive simultaneous launch arrives together; the joint 6-tank
+    mass clears the cluster fast and lands ≥4 tanks on the objective
+    losing ≤2. Squad membership is latched on turn 1 by id."""
+    state = {"a": None, "b": None}
+
+    def policy(rs, Command):
+        if state["a"] is None:
+            state["a"], state["b"] = _initial_split(rs)
+        a = _live(rs, state["a"])
+        b = _live(rs, state["b"])
+        cmds = []
+        if a:
+            cmds.append(Command.attack_move(a, 50, 20))
+        if b:
+            cmds.append(Command.attack_move(b, 50, 20))
+        return cmds or [Command.observe()]
+
+    return policy
 
 
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
@@ -319,7 +355,7 @@ def test_single_squad_a_loses(level, seed):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    r = run_level(c, _single_squad_a, seed=seed)
+    r = run_level(c, _make_single_squad_a(), seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed={seed}: single-squad-A must LOSE "
         f"(region n=4 impossible with 3 tanks); got {r.outcome} "
@@ -330,10 +366,11 @@ def test_single_squad_a_loses(level, seed):
 @pytest.mark.parametrize("level", ["medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_sequenced_a_then_b_late_loses_on_medium_hard(level, seed):
-    """A commits first, B holds 20 turns. The cluster's enemy 2tnks
-    shred A (lose 3 of 3 tanks) before B arrives → units_lost_lte:2
-    busts → LOSS. Easy has no enemy armour so this may squeak by
-    there (bare-skill-tier inert-easy-teeth convention)."""
+    """A commits first, B holds 20 turns. The stationary defender
+    cluster focus-fires the lone Squad A and shreds it (loses all 3
+    tanks) before B arrives → units_lost_lte:2 busts → LOSS. Easy has
+    a lighter cluster so this may squeak by there (bare-skill-tier
+    inert-easy-teeth convention)."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
@@ -356,7 +393,7 @@ def test_intended_pincer_sync_wins(level, seed):
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    r = run_level(c, _intended_pincer_sync, seed=seed)
+    r = run_level(c, _make_intended_pincer_sync(), seed=seed)
     assert r.outcome == "win", (
         f"{level} seed={seed}: intended pincer-sync should WIN, "
         f"got {r.outcome} after {r.turns} turns "
