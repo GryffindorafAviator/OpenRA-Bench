@@ -10,12 +10,20 @@ test is RECOGNISING AN INFEASIBLE PATH AND PIVOTING to the other.
 Bar (per CLAUDE.md):
   - STALL                LOSS every (level, seed) — clock teeth.
   - COMMIT-A-PURE        LOSS every (level, seed) — attrition cap
-                         (6 e3 anti-vehicle wreck 5 2tnk).
-  - COMMIT-B-PURE        WIN on easy/medium (direct B beeline beats
-                         the light picket inside cap); LOSS on hard
-                         (tighter cap leaves no slack and the
-                         spawn-varied approach brushes A's e3 sight).
+                         (e3 anti-vehicle stack wrecks 5 2tnk).
+  - COMMIT-B-PURE        LOSS every (level, seed) — a blind beeline
+                         to B is punished on every tier: on easy/
+                         medium it drives straight through A's e3
+                         cluster; on hard a SOUTH-spawn beeline
+                         skims A's fact from the y=24..28 band and
+                         the southern e3 apron busts the attrition
+                         cap. Only the informed pivot wins.
   - INTENDED scout-A-pivot-B  WIN every (level, seed).
+
+After the engine combat-balance pass the brute beeline to B is no
+longer a free path on any tier — the capability under test (scout
+the heavy objective, recognise infeasibility, pivot to the lighter
+one on a safe route) is now strictly load-bearing.
 """
 
 from __future__ import annotations
@@ -81,13 +89,14 @@ def _commit_a_pure_policy():
 
 
 def _commit_b_pure_policy():
-    """Beeline the 5 tanks straight at B's lightly-defended fact.
-    On easy/medium this WINS: a direct drive reaches B inside the
-    deadline, 2tnk crush the e1 picket, units_lost stays ≤2. On hard
-    the tighter cap (lte:2) + spawn-varied approach (lateral y-band
-    flips per seed) makes this brittle — the natural path from NORTH
-    staging (y=14) toward B at (100,30) brushes A's e3 sight, chips
-    a tank or two, and busts the cap.
+    """Beeline the 5 tanks straight at B's fact with no scouting.
+    Must LOSE every (level, seed): on easy/medium the direct drive
+    from the western staging band runs through A's e3 cluster and
+    the 5 2tnk are chewed past the attrition cap before reaching B;
+    on hard a SOUTH-spawn beeline skims A's `fact` along the
+    y=24..28 band and A's southern e3 apron busts the tightened
+    `units_lost_lte:2` cap. The blind beeline never reasons about
+    A's feasibility, so it is punished on every tier.
     """
     state = {"sent": False}
 
@@ -368,34 +377,16 @@ def test_commit_a_pure_loses(level, seed):
 
 
 @pytest.mark.parametrize("seed", SEEDS)
-def test_commit_b_pure_wins_on_easy(seed):
-    """A direct beeline to B WINS on easy: B is extra-lightly
-    defended (1× e1), the central A defence is the easy variant
-    (no heavy tanks), and the path from (10,20) to (100,30) is
-    survivable enough to reach B with ≤3 tanks alive — the e1
-    picket falls and B is razed inside the cap. This is the
-    'spec said: also a valid path on lower diff' check."""
-    c = compile_level(load_pack(PACK), "easy")
-    res = run_level(c, _commit_b_pure_policy(), seed=seed)
-    assert res.outcome == "win", (
-        f"commit-B-pure must WIN on easy s={seed}; "
-        f"got {res.outcome} (lost={res.signals.units_lost}, "
-        f"kills={res.signals.units_killed}, "
-        f"tick={res.signals.game_tick})"
-    )
-
-
-@pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("level", ("medium", "hard"))
-def test_commit_b_pure_loses_on_medium_and_hard(level, seed):
-    """A direct beeline to B LOSES on medium and hard: the early
-    naive commit to B drives the squad through A's e3 sight
-    envelope on the central y-band, the heavy A picket chews
-    them up before they clear, and the cap (`units_lost_lte:3`
-    or :2) trips before B is reached. This is the 'pure-B early
-    LOSS — didn't realize A might work, late commitment' tooth
-    that makes the intended scout-then-pivot decision
-    load-bearing on medium+ tiers."""
+@pytest.mark.parametrize("level", LEVELS)
+def test_commit_b_pure_loses(level, seed):
+    """A blind beeline straight to B must LOSE every (level, seed).
+    On easy/medium the direct drive runs the squad through A's e3
+    cluster and the attrition cap trips before B is reached; on
+    hard a SOUTH-spawn beeline skims A's `fact` along the y=24..28
+    band and the southern e3 apron busts the tightened cap. The
+    brute shortest-path policy never scouts A's feasibility, so it
+    is punished on every tier — only the informed scout-then-pivot
+    converges inside both teeth."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _commit_b_pure_policy(), seed=seed)
     assert res.outcome == "loss", (

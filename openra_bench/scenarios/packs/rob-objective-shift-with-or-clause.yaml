@@ -26,15 +26,19 @@
 #      (the 6 e3 wreck the 5 2tnk well before A falls — units_lost
 #      blows past the cap; even if a single tank lands the kill, the
 #      `units_lost_lte:3` clause is already violated).
-#   3. COMMIT-B-PURE (skip A)      → WIN on easy/medium (a direct
-#      drive to B inside the deadline crushes 2 e1 and razes B with
-#      ≤2 losses), LOSS on hard (the tighter `units_lost_lte:2`
-#      cap + lateral spawn variation makes a clean pure-B unreliable;
-#      the intended scout-A-pivot-B converges on B from a safer
-#      angle).
+#   3. COMMIT-B-PURE (blind beeline) → LOSS every tier. A direct
+#      drive straight at B with no scouting is punished on every
+#      difficulty: on easy/medium the natural line from the western
+#      staging band crosses A's e3 cluster and the attrition cap
+#      trips before B is reached; on hard a SOUTH-spawn beeline
+#      skims A's `fact` along the y=24..28 band and A's southern e3
+#      apron busts the tightened `units_lost_lte:2` cap. After the
+#      engine combat-balance pass the brute shortest-path is no
+#      longer a free path on ANY tier — only the informed pivot wins.
 #   4. INTENDED scout-A-pivot-B    → WIN every tier. Send the squad
 #      partway toward A, register the heavy defence, pivot south-east
-#      to B, raze B in time inside the attrition cap.
+#      to B on a deep-southern route that stays clear of A's defence
+#      envelope, raze B in time inside the attrition cap.
 #
 # Real-world anchor (spec):
 #   - PlanBench replanning / goal-conditional adaptation
@@ -122,14 +126,16 @@ base:
 
 levels:
   # ── EASY ────────────────────────────────────────────────────────
-  # Plan-and-execute rehearsal. The `any_of` is genuinely satisfiable
-  # by EITHER path on easy: A is defended but the lighter e3 count
-  # gives a determined commit-A a chance; B is even lighter on easy
-  # (1× e1) so even a pure-B beeline wins. The intended scout-A-
-  # pivot-B also wins. Stall loses on the clock; over-commit-A still
-  # loses on the cap because e3 vs 2tnk is the anti-vehicle counter
-  # regardless. The teaching point is the OR-objective predicate
-  # shape (two acceptable paths) and that BOTH are valid here.
+  # Plan-and-execute rehearsal of the OR-objective predicate shape
+  # (`any_of` over two destruction paths). Only the INFORMED pivot
+  # wins: the intended scout-A-pivot-B detours south of A's defence
+  # envelope and razes B inside the cap. Stall loses on the clock;
+  # over-commit-A loses on the cap (e3 vs 2tnk is the anti-vehicle
+  # counter); a blind pure-B beeline loses too — the natural line
+  # from the western staging band crosses A's e3 cluster and the
+  # attrition cap trips before B is reached. The teaching point is
+  # that the win path must be chosen by REASONING about A's
+  # feasibility, not by beelining at either fact.
   easy:
     description: >
       Five medium tanks (2tnk) sit at the western edge. Two enemy
@@ -139,9 +145,10 @@ levels:
       You must finish inside 5400 ticks and lose no more than 3
       tanks. Stalling loses on the clock. A pure brute-force into
       A's e3 cluster bleeds the tank squad past the attrition cap;
-      a direct drive to B easily razes the lone e1 defender; the
-      intended play scouts A's defence then pivots to B if A looks
-      infeasible.
+      a blind beeline to B drives straight through A's e3 cluster
+      and busts the cap too; the intended play scouts A's defence,
+      recognises it is infeasible, and pivots to B on a route that
+      keeps clear of A.
     starting_cash: 500
     overrides:
       actors:
@@ -190,26 +197,29 @@ levels:
     max_turns: 65
 
   # ── MEDIUM ──────────────────────────────────────────────────────
-  # +1 controlled variable: A is now AT FULL SPEC (6 e3) — a brute-
-  # force commit to A definitively LOSES on the cap (5 tanks vs 6
-  # e3 rocket infantry on top of the fact is not survivable inside
-  # `units_lost_lte:3`). B keeps the spec's 2× e1 defenders. The
-  # intended scout-A-pivot-B wins; a pure-B beeline also still wins
-  # on medium (the spec keeps it valid on "lower diff"). The pivot
-  # is the SAFER play because the agent learns A is too hot from
-  # a brief approach rather than over-committing to either default.
+  # +1 controlled variable: A is now AT FULL SPEC (8 e3 + 1 3tnk) —
+  # a brute-force commit to A definitively LOSES on the cap (5 tanks
+  # vs the anti-vehicle stack on top of the fact is not survivable
+  # inside `units_lost_lte:3`). B keeps 2× e1. Both brute defaults
+  # lose: a pure-A commit is shredded in the e3 stack, and a blind
+  # pure-B beeline crosses A's e3 cluster on the central y-band and
+  # busts the cap before reaching B. Only the intended scout-A-
+  # pivot-B — which learns A is too hot from a brief approach and
+  # detours south of A's defence envelope — wins.
   medium:
     description: >
       Five medium tanks (2tnk) sit at the western edge. Two enemy
       construction yards stand to the east: fact A at (60,20)
-      heavily guarded by 6 rocket-infantry (e3), and fact B at
-      (100,30) lightly guarded by 2 riflemen (e1). EITHER raze
-      satisfies the win — you must finish inside 5400 ticks and
-      lose no more than 3 tanks. A pure-A commit bleeds the squad
-      past the cap (the 6 e3 are the anti-vehicle counter); a
-      direct drive to B reaches it in time and razes the light
-      picket; the intended play scouts A briefly, recognises it
-      is infeasible, and pivots south-east to B inside the cap.
+      heavily guarded by an 8-strong rocket-infantry (e3) stack and
+      a heavy tank, and fact B at (100,30) lightly guarded by 2
+      riflemen (e1). EITHER raze satisfies the win — you must finish
+      inside 5400 ticks and lose no more than 3 tanks. A pure-A
+      commit bleeds the squad past the cap (the e3 stack is the
+      anti-vehicle counter); a blind beeline to B drives through
+      A's e3 cluster on the central band and busts the cap before
+      reaching B; the intended play scouts A briefly, recognises
+      it is infeasible, and pivots south-east to B on a route
+      that keeps clear of A's defence envelope.
     starting_cash: 500
     overrides:
       actors:
@@ -259,27 +269,31 @@ levels:
   # ── HARD ────────────────────────────────────────────────────────
   # +1 axis: TWO agent spawn_point groups (NORTH staging y=14 vs
   # SOUTH staging y=26) so seed flips the agent's lateral approach,
-  # AND a TIGHTER attrition cap (`units_lost_lte:2`). The pivot
-  # becomes load-bearing: a pure-B beeline now risks the cap (the
-  # cap of 2 leaves no slack for being chipped by A's rockets en
-  # route, since the natural path from EITHER staging y-band toward
-  # B at (100,30) brushes A's e3 sight envelope), and pure-A is even
-  # less feasible. The intended scout-A-pivot-B avoids A's sight
-  # envelope on the return leg and approaches B from a safe angle.
+  # AND a TIGHTER attrition cap (`units_lost_lte:2`). The pivot is
+  # strictly load-bearing: a blind pure-B beeline LOSES on every
+  # seed — a NORTH-spawn line crosses A's e3 sight envelope, and a
+  # SOUTH-spawn line runs the squad along the y=24..28 band where it
+  # skims A's `fact` and takes fire from A's southern e3 apron (see
+  # the SOUTHERN APRON note below); both bust the cap of 2. Pure-A
+  # is even less feasible. Only the intended scout-A-pivot-B — which
+  # detours deep south along y=36, well clear of A's whole defence
+  # envelope, then turns up to B — converges inside both teeth.
   # Satisfies `tests/test_hard_tier.py::UPGRADED` (≥2 spawn groups).
   hard:
     description: >
       Five medium tanks (2tnk) sit at the western edge — round-
       robined between a NORTH staging row and a SOUTH staging row
       by seed. Two enemy construction yards stand to the east:
-      fact A at (60,20) heavily guarded by 6 rocket-infantry (e3),
-      and fact B at (100,30) lightly guarded by 2 riflemen (e1).
-      EITHER raze satisfies the win — finish inside 5400 ticks and
-      lose no more than TWO tanks. A pure-A commit is unsurvivable;
-      a pure-B beeline brushes A's rocket sight envelope and risks
-      the tightened cap; the intended play scouts A from a safe
-      offset, recognises it is infeasible, and pivots to B from
-      an angle that stays out of A's rocket sight.
+      fact A at (60,20) heavily guarded by a rocket-infantry (e3)
+      stack with a southern apron, and fact B at (100,30) lightly
+      guarded by 2 riflemen (e1). EITHER raze satisfies the win —
+      finish inside 5400 ticks and lose no more than TWO tanks. A
+      pure-A commit is unsurvivable; a blind pure-B beeline brushes
+      A's defence envelope (and from the SOUTH staging row skims
+      A's fact directly) and busts the tightened cap; the intended
+      play scouts A from a safe offset, recognises it is infeasible,
+      and pivots to B on a deep-southern route that stays well
+      clear of A entirely.
     starting_cash: 500
     overrides:
       actors:
@@ -312,18 +326,24 @@ levels:
         - {type: e3,   owner: enemy, position: [61, 21], stance: 2}
         - {type: e3,   owner: enemy, position: [63, 18], stance: 2}
         - {type: e3,   owner: enemy, position: [63, 20], stance: 2}
+        # SOUTHERN APRON on A (hard-tier addition). After the engine
+        # combat-balance pass a SOUTH-spawn pure-B beeline runs the
+        # squad along the y=24..28 band — close enough to skim A's
+        # `fact` (60,19) with long-range tank fire while the main
+        # e3 stack (centred y=17..21) is too far north to retaliate
+        # in full. These 4 e3 sit on A's south edge (y=24..26) so
+        # any squad close enough to raze A's fact from the south
+        # takes anti-vehicle fire and busts the `units_lost_lte:2`
+        # cap. The intended scout-A-pivot-B detours along y=36 —
+        # ≥10 cells clear of this apron — so it is untouched.
+        - {type: e3,   owner: enemy, position: [58, 24], stance: 2}
+        - {type: e3,   owner: enemy, position: [60, 24], stance: 2}
+        - {type: e3,   owner: enemy, position: [62, 24], stance: 2}
+        - {type: e3,   owner: enemy, position: [60, 26], stance: 2}
         # B: 2 e1 at full spec.
         - {type: fact, owner: enemy, position: [100, 30]}
         - {type: e1,   owner: enemy, position: [98, 30], stance: 2}
         - {type: e1,   owner: enemy, position: [99, 31], stance: 2}
-        # INTERCEPT PICKET on the CENTRAL east-bound corridor at
-        # (75, 25) — 2 e3 stance:2 that chip a beelining pure-B
-        # squad on the y=20..27 central band but don't reach the
-        # deep-south staging band (y=36) the intended pivot uses.
-        # Hard-tier-only addition: keeps pure-B unviable on hard
-        # while leaving the SOUTH-detour intended play untouched.
-        - {type: e3,   owner: enemy, position: [75, 25], stance: 2}
-        - {type: e3,   owner: enemy, position: [76, 26], stance: 2}
         # Sentinel.
         - {type: fact, owner: enemy, position: [125, 4]}
     win_condition:
