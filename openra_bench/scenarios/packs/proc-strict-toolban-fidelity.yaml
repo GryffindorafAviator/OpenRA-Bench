@@ -53,6 +53,15 @@
 #     tool_violations. We make this irrelevant here by leaving the
 #     central corridor enemy-free (no opportunistic targets exist
 #     along the safe path).
+#   • The jeeps carry an EXPLICIT `stance: 0` (HoldFire). After the
+#     engine stance-semantics balance fix, an actor with no `stance:`
+#     resolves to the AttackAnything default (stance:3), which ADVANCES
+#     toward any visible enemy — the far enemy `fact` marker at
+#     (120,20) would draw the un-stanced jeeps east on their own and a
+#     stall policy (only `observe`) would WIN for free, inverting the
+#     bar. stance:0 makes the jeeps inert until an explicit
+#     `move_units` order is issued (explicit orders override stance),
+#     so a staller genuinely stalls and loses on the deadline.
 #   • Persistent enemy `fact` at (120,20) keeps the episode alive
 #     past any incidental death (engine auto-done on enemy wipe would
 #     collapse the deadline-bound reach scenario to DRAW).
@@ -149,11 +158,17 @@ levels:
         # the episode by the fail-side `not building_count_gte` clause.
         - {type: fact, owner: agent, position: [10, 20]}
         # 4 jeeps clustered at the west edge (safe path due east to
-        # the egress region around (90,20)).
-        - {type: jeep, owner: agent, position: [8, 19]}
-        - {type: jeep, owner: agent, position: [8, 20]}
-        - {type: jeep, owner: agent, position: [8, 21]}
-        - {type: jeep, owner: agent, position: [9, 20]}
+        # the egress region around (90,20)). stance:0 (HoldFire) — the
+        # jeeps must NOT auto-advance toward the far enemy `fact`
+        # marker on their own; without an explicit stance the engine
+        # default (stance:3 AttackAnything) self-delivers the convoy
+        # east and a stall policy would WIN for free. stance:0 makes
+        # the jeeps inert until an explicit `move_units` order is
+        # issued (explicit orders override stance).
+        - {type: jeep, owner: agent, position: [8, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 21], stance: 0}
+        - {type: jeep, owner: agent, position: [9, 20], stance: 0}
         # Persistent enemy `fact` marker far east — keeps the episode
         # alive past any incidental engine condition (no combatants
         # exist, but the marker is the standard idiom — CLAUDE.md
@@ -194,10 +209,12 @@ levels:
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
-        - {type: jeep, owner: agent, position: [8, 19]}
-        - {type: jeep, owner: agent, position: [8, 20]}
-        - {type: jeep, owner: agent, position: [8, 21]}
-        - {type: jeep, owner: agent, position: [9, 20]}
+        # stance:0 (HoldFire) — see the easy-tier comment; the jeeps
+        # must not self-deliver east under the engine's default stance.
+        - {type: jeep, owner: agent, position: [8, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 21], stance: 0}
+        - {type: jeep, owner: agent, position: [9, 20], stance: 0}
         - {type: fact, owner: enemy, position: [120, 20]}
     forbidden_tools: [attack_unit, attack_move, set_stance, harvest, repair, sell, set_rally_point]
     win_condition:
@@ -236,16 +253,18 @@ levels:
       forbidden tool all LOSE.
     overrides:
       actors:
-        # spawn_point 0 — NW jeep staging (y≈8).
-        - {type: jeep, owner: agent, position: [8, 7],  spawn_point: 0}
-        - {type: jeep, owner: agent, position: [8, 8],  spawn_point: 0}
-        - {type: jeep, owner: agent, position: [8, 9],  spawn_point: 0}
-        - {type: jeep, owner: agent, position: [9, 8],  spawn_point: 0}
+        # spawn_point 0 — NW jeep staging (y≈8). stance:0 (HoldFire)
+        # — see the easy-tier comment; the jeeps must not self-deliver
+        # east under the engine's default stance.
+        - {type: jeep, owner: agent, position: [8, 7],  spawn_point: 0, stance: 0}
+        - {type: jeep, owner: agent, position: [8, 8],  spawn_point: 0, stance: 0}
+        - {type: jeep, owner: agent, position: [8, 9],  spawn_point: 0, stance: 0}
+        - {type: jeep, owner: agent, position: [9, 8],  spawn_point: 0, stance: 0}
         # spawn_point 1 — SW jeep staging (y≈32).
-        - {type: jeep, owner: agent, position: [8, 31], spawn_point: 1}
-        - {type: jeep, owner: agent, position: [8, 32], spawn_point: 1}
-        - {type: jeep, owner: agent, position: [8, 33], spawn_point: 1}
-        - {type: jeep, owner: agent, position: [9, 32], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 31], spawn_point: 1, stance: 0}
+        - {type: jeep, owner: agent, position: [8, 32], spawn_point: 1, stance: 0}
+        - {type: jeep, owner: agent, position: [8, 33], spawn_point: 1, stance: 0}
+        - {type: jeep, owner: agent, position: [9, 32], spawn_point: 1, stance: 0}
         # Agent fact duplicated across BOTH spawn groups (anchor for
         # the building_count_gte:fact:1 clause). CLAUDE.md: if ANY
         # agent actor declares spawn_point, every agent actor WITHOUT
