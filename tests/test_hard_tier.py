@@ -564,6 +564,21 @@ UPGRADED = [
     # filtered out), so the strike geometry is symmetric but a
     # memorised opening cannot generalise.
     "rob-unit-loss-recovery",
+    # Wave-11 ROBUSTNESS / reasoning seed — graceful degradation /
+    # incident triage. A `scheduled_events: destroy_actors` hook razes
+    # a NON-CRITICAL slice of the agent's base (an outer pbox + 1 of 2
+    # harvesters) at tick ~1200 while the war-critical core (fact +
+    # proc + powr + weap + fix) is untouched; the agent must press on
+    # with the core objective (field >=4 2tnk + clear the e1 garrison)
+    # rather than panic-rebuilding the lost non-essentials. Hard tier
+    # defines two agent spawn_point groups (NORTH-flank scout (18,12)
+    # vs SOUTH-flank scout (18,32)) round-robined by seed; the core
+    # base + 2tnk column + south outpost are SHARED across both groups
+    # at identical cells (per CLAUDE.md, every agent actor declares
+    # spawn_point because ANY agent actor with one filters out agent
+    # actors WITHOUT one), so the strike + destroy geometry is
+    # symmetric but a memorised opening cannot generalise.
+    "rob-partial-base-loss-continue",
     # Wave-6 Group N coordination pack — military pincer movement /
     # SC2 two-prong attack / envelopment from two directions. Two
     # 3-tank squads start at OPPOSING west-edge latitudes (north y=8 /
@@ -1290,6 +1305,41 @@ UPGRADED = [
     # the two spawn-matched NEAR clauses — a memorised "always route
     # to (16,14)" policy loses on the SOUTH seeds.
     "econ-far-patch-vs-near-patch",
+    # Wave-11 REASONING pack — disaster recovery after a mid-episode
+    # exogenous loss (PlanBench replanning under exogenous failure /
+    # disaster recovery / SC2 comeback anchor). A `scheduled_events`
+    # destroy_actors event at tick 1500 wipes the agent's Ore Refinery
+    # (and the forward tanks caught in the blast region); the agent
+    # must rebuild the refinery AND still clear the eastern garrison
+    # within the original deadline. Hard tier defines two agent
+    # spawn_point groups (NORTH base y=12 / SOUTH base y=28) round-
+    # robined by seed; the full base + column is duplicated across
+    # both spawns and the destroy_actors region is declared at both
+    # latitudes (scheduled_events do not honour spawn_point, so both
+    # fire — the dormant-latitude one matches nothing), so a memorised
+    # rebuild cell cannot generalise.
+    "lh-recovery-after-mid-game-loss",
+    # Wave-11 reasoning pack — schedule compression: a tick-1000
+    # `shorten_deadline` scheduled event pulls the deadline forward
+    # mid-episode, so a force still paced for the original budget
+    # misses (project-management crashing-the-schedule / deadline-
+    # pressure anchor). Hard tier defines two agent spawn_point
+    # groups (base at y=14 vs y=26) round-robined by seed; the
+    # 4-tank strike force and agent fact are duplicated under each
+    # spawn_point at identical x, so the compressed budget is fair
+    # for either latitude — a memorised base-latitude opening cannot
+    # generalise, but the schedule-compression doctrine does.
+    "rob-deadline-shortened-midway",
+    # Wave-11 econ reasoning pack — capacity-expansion timing: add the
+    # 2nd harvester before the break-even tick (SC2 worker-count
+    # optimization / capacity-expansion timing / OR break-even
+    # analysis anchor). Hard tier defines two agent spawn_point groups
+    # (NORTH base y=10..14 / SOUTH base y=28..32) round-robined by
+    # seed; each carries its own fact+proc+powr+weap+harv and a
+    # symmetric near-patch ore pair so the income economics are
+    # identical per spawn — a memorised "build at (8,18)" opening
+    # cannot generalise across seeds.
+    "econ-expansion-timing",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

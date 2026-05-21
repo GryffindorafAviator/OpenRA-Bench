@@ -1,0 +1,444 @@
+# lh-recovery-after-mid-game-loss — disaster recovery after a
+# mid-episode exogenous LOSS of part of the agent's force AND economy.
+#
+# REASONING capability — Wave-11 disaster-recovery pack. The agent
+# inherits a working production base (fact + proc + powr + weap + harv
+# + an ore patch) and a forward column of heavy tanks, and is given an
+# offensive objective: clear the eastern garrison defending the enemy
+# construction yard. Mid-episode a SCHEDULED catastrophe strikes: at
+# tick ~1500 a `scheduled_events` `destroy_actors` event wipes every
+# agent actor inside a circular region that contains the Ore Refinery
+# (`proc`) and TWO of the forward tanks — the "disaster" (a sabotage
+# strike / supply-line cut / industrial accident). The episode deadline
+# does NOT move. The agent must:
+#   1. notice the loss (the live `proc` building count drops to 0; the
+#      forward tank count drops by two),
+#   2. REBUILD the refinery (`build('proc')` + `place_building`, cost
+#      1400) so the income channel is restored and the win clause
+#      `building_count_gte:proc:1` can re-latch,
+#   3. CONTINUE the original offensive with the surviving force (and
+#      any units the restored economy can fund) and still clear the
+#      eastern garrison before the ORIGINAL deadline.
+#
+# This is PlanBench replanning under an exogenous failure event /
+# disaster recovery / the SC2 comeback (rebuild-after-a-bad-trade and
+# still hit the timing): the plan that worked at t=0 is invalidated
+# mid-flight and must be repaired without a deadline extension.
+#
+# Difficulty axis (one new controlled variable per tier):
+#   • easy   — bare skill. The disaster wipes proc + 2 of 4 tanks; the
+#              2 survivors plus a modest rebuild reserve clear a
+#              5-strong garrison. Generous clock.
+#   • medium — +1 axis: a HEAVIER disaster (larger blast region also
+#              catches a 3rd tank — only 1 survivor) and a TIGHTER
+#              clock. The rebuild must fund replacement tanks, not
+#              just the refinery, so a stall on the rebuild busts the
+#              kill bar.
+#   • hard   — +1 axis: TWO seed-driven AGENT `spawn_point` groups
+#              (NORTH base y=12 / SOUTH base y=28). Per CLAUDE.md the
+#              per-owner `spawn_point` filter means EVERY agent actor
+#              must carry a `spawn_point`, so the full base + column is
+#              duplicated across both groups; the `destroy_actors`
+#              region is duplicated at both latitudes (scheduled_events
+#              do NOT honour spawn_point, so both fire — the one on the
+#              dormant latitude finds nothing and is a no-op). A
+#              memorised rebuild cell cannot generalise across the
+#              seed-flip.
+#
+# Bar (the four-script discrimination):
+#   • stall (only `observe`): the disaster wipes proc + tanks; the
+#     refinery is never rebuilt and the garrison is never touched →
+#     `units_killed_gte` unmet AND `building_count_gte:proc` unmet →
+#     `after_ticks` fail clause fires → LOSS. A give-up-after-loss
+#     policy that simply stops also lands here → LOSS.
+#   • rebuild-only (rebuild proc but never push east): the proc clause
+#     latches but the kill bar is never met → `after_ticks` LOSS.
+#   • attack-only (push the survivors east but never rebuild proc):
+#     the survivors may even clear the garrison and meet the kill bar,
+#     but `building_count_gte:proc:1` is false (the refinery was
+#     destroyed and never rebuilt) → the win never closes → LOSS.
+#   • INTENDED recover-and-continue (rebuild the refinery AND push the
+#     surviving + replacement force east to clear the garrison): all
+#     three win clauses latch inside the clock → WIN.
+#
+# Anchor: PlanBench replanning under exogenous failure; disaster
+# recovery; the SC2 comeback (rebuild after a bad trade, still finish
+# the objective on the original timeline).
+#
+# ENGINE FACTS (CLAUDE.md, verified 2026-05-20):
+#  - `scheduled_events:` `destroy_actors` removes every actor matching
+#    `filter:` (`owner:` + optional circular `region:{x,y,radius}`) the
+#    instant `world_tick >= tick`. Pinned by openra-data/tests/
+#    test_scheduled_events.rs + tests/test_scheduled_events.py; used in
+#    `maint-repair-priority-order` for a bounded strike. Here it is the
+#    DISASTER itself — it deletes agent assets, not enemy ones.
+#  - `building_count_gte:{type:proc,n:1}` re-counts the LIVE building
+#    actors every frame (win_conditions.py), so it drops to false the
+#    instant the disaster razes the refinery and re-latches true the
+#    instant a rebuilt refinery completes — exactly the
+#    destroyed-then-rebuilt signal this pack needs. (`has_building`
+#    uses the accumulating set and would never toggle false — CLAUDE.md
+#    footgun.)
+#  - `units_killed_gte:N` reads the agent's running kill count
+#    (win_conditions.py); the eastern garrison `e1` are the kill
+#    targets. The enemy uses the `turtle` scripted bot so the garrison
+#    HOLDS at x=82 instead of surging west — the kill bar is met by an
+#    eastbound assault, and the disaster stays the only loss event.
+#  - `proc` cost = 1400 (build-power-online-first.yaml); `3tnk` heavy
+#    tank cost = 1150 (rob-unit-loss-recovery.yaml). The per-tier
+#    reserve funds the refinery rebuild plus the tank replacements the
+#    tier needs; a wrong-spend (army-only / stall) busts a clause.
+#  - The persistent unarmed enemy `fact` far east at (122,20) is the
+#    engine auto-`done` guard (CLAUDE.md): without a persistent enemy
+#    MustBeDestroyed building the engine ends the episode the moment
+#    the last garrison `e1` falls, which can collapse a clean run to
+#    DRAW before the win/fail evaluator runs.
+#  - Tick alignment (CLAUDE.md): engine advances ~90 ticks/turn,
+#    ceiling tick ≈ 93 + 90·(max_turns-1). easy max_turns 60 ⇒ ceiling
+#    5403 > within_ticks 5400 / after_ticks 5401 ✓. medium max_turns
+#    52 ⇒ ceiling 4683 > 4600 / 4601 ✓. hard max_turns 52 ⇒ ceiling
+#    4683 > 4600 / 4601 ✓. The disaster fires at tick 1500 (~turn 17),
+#    leaving ample budget to rebuild and still finish.
+#  - `place_building` does NOT enforce build-adjacency (CLAUDE.md) — a
+#    `build('proc') + place_building` chain works at any in-bounds
+#    cell; the intended idiom is to place the new refinery near the
+#    surviving `fact` (clear of the disaster region).
+#  - Hard `spawn_point` rule (CLAUDE.md oramap.rs): ANY agent actor
+#    with a `spawn_point` filters OUT every ungrouped agent actor, so
+#    the FULL base + column is duplicated across both spawn groups.
+#    scheduled_events do NOT honour `spawn_point`; both disaster
+#    regions are declared and the one on the dormant latitude simply
+#    matches nothing.
+
+meta:
+  id: lh-recovery-after-mid-game-loss
+  title: 'Disaster Recovery — Rebuild After a Mid-Game Loss, Still Finish'
+  capability: reasoning
+  real_world_meaning: >
+    Reactive replan after a mid-mission exogenous catastrophe wipes
+    part of the operating force and the economy at once. An offensive
+    operation runs on a fixed deadline with a working production base
+    (Construction Yard + Refinery + Power Plant + War Factory + Ore
+    Truck + ore patch) and a forward armoured column. Mid-episode a
+    scheduled disaster — a sabotage strike, a supply-line cut, an
+    industrial accident — destroys the Ore Refinery and two of the
+    forward tanks. The deadline does not move. The model must notice
+    the loss (the live refinery count drops to zero, the tank count
+    falls), commit the reserve to rebuilding the refinery so the
+    income channel is restored, AND press on with the surviving and
+    replacement force to clear the eastern garrison before the
+    original clock expires. Giving up after the loss, rebuilding but
+    never attacking, or attacking but never rebuilding the refinery
+    all miss the bar.
+  robotics_analogue: >
+    Disaster recovery / PlanBench replanning under an exogenous
+    failure event. An autonomous operation loses a critical
+    infrastructure node and part of its mobile fleet to a single
+    mid-mission catastrophe; the operational objective and timeline
+    are unchanged. Recovery requires recognising the compound loss,
+    committing the reserve to rebuilding the lost infrastructure (not
+    to more mobile units, not to nothing), and continuing the mission
+    with the regenerated force fast enough that the original deadline
+    is still met — the SC2 comeback: rebuild after a bad trade and
+    still hit the timing.
+  benchmark_anchor:
+    - "PlanBench replanning"
+    - "disaster recovery"
+    - "SC2 comeback"
+  author: openra-bench-wave-11
+
+base_map: rush-hour-arena
+starting_cash: 3000  # per-level override below
+
+base:
+  agent:
+    faction: soviet
+  enemy:
+    faction: allies
+    # `turtle` scripted bot — the eastern garrison HOLDS at x=82 and
+    # returns fire only; it does not surge west. This isolates the
+    # loss event to the scheduled `destroy_actors` disaster and keeps
+    # the kill bar reachable from a single eastbound assault.
+    bot_type: turtle
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # Re-decide the instant the disaster lands so the agent can react
+  # to the compound loss rather than discovering it a full turn late.
+  interrupts:
+    own_building_destroyed: true
+    own_unit_lost: true
+  termination:
+    max_ticks: 7000
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare skill: the disaster wipes proc + 2 of 4 tanks; 2 survivors
+  # plus the rebuild reserve clear a 5-strong garrison. Reserve 3000 cr
+  # funds the refinery rebuild (1400) with $1600 slack — one
+  # replacement 3tnk (1150) if a survivor is lost on the way east.
+  # max_turns 60 ⇒ ceiling tick 5403 > within_ticks 5400 ✓.
+  easy:
+    description: >
+      You command a working production base — a Construction Yard
+      ('fact'), an Ore Refinery ('proc'), a Power Plant ('powr'), a
+      War Factory ('weap') and an Ore Truck ('harv') with an ore
+      patch — and a forward column of FOUR heavy tanks ('3tnk').
+      Your objective: clear the eastern garrison of 5 rifle infantry
+      ('e1') that defends the enemy Construction Yard. Around tick
+      1500 a DISASTER strikes — a scheduled sabotage event destroys
+      every asset of yours inside a blast zone around the Ore
+      Refinery: you LOSE the refinery and TWO of your four tanks. The
+      deadline does NOT change. To recover: rebuild the refinery
+      ('build' "proc", cost 1400, then 'place_building' near your
+      Construction Yard) AND press on east with your surviving force
+      to finish the garrison. Win = kill ≥5 enemy units AND own an
+      Ore Refinery again, before tick 5400. Giving up after the loss,
+      rebuilding but never attacking, or attacking but never
+      rebuilding the refinery all LOSE.
+    starting_cash: 3000
+    overrides:
+      actors:
+        # Base: fact + powr + weap on the west edge (SAFE — outside
+        # the disaster blast zone). harv next to the proc.
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [10, 18]}
+        - {type: weap, owner: agent, position: [12, 18]}
+        # The Ore Refinery sits forward at (40,18) — INSIDE the
+        # disaster blast region. The harv works the patch beside it.
+        - {type: proc, owner: agent, position: [40, 18]}
+        - {type: harv, owner: agent, position: [40, 20]}
+        - {type: mine, owner: neutral, position: [44, 18]}
+        # Forward column of 4 heavy tanks. TWO sit inside the disaster
+        # blast region (37,18)/(40,16) — they are wiped. TWO sit
+        # SOUTH at (36,26)/(38,26), outside the blast — they survive
+        # and form the recovery assault core.
+        - {type: '3tnk', owner: agent, position: [37, 18], stance: 2}
+        - {type: '3tnk', owner: agent, position: [40, 16], stance: 2}
+        - {type: '3tnk', owner: agent, position: [36, 26], stance: 2}
+        - {type: '3tnk', owner: agent, position: [38, 26], stance: 2}
+        # Eastern garrison: 5 rifle infantry defending the enemy
+        # construction yard. stance:1 ReturnFire — holds but engages
+        # when fired upon (the `turtle` bot keeps them on post).
+        - {type: e1, owner: enemy, position: [82, 16], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [84, 19], stance: 1}
+        # Persistent unarmed enemy `fact` far east — engine
+        # auto-`done` guard (LOSS-not-DRAW).
+        - {type: fact, owner: enemy, position: [122, 20]}
+      scheduled_events:
+        # THE DISASTER. At tick 1500 a circular blast at (40,18)
+        # radius 6 wipes every agent actor inside it: the proc, the
+        # harv, and the two forward tanks at (37,18)/(40,16). The
+        # west base (x≤12) and the two southern tanks (y=26) are
+        # outside the radius and survive.
+        - tick: 1500
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 40, y: 18, radius: 6}
+    # The win is GATED behind `after_ticks: 1600`: it cannot latch
+    # until the disaster (tick 1500) has fired and the actor removals
+    # have settled. Without this gate a fast assault could clear the
+    # garrison BEFORE tick 1500 and win while the (still-alive,
+    # not-yet-destroyed) refinery trivially satisfies
+    # `building_count_gte:proc` — the disaster would never bite. With
+    # the gate, at tick 1600 the refinery has been destroyed, so the
+    # proc clause is true ONLY if the agent has REBUILT it. `after_
+    # ticks` is SAFE in this win clause: the agent only ever kills the
+    # `e1` garrison, never the persistent enemy `fact`, so the engine's
+    # conquest auto-`done` (last enemy MustBeDestroyed building falls)
+    # cannot pre-empt the window (CLAUDE.md footgun does not apply).
+    win_condition:
+      all_of:
+        - units_killed_gte: 5
+        - building_count_gte: {type: proc, n: 1}
+        - after_ticks: 1600
+        - within_ticks: 5400
+    fail_condition:
+      any_of:
+        - after_ticks: 5401
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 60
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a HEAVIER disaster (blast radius 8 also
+  # catches a 3rd forward tank — only ONE survivor) AND a TIGHTER
+  # clock (within_ticks 4600, max_turns 52 ⇒ ceiling 4683). With a
+  # single surviving tank the agent MUST fund replacement tanks from
+  # the reserve, not just the refinery — a stall on the rebuild busts
+  # the kill bar. Reserve 4000 cr: refinery (1400) + 2 replacement
+  # 3tnk (2300) with slack.
+  medium:
+    description: >
+      Same task as easy — clear the eastern garrison defending the
+      enemy Construction Yard — but the disaster is HEAVIER and the
+      clock is TIGHTER. Around tick 1500 the scheduled sabotage event
+      destroys the Ore Refinery AND THREE of your four forward tanks;
+      only ONE tank survives. The deadline does not change. To
+      recover you must rebuild the refinery ('build' "proc", cost
+      1400) AND commission replacement heavy tanks ('build' "3tnk",
+      cost 1150 each) from the War Factory — one tank cannot clear a
+      6-strong garrison alone. Win = kill ≥6 enemy units AND own an
+      Ore Refinery again, before tick 4600. Giving up, rebuilding
+      without attacking, or attacking with the lone survivor and
+      never rebuilding all LOSE.
+    starting_cash: 4000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [10, 18]}
+        - {type: weap, owner: agent, position: [12, 18]}
+        - {type: proc, owner: agent, position: [40, 18]}
+        - {type: harv, owner: agent, position: [40, 20]}
+        - {type: mine, owner: neutral, position: [46, 18]}
+        # Forward column of 4 tanks. THREE sit inside the radius-8
+        # blast (37,18)/(40,16)/(40,24) — wiped. ONE survives, placed
+        # SOUTH at (38,30), clear of the blast.
+        - {type: '3tnk', owner: agent, position: [37, 18], stance: 2}
+        - {type: '3tnk', owner: agent, position: [40, 16], stance: 2}
+        - {type: '3tnk', owner: agent, position: [40, 24], stance: 2}
+        - {type: '3tnk', owner: agent, position: [38, 30], stance: 2}
+        # Garrison: 6 e1 defending the enemy construction yard, in a
+        # compact cluster around (82..84, 17..21) so a single
+        # eastbound assault can engage the whole garrison.
+        - {type: e1, owner: enemy, position: [82, 17], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [84, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [84, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [83, 19], stance: 1}
+        - {type: fact, owner: enemy, position: [122, 20]}
+      scheduled_events:
+        # Heavier disaster: radius 8 at (40,18) catches the proc, the
+        # harv and the three tanks at (37,18)/(40,16)/(40,24). The
+        # west base (x≤12) and the lone southern tank (38,30) survive.
+        - tick: 1500
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 40, y: 18, radius: 8}
+    # `after_ticks: 1600` gates the win behind the disaster — see the
+    # easy-tier note. The proc clause is true at tick 1600 only if the
+    # refinery has been REBUILT after the disaster razed it.
+    win_condition:
+      all_of:
+        - units_killed_gte: 6
+        - building_count_gte: {type: proc, n: 1}
+        - after_ticks: 1600
+        - within_ticks: 4600
+    fail_condition:
+      any_of:
+        - after_ticks: 4601
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 52
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable on top of medium: TWO seed-driven AGENT
+  # `spawn_point` groups (NORTH base y=12 / SOUTH base y=28) round-
+  # robined by seed. Per CLAUDE.md ANY agent actor with a spawn_point
+  # filters OUT every ungrouped agent actor, so the FULL base +
+  # column is duplicated across both groups. The disaster region is
+  # declared at BOTH latitudes (scheduled_events do NOT honour
+  # spawn_point — both fire; the one on the dormant latitude matches
+  # nothing). A memorised rebuild cell cannot generalise across the
+  # seed-flip. Same heavy disaster and clock as medium.
+  hard:
+    description: >
+      Same disaster-recovery task as medium (a scheduled sabotage
+      event around tick 1500 destroys the Ore Refinery and three of
+      four forward tanks; rebuild the refinery and commission
+      replacement tanks; clear the eastern garrison) but your base
+      may begin in the NORTH band (y≈12) OR the SOUTH band (y≈28) of
+      the map depending on the seed. Read your Construction Yard's
+      actual position from the observation and place the rebuilt
+      refinery near it. A memorised rebuild cell will mis-place on
+      one of the two spawns. Win = kill ≥6 enemy units AND own an
+      Ore Refinery again, before tick 4600. The same lazy /
+      wrong-spend plays lose as on medium.
+    starting_cash: 4000
+    overrides:
+      actors:
+        # ── SPAWN 0 (NORTH base, y≈12) ───────────────────────────
+        - {type: fact, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: weap, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [40, 12], spawn_point: 0}
+        - {type: harv, owner: agent, position: [40, 14], spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [37, 12], stance: 2, spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [40, 10], stance: 2, spawn_point: 0}
+        - {type: '3tnk', owner: agent, position: [40, 18], stance: 2, spawn_point: 0}
+        # The lone survivor — sited well WEST (x=20) so it is clear of
+        # BOTH disaster regions (the y=12 blast and the dormant y=28
+        # blast overlap in the mid-band; only x≤32 is safe from both).
+        - {type: '3tnk', owner: agent, position: [20, 14], stance: 2, spawn_point: 0}
+        # ── SPAWN 1 (SOUTH base, y≈28) ───────────────────────────
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: weap, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [40, 28], spawn_point: 1}
+        - {type: harv, owner: agent, position: [40, 30], spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [37, 28], stance: 2, spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [40, 26], stance: 2, spawn_point: 1}
+        - {type: '3tnk', owner: agent, position: [40, 34], stance: 2, spawn_point: 1}
+        # The lone survivor — sited well WEST (x=20), clear of BOTH
+        # disaster regions (see the spawn-0 note).
+        - {type: '3tnk', owner: agent, position: [20, 26], stance: 2, spawn_point: 1}
+        # Neutral ore patch duplicated at both latitudes (neutral
+        # actors always place — same oramap.rs rule as enemy actors).
+        - {type: mine, owner: neutral, position: [46, 12]}
+        - {type: mine, owner: neutral, position: [46, 28]}
+        # Eastern garrison: 6 e1 defending the enemy construction
+        # yard. Enemy actors do NOT honour spawn_point — they place
+        # every seed. Sited in a compact cluster around (82..84,
+        # 18..22) (mid-band) so they are reachable from either spawn
+        # latitude by a single eastbound assault.
+        - {type: e1, owner: enemy, position: [82, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [82, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [84, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [84, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [83, 20], stance: 1}
+        # Persistent unarmed enemy `fact` far east — engine
+        # auto-`done` guard (LOSS-not-DRAW).
+        - {type: fact, owner: enemy, position: [122, 20]}
+      scheduled_events:
+        # The disaster, declared at BOTH latitudes. scheduled_events
+        # do NOT honour spawn_point, so both fire every seed; the one
+        # on the dormant latitude matches no actors (a no-op). Each
+        # radius-8 blast wipes that latitude's proc + harv + the
+        # three forward tanks; the west base and one southern tank
+        # survive.
+        - tick: 1500
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 40, y: 12, radius: 8}
+        - tick: 1500
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 40, y: 28, radius: 8}
+    # `after_ticks: 1600` gates the win behind the disaster — see the
+    # easy-tier note.
+    win_condition:
+      all_of:
+        - units_killed_gte: 6
+        - building_count_gte: {type: proc, n: 1}
+        - after_ticks: 1600
+        - within_ticks: 4600
+    fail_condition:
+      any_of:
+        - after_ticks: 4601
+        - not: {building_count_gte: {type: fact, n: 1}}
+    max_turns: 52
