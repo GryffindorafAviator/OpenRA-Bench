@@ -1,0 +1,357 @@
+# build-defensive-skirt-corners — Skirt the High-Value Building with
+# Pillboxes in EVERY Corner
+#
+# REASONING focus: DISTRIBUTED-DEFENSE topology, the INVERSE of
+# `build-defensive-tower-cluster`. There the single high-value building
+# (the agent fact) was rushed from ONE direction, so the right doctrine
+# was a TIGHT CLUSTER wrapping it. HERE the same fact sits at the centre
+# of the map and is rushed CONCURRENTLY from ALL FOUR diagonal corners
+# (NE / NW / SE / SW). Concentrating every pillbox on one corner wins
+# THAT corner but the other three waves stride untouched into the fact
+# and raze it. The right doctrine is a SKIRT: one pillbox planted in
+# EACH of the four corner approaches around the fact, so every diagonal
+# axis has its own overlapping field of fire.
+#
+# The win predicate makes the four-corner topology load-bearing — total
+# pbox count alone is NOT enough; ONE pbox must sit inside a radius-4
+# disc in EACH of the four corner regions (NE/NW/SE/SW of the fact).
+# A concentrate-at-one-corner policy meets the count (4 pbox) but
+# satisfies only ONE of the four region clauses and fails the other
+# three — AND the three uncovered corner waves reach the fact and raze
+# it. Concentrate LOSES; the intended four-corner skirt WINS.
+#
+# Real-world anchors (binding meta.benchmark_anchor):
+#   • MicroRTS pillbox placement — the canonical RTS sub-benchmark for
+#     where a finite set of static defences should be planted; the
+#     correct answer tracks the cardinality of incoming threat axes.
+#   • Distributed defense — defensive capacity matched to the number of
+#     concurrent fronts, not massed on the loudest single front.
+#   • Military quadrant doctrine — a force defending a central asset
+#     against attack from all bearings posts a strongpoint in EACH
+#     quadrant; an undefended quadrant is an open envelopment lane.
+#
+# Discrimination (four-script bar — scripted, no model needed):
+#   • stall (observe-only): spends nothing; the four corner rushes
+#     converge on the fact and raze it — the fact-alive fail clause
+#     fires → LOSS (`after_ticks` is the deterministic backstop, no
+#     draw degeneracy).
+#   • concentrate (all 4 pbox massed at ONE corner, e.g. NE): meets the
+#     count clause and satisfies the NE region clause but FAILS the NW,
+#     SE, SW region clauses (0 pbox in each) AND the three uncovered
+#     corner waves walk into the fact and raze it → LOSS.
+#   • pure-army (only e1, never a pbox): FAILS the count clause AND all
+#     four region clauses; the rifle wall alone cannot hold four
+#     concurrent rushes → LOSS.
+#   • intended SKIRT (1 pbox in EACH of the four corner regions): all
+#     four region clauses hold; every diagonal axis has its own pbox
+#     field of fire shredding its wave; count + 4×region + kill +
+#     fact-alive clauses all satisfied → WIN.
+#
+# Why the spec works (engine combat sheet, per CLAUDE.md):
+#   • pbox = pillbox (anti-infantry base defence; cost 600cr; very high
+#     dps vs rifle infantry; 1×1 footprint). Defence and infantry are
+#     SEPARATE production queues, so a model may queue build('pbox')
+#     and build('e1') in parallel.
+#   • `building_count_gte:{pbox,4}` + FOUR `building_in_region` clauses
+#     (one radius-4 disc per corner) make the four-corner SKIRT load-
+#     bearing: a concentration satisfies the count and exactly one
+#     region clause and fails the other three.
+#   • `building_count_gte:{fact,1}` (PRESENT-TENSE) is the fact-alive
+#     check — `has_building:fact` is a one-shot ever-seen set that
+#     stays true after the fact is razed (documented CLAUDE.md footgun).
+#   • `after_ticks: BUDGET+1` fail clause is reachable within max_turns
+#     (no interrupts ⇒ exactly 90 ticks/step ⇒ max tick = 93+90·(N-1));
+#     stallers hit it and LOSE rather than draw.
+#   • A persistent unarmed enemy `fact` keeps the episode alive past
+#     full rusher elimination so the win/fail evaluator sees the
+#     terminal frame (no DRAW collapse on enemy-wipe auto-done).
+#   • The `rusher` bot charges the agent centroid (the fact at map
+#     centre) — that is WHY a corner wave whose corner has no pbox
+#     walks straight into the fact, and why a skirt with a pbox in
+#     every corner shreds every wave at its own approach.
+#   • Cash is intentionally tight (exactly 4×600cr = 2400cr). A model
+#     that wastes cash on extra units cannot complete the pbox count.
+
+meta:
+  id: build-defensive-skirt-corners
+  title: 'Defense Topology — Skirt the Building with a Pillbox in Every Corner'
+  capability: reasoning
+  real_world_meaning: >
+    A single high-value building (the fact — your construction yard)
+    sits at the centre of the map and is rushed CONCURRENTLY from all
+    four diagonal corners (NE, NW, SE, SW). Right doctrine: a SKIRT of
+    pillboxes — one planted in EACH of the four corner approaches — so
+    every diagonal axis has its own overlapping field of fire. Wrong
+    doctrine: massing every pillbox on a single corner; that satisfies
+    a naive "we built four defences" count and holds one corner, but
+    the three uncovered corner waves stride untouched into the fact and
+    raze it. The win predicate makes the topology load-bearing: total
+    pbox count is not enough — one pbox must sit inside a radius-4 disc
+    in EVERY corner region, AND the fact must survive.
+  robotics_analogue: >
+    Distributed defense / quadrant coverage: when one central asset is
+    threatened from all bearings, finite defensive capacity must be
+    matched to the cardinality of the threat axes — a strongpoint in
+    every quadrant — not massed on the loudest single approach. The
+    same logic as air-defence sector coverage or a multi-front
+    perimeter: an uncovered sector is an open envelopment lane no
+    matter how heavily the others are defended.
+  benchmark_anchor:
+    - "MicroRTS pillbox placement"
+    - "distributed defense"
+    - "military quadrant doctrine"
+  author: "openra-bench"
+
+base_map: rush-hour-arena
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: rusher}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - stop
+  planning: true
+  # No interrupts — defense topology is a STATIC up-front decision; the
+  # four diagonal threat axes are known a priori (the rusher always
+  # charges the central agent fact). Disabling interrupts also makes the
+  # tick budget deterministic (exactly 90 ticks/step ⇒ max_turns is a
+  # hard tick budget the `after_ticks` fail clause reliably bites in).
+  interrupts: {}
+  termination:
+    max_ticks: 12000
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ── bare FOUR-CORNER-SKIRT skill: budget covers exactly 4
+  # pbox (2400cr). Win requires the count (4 pbox) AND one pbox inside
+  # the radius-4 disc of EACH corner region (NE (76,10), NW (52,10),
+  # SE (76,30), SW (52,30) — corners of the fact at (64,20)). A
+  # concentrate-at-one-corner layout meets the count but satisfies
+  # exactly one region clause. Stall loses (clock OR fact razed);
+  # pure-army loses (count). max_turns 60 ⇒ reachable tick
+  # 93+90·59 = 5403; deadline 5400.
+  easy:
+    description: >
+      Four rusher bands of rifle infantry charge your construction yard
+      (fact, at map centre (64,20)) CONCURRENTLY from the four diagonal
+      corners (NE, NW, SE, SW). Build 4 pillboxes (pbox — 600cr each,
+      budget exactly 2400) AND place ONE of them inside the radius-4
+      disc of EACH corner region around the fact: NE (76,10), NW
+      (52,10), SE (76,30), SW (52,30). Massing all four pillboxes on a
+      single corner holds that corner but lets the other three waves
+      reach the fact. Stall, pure-army, and concentrate all LOSE. The
+      fact must survive; ≥4 enemy units must die before tick 5400.
+    starting_cash: 2400
+    overrides:
+      actors:
+        # Pre-placed agent base. Fact at map centre (64,20); tent and
+        # powr tucked just NORTH-WEST of the fact, clear of all four
+        # corner regions and leaving every corner disc free for a pbox.
+        - {type: fact, owner: agent, position: [64, 20]}
+        - {type: tent, owner: agent, position: [60, 16]}
+        - {type: powr, owner: agent, position: [60, 24]}
+        # 4 pre-placed e1 defenders ringing the fact (the skirt pboxes
+        # are the load-bearing wall; these are supporting fire so the
+        # concentrate / pure-army counterfactuals are still
+        # discriminated). stance:2 (return fire) so they hold position.
+        - {type: e1, owner: agent, position: [66, 19], stance: 2}
+        - {type: e1, owner: agent, position: [66, 21], stance: 2}
+        - {type: e1, owner: agent, position: [62, 19], stance: 2}
+        - {type: e1, owner: agent, position: [62, 21], stance: 2}
+        # Four rusher bands, one per diagonal map corner. Each charges
+        # the agent centroid (the central fact), so each wave approaches
+        # along its own diagonal axis. 3× e1 per corner is enough to
+        # raze the fact through an uncovered corner but a single pbox
+        # planted in that corner shreds it.
+        - {type: e1, owner: enemy, position: [114,  6], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [14,   6], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [114, 34], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [14,  34], stance: 3, count: 3}
+        # Unarmed high-HP marker (anti-DRAW): keeps the episode alive
+        # past full rusher elimination so the win/fail check fires.
+        - {type: fact, owner: enemy, position: [64, 4]}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: pbox, n: 4}}
+        - {building_in_region: {type: pbox, x: 76, y: 10, radius: 4, count: 1}}
+        - {building_in_region: {type: pbox, x: 52, y: 10, radius: 4, count: 1}}
+        - {building_in_region: {type: pbox, x: 76, y: 30, radius: 4, count: 1}}
+        - {building_in_region: {type: pbox, x: 52, y: 30, radius: 4, count: 1}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {units_killed_gte: 4}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── MEDIUM ── +1 axis: the kill bar is raised from ≥4 to ≥8. The
+  # rush count is the SAME as easy (3× e1 per corner = 12 total) so
+  # the central pre-placed defenders hold the fact long enough for the
+  # four-corner skirt to come online — but the higher kill bar means
+  # the skirt must actually ENGAGE and clear most of the rush, not
+  # merely survive on the clock. A concentrate layout, with three
+  # corners uncovered, both fails three region clauses AND lets those
+  # waves walk into the fact. The four-corner region bar is unchanged.
+  # max_turns 60 ⇒ reachable tick 5403; deadline 5400.
+  medium:
+    description: >
+      Four rusher bands — 3 rifle infantry each (12 total) — charge
+      your construction yard (fact, at map centre (64,20))
+      CONCURRENTLY from the four diagonal corners. Build 4 pillboxes
+      (budget exactly 2400cr = 4 pbox at 600 each) AND place ONE inside
+      the radius-4 disc of EACH corner region: NE (76,10), NW (52,10),
+      SE (76,30), SW (52,30). Massing all four pillboxes on a single
+      corner satisfies only one region clause and lets the three
+      uncovered waves walk into the fact. Stall, pure-army, and
+      concentrate all LOSE. The fact must survive; ≥8 enemy units must
+      die before tick 5400 — the medium kill bar forces the skirt to
+      actively clear the rush, not merely outlast it.
+    starting_cash: 2400
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [64, 20]}
+        - {type: tent, owner: agent, position: [60, 16]}
+        - {type: powr, owner: agent, position: [60, 24]}
+        # 4 pre-placed e1 defenders ringing the fact — supporting fire;
+        # the skirt pboxes remain the load-bearing wall.
+        - {type: e1, owner: agent, position: [66, 19], stance: 2}
+        - {type: e1, owner: agent, position: [66, 21], stance: 2}
+        - {type: e1, owner: agent, position: [62, 19], stance: 2}
+        - {type: e1, owner: agent, position: [62, 21], stance: 2}
+        # Four rusher bands, 3× e1 per corner (12 total) — the same
+        # count as easy so the central pre-placed defenders hold the
+        # fact long enough for the four-corner skirt to come online.
+        # The medium +1 axis is the raised kill bar (≥8 vs easy's ≥4):
+        # the skirt must actually engage and clear most of the rush,
+        # not merely survive it. A concentrate layout, with three
+        # corners uncovered, both fails three region clauses AND lets
+        # those waves through to the fact.
+        - {type: e1, owner: enemy, position: [114,  6], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [14,   6], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [114, 34], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [14,  34], stance: 3, count: 3}
+        # Anti-DRAW marker.
+        - {type: fact, owner: enemy, position: [64, 4]}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: pbox, n: 4}}
+        - {building_in_region: {type: pbox, x: 76, y: 10, radius: 4, count: 1}}
+        - {building_in_region: {type: pbox, x: 52, y: 10, radius: 4, count: 1}}
+        - {building_in_region: {type: pbox, x: 76, y: 30, radius: 4, count: 1}}
+        - {building_in_region: {type: pbox, x: 52, y: 30, radius: 4, count: 1}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {units_killed_gte: 8}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60
+
+  # ── HARD ── +1 axis: TWO seed-driven agent spawn_point groups so the
+  # fact (and therefore the four corner regions of the skirt) FLIPS
+  # between a WEST base (fact at x=50) and an EAST base (fact at x=78)
+  # per seed — a 14-cell swing each way from the easy/medium centre at
+  # x=64. The flip is along the EAST-WEST axis (not north-south) so the
+  # fact stays at y=20 and remains equidistant from all four diagonal
+  # corner rushes — the threat geometry is balanced on both seeds; the
+  # only thing the seed changes is WHERE the skirt's four corner discs
+  # sit. The win predicate's `any_of` accepts the four-corner skirt
+  # around EITHER candidate fact longitude — but a single memorised
+  # "skirt the corners of (64,20)" plan does NOT work: the fact never
+  # sits at x=64 on hard, so a x=64-centred skirt lands every pbox
+  # ≥10 cells outside the active corner discs (radius 4) and fails the
+  # region bar. The model must READ the fact's longitude from
+  # observation and place the four corner pboxes relative to it. The
+  # four rusher bands are FIXED at the four map corners and always
+  # place every seed (enemy actors don't honour spawn_point —
+  # CLAUDE.md / oramap.rs::expand_scenario_actors); the rusher charges
+  # the agent centroid, so all four bands converge on whichever fact
+  # is present this seed. Kill bar 8. max_turns 60 ⇒ reachable tick
+  # 5403; deadline 5400.
+  hard:
+    description: >
+      The agent construction yard (fact) flips between a WEST base
+      (fact at (50,20)) and an EAST base (fact at (78,20)) by seed; the
+      four corner regions of the skirt must follow. Build 4 pillboxes
+      (budget 2400cr = 4 pbox at 600 each) AND place ONE inside the
+      radius-4 disc of EACH corner of the CURRENT fact (read the fact's
+      longitude from the observation). Massing all four pillboxes on
+      one corner, or skirting the corners of the wrong (x=64) centre,
+      satisfies at most one region clause and lets the uncovered waves
+      raze the fact. Stall, pure-army, and concentrate all LOSE. The
+      fact must survive; ≥8 enemy units must die before tick 5400.
+    starting_cash: 2400
+    overrides:
+      actors:
+        # spawn_point 0 — WEST base. Fact at (50,20); corner regions
+        # at NE (62,10), NW (38,10), SE (62,30), SW (38,30). SIX
+        # pre-placed e1 ring the fact (two more than easy/medium) so
+        # the off-centre base holds the fact long enough for the skirt
+        # to come online regardless of the order the four corners are
+        # built in (the win predicate only scores the FINAL skirt, so
+        # build order must not decide the outcome).
+        - {type: fact, owner: agent, position: [50, 20], spawn_point: 0}
+        - {type: tent, owner: agent, position: [46, 16], spawn_point: 0}
+        - {type: powr, owner: agent, position: [46, 24], spawn_point: 0}
+        - {type: e1, owner: agent, position: [52, 19], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [52, 21], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [48, 19], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [48, 21], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [50, 18], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [50, 22], stance: 2, spawn_point: 0}
+        # spawn_point 1 — EAST base. Fact at (78,20); corner regions
+        # at NE (90,10), NW (66,10), SE (90,30), SW (66,30). SIX
+        # pre-placed e1 ring the fact (mirror of the WEST base).
+        - {type: fact, owner: agent, position: [78, 20], spawn_point: 1}
+        - {type: tent, owner: agent, position: [74, 16], spawn_point: 1}
+        - {type: powr, owner: agent, position: [74, 24], spawn_point: 1}
+        - {type: e1, owner: agent, position: [80, 19], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [80, 21], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [76, 19], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [76, 21], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [78, 18], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [78, 22], stance: 2, spawn_point: 1}
+        # Four rusher bands FIXED at the four map corners (3× e1 each =
+        # 12 total, same load as easy/medium). Enemies don't honour
+        # spawn_point so all four always place; the rusher charges the
+        # agent centroid so every band converges on whichever fact the
+        # seed selected — the seed flips ONLY the agent base / skirt
+        # geometry, not the threat count.
+        - {type: e1, owner: enemy, position: [114,  6], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [14,   6], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [114, 34], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [14,  34], stance: 3, count: 3}
+        # Anti-DRAW marker on the symmetry axis.
+        - {type: fact, owner: enemy, position: [64, 4]}
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: pbox, n: 4}}
+        - any_of:
+            # WEST base (fact x=50): corners at x=38 (NW/SW) and x=62 (NE/SE).
+            - all_of:
+                - {building_in_region: {type: pbox, x: 62, y: 10, radius: 4, count: 1}}
+                - {building_in_region: {type: pbox, x: 38, y: 10, radius: 4, count: 1}}
+                - {building_in_region: {type: pbox, x: 62, y: 30, radius: 4, count: 1}}
+                - {building_in_region: {type: pbox, x: 38, y: 30, radius: 4, count: 1}}
+            # EAST base (fact x=78): corners at x=66 (NW/SW) and x=90 (NE/SE).
+            - all_of:
+                - {building_in_region: {type: pbox, x: 90, y: 10, radius: 4, count: 1}}
+                - {building_in_region: {type: pbox, x: 66, y: 10, radius: 4, count: 1}}
+                - {building_in_region: {type: pbox, x: 90, y: 30, radius: 4, count: 1}}
+                - {building_in_region: {type: pbox, x: 66, y: 30, radius: 4, count: 1}}
+        - {building_count_gte: {type: fact, n: 1}}
+        - {units_killed_gte: 8}
+        - {within_ticks: 5400}
+    fail_condition:
+      any_of:
+        - {after_ticks: 5401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 60

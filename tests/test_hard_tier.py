@@ -662,6 +662,21 @@ UPGRADED = [
     # the active fact, but it is heavy enough to overwhelm any
     # defence that isn't a CLUSTER around the correct fact.
     "build-defensive-tower-cluster",
+    # Wave-10 REASONING pack: distributed-defense topology — the inverse
+    # of build-defensive-tower-cluster. One central high-value building
+    # (the agent fact) is rushed CONCURRENTLY from all four diagonal
+    # corners; the right doctrine is a SKIRT (one pbox per corner
+    # region), not a concentration at one corner. Hard tier defines two
+    # agent spawn_point groups (WEST fact x=50 / EAST fact x=78) round-
+    # robined by seed; the four corner regions of the skirt flip with
+    # the fact, so a memorised "skirt the corners of (64,20)" plan
+    # cannot generalise. The four rusher bands are fixed at the four
+    # map corners and always place every seed (enemy actors don't
+    # honour spawn_point — CLAUDE.md); the rusher charges the agent
+    # centroid so every band converges on whichever fact the seed
+    # selected. MicroRTS pillbox placement / military quadrant
+    # doctrine anchor.
+    "build-defensive-skirt-corners",
     # Wave-7 REASONING asymmetric-underdog pack — SC2 asymmetric /
     # guerrilla tactics / asymmetric warfare anchor. 2× 2tnk vs 4× e1
     # + 1× 3tnk; head-on loses, off-axis flank-pick (outside the
