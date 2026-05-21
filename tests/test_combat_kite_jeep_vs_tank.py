@@ -1,26 +1,35 @@
 """combat-kite-jeep-vs-tank — kite a slow heavy unit with fast raiders.
 
-Bar: the intended kite cycle (move-AWAY when the heavy is close, then
-attack_unit at range; repeat) is the load-bearing decision. The four
-script-policy proxies exercise the predicate teeth and the failure-
-mode bar:
+Bar (recalibrated 2026-05-20 after the OpenRA-Rust engine movement
+fixes — moving units now fire AND take fire en route, and attack_unit
+on an out-of-sight target paths normally instead of teleporting).
+Those fixes (a) made the old 1tnk-light-tank easy variant fully
+degenerate — every policy, pure stall included, killed the weak light
+tank for free — and (b) shifted the close-range trade so a static
+attack_unit stand now trades exactly ONE raider for the kill. The
+recalibration:
 
-  • stall (observe only)            → LOSS
-  • stand-and-shoot                  → LOSS (cannon out-trades raider
-    weapons; survival bar fails)
-  • brute attack_move east           → LOSS (no disengage; tank closes
-    and out-trades)
-  • intended kite cycle              → WIN (in principle, see notes)
+  • easy now uses the same 3tnk Soviet heavy as medium/hard, staged
+    CLOSER (x≈70) so the kite-band is widest (the easy difficulty
+    axis is band width, not a weaker enemy);
+  • the survival bar is own_units_gte:3 on EVERY tier — kiting kills
+    the heavy losing ZERO raiders, every non-kite policy loses ≥1, so
+    "lose no raider" is the load-bearing teeth.
 
-Engine note (verified 2026-05-19): with the `hunt` bot the heavy tank
-closes ~50 cells per 90-tick decision interval. A purely reactive
-kite cycle (act after observing the tank within range) lags one
-decision behind the tank's approach and currently cannot consistently
-preserve raiders to the survival bar on every seed. The PREDICATE-
-level discrimination is strict and correct; the engine-driven
-intended-kite WIN test is parametrized over seeds with a `xfail`
-note documenting this engine limitation, while the other three
-engine-driven LOSS tests are strict.
+The four script-policy proxies, every level, seeds 1-4:
+
+  • stall (observe only)        → LOSS — the hunt-bot heavy closes and
+    grinds a raider down (killed 0, lost 1).
+  • stand-and-shoot             → LOSS — attack_unit the heavy without
+    disengaging; the cannon out-trades raider weapons at close range
+    and one raider falls (killed 0-1, lost 1).
+  • brute attack_move east      → LOSS — no disengage; the column
+    meets the heavy point-blank and loses a raider (killed 0, lost
+    1-2).
+  • intended kite cycle         → WIN — when the heavy is within ~5
+    cells move the raiders away along the lane, else attack_unit it;
+    repeat. Kills the heavy keeping all three raiders (killed 1,
+    lost 0).
 """
 
 from __future__ import annotations
@@ -65,14 +74,18 @@ def _ctx(units_xy=(), tick=1000, killed=0, lost=0):
 
 def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    raiders3 = [(28, 19), (30, 20), (28, 21)]
+    raiders3 = [(28, 9), (30, 10), (28, 11)]
 
-    # Intended: 1 kill (tank), ≥1 raider alive, in time → WIN
+    # Intended: 1 kill (the heavy), all 3 raiders alive, in time → WIN
     assert evaluate(c.win_condition, _ctx(raiders3, tick=3000, killed=1, lost=0))
-    # 2 losses (1 raider remaining) still wins on easy (cap is ≥1)
-    assert evaluate(c.win_condition, _ctx(raiders3[:1], tick=3000, killed=1, lost=2))
-    # All 3 lost → fail (own_units_gte:1 fails)
-    assert evaluate(c.fail_condition, _ctx([], tick=3000, killed=1, lost=3))
+    # 1 loss (only 2 raiders) → win fails (the bar is own_units_gte:3)
+    assert not evaluate(
+        c.win_condition, _ctx(raiders3[:2], tick=3000, killed=1, lost=1)
+    )
+    # 0 kills → win fails
+    assert not evaluate(c.win_condition, _ctx(raiders3, tick=3000, killed=0, lost=0))
+    # 1 raider lost → fail clause fires (own_units_gte:3 busts)
+    assert evaluate(c.fail_condition, _ctx(raiders3[:2], tick=3000, killed=1, lost=1))
     # Past deadline → real loss, reachable within max_turns
     assert evaluate(c.fail_condition, _ctx(raiders3, tick=4502, killed=0, lost=0))
     assert 4501 <= 93 + 90 * (c.max_turns - 1), (
@@ -80,21 +93,19 @@ def test_predicates_easy():
     )
 
 
-def test_predicates_medium_two_raider_survival_bar():
+def test_predicates_medium_force_preservation_bar():
     c = compile_level(load_pack(PACK_PATH), "medium")
-    raiders3 = [(28, 19), (30, 20), (28, 21)]
+    raiders3 = [(28, 9), (30, 10), (28, 11)]
     raiders2 = raiders3[:2]
-    raiders1 = raiders3[:1]
 
-    # Intended: 1 kill, ≥2 raiders alive → WIN
+    # Intended: 1 kill, all 3 raiders alive → WIN
     assert evaluate(c.win_condition, _ctx(raiders3, tick=3000, killed=1, lost=0))
-    assert evaluate(c.win_condition, _ctx(raiders2, tick=3000, killed=1, lost=1))
-    # 1 raider remaining → predicate fails (need ≥2)
-    assert not evaluate(c.win_condition, _ctx(raiders1, tick=3000, killed=1, lost=2))
+    # 1 raider lost → predicate fails (need ≥3)
+    assert not evaluate(c.win_condition, _ctx(raiders2, tick=3000, killed=1, lost=1))
     # 0 kills → predicate fails
     assert not evaluate(c.win_condition, _ctx(raiders3, tick=3000, killed=0, lost=0))
-    # 1 raider remaining → fail clause fires
-    assert evaluate(c.fail_condition, _ctx(raiders1, tick=3000, killed=1, lost=2))
+    # 1 raider lost → fail clause fires
+    assert evaluate(c.fail_condition, _ctx(raiders2, tick=3000, killed=1, lost=1))
     # Past deadline → real loss, reachable
     assert evaluate(c.fail_condition, _ctx(raiders3, tick=4502, killed=0, lost=0))
     assert 4501 <= 93 + 90 * (c.max_turns - 1)
@@ -104,11 +115,11 @@ def test_predicates_hard_tighter_deadline_and_survival_bar():
     c = compile_level(load_pack(PACK_PATH), "hard")
     raiders3 = [(28, 9), (30, 10), (28, 11)]
 
-    # Intended: 1 kill, ≥2 alive, in time → WIN
+    # Intended: 1 kill, all 3 alive, in time → WIN
     assert evaluate(c.win_condition, _ctx(raiders3, tick=3000, killed=1, lost=0))
-    # 1 raider remaining → predicate fails (need ≥2)
+    # 1 raider lost → predicate fails (need ≥3)
     assert not evaluate(
-        c.win_condition, _ctx(raiders3[:1], tick=3000, killed=1, lost=2)
+        c.win_condition, _ctx(raiders3[:2], tick=3000, killed=1, lost=1)
     )
     # Past the tighter deadline → real loss, reachable
     assert evaluate(c.fail_condition, _ctx(raiders3, tick=3602, killed=0, lost=0))
@@ -146,6 +157,26 @@ def test_pack_compiles_and_meta_fields_populated():
         assert c.win_condition is not None and c.fail_condition is not None
 
 
+def test_force_preservation_bar_is_lose_zero_on_every_tier():
+    """The recalibrated bar is own_units_gte:3 on every level — a
+    policy that loses even ONE of the three raiders fails the win and
+    trips the fail clause. This is what makes the kite cycle (lose
+    zero) load-bearing against a stand-and-shoot (lose one)."""
+    pack = load_pack(PACK_PATH)
+    raiders3 = [(28, 9), (30, 10), (28, 11)]
+    for lvl in ("easy", "medium", "hard"):
+        c = compile_level(pack, lvl)
+        # all 3 alive + a kill → WIN
+        assert evaluate(c.win_condition, _ctx(raiders3, tick=2000, killed=1))
+        # exactly one raider lost → NOT a win, and fail clause fires
+        assert not evaluate(
+            c.win_condition, _ctx(raiders3[:2], tick=2000, killed=1, lost=1)
+        )
+        assert evaluate(
+            c.fail_condition, _ctx(raiders3[:2], tick=2000, killed=1, lost=1)
+        )
+
+
 def test_timeout_loss_is_reachable_on_every_level():
     """No draw degeneracy: the after_ticks deadline fits inside
     max_turns on every level (∼90 ticks/turn ⇒ 93 + 90·(max_turns-1))."""
@@ -164,10 +195,12 @@ def test_timeout_loss_is_reachable_on_every_level():
 # KITE_TRIGGER cells of a raider, move that raider RETREAT_DIST cells
 # AWAY from the tank along the lane; otherwise attack_unit the
 # nearest tank. The cycle is purely reactive — no memory, derived
-# each turn from geometry.
+# each turn from geometry. KITE_TRIGGER=5 is the proximity threshold
+# that generalises across all tiers and both hard spawn corridors
+# (the recalibrated kite band).
 
-KITE_TRIGGER = 6
-RETREAT_DIST = 8
+KITE_TRIGGER = 5
+RETREAT_DIST = 12
 
 
 def _tanks(enemies):
@@ -179,15 +212,15 @@ def _tanks(enemies):
 
 
 def _stall_policy(rs, Command):
-    """Stall: only observe. Kill bar never met → fail on the clock
-    (medium/hard) or after the hunt-bot tank wipes the idle stack."""
+    """Stall: only observe. The hunt-bot heavy closes on the idle
+    raider stack and grinds a raider down → own_units_gte:3 busts."""
     return [Command.observe()]
 
 
 def _stand_and_shoot_policy(rs, Command):
-    """Stand at staging, attack_unit the tank when visible. The
-    heavy's cannon out-trades the raider stack head-on; survival bar
-    (own_units_gte:2 on medium/hard) fails."""
+    """Stand at staging, attack_unit the heavy when visible — never
+    disengage. The cannon out-trades raider weapons head-on; one
+    raider falls and the own_units_gte:3 survival bar fails."""
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
     tanks = _tanks(enemies)
@@ -210,8 +243,8 @@ def _stand_and_shoot_policy(rs, Command):
 
 def _brute_attack_move_policy(rs, Command):
     """Brute: one attack_move order eastward. No disengage; the
-    column meets the hunt-bot heavy and dies in the same close-range
-    trade as stand-and-shoot."""
+    column meets the hunt-bot heavy and loses a raider in the same
+    close-range trade as stand-and-shoot."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
@@ -266,16 +299,16 @@ def _intended_kite_policy(rs, Command):
     return cmds
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 def test_stall_policy_loses(level):
-    """Stall must LOSE on medium and hard (kill bar unmet OR hunt-bot
-    tank wipes the idle stack)."""
+    """Stall must LOSE on every level/seed — the hunt-bot heavy closes
+    on the idle raider stack and grinds a raider down (own_units_gte:3
+    busts)."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
-    for s in seeds:
+    for s in (1, 2, 3, 4):
         res = run_level(c, _stall_policy, seed=s)
         assert res.outcome == "loss", (
             f"{level} seed={s}: stall must LOSE; got {res.outcome} "
@@ -283,17 +316,16 @@ def test_stall_policy_loses(level):
         )
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 def test_brute_attack_move_loses(level):
     """Brute attack_move east must LOSE — no disengage; the hunt-bot
-    heavy closes to point-blank and out-trades the column before the
-    survival bar is met."""
+    heavy closes to point-blank and out-trades the column, costing a
+    raider before the survival bar is met."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
-    for s in seeds:
+    for s in (1, 2, 3, 4):
         res = run_level(c, _brute_attack_move_policy, seed=s)
         assert res.outcome == "loss", (
             f"{level} seed={s}: brute attack_move must LOSE; got "
@@ -302,57 +334,38 @@ def test_brute_attack_move_loses(level):
         )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Engine note (verified 2026-05-19): a tightly-focused stand-and-"
-        "shoot (attack_unit on the heavy, hold position at the off-axis "
-        "staging) trades exactly 1 raider for the kill on current engine "
-        "numbers — clears the own_units_gte:2 bar with 2 survivors. The "
-        "KITE policy is strictly STRONGER on the rigor axis (preserves "
-        "more raider HP and more flexible against multi-tank variants) "
-        "but both pass the bar as currently stated. Bar-tightening to "
-        "own_units_gte:3 is engine-blocked: the kite cycle cannot "
-        "preserve all 3 raiders under hunt-bot close-range geometry. "
-        "Tracked for a follow-up engine pass that makes heavy close-range "
-        "volleys AoE the raider stack."
-    ),
-    strict=False,
-)
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 def test_stand_and_shoot_loses(level):
-    """Stand-and-shoot should LOSE on medium and hard — the heavy tank's
-    cannon out-trades raider weapons head-on. Marked xfail: see
-    decorator note (current engine numbers allow a 2-survivor stand)."""
+    """Stand-and-shoot must LOSE on every level/seed — the heavy tank's
+    cannon out-trades raider weapons head-on. With the recalibrated
+    own_units_gte:3 bar a stand trades exactly one raider for the kill
+    and busts the survival cap (was an xfail on the pre-fix engine,
+    now a strict LOSS)."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
-    for s in seeds:
+    for s in (1, 2, 3, 4):
         res = run_level(c, _stand_and_shoot_policy, seed=s)
         assert res.outcome == "loss", (
-            f"{level} seed={s}: stand-and-shoot expected LOSS, got "
+            f"{level} seed={s}: stand-and-shoot must LOSE; got "
             f"{res.outcome} killed={res.signals.units_killed} "
             f"lost={res.signals.units_lost}"
         )
 
 
-@pytest.mark.parametrize("level", ["medium", "hard"])
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 def test_intended_kite_wins(level):
     """Intended kite cycle (reactive move-away + attack_unit) — the
     spec's load-bearing decision: each turn, if the heavy is within
-    KITE_TRIGGER cells, retreat along the lane; otherwise attack_unit
-    the nearest tank. Verified WINNING on every hard seed (1..4) and
-    medium seed=1 with the off-axis raider staging (raiders on the
-    y=10 corridor, heavy on y=20) — the y-axis lag in the hunt-bot
-    centroid chase gives the kite cycle a reactive window.
-    """
+    KITE_TRIGGER (~5) cells, retreat along the lane; otherwise
+    attack_unit the nearest tank. Verified WINNING on every level and
+    every seed (1..4) — kills the heavy keeping all three raiders."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
     c = compile_level(load_pack(PACK_PATH), level)
-    seeds = (1, 2, 3, 4) if level == "hard" else (1,)
-    for s in seeds:
+    for s in (1, 2, 3, 4):
         res = run_level(c, _intended_kite_policy, seed=s)
         assert res.outcome == "win", (
             f"{level} seed={s}: intended kite should WIN, got {res.outcome} "
