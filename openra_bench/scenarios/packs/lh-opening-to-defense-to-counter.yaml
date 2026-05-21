@@ -1,0 +1,389 @@
+# lh-opening-to-defense-to-counter.yaml
+#
+# REASONING capability — Wave-10 long-horizon 3-phase military chain:
+#   PHASE 1 (OPENING): bring the base online — own a powr AND a proc
+#   PHASE 2 (DEFENSE): survive the opening rush — kill ≥N_def rushers
+#                      AND hold the line past tick T1
+#   PHASE 3 (COUNTER): destroy the enemy construction yard far east
+#
+# The Wave-2 `then:` happened-before composite GATES each phase: the
+# chain only advances once the preceding clause has been observed
+# true at least once, IN ORDER. A policy that stalls loses its fact
+# to the rush; a policy that races east first loses its fact while
+# undefended; a defend-only policy survives the rush but never razes
+# the enemy yard so phase 3 never latches. Only the intended
+# open → defend → counter chain WINS within the tick budget.
+#
+# Sister pack to `lh-econ-army-victory` (econ → army → victory) and
+# `lh-build-army-coordinate-multifront-attack` (army → multifront).
+# This pack uses the OPENING / DEFENSE / COUNTER trio — the SC2
+# timing-push and military "defend-then-counter" anchor of holding a
+# rush at home and then converting the survived defence into an
+# offensive that takes the enemy base.
+#
+# ENGINE NOTES (verified against the installed openra_train wheel):
+# 1. Cost / power table (gamerules.rs / build-power-online-first
+#    ENGINE NOTE #1):
+#       powr = 300   (no prereq, +100 power)
+#       proc = 1400  (prereq powr, ~−30 power) — pre-placed here
+#       tent = 400   (prereq powr)             — pre-placed here
+#       weap = 2000  (prereq proc)             — pre-placed here
+#       e1   = 100   (prereq tent) — cheap rifleman
+#       e3   = 300   (prereq tent) — rocket soldier
+#       pbox = 600   (anti-infantry static defence)
+#    THE PRE-PLACED BASE STARTS UNPOWERED: fact+proc+tent+weap drain
+#    power but no `powr` is pre-placed (T0 power_provided=0,
+#    power_drained~50). Phase 1 (OPENING) is therefore a REAL build
+#    step — `build('powr')` — and it is LOAD-BEARING: an unpowered
+#    `tent` cannot train infantry, so until powr is up the agent
+#    CANNOT field a defensive force. Skip the opening ⇒ no defenders
+#    ⇒ the rush razes the base. (powr is cheap/$300 so the intended
+#    play has it online by ~tick 300, well before the rush at
+#    ~tick 1000.) `has_building: proc` is satisfied immediately by
+#    the pre-placed refinery; `has_building: powr` is the build —
+#    both must be OWNED for phase 1 to latch. The phase-1 clause is
+#    written as `{all_of: [{has_building: powr}, {has_building:
+#    proc}]}` — a single leaf node CANNOT carry the same key twice
+#    (YAML duplicate-key collapse would silently drop one of the two
+#    `has_building` checks), so the conjunction is expressed as an
+#    explicit `all_of` composite.
+# 2. The rusher scripted bot (`scripted_bot.rs::Rusher`) drives the
+#    whole band straight at the agent centroid every ~8 ticks — an
+#    undefended fact is razed in ~18 turns (tick ~1500, observed on
+#    this pack's stall run). The agent must blunt the rush at home
+#    with trained infantry (`e1` from the now-powered tent) and/or a
+#    pillbox to satisfy phase 2 (`units_killed_gte`).
+# 3. PHASE-2 clause pairs `units_killed_gte: N_def` with
+#    `after_ticks: T1` in ONE leaf node (implicit AND). The `then:`
+#    latch advances past phase 2 only once BOTH hold — the kill
+#    count is cumulative (`signals.units_killed` never resets) and
+#    T1 forces the chain to spend real time in the defence window
+#    before the counter phase opens. (`after_ticks` here sits inside
+#    a `then:` clause, NOT as a bare win leaf — the CLAUDE.md
+#    "after_ticks incompatible with ConquestVictoryConditions"
+#    footgun is about a bare win leaf colliding with engine
+#    auto-`done`; the persistent enemy marker fact below keeps the
+#    episode alive so the chain completes normally.)
+# 4. PHASE-3 uses `enemy_key_buildings_destroyed_in_region` scoped
+#    to the FAR-EAST objective enemy `fact`. A SECOND, persistent
+#    unarmed enemy `fact` marker sits even further out so the engine
+#    does not auto-`done` on all-enemy-MustBeDestroyed-gone the
+#    instant the objective yard falls (the CLAUDE.md auto-done
+#    footgun). The marker is placed deep enough that no intended
+#    counter force ever reaches it.
+# 5. Tick alignment: the engine advances ~90 ticks per decision turn,
+#    but with `interrupts:` enabled an interrupt-heavy run (constant
+#    own-unit-destroyed events) averages only ~50 ticks/turn. The
+#    budgets are tuned for the WORST case: `within_ticks` 5000 with
+#    `max_turns` 130 means even a ~45-tick/turn non-finisher crosses
+#    the `after_ticks: 5001` fail clause (130·45 ≈ 5850 > 5001)
+#    before the turn budget runs out — so a survive-but-never-finish
+#    policy reliably LOSES on the clock instead of timing out as a
+#    DRAW. The intended play wins by ~tick 4500 (interrupt-light,
+#    ~90 ticks/turn), comfortably inside `within_ticks`.
+#    `building_count_gte: {type: fact, n: 1}` in the fail_condition
+#    catches the agent's own fact being razed by the rush (the real
+#    defence-failure LOSS path).
+# 6. `spawn_point` filter applies PER OWNER (CLAUDE.md). Hard tier
+#    declares two AGENT spawn groups (NORTH y=14 / SOUTH y=24)
+#    round-robined by seed; the enemy facts (BUILDING actors) keep
+#    absolute coords every seed, while the enemy rush UNITS are
+#    placed near the active agent base on the spawn_point path (see
+#    the hard-tier comment), hence the pre-placed defensive squad.
+#
+# Validate (no engine):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/lh-opening-to-defense-to-counter.yaml
+
+meta:
+  id: lh-opening-to-defense-to-counter
+  title: 'Opening → Defense → Counter — Strict 3-Phase Military Chain'
+  capability: reasoning
+  real_world_meaning: >
+    A long single-episode military plan whose final win depends on
+    three sequenced milestones: first bring the base online (build
+    the power plant so the pre-placed barracks/refinery come online);
+    then survive a concentrated opening rush (kill enough of the
+    rushers and hold the line past a defence window); then convert
+    the survived defence into an offensive that destroys the enemy
+    construction yard far to the east. The Wave-2 `then:` composite
+    enforces happened-before sequencing — stalling loses the base to
+    the rush, racing the counter first loses the base while
+    undefended, and a pure defence that never counter-attacks cannot
+    complete the chain. Only the intended opening → defense →
+    counter plan WINS inside the tick budget.
+  robotics_analogue: >
+    Long-horizon agentic operation with strict stage gating in a
+    military / incident-response context: a site must first be
+    brought to operational readiness (power online so the line can
+    run), then survive a concentrated incoming attack (contain the
+    spike and hold past the incident window), then mount the planned
+    response that neutralises the source of the attack. Each stage
+    gates the next inside one budget window — skipping any stage (no
+    readiness, no defence, no response) forfeits the chain.
+  benchmark_anchor:
+    - "SC2 timing push"
+    - "military defense-then-counter"
+    - "PlanBench long-sequencing"
+    - "incident response: stabilise then remediate the source"
+  author: openra-bench
+
+base_map: rush-hour-arena
+
+base:
+  agent:
+    faction: allies
+  # The rusher scripted bot concentrates the whole band on the
+  # agent's centroid (~8-tick interval) — the canonical opening
+  # rush opponent.
+  enemy:
+    faction: soviet
+    bot_type: rusher
+  tools:
+    - observe
+    - build
+    - place_building
+    - harvest
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  # Re-decide the instant a rusher is spotted or a unit is lost —
+  # opening tempo is reactive, not on fixed ticks.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination:
+    max_ticks: 40000
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare 3-phase chain: a single 4×e1 rush, modest N_def and a
+  # generous clock. The chain still bites: skip the opening ⇒ the
+  # tent stays unpowered, no defenders, the fact is razed (fail);
+  # ignore the rush ⇒ the fact is razed or the rushers are never
+  # killed (P2 unmet); defend but never counter ⇒ P3 (enemy yard
+  # razed) never latches.
+  easy:
+    description: >
+      Pre-placed at the west base: a construction yard (fact), an
+      Allied barracks (tent), an ore refinery (proc), a war factory
+      (weap) and one harvester (harv) on a near ore patch. The base
+      starts UNPOWERED — you must build a power plant (powr) before
+      the barracks can train infantry. A single wave of 4 rifle
+      infantry rushes your base from mid-lane. Far to the east
+      stands the enemy construction yard. Three phases IN STRICT
+      ORDER (`then:` composite):
+        1. OPENING — own a 'powr' AND a 'proc' (build the power
+           plant; the refinery is already standing).
+        2. DEFENSE — destroy ≥4 of the rushers AND hold past
+           tick 1100 (train infantry from the now-powered tent).
+        3. COUNTER — destroy the enemy construction yard far east
+           (region around cell (118,20)).
+      Win within tick 5000. Stalling LOSES (the unpowered base
+      cannot defend; the fact is razed); racing the counter east
+      first LOSES (the fact is razed while undefended); building a
+      defence but never counter-attacking LOSES (phase 3 never
+      latches).
+    starting_cash: 3200
+    overrides:
+      actors:
+        # ── agent base (west) ── fact at the lane mouth; tent +
+        # proc + weap placed BEHIND the fact (smaller x) so the rush
+        # hits the fact / the agent's intercepting defenders first
+        # and the production buildings survive to keep training
+        # infantry. NO powr: the base starts unpowered — phase 1 is
+        # to build it.
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [8, 17]}
+        - {type: proc, owner: agent, position: [8, 23]}
+        - {type: weap, owner: agent, position: [6, 20]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        # Near ore patch so the pre-placed proc has somewhere to
+        # harvest once powered.
+        - {type: mine, owner: neutral, position: [24, 20]}
+        # ── opening rush ── one wave of 4× e1 at mid-lane, same
+        # row as the fact. Placed at x=72 so the rush needs ~12-13
+        # turns to reach the fact at x=10 (undefended fact razed by
+        # tick ~1100) — enough budget for the intended powr →
+        # defenders chain to stand up first.
+        - {type: e1, owner: enemy, position: [72, 20], stance: 3, count: 4}
+        # ── COUNTER objective ── the enemy construction yard far
+        # east. Phase 3 requires this razed (region around 118,20).
+        - {type: fact, owner: enemy, position: [118, 20]}
+        # ── persistent marker ── a second unarmed enemy fact even
+        # further out so the engine does not auto-`done` the
+        # instant the objective yard falls. Deep enough that no
+        # intended counter force ever reaches it.
+        - {type: fact, owner: enemy, position: [126, 36]}
+    win_condition:
+      all_of:
+        - then:
+            id: opening-defense-counter-easy
+            clauses:
+              # P1 OPENING — base online (powr AND proc owned).
+              - {all_of: [{has_building: powr}, {has_building: proc}]}
+              # P2 DEFENSE — rush blunted (kills) AND held past T1.
+              - {units_killed_gte: 4, after_ticks: 1100}
+              # P3 COUNTER — far-east enemy yard razed.
+              - enemy_key_buildings_destroyed_in_region:
+                  {x: 118, y: 20, radius: 8, types: [fact]}
+        - within_ticks: 5000
+    fail_condition:
+      any_of:
+        - {after_ticks: 5001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 130
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: a heavier rush (6× e1 + 2× e3) AND a
+  # larger N_def (7) AND a longer hold window (T1=1300). The opening
+  # and counter phases are unchanged — the added pressure is the
+  # defence phase, which now needs a real defensive force, not a
+  # token handful of riflemen.
+  medium:
+    description: >
+      Pre-placed at the west base: a construction yard (fact), an
+      Allied barracks (tent), an ore refinery (proc), a war factory
+      (weap) and one harvester (harv) on a near ore patch. The base
+      starts UNPOWERED — you must build a power plant (powr) before
+      the barracks can train infantry. A heavier wave of 6 rifle
+      infantry plus 2 rocket soldiers rushes your base from
+      mid-lane. Far to the east stands the enemy construction yard.
+      Three phases IN STRICT ORDER (`then:` composite):
+        1. OPENING — own a 'powr' AND a 'proc' (build the power
+           plant; the refinery is already standing).
+        2. DEFENSE — destroy ≥7 of the rushers AND hold past
+           tick 1300.
+        3. COUNTER — destroy the enemy construction yard far east
+           (region around cell (118,20)).
+      Win within tick 5000. Stalling, racing the counter east
+      first, and defend-only (no counter) all LOSE.
+    starting_cash: 3600
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: tent, owner: agent, position: [8, 17]}
+        - {type: proc, owner: agent, position: [8, 23]}
+        - {type: weap, owner: agent, position: [6, 20]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: mine, owner: neutral, position: [24, 20]}
+        # Heavier rush: 6× e1 + 2× e3 at mid-lane.
+        - {type: e1, owner: enemy, position: [72, 20], stance: 3, count: 6}
+        - {type: e3, owner: enemy, position: [72, 22], stance: 3, count: 2}
+        - {type: fact, owner: enemy, position: [118, 20]}
+        - {type: fact, owner: enemy, position: [126, 36]}
+    win_condition:
+      all_of:
+        - then:
+            id: opening-defense-counter-medium
+            clauses:
+              - {all_of: [{has_building: powr}, {has_building: proc}]}
+              - {units_killed_gte: 7, after_ticks: 1300}
+              - enemy_key_buildings_destroyed_in_region:
+                  {x: 118, y: 20, radius: 8, types: [fact]}
+        - within_ticks: 5000
+    fail_condition:
+      any_of:
+        - {after_ticks: 5001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 130
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled variable: ≥2 agent spawn_point groups (NORTH y=14
+  # / SOUTH y=24) round-robined by seed, so a memorised opening
+  # cannot generalise. ENGINE FACT (verified): on the spawn_point
+  # path the engine places scenario ENEMY UNIT actors near the enemy
+  # player spawn — which sits next to the agent — so the rush hits
+  # the base IMMEDIATELY (enemy BUILDING actors, by contrast, keep
+  # their absolute coords, so the counter objective fact stays far
+  # east). The hard tier therefore pre-places a defensive infantry
+  # squad (8× e1, stance:2) at each spawn so the instant rush is
+  # survivable; the OPENING phase (build powr) is still load-bearing
+  # — the `then:` chain cannot reach phase 2/3 until `has_building:
+  # powr` latches, so a policy that skips the opening forfeits the
+  # whole chain — and the COUNTER phase still requires marching a
+  # force ~110 cells east onto the enemy yard. The rush is heavier
+  # (8× e1 + 2× e3), N_def=9, and because the rush resolves fast the
+  # hold window T1 is short (700). Both spawns face the identical
+  # open→defend→counter discipline from a flipped base latitude.
+  hard:
+    description: >
+      Pre-placed at the west base (round-robined between a NORTH
+      y=14 and a SOUTH y=24 layout per seed): a construction yard
+      (fact), an Allied barracks (tent), an ore refinery (proc), a
+      war factory (weap), one harvester (harv) on a near ore patch,
+      and a defensive squad of 8 rifle infantry. The base starts
+      UNPOWERED — you must build a power plant (powr) before the
+      barracks can train more infantry. A heavy wave of 8 rifle
+      infantry plus 2 rocket soldiers rushes your base immediately.
+      Far to the east stands the enemy construction yard. Three
+      phases IN STRICT ORDER (`then:` composite):
+        1. OPENING — own a 'powr' AND a 'proc' (build the power
+           plant; the refinery is already standing).
+        2. DEFENSE — destroy ≥9 of the rushers AND hold past
+           tick 700.
+        3. COUNTER — destroy the enemy construction yard far east
+           (region around cell (118,20)).
+      Win within tick 5000. The seed-varied spawn means a memorised
+      "place powr at (12,20)" opening misses one of the two spawn
+      groups. Stalling LOSES (the opening is never built so the
+      chain never advances); racing the squad east first LOSES (the
+      base is razed by the immediate rush); defend-only (no counter)
+      LOSES (phase 3 never latches).
+    starting_cash: 4000
+    overrides:
+      actors:
+        # NORTH base spawn (spawn_point 0) — tent/proc/weap behind
+        # the fact (smaller x) so production survives the rush.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [8, 11], spawn_point: 0}
+        - {type: proc, owner: agent, position: [8, 17], spawn_point: 0}
+        - {type: weap, owner: agent, position: [6, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        # Pre-placed defensive squad (8× e1, stance:2 Defend) so the
+        # IMMEDIATE rush is survivable while the agent builds powr.
+        - {type: e1, owner: agent, position: [12, 13], stance: 2, count: 4, spawn_point: 0}
+        - {type: e1, owner: agent, position: [12, 15], stance: 2, count: 4, spawn_point: 0}
+        # SOUTH base spawn (spawn_point 1)
+        - {type: fact, owner: agent, position: [10, 24], spawn_point: 1}
+        - {type: tent, owner: agent, position: [8, 21], spawn_point: 1}
+        - {type: proc, owner: agent, position: [8, 27], spawn_point: 1}
+        - {type: weap, owner: agent, position: [6, 24], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: e1, owner: agent, position: [12, 23], stance: 2, count: 4, spawn_point: 1}
+        - {type: e1, owner: agent, position: [12, 25], stance: 2, count: 4, spawn_point: 1}
+        # Spawn-matched ore patches (neutral; place every seed
+        # regardless of spawn_point — CLAUDE.md footgun). The harv
+        # of the active spawn finds its own row's patch.
+        - {type: mine, owner: neutral, position: [24, 14]}
+        - {type: mine, owner: neutral, position: [24, 24]}
+        # Heavy rush: 8× e1 + 2× e3. On the spawn_point path the
+        # engine places these enemy UNIT actors next to the active
+        # agent base, so the rush is immediate (see the hard-tier
+        # comment above) — hence the pre-placed defensive squad.
+        - {type: e1, owner: enemy, position: [72, 20], stance: 3, count: 8}
+        - {type: e3, owner: enemy, position: [72, 22], stance: 3, count: 2}
+        # Counter objective + persistent marker. Enemy BUILDING
+        # actors keep their absolute coords on the spawn_point path,
+        # so the objective yard stays far east at (118,20) and the
+        # marker at (126,36) every seed.
+        - {type: fact, owner: enemy, position: [118, 20]}
+        - {type: fact, owner: enemy, position: [126, 36]}
+    win_condition:
+      all_of:
+        - then:
+            id: opening-defense-counter-hard
+            clauses:
+              - {all_of: [{has_building: powr}, {has_building: proc}]}
+              - {units_killed_gte: 9, after_ticks: 700}
+              - enemy_key_buildings_destroyed_in_region:
+                  {x: 118, y: 20, radius: 8, types: [fact]}
+        - within_ticks: 5000
+    fail_condition:
+      any_of:
+        - {after_ticks: 5001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 130
