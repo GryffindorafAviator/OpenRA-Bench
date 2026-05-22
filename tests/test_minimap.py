@@ -10,7 +10,7 @@ import io
 import pytest
 
 pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
-from openra_bench.minimap import render_png_b64
+from openra_bench.minimap import render_png_b64, render_tactical_minimap
 
 PIL = pytest.importorskip("PIL")
 from PIL import Image  # noqa: E402
@@ -112,3 +112,18 @@ def test_agent_uses_terrain_when_base_map_given():
                    provider=type("P", (), {"complete": lambda *x, **k: None})(),
                    base_map="rush-hour-arena")
     assert a._terrain and a._terrain[:4] == b"\x89PNG"
+
+
+def test_tactical_minimap_draws_objective_regions():
+    rs = {
+        "minimap": _grid(30, 15, explored_cols=30),
+        "units_summary": [{"cell_x": 2, "cell_y": 2, "type": "1tnk"}],
+        "objective_regions": [
+            {"x": 20, "y": 8, "radius": 3, "label": "target"},
+        ],
+    }
+    im = render_tactical_minimap(rs, scale=2, grid=False, legend=False)
+    assert im is not None
+    colors = im.convert("RGB").getdata()
+    yellowish = [p for p in colors if p[0] > 220 and p[1] > 170 and p[2] < 120]
+    assert yellowish

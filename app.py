@@ -1107,6 +1107,14 @@ def _play_minimap(render_state: dict, sel=None, queue=None):
         return None
 
 
+def _play_render_state(sess, show_objectives: bool = False) -> dict:
+    rs = sess.render_state()
+    if not show_objectives and "objective_regions" in rs:
+        rs = dict(rs)
+        rs.pop("objective_regions", None)
+    return rs
+
+
 def _play_objective_md(sess) -> str:
     """The scenario objective — what the human must do to WIN."""
     if sess is None:
@@ -1198,9 +1206,9 @@ def _play_briefing_md(sess, sel, queue, note: str = "") -> str:
     )
 
 
-def _play_render(sess, sel, queue):
+def _play_render(sess, sel, queue, show_objectives=False):
     img = (
-        _play_minimap(sess.render_state(), sel, queue)
+        _play_minimap(_play_render_state(sess, show_objectives), sel, queue)
         if sess is not None else None
     )
     return (
@@ -1211,7 +1219,7 @@ def _play_render(sess, sel, queue):
     )
 
 
-def _play_start(prev_sess, pack, level, seed):
+def _play_start(prev_sess, pack, level, seed, show_objectives=False):
     # Release any prior session's engine env before opening a new one.
     if prev_sess is not None:
         try:
@@ -1235,14 +1243,14 @@ def _play_start(prev_sess, pack, level, seed):
             None, [], [], "", None, f"⚠️ {e}", "_start failed_",
             empty_units,
         )
-    img, brief, status, units = _play_render(sess, [], [])
+    img, brief, status, units = _play_render(sess, [], [], show_objectives)
     return (
         sess, [], [], _play_objective_md(sess),
         img, brief, status, units,
     )
 
 
-def _play_click(sess, sel, queue, evt: gr.SelectData):
+def _play_click(sess, sel, queue, show_objectives, evt: gr.SelectData):
     """Contextual minimap click — classic RTS interaction, no mode:
 
     * click a cell holding YOUR unit(s)  → select/deselect them (toggle);
@@ -1253,7 +1261,7 @@ def _play_click(sess, sel, queue, evt: gr.SelectData):
     if sess is None or evt is None or evt.index is None:
         return (
             sel, queue, _play_briefing_md(sess, sel, queue),
-            _play_units_df(sess, sel),
+            _play_units_df(sess, sel), None,
         )
     note = ""
     try:
@@ -1270,7 +1278,7 @@ def _play_click(sess, sel, queue, evt: gr.SelectData):
         if not rows:
             return (
                 sel, queue, _play_briefing_md(sess, sel, queue),
-                _play_units_df(sess, sel),
+                _play_units_df(sess, sel), None,
             )
         h = len(rows)
         w = max(len(r) for r in rows)
@@ -1318,7 +1326,7 @@ def _play_click(sess, sel, queue, evt: gr.SelectData):
     # Re-render the minimap so the selection boundary + move arrows
     # update live as the player clicks.
     img = (
-        _play_minimap(sess.render_state(), sel, queue)
+        _play_minimap(_play_render_state(sess, show_objectives), sel, queue)
         if sess is not None else None
     )
     return (
@@ -1327,20 +1335,20 @@ def _play_click(sess, sel, queue, evt: gr.SelectData):
     )
 
 
-def _play_end_turn(sess, sel, queue):
+def _play_end_turn(sess, sel, queue, show_objectives=False):
     if sess is not None and not sess.done:
         try:
             sess.submit_turn(list(queue))
         except Exception as e:  # noqa: BLE001
             logger.warning("play submit_turn failed: %s", e)
-    img, brief, status, units = _play_render(sess, [], [])
+    img, brief, status, units = _play_render(sess, [], [], show_objectives)
     return sess, [], [], img, brief, status, units
 
 
-def _play_clear_queue(sess, sel):
+def _play_clear_queue(sess, sel, show_objectives=False):
     """Cancel queued orders this turn (keeps the unit selection)."""
     img = (
-        _play_minimap(sess.render_state(), sel, [])
+        _play_minimap(_play_render_state(sess, show_objectives), sel, [])
         if sess is not None else None
     )
     return (
@@ -1349,15 +1357,23 @@ def _play_clear_queue(sess, sel):
     )
 
 
-def _play_clear_selection(sess, queue):
+def _play_clear_selection(sess, queue, show_objectives=False):
     """Cancel the current unit selection (keeps queued orders)."""
     img = (
-        _play_minimap(sess.render_state(), [], queue)
+        _play_minimap(_play_render_state(sess, show_objectives), [], queue)
         if sess is not None else None
     )
     return (
         [], _play_briefing_md(sess, [], queue),
         _play_units_df(sess, []), img,
+    )
+
+
+def _play_toggle_objectives(sess, sel, queue, show_objectives):
+    if sess is None:
+        return None
+    return _play_minimap(
+        _play_render_state(sess, show_objectives), sel, queue
     )
 
 
@@ -1580,6 +1596,10 @@ def build_app() -> gr.Blocks:
                         value=1, label="Seed", precision=0, scale=1,
                     )
                     play_start = gr.Button("▶ Start", scale=1)
+                play_show_objectives = gr.Checkbox(
+                    label="Show objective rings", value=False,
+                    info="Only available when the scenario already reveals exact coordinates.",
+                )
                 play_objective = gr.Markdown()
                 play_status = gr.Markdown(_play_status_md(None))
                 # Minimap on its own full-width row. No fixed height —
@@ -1598,16 +1618,21 @@ def build_app() -> gr.Blocks:
                 )
                 with gr.Row():
                     play_clearsel_btn = gr.Button(
-                        "✖ Clear selection", scale=1
+                        "✖ Clear selected units", scale=1
                     )
-                    play_clear_btn = gr.Button("Clear queued", scale=1)
+                    play_clear_btn = gr.Button(
+                        "Cancel queued orders", scale=1
+                    )
                     play_end_btn = gr.Button(
                         "End Turn ▶", variant="primary", scale=2,
                     )
 
                 play_start.click(
                     _play_start,
-                    inputs=[play_sess, play_scen, play_level, play_seed],
+                    inputs=[
+                        play_sess, play_scen, play_level, play_seed,
+                        play_show_objectives,
+                    ],
                     outputs=[
                         play_sess, play_sel, play_queue, play_objective,
                         play_img, play_brief, play_status, play_units,
@@ -1615,7 +1640,10 @@ def build_app() -> gr.Blocks:
                 )
                 play_img.select(
                     _play_click,
-                    inputs=[play_sess, play_sel, play_queue],
+                    inputs=[
+                        play_sess, play_sel, play_queue,
+                        play_show_objectives,
+                    ],
                     outputs=[
                         play_sel, play_queue, play_brief, play_units,
                         play_img,
@@ -1623,7 +1651,10 @@ def build_app() -> gr.Blocks:
                 )
                 play_end_btn.click(
                     _play_end_turn,
-                    inputs=[play_sess, play_sel, play_queue],
+                    inputs=[
+                        play_sess, play_sel, play_queue,
+                        play_show_objectives,
+                    ],
                     outputs=[
                         play_sess, play_sel, play_queue,
                         play_img, play_brief, play_status, play_units,
@@ -1631,17 +1662,25 @@ def build_app() -> gr.Blocks:
                 )
                 play_clearsel_btn.click(
                     _play_clear_selection,
-                    inputs=[play_sess, play_queue],
+                    inputs=[play_sess, play_queue, play_show_objectives],
                     outputs=[
                         play_sel, play_brief, play_units, play_img,
                     ],
                 )
                 play_clear_btn.click(
                     _play_clear_queue,
-                    inputs=[play_sess, play_sel],
+                    inputs=[play_sess, play_sel, play_show_objectives],
                     outputs=[
                         play_queue, play_brief, play_units, play_img,
                     ],
+                )
+                play_show_objectives.change(
+                    _play_toggle_objectives,
+                    inputs=[
+                        play_sess, play_sel, play_queue,
+                        play_show_objectives,
+                    ],
+                    outputs=play_img,
                 )
 
             # ── About Tab ─────────────────────────────────────────────────
