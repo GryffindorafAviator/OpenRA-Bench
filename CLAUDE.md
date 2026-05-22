@@ -228,6 +228,19 @@ A scenario is defective if any of the following hold:
   the full grid with `run_eval --perception-sweep` (expands every
   `pack:level` into `pack:level:<mode>`); the human Play tab stays
   on the canonical `vision` (fogged) modality.
+- **Handoff ablation** (`openra_bench/handoff.py`, `run_eval
+  --handoff-sweep`). A `HandoffController` lets a `prefix` controller
+  play the first K turns, then the model inherits the live game state
+  ("take over from here" — a pure STATE handoff, no transcript). A
+  `stall` prefix hands the model a losing position (recovery test); a
+  replayed winning trajectory (`TrajectoryController`, sourced from a
+  `--handoff-bank` of Playback runs) hands it a winning one
+  (capitalize-on-advantage). Sweep cells are
+  `pack:level:handoff-{base,bad,good}`. Every result carries a
+  `passivity` stat — the fraction of the model's turns spent on
+  `observe`/`stop` only — the freeze-and-panic signal. A replayed
+  trajectory MUST come from the same `pack:level:seed` (engine actor
+  ids are seed-deterministic).
 - **`pbox` costs 600** (not the 400 some old specs assumed);
   defense and infantry are SEPARATE production queues so an
   efficient policy queues `build('pbox')` and `build('e1')` in

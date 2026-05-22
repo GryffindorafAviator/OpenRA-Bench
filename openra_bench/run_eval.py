@@ -99,6 +99,50 @@ def _agg(scores: list) -> dict:
     }
 
 
+def _find_win_trajectory(bank: str | Path, cell: str, seed: int) -> str | None:
+    """Path to a winning run's messages.json for this cell+seed, scanned
+    from a `--handoff-bank` directory of Playback runs — the good-prefix
+    source. None when the bank holds no matching win. (Engine actor ids
+    are seed-deterministic, so the trajectory must match pack/level/seed
+    for a faithful replay.)"""
+    base = cell.rsplit(":handoff-", 1)[0]  # "pack:level"
+    pack_id, _, level = base.partition(":")
+    for mf in sorted(Path(bank).rglob("manifest.json")):
+        try:
+            m = json.loads(mf.read_text())
+        except (ValueError, OSError):
+            continue
+        if (
+            str(m.get("pack_id")) == pack_id
+            and str(m.get("level")) == level
+            and int(m.get("seed", -1)) == int(seed)
+            and str(m.get("outcome")) == "win"
+            and (mf.parent / "messages.json").exists()
+        ):
+            return str(mf.parent / "messages.json")
+    return None
+
+
+def _handoff_wrap(agent, cell: str, seed: int, k: int, bank):
+    """Wrap `agent` in a HandoffController for a `:handoff-<kind>` cell.
+    Returns (controller, note)."""
+    from .handoff import HandoffController, TrajectoryController, stall_policy
+
+    kind = cell.rsplit(":handoff-", 1)[1]
+    if kind == "bad":  # losing prefix — the recovery / freeze test
+        return HandoffController(stall_policy, agent, k), ""
+    if kind == "good":  # winning prefix — capitalize-on-advantage
+        traj = _find_win_trajectory(bank, cell, seed) if bank else None
+        if traj is None:
+            return (
+                HandoffController(stall_policy, agent, 0),
+                f"no winning trajectory in bank for seed {seed} — ran as base",
+            )
+        return HandoffController(TrajectoryController(traj), agent, k), ""
+    # base — k=0; the model plays the whole episode (baseline passivity).
+    return HandoffController(stall_policy, agent, 0), ""
+
+
 def evaluate(
     packs: list[Path],
     levels: list[str],
@@ -118,6 +162,9 @@ def evaluate(
     report_path: str | Path | None = None,
     progress=None,
     perception_sweep: bool = False,
+    handoff_sweep: bool = False,
+    handoff_k: int = 3,
+    handoff_bank: str | Path | None = None,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -129,6 +176,14 @@ def evaluate(
     ablation cells (`pack:level:<mode>` for mode in PERCEPTION_MODES —
     vision/structured × fog/no-fog) instead of the raw 3 levels, so one
     run yields the full channel-cost / fog-cost decomposition.
+
+    `handoff_sweep` expands every pack×level into handoff cells
+    (`pack:level:handoff-{base,bad,good}`): the model plays the whole
+    episode (`base`), or inherits a losing position after a `stall`
+    prefix (`bad` — the recovery / freeze-and-panic test), or a winning
+    position replayed from a `handoff_bank` trajectory (`good` — the
+    capitalize-on-advantage test). `handoff_k` is the prefix length.
+    Each record carries a `passivity` stat (observe/stop-only fraction).
     """
     from .resilience import (
         BudgetExceeded,
@@ -220,6 +275,16 @@ def evaluate(
                     cl.fog_mode = mode
                     cl.config_name = f"{lv}:{mode}"
                     unit_iter.append((cl, f"{pack.meta.id}:{lv}:{mode}"))
+        # Handoff sweep: each level as base / bad / good handoff cells.
+        # `good` needs a winning trajectory from the bank — emitted only
+        # when a bank is supplied; `base`/`bad` always run.
+        elif handoff_sweep:
+            kinds = ["base", "bad"] + (["good"] if handoff_bank else [])
+            unit_iter = [
+                (compile_level(pack, lv), f"{pack.meta.id}:{lv}:handoff-{kind}")
+                for lv in levels
+                for kind in kinds
+            ]
         # Declared configs (pack:config_name, each pins level+fog_mode)
         # supersede the raw 3-level enumeration when present.
         elif pack.configs:
@@ -258,7 +323,19 @@ def evaluate(
                 seed,
             )
             pb.run_id, pb.model = run_id, model
-        res = run_level(compiled, factory(compiled), seed=seed, playback=pb)
+        ctrl = factory(compiled)
+        if handoff_sweep and ":handoff-" in cell:
+            ctrl, _hnote = _handoff_wrap(
+                ctrl, cell, seed, handoff_k, handoff_bank
+            )
+        else:
+            _hnote = ""
+        res = run_level(compiled, ctrl, seed=seed, playback=pb)
+        hstats = getattr(ctrl, "handoff_stats", None)
+        if hstats is not None:
+            hstats = dict(hstats)
+            if _hnote:
+                hstats["note"] = _hnote
         sc = score_episode(compiled, res)
         if pb is not None:
             (pb.dir / "score.json").write_text(
@@ -292,6 +369,8 @@ def evaluate(
             "reward_vector": res.reward_vector,
             "turns": res.turns,
             "notes": sc.notes,
+            "passivity": hstats.get("passivity") if hstats else None,
+            "handoff": hstats,
             "_sc": sc,
         }
 
@@ -600,6 +679,15 @@ def main(argv: list[str]) -> int:
                     help="run the 2x2 perception ablation: every "
                     "pack:level expanded into vision/structured x "
                     "fog/no-fog (pack:level:<mode>)")
+    ap.add_argument("--handoff-sweep", action="store_true",
+                    help="run the handoff ablation: each pack:level as "
+                    "handoff-base / handoff-bad (recovery) / handoff-good "
+                    "(capitalize) cells")
+    ap.add_argument("--handoff-k", type=int, default=3,
+                    help="handoff prefix length in turns (default 3)")
+    ap.add_argument("--handoff-bank", default=None,
+                    help="dir of Playback runs — source of winning "
+                    "trajectories for the handoff-good prefix")
     a = ap.parse_args(argv[1:])
 
     cfg = None
@@ -642,6 +730,9 @@ def main(argv: list[str]) -> int:
         dry_run=a.dry_run,
         report_path=a.out,
         perception_sweep=a.perception_sweep,
+        handoff_sweep=a.handoff_sweep,
+        handoff_k=a.handoff_k,
+        handoff_bank=a.handoff_bank,
         progress=lambda d, n, rec, c: print(
             f"[{d}/{n}] {rec['cell']}:{rec['split']}#{rec['seed']} "
             f"{rec['outcome']} comp={rec['composite']} "
