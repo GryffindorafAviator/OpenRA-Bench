@@ -67,6 +67,11 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     sched = getattr(compiled, "scheduled_events", None) or []
     if sched:
         data["scheduled_events"] = sched
+    # No-fog perception cells (fog_mode ends with "-clear") flip the
+    # engine's `reveal_map` flag: the agent observes the whole map with
+    # no fog of war — the clear half of the perception ablation grid.
+    if getattr(compiled, "reveal_map", False):
+        data["reveal_map"] = True
     fd = tempfile.NamedTemporaryFile(
         "w", suffix=f"_{compiled.pack_id}_{compiled.level}.yaml", delete=False
     )

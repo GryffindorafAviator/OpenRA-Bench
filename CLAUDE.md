@@ -195,6 +195,39 @@ A scenario is defective if any of the following hold:
   `stance:3` AGENT combat unit auto-hunts the whole map; for a
   perception pack keep the agent's combat arm `stance:0` so a
   stall policy can't win for free by self-delivering the army.
+- **`reveal_map:` — the no-fog perception cell** (pinned by
+  `OpenRA-Rust/openra-data/tests/test_reveal_map.rs` +
+  `tests/test_perception_ablation.py`). A scenario may declare a
+  top-level `reveal_map: true`; the agent player then observes the
+  whole map with NO fog of war — every enemy actor is reported
+  regardless of shroud and `explored_percent` is 100. Parsed by
+  `oramap.rs::parse_scenario_yaml` (mirrors `spawn_mcvs`), applied
+  in `env.rs` (`is_visible_to` short-circuits true for the agent;
+  `refresh_explored_cells` fills the playable rectangle). This is
+  the no-fog half of the **perception ablation grid**. The bench
+  `fog_mode` spans 3 observation channels × 2 fog states = 6 cells
+  (`openra_bench/scenarios/schema.py::PERCEPTION_MODES`):
+  - `structured` — text briefing + a text 'Unexplored regions'
+    block; no image.
+  - `vision` — text briefing + PNG minimap. NOTE the briefing
+    already enumerates units/enemies with coordinates, so the image
+    is a redundant SUPPLEMENT — `vision` does NOT isolate
+    image-reading.
+  - `image` — image-PRIMARY: `prompt_v2.briefing_image_primary`
+    redacts every coordinate from the text; the labelled minimap
+    (`render_tactical_minimap(..., unit_labels=...)`) is the sole
+    spatial source. The model references units by the on-map
+    handle (`tank-1`, `enemy-2`); `agent._to_commands` maps the
+    handle back to the engine id. The clean "can the model read a
+    minimap" probe.
+  Each channel has a fogged form and a `-clear` (no-fog) form. A
+  `-clear` cell is a perfect-information CONTROL that isolates the
+  perception cost — a stall/observe policy WINS a `-clear`
+  perception pack (perception removed), so the no-cheat bar
+  applies ONLY to the fogged cells, never the `-clear` ones. Run
+  the full grid with `run_eval --perception-sweep` (expands every
+  `pack:level` into `pack:level:<mode>`); the human Play tab stays
+  on the canonical `vision` (fogged) modality.
 - **`pbox` costs 600** (not the 400 some old specs assumed);
   defense and infantry are SEPARATE production queues so an
   efficient policy queues `build('pbox')` and `build('e1')` in

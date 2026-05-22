@@ -118,16 +118,47 @@ class Level(BaseModel):
     forbidden_tools: list[str] = Field(default_factory=list)
 
 
+# The perception ablation grid: observation channel × fog of war.
+#
+# Three channels:
+#   structured — text briefing + a text 'Unexplored regions' block;
+#                NO image. The text-only condition.
+#   vision     — text briefing + PNG minimap. The multimodal "both
+#                available" condition — note the text briefing already
+#                enumerates units/enemies, so the image is a SUPPLEMENT.
+#   image      — image-PRIMARY: the text briefing is redacted of every
+#                coordinate (and the enemy line dropped); the PNG, with
+#                legible per-unit labels, is the ONLY source of spatial
+#                state. The clean "can the model read a minimap" probe.
+#
+# Fog axis: bare name ⇒ fog ON (canonical scoring modality); the
+# `-clear` variant reveals the whole map (engine `reveal_map: true` ⇒
+# every enemy observed, `explored_percent` 100). A `-clear` cell is a
+# perfect-information CONTROL for measuring the perception cost — the
+# no-cheat bar applies only to the fogged cells.
+PERCEPTION_MODES = (
+    "structured", "structured-clear",
+    "vision", "vision-clear",
+    "image", "image-clear",
+)
+FogMode = Literal[
+    "structured", "structured-clear",
+    "vision", "vision-clear",
+    "image", "image-clear",
+]
+
+
 class ScenarioConfig(BaseModel):
     """A named runnable configuration of one pack: pins a difficulty
-    `level` and the observation `fog_mode`. The same setup at
-    `fog_mode: structured` (text 'Unexplored regions') vs `vision`
-    (PNG minimap) becomes two distinct cells, so text-vs-vision is a
-    first-class comparison the YAML declares (not just a CLI flag)."""
+    `level` and the observation `fog_mode`. `fog_mode` spans the 2×2
+    perception grid — channel (`vision` PNG minimap vs `structured`
+    text 'Unexplored regions') × fog (on, or `-clear` ⇒ no fog) — so
+    text-vs-vision AND fogged-vs-clear are first-class comparisons the
+    YAML declares, not just CLI flags."""
 
     name: str = Field(..., description="cell suffix, e.g. easy-structured")
     level: LevelName
-    fog_mode: Literal["vision", "structured"] = "vision"
+    fog_mode: FogMode = "vision"
     # Optional override of the level's objective_coords for this cell.
     objective_coords: Literal["exact", "relative"] | None = None
 
@@ -155,9 +186,9 @@ class CompiledLevel(BaseModel):
     map_supported: bool = Field(
         ..., description="False => Rust lacks this map (Phase 3 gate)"
     )
-    # Observation channel + the cell label. config_name is None for
-    # legacy level cells (pack:level); set for declared configs
-    # (pack:config_name).
+    # Observation modality (channel × fog — see PERCEPTION_MODES) + the
+    # cell label. config_name is None for legacy level cells
+    # (pack:level); set for declared configs / sweep cells.
     fog_mode: str = "vision"
     config_name: str | None = None
     objective_coords: Literal["exact", "relative"] = "exact"
@@ -170,6 +201,24 @@ class CompiledLevel(BaseModel):
     # so it's preserved on the CompiledLevel instead of the inner
     # scenario, and re-attached at YAML-write time.
     scheduled_events: list[dict[str, Any]] = Field(default_factory=list)
+
+    @property
+    def reveal_map(self) -> bool:
+        """No-fog cell? The `-clear` perception modes disable fog of
+        war — `_scenario_to_tmp_yaml` emits `reveal_map: true` so the
+        engine reveals the whole map to the agent."""
+        return self.fog_mode.endswith("-clear")
+
+    @property
+    def obs_channel(self) -> str:
+        """The observation channel — `structured` (text only), `image`
+        (image-primary: text redacted, PNG is the sole spatial source),
+        or `vision` (text + PNG) — independent of the fog axis."""
+        if self.fog_mode.startswith("structured"):
+            return "structured"
+        if self.fog_mode.startswith("image"):
+            return "image"
+        return "vision"
 
 
 class ScenarioPack(BaseModel):

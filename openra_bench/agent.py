@@ -375,39 +375,50 @@ def _render_minimap_b64(
         return None
 
 
-def _to_commands(tool_calls: list[dict], Command: Any) -> list:
+def _to_commands(
+    tool_calls: list[dict], Command: Any, label_to_id: dict | None = None
+) -> list:
+    # In the image-primary channel the model references units by the
+    # legible handle shown on the minimap (`tank-1`); map it back to the
+    # engine actor id. Numeric ids (every other channel) pass straight
+    # through — the lookup simply misses.
+    label_to_id = label_to_id or {}
+
+    def _rid(x: Any) -> str:
+        return label_to_id.get(str(x), str(x))
+
     cmds = []
     for call in tool_calls:
         name = _TOOL_ALIASES.get(call.get("name", ""), call.get("name", ""))
         args = call.get("arguments") or {}
         try:
             if name == "move_units":
-                ids = [str(i) for i in args["unit_ids"]]
+                ids = [_rid(i) for i in args["unit_ids"]]
                 cmds.append(
                     Command.move_units(ids, int(args["target_x"]), int(args["target_y"]))
                 )
             elif name == "attack_unit":
-                ids = [str(i) for i in args["unit_ids"]]
-                cmds.append(Command.attack_unit(ids, str(args["target_id"])))
+                ids = [_rid(i) for i in args["unit_ids"]]
+                cmds.append(Command.attack_unit(ids, _rid(args["target_id"])))
             elif name == "guard":
-                ids = [str(i) for i in args["unit_ids"]]
-                cmds.append(Command.guard(ids, str(args["target_id"])))
+                ids = [_rid(i) for i in args["unit_ids"]]
+                cmds.append(Command.guard(ids, _rid(args["target_id"])))
             elif name == "enter_transport":
-                ids = [str(i) for i in args["unit_ids"]]
+                ids = [_rid(i) for i in args["unit_ids"]]
                 cmds.append(
-                    Command.enter_transport(ids, str(args["target_id"]))
+                    Command.enter_transport(ids, _rid(args["target_id"]))
                 )
             elif name == "observe":
                 cmds.append(Command.observe())
             elif name == "surrender":
                 cmds.append(Command.surrender())
             elif name == "set_stance":
-                ids = [str(i) for i in args["unit_ids"]]
+                ids = [_rid(i) for i in args["unit_ids"]]
                 cmds.append(Command.set_stance(ids, int(args["stance"])))
             elif name == "patrol":
-                cmds.append(Command.patrol([str(i) for i in args["unit_ids"]]))
+                cmds.append(Command.patrol([_rid(i) for i in args["unit_ids"]]))
             elif name in ("attack_move", "harvest", "set_rally_point"):
-                ids = [str(i) for i in args["unit_ids"]]
+                ids = [_rid(i) for i in args["unit_ids"]]
                 fn = getattr(Command, name)
                 cmds.append(fn(ids, int(args["target_x"]), int(args["target_y"])))
             elif name in (
@@ -419,7 +430,7 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
                 "set_primary",
                 "unload",
             ):
-                ids = [str(i) for i in args["unit_ids"]]
+                ids = [_rid(i) for i in args["unit_ids"]]
                 cmds.append(getattr(Command, name)(ids))
             elif name in ("build", "cancel_production"):
                 cmds.append(getattr(Command, name)(str(args["item"])))
@@ -432,6 +443,35 @@ def _to_commands(tool_calls: list[dict], Command: Any) -> list:
         except (KeyError, TypeError, ValueError) as e:
             logger.debug("dropping malformed tool call %s: %s", call, e)
     return cmds
+
+
+def _image_primary_tools(tools: list[dict]) -> list[dict]:
+    """Re-type unit/target handles as strings for the image-primary
+    channel: the model references actors by the legible label drawn on
+    the minimap (`tank-1`, `enemy-2`), not numeric engine ids. The
+    `_to_commands` `label_to_id` map turns them back into engine ids."""
+    import copy
+
+    out = copy.deepcopy(tools)
+    for t in out:
+        props = (
+            t.get("function", {}).get("parameters", {}).get("properties", {})
+        )
+        ui = props.get("unit_ids")
+        if isinstance(ui, dict) and ui.get("type") == "array":
+            ui["items"] = {"type": "string"}
+            ui["description"] = (
+                'unit handles EXACTLY as labelled on the minimap, '
+                'e.g. ["tank-1","jeep-2"]'
+            )
+        tid = props.get("target_id")
+        if isinstance(tid, dict):
+            tid["type"] = "string"
+            tid["description"] = (
+                'the target actor\'s handle as labelled on the minimap, '
+                'e.g. "enemy-1"'
+            )
+    return out
 
 
 class ModelAgent:
@@ -462,6 +502,15 @@ class ModelAgent:
         self._level = level
         # Scenario config wins over the model-side cfg default.
         self._fog_mode = fog_mode or getattr(cfg, "fog_mode", "vision")
+        # Image-primary channel: the text briefing carries no positions —
+        # the labelled minimap is the sole spatial source, and the model
+        # references units by those labels. Re-type the tool handles to
+        # strings; `_labels` / `_label_to_id` are rebuilt each turn.
+        self._image_primary = self._fog_mode.startswith("image")
+        if self._image_primary:
+            self.tools = _image_primary_tools(self.tools)
+        self._labels: dict[str, str] = {}
+        self._label_to_id: dict[str, str] = {}
         # Real terrain (map.png from the .oramap) for the vendored
         # training bitmap minimap; persistent fog history across turns.
         self._terrain: bytes | None = None
@@ -484,6 +533,16 @@ class ModelAgent:
             sys_content = SYSTEM_PROMPT + (
                 f"\n\n{system_extra}" if system_extra else ""
             )
+        if self._image_primary:
+            sys_content += (
+                "\n\nPERCEPTION MODE — IMAGE-PRIMARY. The text briefing "
+                "lists WHAT units exist but never where anything is. "
+                "Every position — your units AND the enemy — is shown "
+                "ONLY on the minimap image. Each marker is tagged with a "
+                "legible label (tank-1, jeep-2, enemy-1). Read the image "
+                "to locate units and threats; pass those exact labels as "
+                "the ids in your tool calls (e.g. unit_ids=[\"tank-1\"])."
+            )
         self.history: list[dict] = [{"role": "system", "content": sys_content}]
         self.stats = {"turns": 0, "tool_calls": 0, "empty_replies": 0}
         # Controller contract (openra_bench/controller.py): a ModelAgent
@@ -492,7 +551,60 @@ class ModelAgent:
         # all drive it interchangeably with any other policy backend.
         self.name = getattr(cfg, "model", None) or "model"
 
+    def _image_primary_message(self, render_state: dict) -> dict:
+        """Image-primary turn message: a position-redacted text briefing
+        plus a labelled minimap — the minimap is the ONLY place the
+        model learns where its units and the enemy are."""
+        from .prompt_v2 import briefing_image_primary, perception_labels
+
+        # Carry last turn's map forward so a label stays pinned to its
+        # actor for the whole episode (stable handles across turns).
+        self._labels = perception_labels(render_state, self._labels)
+        self._label_to_id = {v: k for k, v in self._labels.items()}
+        text = briefing_image_primary(render_state, self._labels)
+        b64 = None
+        try:
+            import base64
+            import io
+
+            from .minimap import render_tactical_minimap
+
+            # Keep the PNG ≤ ~1560px wide so the vision API does not
+            # downscale it (which would shrink the unit labels below
+            # legibility); the 6px base cell × scale sets the width.
+            rows = [
+                r for r in (render_state.get("minimap") or "").split("\n")
+                if r
+            ]
+            w = max((len(r) for r in rows), default=64)
+            scale = max(2, min(6, 1560 // max(1, w * 6)))
+            img = render_tactical_minimap(
+                render_state, scale=scale, unit_labels=self._labels,
+            )
+            if img is not None:
+                buf = io.BytesIO()
+                img.save(buf, "PNG")
+                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception:  # noqa: BLE001 — degrade to text-only on render fail
+            b64 = None
+        if b64:
+            return {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": text},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{b64}"},
+                    },
+                ],
+            }
+        return {"role": "user", "content": text}
+
     def _user_message(self, render_state: dict) -> dict:
+        # Image-primary channel builds its own (position-redacted)
+        # briefing + labelled minimap — dispatch before the text path.
+        if self._image_primary:
+            return self._image_primary_message(render_state)
         # Briefing = vendored training briefing_v2 (one unit/line,
         # "moving to (x,y)", Idle list). Objective is in the system
         # prompt now, so it's NOT repeated here.
@@ -502,10 +614,11 @@ class ModelAgent:
             text = _v2_brief(render_state)
         except Exception:  # noqa: BLE001 — never break a turn
             text = build_briefing(render_state, self.objective)
-        # Structured-fog mode: NO image — append the text "Unexplored
-        # regions" block instead (text-vs-vision A/B; pair with the
-        # easy/medium level of the setup).
-        if self._fog_mode == "structured":
+        # Structured channel: NO image — append the text "Unexplored
+        # regions" block instead (text-vs-vision A/B). Covers both
+        # `structured` (fogged) and `structured-clear` (no fog — under
+        # reveal_map the block reports zero unexplored regions).
+        if self._fog_mode.startswith("structured"):
             try:
                 from .prompt_v2 import structured_fog as _v2_fog
 
@@ -608,7 +721,7 @@ class ModelAgent:
                 ],
             }
         )
-        cmds = _to_commands(reply.tool_calls, Command)
+        cmds = _to_commands(reply.tool_calls, Command, self._label_to_id)
         self.stats["tool_calls"] += len(cmds)
         if not cmds:
             self.stats["empty_replies"] += 1

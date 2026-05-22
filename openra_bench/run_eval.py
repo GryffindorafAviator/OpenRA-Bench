@@ -117,12 +117,18 @@ def evaluate(
     dry_run: bool = False,
     report_path: str | Path | None = None,
     progress=None,
+    perception_sweep: bool = False,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
     `overall_held_out` and `generalization_gap` (public composite −
     held-out composite) — the anti-memorization metric the
     generalization literature (Procgen/SMACv2/lmgame-Bench) requires.
+
+    `perception_sweep` expands every pack×level into the 4 perception
+    ablation cells (`pack:level:<mode>` for mode in PERCEPTION_MODES —
+    vision/structured × fog/no-fog) instead of the raw 3 levels, so one
+    run yields the full channel-cost / fog-cost decomposition.
     """
     from .resilience import (
         BudgetExceeded,
@@ -201,9 +207,22 @@ def evaluate(
                 f"{pack.meta.quarantine_reason or 'excluded from default set'})"
             )
             continue
+        # Perception sweep: every level × the 4 modality cells
+        # (pack:level:<mode>). Overrides both declared configs and the
+        # raw enumeration — it is an explicit ablation request.
+        if perception_sweep:
+            from .scenarios.schema import PERCEPTION_MODES
+
+            unit_iter = []
+            for lv in levels:
+                for mode in PERCEPTION_MODES:
+                    cl = compile_level(pack, lv)
+                    cl.fog_mode = mode
+                    cl.config_name = f"{lv}:{mode}"
+                    unit_iter.append((cl, f"{pack.meta.id}:{lv}:{mode}"))
         # Declared configs (pack:config_name, each pins level+fog_mode)
         # supersede the raw 3-level enumeration when present.
-        if pack.configs:
+        elif pack.configs:
             from .scenarios.loader import is_map_supported
 
             ms = is_map_supported(pack.base_map)
@@ -577,6 +596,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--fog-mode", default="vision",
                     choices=["vision", "structured"],
                     help="spatial channel: PNG minimap vs text fog")
+    ap.add_argument("--perception-sweep", action="store_true",
+                    help="run the 2x2 perception ablation: every "
+                    "pack:level expanded into vision/structured x "
+                    "fog/no-fog (pack:level:<mode>)")
     a = ap.parse_args(argv[1:])
 
     cfg = None
@@ -618,6 +641,7 @@ def main(argv: list[str]) -> int:
         smoke=a.smoke,
         dry_run=a.dry_run,
         report_path=a.out,
+        perception_sweep=a.perception_sweep,
         progress=lambda d, n, rec, c: print(
             f"[{d}/{n}] {rec['cell']}:{rec['split']}#{rec['seed']} "
             f"{rec['outcome']} comp={rec['composite']} "
