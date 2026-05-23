@@ -22,6 +22,7 @@ from openra_bench.playlist import (
     OUTCOME_COLORS,
     PLAYLIST_TOOLS,
     explain_outcome,
+    is_valid_player_name,
     needs_build_tool,
     outcome_html,
     playlist_progress,
@@ -342,6 +343,29 @@ def test_outcome_colors_palette_uses_distinct_hexes():
     UX contract."""
     assert len({OUTCOME_COLORS["win"], OUTCOME_COLORS["loss"],
                 OUTCOME_COLORS["draw"]}) == 3
+
+
+# ── Player-name validation (B9 nit #3) ──────────────────────────────
+
+
+def test_is_valid_player_name_rejects_empty_and_whitespace():
+    """The Start button is gated on this validator. Empty input,
+    None, and whitespace-only input must all return False so the
+    silent "anon" fallback never gets recorded against a tester who
+    didn't type their name."""
+    assert is_valid_player_name(None) is False
+    assert is_valid_player_name("") is False
+    assert is_valid_player_name("   ") is False
+    assert is_valid_player_name("\t\n") is False
+
+
+def test_is_valid_player_name_accepts_real_names():
+    """Single-character names pass (the spec is ≥1 non-whitespace
+    char). Whitespace padding is tolerated (a paste-trim case)."""
+    assert is_valid_player_name("A") is True
+    assert is_valid_player_name("Alex") is True
+    assert is_valid_player_name("  Alex  ") is True
+    assert is_valid_player_name("张三") is True  # non-ASCII still valid
 
 
 def test_session_summary_row_shape():

@@ -2652,14 +2652,20 @@ def build_app() -> gr.Blocks:
                 pl_progress = gr.Markdown(_playlist_progress_md({}))
                 with gr.Row():
                     pl_player = gr.Textbox(
-                        label="Your name", placeholder="e.g. Alex",
+                        label="Your name (required)",
+                        placeholder="e.g. Alex",
                         scale=3,
                     )
                     # Start is the only button visible pre-session;
                     # `_playlist_render` hides it once a game is open.
+                    # Disabled until the name textbox holds ≥1 non-
+                    # whitespace character — empty input previously
+                    # silently became "anon" in the recorded summary
+                    # row, which a non-gamer never opted into. (B9
+                    # Playlist nit #3.)
                     pl_start_btn = gr.Button(
                         "▶ Start playlist", variant="primary", scale=1,
-                        visible=True,
+                        visible=True, interactive=False,
                     )
                     # Skip-wait is hidden until a game ends — clicking
                     # it before that did nothing useful and confused a
@@ -2735,6 +2741,20 @@ def build_app() -> gr.Blocks:
                     # Button visibility — smoke-test friction fixes.
                     pl_start_btn, pl_skip_btn, pl_play_row,
                 ]
+                # B9 nit #3: gate the Start button on a non-empty name.
+                # The name flows directly into the InteractiveSession's
+                # `player` field (and the recorded raw-game row) so an
+                # empty textbox would silently become "anon" — which a
+                # non-gamer never opted into. Re-enable as soon as the
+                # textbox holds ≥1 non-whitespace character.
+                def _pl_validate_name(name):
+                    from openra_bench.playlist import is_valid_player_name
+                    return gr.update(interactive=is_valid_player_name(name))
+
+                pl_player.change(
+                    _pl_validate_name, inputs=[pl_player],
+                    outputs=[pl_start_btn],
+                )
                 pl_start_btn.click(
                     _playlist_start, inputs=[pl_sess, pl_player],
                     outputs=_pl_render_outs,

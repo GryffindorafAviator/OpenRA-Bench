@@ -465,3 +465,20 @@ def outcome_html(outcome: str) -> str:
     if color is None:
         return label
     return f"<span style='color: {color}; font-weight: bold'>{label}</span>"
+
+
+# ── Name validation (B9 nit #3) ──────────────────────────────────────
+# The pre-session "Your name" textbox previously accepted empty input
+# — the start handler then silently substituted "anon", and a non-
+# gamer's leaderboard row landed under that name without their
+# consent. The validator below is the single source of truth for
+# "is this name acceptable?", consumed by `pl_player.change` to gate
+# the Start button's `interactive` flag.
+
+def is_valid_player_name(name: str | None) -> bool:
+    """True if `name` has ≥1 non-whitespace character. The textbox can
+    hold leading/trailing whitespace from a paste — strip first so a
+    typo of `"   "` doesn't pass the gate."""
+    if name is None:
+        return False
+    return len(name.strip()) >= 1
