@@ -107,6 +107,7 @@ def _serialize_state(sess) -> dict:
             "cell_x": e.get("cell_x", 0),
             "cell_y": e.get("cell_y", 0),
             "hp": round(float(e.get("hp", 1.0)), 2),
+            "is_building": bool(e.get("is_building", False)),
         })
 
     own_buildings = []
@@ -118,6 +119,7 @@ def _serialize_state(sess) -> dict:
                 "cell_x": b.get("cell_x", 0),
                 "cell_y": b.get("cell_y", 0),
                 "hp": round(float(b.get("hp", 1.0)), 2),
+                "is_building": True,
             })
 
     minimap_b64 = None
@@ -151,6 +153,10 @@ def _serialize_state(sess) -> dict:
         "units_killed": sig.units_killed,
         "units_lost": sig.units_lost,
         "cash": sig.cash,
+        "resources": sig.resources,
+        "resource_capacity": sig.resource_capacity,
+        "economy_value": sig.cash + sig.resources,
+        "harvesters": sig.harvesters,
         "power_provided": sig.power_provided,
         "power_drained": sig.power_drained,
     }

@@ -50,7 +50,9 @@ def test_run_level_playback_writes_transcript_and_manifest(tmp_path):
     # res.turns model turns + 1 terminal "episode end" frame (the
     # resolved post-action board the moment the episode ends).
     assert len(lines) == res.turns + 1
-    assert "ascii_minimap" in lines[0] and "commands" in lines[0]
+    assert "commands" in lines[0]
+    assert "signals" in lines[0]
+    assert "ascii_minimap" not in lines[0]
     term = lines[-1]
     assert term["turn"] == res.turns + 1
     assert "episode end" in term["commands"][0]
