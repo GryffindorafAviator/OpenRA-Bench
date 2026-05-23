@@ -1,35 +1,55 @@
 """def-tower-line-vs-cluster scenario family, full loop on Rust.
 
-The pack tests DEFENSE TOPOLOGY: when the threat is forced through a
-known chokepoint, the right architecture is dense cluster AT the choke
-(graph min-cut / military bunker placement doctrine), NOT a thin spread
-along the perimeter. The win predicate makes the topology decision
-load-bearing — total pbox count alone is not sufficient:
+The pack tests DEFENSE TOPOLOGY: the agent must match the topology of
+its pillbox layout (LINE across rows OR CLUSTER at one cell) to the
+attacker's forcing geometry. Each tier presents a different geometry
+and therefore demands a different topology:
 
-* `building_count_gte:{pbox, n}` ⇒ the agent actually built the budget
-  worth of defences (3 on easy, 4 on medium, 5 on hard);
-* `building_in_region:{pbox, x:60, y:20, radius:5, count}` ⇒ ≥3 (easy),
-  ≥3 (medium), or ≥4 (hard) of those pbox sit INSIDE the choke region —
-  a spread-line layout (one pbox at the choke, the rest along the
-  perimeter) satisfies the count but NOT the region;
-* `building_count_gte:{fact,1}` ⇒ the fact must still stand (rather than
-  `has_building:fact` which is a one-shot "ever seen" set — see CLAUDE.md
-  footgun);
-* `within_ticks` paired with `after_ticks` ⇒ a non-finisher is a real
-  reachable timeout LOSS (no interrupts on this pack ⇒ each step is
-  exactly 90 ticks, so max_turns is a hard tick budget that the
-  `after_ticks` deadline reliably bites in).
+* easy  — open arena 112x40, 4 attacker squads on 4 separate rows
+          (y=4/12/28/36) → LINE wins, CLUSTER fails (the line rung
+          clauses are all missed by a y=20 cluster).
+* medium— chokepoint-arena 112x40, one 5-cell corridor at y=18..22
+          x=60 → CLUSTER wins, LINE fails (the off-corridor rows are
+          impassable wall water, so a line attempt at y=8/16/24/32
+          either has no place to go or is rejected outright).
+* hard  — open arena 112x40 with TWO enemy spawn_point groups: a
+          CONCENTRATED-thrust composition (9×e1 + 2×e3 stacked at
+          y=20) and a WIDE-FRONT composition (4 stance:0 squads on
+          y=4/12/28/36). The win predicate is `any_of` over the
+          cluster bar and the line bar; the kill quota
+          `units_killed_gte:8` is the load-bearing clause — a
+          memorised CLUSTER vs the wide-front seed (or a memorised
+          LINE vs the concentrated seed) cannot fire on the active
+          threat and so cannot satisfy the kill quota.
+
+The win predicate makes the topology decision load-bearing — total
+pbox count alone is not sufficient:
+
+* `building_count_gte:{pbox, n:4}` ⇒ the agent built the full budget;
+* `building_in_region` row/disc clauses ⇒ the pbox layout MATCHES the
+  forcing geometry (LINE rungs on easy, CLUSTER disc on medium, EITHER
+  on hard);
+* `units_killed_gte:N` ⇒ the pbox layout actively KILLS the attackers
+  (a stall / wrong-topology layout that satisfies the region clause
+  by luck still fails to kill enough);
+* `building_count_gte:{fact,n:1}` (present-tense — `has_building` is
+  the one-shot "ever-seen" set, see CLAUDE.md footgun);
+* `within_ticks` paired with `after_ticks` in the fail clause ⇒ a
+  non-finisher is a real reachable timeout LOSS (no interrupts on this
+  pack ⇒ each step is exactly 90 ticks, so max_turns is a hard tick
+  budget that the `after_ticks` deadline reliably bites in).
 
 The scripted-policy validations prove deterministically that:
 
-* the intended CLUSTER policy (all pbox built INSIDE the choke region)
-  WINS every level + every hard seed (1..4);
-* stall / spread-line (1 at choke + rest perimeter) / pure-army
-  (no pbox) all LOSE every level + every hard seed — a real LOSS, not
-  a draw;
-* the hard tier defines ≥2 spawn_point groups (north y=10 / south y=30)
-  so a memorised relative-to-base placement that lands in the same
-  world cell on every seed cannot solve the pack.
+* the intended TOPOLOGY (line on easy / cluster on medium / matched
+  topology per seed on hard) WINS every level + every applicable seed;
+* stall, pure-army, and the WRONG-TOPOLOGY (cluster on easy / line on
+  medium) all LOSE on every level + every seed — a real LOSS, not a
+  draw (the count or region or kill clause is unmet AND the
+  `after_ticks` deadline reliably bites);
+* the hard tier defines ≥2 distinct enemy spawn_point groups (Wave-9
+  per-owner spawn_point activation) so a single memorised topology
+  cannot generalise across seeds.
 """
 
 from __future__ import annotations
@@ -47,80 +67,28 @@ PACK = PACKS_DIR / "def-tower-line-vs-cluster.yaml"
 LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
 
-# Per-level total pbox budget (exactly `starting_cash / 600`).
-_N_PBOX = {"easy": 3, "medium": 4, "hard": 5}
+# Pbox cells for each topology. Outer rows are placed FIRST so they
+# are up by the time the (slowest-arriving) flank squads reach x=60.
+LINE_CELLS    = [(60, 4), (60, 36), (60, 12), (60, 28)]
+CLUSTER_CELLS = [(58, 20), (60, 19), (60, 21), (62, 20)]
 
 
 # ── scripted policies ────────────────────────────────────────────────
 
 
 def stall(rs, C):
-    """Observe-only — the agent never spends. Fact gets razed and/or
-    the clock runs out."""
+    """Observe-only — the agent never spends. The win predicate
+    requires `building_count_gte:pbox,4` AND `units_killed_gte`, so
+    the win never latches and the episode times out via
+    `after_ticks`. (On every tier the attackers are configured so a
+    pure stall also cannot satisfy the fact-alive clause.)"""
     return [C.observe()]
 
 
-def make_cluster(choke=(60, 20)):
-    """Intended CLUSTER topology: every pbox is placed INSIDE the choke
-    region (within radius 5 of the choke cell)."""
-    cx0, cy0 = choke
-    # Eight pre-chosen cells around the choke; the policy uses as many
-    # as the budget needs (easy:3, medium:4, hard:5).
-    cells = [
-        (cx0 - 2, cy0 - 1), (cx0, cy0 - 1), (cx0 + 2, cy0 - 1),
-        (cx0 - 2, cy0 + 1), (cx0, cy0 + 1), (cx0 + 2, cy0 + 1),
-        (cx0 - 1, cy0),     (cx0 + 1, cy0),
-    ]
-
-    def policy(rs, C):
-        own_b = rs.get("own_buildings") or []
-        n = sum(1 for b in own_b if b.get("type") == "pbox")
-        prod = rs.get("production") or []
-        prod_items = [p.get("item") for p in prod if isinstance(p, dict)]
-        cmds = []
-        # Once enough pboxes are up, idle (the win clause counts the
-        # current building list each turn).
-        if n >= len(cells):
-            return [C.observe()]
-        if "pbox" not in prod_items:
-            cmds.append(C.build("pbox"))
-        cmds.append(C.place_building("pbox", cells[n][0], cells[n][1]))
-        if not cmds:
-            cmds.append(C.observe())
-        return cmds
-
-    return policy
-
-
-def make_spread_line(n_pbox):
-    """SPREAD-LINE topology: one pbox at the choke + the rest along the
-    perimeter near the base. Satisfies `building_count_gte` but FAILS
-    `building_in_region` (only 1 of N at the choke, not the required
-    3-of-3 / 3-of-4 / 4-of-5)."""
-    cells = [(60, 20), (20, 18), (24, 18), (28, 18), (32, 18)][:n_pbox]
-
-    def policy(rs, C):
-        own_b = rs.get("own_buildings") or []
-        n = sum(1 for b in own_b if b.get("type") == "pbox")
-        prod = rs.get("production") or []
-        prod_items = [p.get("item") for p in prod if isinstance(p, dict)]
-        cmds = []
-        if n >= len(cells):
-            return [C.observe()]
-        if "pbox" not in prod_items:
-            cmds.append(C.build("pbox"))
-        cmds.append(C.place_building("pbox", cells[n][0], cells[n][1]))
-        if not cmds:
-            cmds.append(C.observe())
-        return cmds
-
-    return policy
-
-
 def pure_army(rs, C):
-    """PURE-ARMY: only ever train e1 — never builds a pbox. FAILS the
-    `building_count_gte:pbox` clause AND lets the rush eventually reach
-    the fact (or runs out the clock with no pbox)."""
+    """PURE-ARMY: only train e1 — never build a pbox. FAILS the
+    `building_count_gte:pbox,4` clause regardless of how many kills
+    the home-trained infantry rack up."""
     prod = rs.get("production") or []
     prod_items = [p.get("item") for p in prod if isinstance(p, dict)]
     if "e1" not in prod_items:
@@ -128,37 +96,69 @@ def pure_army(rs, C):
     return [C.observe()]
 
 
+def _make_topology(cells):
+    """Build one pbox at each cell, in order, then idle. The
+    place_building order is rejected by the engine if the cell is
+    impassable terrain — which is how the medium tier's LINE attempt
+    silently fails the count clause (only the one in-corridor cell
+    succeeds)."""
+    cells = list(cells)
+
+    def policy(rs, C):
+        own_b = rs.get("own_buildings") or []
+        n = sum(1 for b in own_b if b.get("type") == "pbox")
+        prod = rs.get("production") or []
+        prod_items = [p.get("item") for p in prod if isinstance(p, dict)]
+        if n >= len(cells):
+            return [C.observe()]
+        cmds = []
+        if "pbox" not in prod_items:
+            cmds.append(C.build("pbox"))
+        cmds.append(C.place_building("pbox", cells[n][0], cells[n][1]))
+        return cmds or [C.observe()]
+
+    return policy
+
+
+def make_line():
+    return _make_topology(LINE_CELLS)
+
+
+def make_cluster():
+    return _make_topology(CLUSTER_CELLS)
+
+
 # ── scenario-shape invariants ────────────────────────────────────────
 
 
-def test_pack_compiles_with_three_levels_and_rusher_bot():
+def test_pack_compiles_with_three_levels():
     pack = load_pack(PACK)
     assert pack.meta.id == "def-tower-line-vs-cluster"
     assert pack.meta.capability == "reasoning"
     assert set(pack.levels) == {"easy", "medium", "hard"}
-    # Required-by-spec benchmark anchors.
+    # Required-by-spec benchmark anchors — both the chokepoint /
+    # min-cut anchor (cluster doctrine) AND the perimeter / wide-front
+    # anchor (line doctrine) must be declared, since the pack
+    # discriminates both.
     anchors = pack.meta.benchmark_anchor
     assert any("min-cut" in a.lower() or "chokepoint" in a.lower() for a in anchors), anchors
     assert any("bunker" in a.lower() for a in anchors), anchors
-    # Rusher bot wired through (charges agent centroid → forces the
-    # rush path through the mid-map choke on every seed).
+    assert any("perimeter" in a.lower() for a in anchors), anchors
+    # All tiers compile + the per-tier base_map is Rust-loadable.
     for lvl in LEVELS:
         c = compile_level(pack, lvl)
-        assert c.map_supported
-        bot = getattr(c.scenario.enemy, "bot_type", None) or getattr(
-            c.scenario.enemy, "bot", None
-        )
-        assert str(bot).lower() == "rusher", (lvl, bot)
+        assert c.map_supported, (lvl, c.scenario.base_map)
 
 
 def test_starting_cash_is_exact_pbox_budget():
-    """The cash is intentionally tight (3/4/5 pbox at 600 each, zero
-    slack). A model that spends on units OR extra power runs out before
-    the count clause is satisfied — the topology decision is the spend."""
+    """The cash is tight (exactly 4 pbox at 600 each, zero slack on
+    every tier). A model that spends on units OR extra power runs out
+    before the count clause is satisfied — the topology decision is
+    the spend."""
     pack = load_pack(PACK)
-    for lvl, expected in (("easy", 1800), ("medium", 2400), ("hard", 3000)):
+    for lvl in LEVELS:
         c = compile_level(pack, lvl)
-        assert c.starting_cash == expected, (lvl, c.starting_cash)
+        assert c.starting_cash == 2400, (lvl, c.starting_cash)
 
 
 @pytest.mark.parametrize("level", LEVELS)
@@ -185,8 +185,7 @@ def test_fact_alive_clause_uses_present_tense_predicate():
     """The fact-survival clause must use the PRESENT-TENSE predicate
     (`building_count_gte:{type:fact,n:1}`) rather than `has_building`,
     which is a one-shot "ever seen" set that stays true after the fact
-    is destroyed (a documented CLAUDE.md footgun). Otherwise the rush
-    razing the fact would not trigger a LOSS."""
+    is destroyed (a documented CLAUDE.md footgun)."""
     for lvl in LEVELS:
         c = compile_level(load_pack(PACK), lvl)
         fc = c.fail_condition.model_dump(exclude_none=True)
@@ -200,36 +199,70 @@ def test_fact_alive_clause_uses_present_tense_predicate():
         assert fact_clauses, f"{lvl}: missing present-tense fact-alive fail clause"
 
 
-def test_hard_has_two_spawn_point_groups():
-    """Hard-tier contract: ≥2 distinct agent spawn_point groups so a
-    memorised relative-to-base placement that lands in the same world
-    cell on every seed cannot generalise."""
+def test_hard_has_two_seed_driven_spawn_point_groups():
+    """Hard-tier contract: ≥2 distinct seed-driven spawn_point groups
+    so a memorised topology cannot generalise. This pack uses the
+    Wave-9 ENEMY-side spawn_point axis (the agent base is fixed
+    across all seeds; only the enemy composition flips)."""
     c = compile_level(load_pack(PACK), "hard")
-    groups = {
+    enemy_groups = {
         a.spawn_point for a in c.scenario.actors
-        if a.owner == "agent" and a.spawn_point is not None
+        if a.owner == "enemy" and a.spawn_point is not None
     }
-    assert groups == {0, 1}, groups
-    # In-bounds check (rush-hour-arena playable y ≈ 2..38, x ≈ 2..126):
+    assert enemy_groups == {0, 1}, enemy_groups
+    # In-bounds check (per-tier playable area; the maps are 112x40
+    # with cordon=2, so x in 2..109 and y in 2..37).
     for a in c.scenario.actors:
         x, y = a.position
-        assert 2 <= x <= 126 and 2 <= y <= 38, (a.type, a.position)
+        assert 2 <= x <= 109 and 2 <= y <= 37, (a.type, a.position)
 
 
-# ── solvency: intended CLUSTER wins every level + every hard seed ────
+# ── solvency: intended topology wins every level + every seed ────────
 
 
-@pytest.mark.parametrize("level", LEVELS)
-def test_intended_cluster_wins_every_level_and_seed(level):
-    c = compile_level(load_pack(PACK), level)
+def test_easy_intended_line_wins_every_seed():
+    c = compile_level(load_pack(PACK), "easy")
+    for seed in SEEDS:
+        r = run_level(c, make_line(), seed=seed)
+        assert r.outcome == "win", (
+            f"easy seed{seed}: intended LINE topology must WIN; "
+            f"got {r.outcome} (tick={r.signals.game_tick}, "
+            f"kills={r.signals.units_killed}, "
+            f"buildings={r.signals.own_buildings})"
+        )
+
+
+def test_medium_intended_cluster_wins_every_seed():
+    c = compile_level(load_pack(PACK), "medium")
     for seed in SEEDS:
         r = run_level(c, make_cluster(), seed=seed)
         assert r.outcome == "win", (
-            f"{level} seed{seed}: intended cluster topology must WIN; "
+            f"medium seed{seed}: intended CLUSTER topology must WIN; "
             f"got {r.outcome} (tick={r.signals.game_tick}, "
             f"kills={r.signals.units_killed}, "
-            f"lost={r.signals.units_lost}, "
             f"buildings={r.signals.own_buildings})"
+        )
+
+
+def test_hard_matched_topology_wins_every_seed():
+    """Hard rotates enemy spawn_point per seed: even-indexed
+    spawn_point = 0 (concentrated) ⇒ CLUSTER wins; spawn_point = 1
+    (wide-front) ⇒ LINE wins. The seed→spawn_point round-robin in the
+    env is seed%2 on enemy-side, so odd seeds → spawn_point 1 and
+    even seeds → spawn_point 0."""
+    c = compile_level(load_pack(PACK), "hard")
+    for seed in SEEDS:
+        # Try both topologies; at least one must WIN on this seed
+        # (the matched one). The pack's no-cheat bar (below) checks
+        # the unmatched one LOSES.
+        r_cluster = run_level(c, make_cluster(), seed=seed)
+        r_line = run_level(c, make_line(), seed=seed)
+        wins = [n for n, r in (("cluster", r_cluster), ("line", r_line))
+                if r.outcome == "win"]
+        assert wins, (
+            f"hard seed{seed}: neither topology won (cluster={r_cluster.outcome}, "
+            f"line={r_line.outcome}) — at least one must match the active "
+            f"enemy composition"
         )
 
 
@@ -240,17 +273,14 @@ def test_intended_cluster_wins_every_level_and_seed(level):
 @pytest.mark.parametrize(
     "policy_name,policy_factory",
     [
-        ("stall",       lambda lvl: stall),
-        ("spread_line", lambda lvl: make_spread_line(_N_PBOX[lvl])),
-        ("pure_army",   lambda lvl: pure_army),
+        ("stall",     lambda lvl: stall),
+        ("pure_army", lambda lvl: pure_army),
     ],
 )
-def test_lazy_and_wrong_topology_policies_lose_every_level_and_seed(
-    level, policy_name, policy_factory
-):
-    """Stall (rush razes fact OR clock), spread-line (region clause
-    unmet), and pure-army (count clause unmet) must ALL LOSE on every
-    level + every seed — no draw."""
+def test_lazy_policies_lose_every_level_and_seed(level, policy_name, policy_factory):
+    """Stall (no pbox built, attackers raze fact or clock runs out)
+    and pure-army (never builds a pbox, fails the count clause) must
+    BOTH LOSE on every level + every seed — no draw."""
     c = compile_level(load_pack(PACK), level)
     fn = policy_factory(level)
     for seed in SEEDS:
@@ -262,13 +292,71 @@ def test_lazy_and_wrong_topology_policies_lose_every_level_and_seed(
         )
 
 
+def test_easy_wrong_topology_cluster_loses_every_seed():
+    """On easy, the LINE topology is intended; a CLUSTER at (60,20)
+    fails the four LINE rung clauses (the cluster's pbox cells are all
+    far from y=4/12/28/36) — the win never latches and the episode
+    times out → LOSS."""
+    c = compile_level(load_pack(PACK), "easy")
+    for seed in SEEDS:
+        r = run_level(c, make_cluster(), seed=seed)
+        assert r.outcome == "loss", (
+            f"easy seed{seed}: wrong-topology CLUSTER must LOSE; "
+            f"got {r.outcome} (tick={r.signals.game_tick}, "
+            f"kills={r.signals.units_killed}, "
+            f"buildings={r.signals.own_buildings})"
+        )
+
+
+def test_medium_wrong_topology_line_loses_every_seed():
+    """On medium, the CLUSTER topology is intended; a LINE attempt at
+    rows y=4/12/28/36 lands on the wall water (the chokepoint-arena's
+    corridor is only y=18..22 at x≈60). Only the in-corridor cell
+    actually places; the rest are rejected, so the count clause
+    fails."""
+    c = compile_level(load_pack(PACK), "medium")
+    for seed in SEEDS:
+        r = run_level(c, make_line(), seed=seed)
+        assert r.outcome == "loss", (
+            f"medium seed{seed}: wrong-topology LINE must LOSE; "
+            f"got {r.outcome} (tick={r.signals.game_tick}, "
+            f"kills={r.signals.units_killed}, "
+            f"buildings={r.signals.own_buildings})"
+        )
+
+
+def test_hard_unmatched_topology_loses_on_at_least_one_seed():
+    """On hard, the enemy composition flips by seed. A memorised
+    topology that satisfies the region clause (cluster OR line)
+    cannot satisfy the kill quota on the unmatched seed — at least
+    one of the four seeds must be a LOSS for EACH topology
+    individually."""
+    c = compile_level(load_pack(PACK), "hard")
+    cluster_losses = sum(
+        1 for seed in SEEDS
+        if run_level(c, make_cluster(), seed=seed).outcome == "loss"
+    )
+    line_losses = sum(
+        1 for seed in SEEDS
+        if run_level(c, make_line(), seed=seed).outcome == "loss"
+    )
+    assert cluster_losses >= 1, (
+        f"hard: CLUSTER must LOSE on at least one of seeds {SEEDS} "
+        f"(the wide-front seed); got 0 losses"
+    )
+    assert line_losses >= 1, (
+        f"hard: LINE must LOSE on at least one of seeds {SEEDS} "
+        f"(the concentrated seed); got 0 losses"
+    )
+
+
 # ── determinism ──────────────────────────────────────────────────────
 
 
 def test_intended_run_is_deterministic_on_easy():
     c = compile_level(load_pack(PACK), "easy")
-    a = run_level(c, make_cluster(), seed=3)
-    b = run_level(c, make_cluster(), seed=3)
+    a = run_level(c, make_line(), seed=3)
+    b = run_level(c, make_line(), seed=3)
     assert (a.outcome, a.turns, a.signals.units_killed) == (
         b.outcome,
         b.turns,

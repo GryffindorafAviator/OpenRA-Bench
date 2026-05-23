@@ -191,6 +191,121 @@ def structured_fog(render_state: dict) -> str:
     return format_structured_fog(obs, bounds)
 
 
+# ── Image-primary channel ────────────────────────────────────────────
+# The `image` perception modality: the text briefing is redacted of
+# every coordinate, so the PNG minimap (with per-unit labels) is the
+# ONLY source of spatial state. Units carry a short legible handle
+# (`tank-1`, `enemy-2`) shown identically in the briefing roster, on
+# the minimap, and as the id the model passes to its tools.
+_FRIENDLY_TYPE = {
+    "1tnk": "tank", "2tnk": "tank", "3tnk": "tank", "4tnk": "tank",
+    "jeep": "jeep", "apc": "apc", "arty": "arty", "harv": "harvester",
+    "mcv": "mcv", "e1": "rifle", "e2": "grenadier", "e3": "rocket",
+    "e6": "engineer",
+}
+
+
+def _friendly_word(actor_type: object) -> str:
+    """A short legible word for an actor type — `1tnk` → `tank`. Falls
+    back to the raw type (so buildings read `proc-1`, `pbox-1`)."""
+    t = str(actor_type or "").lower()
+    return _FRIENDLY_TYPE.get(t, t or "unit")
+
+
+def perception_labels(
+    render_state: dict, prior: dict[str, str] | None = None
+) -> dict[str, str]:
+    """Per-actor handle map for the image-primary channel: engine id
+    (str) → a short legible label. Own actors get a type-word handle
+    (`tank-1`, `jeep-2`, `proc-1`); enemy actors get `enemy-N`.
+
+    `prior` (the previous turn's map) is carried forward so a label
+    stays pinned to its actor for the actor's whole lifetime — an
+    enemy revealed mid-episode keeps the same handle on every later
+    turn instead of renumbering when a lower-id foe is later scouted.
+    New actors are assigned in engine-id order, continuing the count."""
+    labels: dict[str, str] = dict(prior or {})
+    # Highest index already used per prefix — so new handles continue
+    # the sequence rather than colliding with carried-over ones.
+    used: dict[str, int] = {}
+    for lab in labels.values():
+        pre, _, num = lab.rpartition("-")
+        if pre and num.isdigit():
+            used[pre] = max(used.get(pre, 0), int(num))
+
+    def _assign(items, prefix_fn):
+        for a in sorted(items, key=lambda a: int(a.get("id", 0) or 0)):
+            aid = a.get("id")
+            if aid is None or str(aid) in labels:
+                continue
+            pre = prefix_fn(a)
+            used[pre] = used.get(pre, 0) + 1
+            labels[str(aid)] = f"{pre}-{used[pre]}"
+
+    _assign(
+        render_state.get("units_summary", []) or [],
+        lambda a: _friendly_word(a.get("type")),
+    )
+    _assign(
+        render_state.get("own_buildings", []) or [],
+        lambda a: _friendly_word(a.get("type")),
+    )
+    enemies = list(render_state.get("enemy_summary", []) or [])
+    enemies += list(render_state.get("enemy_buildings_summary", []) or [])
+    _assign(enemies, lambda a: "enemy")
+    return labels
+
+
+def briefing_image_primary(render_state: dict, labels: dict[str, str]) -> str:
+    """Image-primary briefing: every coordinate redacted. The text
+    keeps the non-spatial scaffolding (funds, power, the unit roster as
+    label+type handles, production) so the model knows WHAT it has —
+    the minimap image is the only place it learns WHERE anything is."""
+    st = state_from_render(render_state)
+    econ = st["economy"]
+    funds = econ["cash"] + econ["ore"]
+    out = [
+        f"--- TURN BRIEFING (tick {st['tick']}) ---",
+        f"Funds: ${funds} (cash=${econ['cash']} + ore=${econ['ore']}) | "
+        f"Power: {st['power_balance']:+d} | "
+        f"Harvesters: {econ['harvester_count']} | "
+        f"Explored: {st['explored_percent']}%",
+    ]
+    units = sorted(
+        st["units_summary"], key=lambda u: int(u.get("id", 0) or 0)
+    )
+    out.append(f"Your units ({len(units)}) — find each on the minimap:")
+    idle = []
+    for u in units:
+        lab = labels.get(str(u.get("id")), str(u.get("id")))
+        out.append(f"  {lab}  ({u.get('type') or '?'})")
+        if str(u.get("activity", "")).lower() in ("", "idle"):
+            idle.append(lab)
+    if idle:
+        out.append(f"Idle: {', '.join(idle)}")
+    bsum = st["buildings_summary"]
+    if bsum:
+        out.append(f"Your buildings ({len(bsum)}) — find each on the minimap:")
+        for b in bsum:
+            lab = labels.get(str(b.get("id")), str(b.get("id")))
+            out.append(f"  {lab}  ({b.get('type') or '?'})")
+    else:
+        out.append("Buildings: none (you command mobile units only).")
+    out.append(
+        "Enemies: NOT listed here — read the minimap. Enemy markers are "
+        "labelled enemy-1, enemy-2, … (only those in your units' sight; "
+        "scout the fog to reveal more)."
+    )
+    prod = st["production_items"]
+    out.append(f"Production: {', '.join(prod) if prod else 'IDLE'}")
+    out.append(
+        "ALL unit and enemy POSITIONS are on the minimap image only — "
+        "each marker is labelled with the id shown above; pass that id "
+        "to your tools."
+    )
+    return "\n".join(out)
+
+
 def minimap_b64(
     render_state: dict, terrain_png: bytes | None,
     explored_history: set | None,

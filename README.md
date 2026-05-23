@@ -21,6 +21,8 @@ Standardized benchmark and leaderboard for AI agents playing Red Alert through [
 - **Evaluation harness**: Automated N-game benchmarking with metrics collection
 - **OpenEnv rubrics**: Composable scoring (win/loss, military efficiency, economy)
 - **Replay verification**: Replay files linked to leaderboard entries
+- **Mission Player**: Static game-like website for browsing, annotating, and reviewing scenarios
+- **Bilingual**: English and Chinese scenario instructions generated deterministically
 
 ## Quick Start
 
@@ -93,6 +95,47 @@ The Gradio app exposes these API endpoints (Gradio 5+ SSE protocol):
 | `submit` | Submit JSON results (no replay) |
 | `submit_with_replay` | Submit JSON + replay file |
 | `filter_leaderboard` | Query/filter leaderboard data |
+
+## Mission Player (Static Site)
+
+A game-like mission selection and annotation website in `site/`. No framework, no build step -- a single HTML file deployable to GitHub Pages.
+
+### For players / annotators
+
+Open `site/index.html` via any HTTP server:
+
+```bash
+cd site && python3 -m http.server 8765
+# Open http://localhost:8765/index.html
+```
+
+Workflow: browse scenario cards, pick a mission, read bilingual objectives (EN/ZH toggle), switch difficulty (easy/medium/hard), annotate the map with point/region tools, tag and add notes, mark complete, navigate to next mission, export annotations as JSON.
+
+### For maintainers
+
+Generate or refresh static data after scenario changes:
+
+```bash
+python site/generate.py            # generate scenarios.json + map thumbnails
+python site/generate.py --dry-run  # print counts without writing
+```
+
+Map thumbnails require the Rust engine wheel (`openra_train`). Without it, the site works with a placeholder map area; annotations still work on the placeholder.
+
+Deploy by copying `site/index.html` and `site/public/` to any static host.
+
+See `docs/IMPLEMENTATION_NOTES.md` for full details.
+
+### Running tests
+
+```bash
+# Data pipeline + coverage invariant tests (Python)
+python -m pytest tests/test_site.py tests/test_app.py -v
+
+# E2E DOM interaction tests (Node.js + jsdom)
+npm install   # first time only
+node tests/test_site_e2e.mjs
+```
 
 ## Scoring
 

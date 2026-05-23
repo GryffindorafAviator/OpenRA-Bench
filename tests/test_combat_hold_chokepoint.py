@@ -1,43 +1,48 @@
 """combat-hold-chokepoint — hold a narrow corridor so a larger enemy
-force can only feed a 3-abreast trickle through the choke.
+force can only feed a few-abreast trickle through the choke.
 
 Capability (action): positioning the squad IN a chokepoint lets a
 small force defeat a larger one — the terrain caps how many attackers
-can bring weapons to bear at once. Anchored in a 3-cell silo-walled
-corridor, 4 medium tanks grind a 12-16 strong light-tank force down
-piecemeal; the same squad fighting in the open is surrounded and
-focus-fired down.
+can bring weapons to bear at once. Anchored at the mouth of a
+water-walled corridor (the chokepoint-arena generator's `pinch_x=48`,
+`pinch_width=6`, per-tier `corridor_width`), the defenders grind the
+larger force down piecemeal; the same squad fighting in the open is
+surrounded and focus-fired down.
 
-Bar (recalibrated 2026-05-20 after the OpenRA-Rust engine movement
-fixes — moving units now fire and take fire en route, and attack_unit
-on an out-of-sight target paths normally. Those fixes made a static
-auto-firing squad strong enough that the old 12-tank / quota-8 easy
-tier was beatable by a pure stall; the recalibration bumps easy to 14
-attackers + quota 9 and adds a corridor-geometry win clause):
+Per-tier (rewritten 2026-05-23 for the canonical chokepoint-arena
+use case — terrain water carries the wall, no silo-as-wall actors):
+
+  easy   — corridor width 4, 3x 2tnk defenders, 6x 1tnk attackers,
+           quota 4, region n>=2 within radius 6 of (44,20).
+  medium — corridor width 3, 4x 2tnk defenders, 10x 1tnk attackers,
+           quota 7, region n>=3.
+  hard   — corridor width 2, 4x 2tnk defenders, 14x 1tnk attackers
+           (seeded NORTH or SOUTH cluster), quota 9, region n>=3.
+
+Bar (every level, every seed):
 
   • stall (only observe)        -> LOSS. The pre-placed squad
-    auto-fires (stance:2) but SPREADS its fire across the 3-abreast
-    front instead of concentrating it, kills too slowly (~7-8 < the
-    quota of 9), and is worn down -> own_units_gte:2 busts AND the
-    kill quota is unmet (killed 7-8, lost 3-4).
-  • brute attack_move east      -> LOSS. The squad charges out of the
-    corridor into the open; the whole force converges and focus-fires
-    all 4 tanks -> loss cap busted before the kill quota (killed 0-1,
-    lost 3-4), and the squad is no longer in the choke region.
-  • wrong-path retreat WEST     -> LOSS. Pulling the squad west out of
-    the corridor into the open: even when it scrapes the kill quota
-    the survival cap busts and the units_in_region geometry clause
-    fails (the squad is at x~20, not in the lane).
-  • intended hold-the-choke     -> WIN. The squad stays anchored in
-    the corridor and focus-fires the frontmost enemy; the 3-abreast
-    funnel is ground down; the squad keeps >=3 tanks in the choke
-    region and hits the kill quota (killed 9-10, lost 0-1).
+    auto-fires (stance:2) but SPREADS its fire across the funnel
+    front instead of concentrating it; kills too slowly to clear the
+    quota before the survival cap busts.
+  • brute attack_move east      -> LOSS. The squad charges through
+    the corridor into the open enemy lobe; the whole force converges
+    and focus-fires the tanks down before the quota.
+  • wrong-path retreat WEST     -> LOSS. Pulling out of the corridor
+    mouth into the west open: even when the retreating squad scrapes
+    the kill quota by kiting, the units_in_region geometry clause
+    (mouth at x=44, y=20) fails — the squad sits at x~20 — and/or
+    the survival cap busts.
+  • intended hold-the-choke     -> WIN. The squad stays anchored at
+    the mouth (x=43..44, y in the corridor rows) and focus-fires the
+    frontmost attacker; the funneled queue is ground down piecemeal
+    and the squad keeps enough tanks at the mouth.
 
-Engine note: `silo` walls block PATHING but not weapons fire, so the
-chokepoint works by CONFINING the attacker to the 3-row lane (capping
-how many enemies are within weapon range at once), not by blocking
-line of sight — this is why the corridor brackets the lane along its
-whole length.
+Engine note: WATER terrain blocks PATHING (not weapons fire), so the
+chokepoint works by CONFINING the attacker to the corridor-width row
+band (capping how many enemies are within weapon range at once),
+not by blocking line of sight — the lane is the only crossing for
+the full map height.
 """
 
 from __future__ import annotations
@@ -58,11 +63,11 @@ PACK_PATH = PACKS / "combat-hold-chokepoint.yaml"
 # ── unit-level predicate checks ──────────────────────────────────────
 
 
-def _ctx(n_units, tick=1000, killed=0, fact=1, pos=(52, 20)):
+def _ctx(n_units, tick=1000, killed=0, fact=1, pos=(44, 20)):
     """Synthesize a WinContext for predicate-level checks. `pos` is the
-    cell every own unit sits at — defaults to the choke (52,20) so the
-    units_in_region win clause is satisfied; pass an out-of-corridor
-    cell to exercise the geometry teeth."""
+    cell every own unit sits at — defaults to the corridor mouth
+    (44,20) so the units_in_region win clause is satisfied; pass an
+    out-of-corridor cell to exercise the geometry teeth."""
     import types
 
     sig = types.SimpleNamespace(
@@ -87,31 +92,26 @@ def _ctx(n_units, tick=1000, killed=0, fact=1, pos=(52, 20)):
 
 def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    # 3 tanks alive (in the choke region), 9 kills, fact alive, in
-    # time -> WIN
-    assert evaluate(c.win_condition, _ctx(3, tick=3000, killed=9))
-    assert evaluate(c.win_condition, _ctx(4, tick=3000, killed=12))
-    # only 2 tanks alive -> own_units_gte:3 fails
-    assert not evaluate(c.win_condition, _ctx(2, tick=3000, killed=12))
+    # 2 tanks at the mouth, 9 kills, fact alive, in time -> WIN
+    assert evaluate(c.win_condition, _ctx(2, tick=3000, killed=9))
+    assert evaluate(c.win_condition, _ctx(3, tick=3000, killed=12))
     # kill quota unmet (8 < 9) -> win fails
-    assert not evaluate(c.win_condition, _ctx(4, tick=3000, killed=8))
+    assert not evaluate(c.win_condition, _ctx(3, tick=3000, killed=8))
     # fact razed -> win fails
-    assert not evaluate(c.win_condition, _ctx(4, tick=3000, killed=12, fact=0))
+    assert not evaluate(c.win_condition, _ctx(3, tick=3000, killed=12, fact=0))
     # 1 tank left -> fail clause fires (not own_units_gte:2)
     assert evaluate(c.fail_condition, _ctx(1, tick=3000, killed=12))
-    # fact razed -> not a fail clause here (fail is unit-count / deadline),
-    # but win is unmet so the episode is a non-win.
     # past deadline -> real loss, reachable within max_turns
-    assert evaluate(c.fail_condition, _ctx(4, tick=5402, killed=12))
+    assert evaluate(c.fail_condition, _ctx(3, tick=5402, killed=12))
     assert 5401 <= 93 + 90 * (c.max_turns - 1), (
         "after_ticks 5401 must be reachable within max_turns"
     )
 
 
 def test_predicates_medium_and_hard():
-    for lvl, quota in (("medium", 9), ("hard", 9)):
+    for lvl, quota in (("medium", 11), ("hard", 9)):
         c = compile_level(load_pack(PACK_PATH), lvl)
-        # meeting the quota with >=3 tanks in the choke and fact alive
+        # meeting the quota with >=3 tanks at the mouth and fact alive
         # -> WIN
         assert evaluate(c.win_condition, _ctx(3, tick=3000, killed=quota))
         # one short of the quota -> win fails
@@ -128,20 +128,21 @@ def test_corridor_geometry_clause_bites():
     """The units_in_region win clause makes the hold load-bearing: a
     squad that met the kill quota and survival cap but abandoned the
     corridor (charged east or pulled west into the open) still fails
-    the win — only a squad anchored in the choke satisfies it."""
-    for lvl, quota in (("easy", 9), ("medium", 9), ("hard", 9)):
+    the win — only a squad anchored at the mouth (x=44, y=20)
+    satisfies it."""
+    for lvl, quota in (("easy", 9), ("medium", 11), ("hard", 9)):
         c = compile_level(load_pack(PACK_PATH), lvl)
-        # Anchored in the choke (52,20) -> WIN
+        # Anchored at the mouth (44,20) -> WIN
         assert evaluate(
-            c.win_condition, _ctx(4, tick=3000, killed=quota, pos=(52, 20))
+            c.win_condition, _ctx(3, tick=3000, killed=quota, pos=(44, 20))
         )
         # Pulled WEST into the open (x=20) -> geometry clause fails
         assert not evaluate(
-            c.win_condition, _ctx(4, tick=3000, killed=quota, pos=(20, 20))
+            c.win_condition, _ctx(3, tick=3000, killed=quota, pos=(20, 20))
         )
-        # Charged EAST out of the corridor (x=100) -> geometry fails
+        # Charged EAST through the corridor (x=80) -> geometry fails
         assert not evaluate(
-            c.win_condition, _ctx(4, tick=3000, killed=quota, pos=(100, 20))
+            c.win_condition, _ctx(3, tick=3000, killed=quota, pos=(80, 20))
         )
 
 
@@ -205,7 +206,7 @@ def _brute_east_policy(rs, Command):
     if not units:
         return [Command.observe()]
     return [
-        Command.attack_move([str(u["id"])], target_x=120, target_y=20)
+        Command.attack_move([str(u["id"])], target_x=88, target_y=20)
         for u in units
     ]
 

@@ -96,7 +96,7 @@
 #     the budget to mop the screen and clear K. So K being met is a
 #     PROXY for "the artillery was killed in time" even though no
 #     per-type enemy-kill predicate exists.
-#   - Anti-DRAW: a persistent enemy `fact` marker far east (120,21)
+#   - Anti-DRAW: a persistent enemy `fact` marker far east (100,21)
 #     keeps the episode alive past enemy-elimination so the win/fail
 #     evaluator always sees the terminal frame (CLAUDE.md footgun).
 #   - Tick budget: ~90 ticks/turn, max_turns 30 ⇒ reachable tick
@@ -119,8 +119,7 @@ meta:
     tank force must perform a counter-battery strike: drive past the
     infantry screen and destroy the artillery FIRST, before it razes
     the construction yard. Trading fire with the screening infantry
-    while the artillery keeps firing loses the base — the highest-
-    impact threat must be engaged first, not the nearest one.
+    while the artillery keeps firing loses the base — the highest-impact threat must be engaged first, not the nearest one.
   robotics_analogue: >
     Military counter-battery doctrine and threat prioritisation:
     when a hostile asset is degrading your objective from beyond
@@ -137,12 +136,50 @@ meta:
     - "SC2 siege-tank counter"
   author: openra-bench
 
-# rush-hour-arena: 128×40 playable (x in [2..126], y in [2..38]).
-# The agent base sits at the west; the enemy screen+battery sits a
-# short distance east, with the artillery already inside range 7c of
-# the fact. The strike force must drive east through the screen to
-# reach and destroy the guns.
-base_map: rush-hour-arena
+# def-counter-battery-arena: 112×40 tailored arena (playable x in
+# [2..109], y in [2..37]).  Generator: `arena` with flanking water
+# obstacles framing a long west→east sight-line lane down the middle
+# (y ≈ 9..32 stays fully clear so the artillery's range-7c shot at
+# the construction yard is unbroken and the strike force can drive
+# straight through the screen). The flanking water rects at the
+# north/south of the agent base (x≈14..21) and behind the enemy
+# battery (x≈32..41), plus the two long bands at the north/south
+# edges from x≈50..89, frame the artillery lane visually and pin the
+# sight-line as the only viable counter-battery approach — they sit
+# ABOVE/BELOW every actor (north y=3..6, south y=36..37, plus the
+# distant y=3..7 / y=33..37 bands well east of the combat zone), so
+# no actor is occluded and the tank push from x=10 to the battery at
+# x=27 is unimpeded. The agent base sits at the west; the enemy
+# screen+battery sits a short distance east, with the artillery
+# already inside range 7c of the fact. The strike force must drive
+# east through the screen to reach and destroy the guns. The
+# persistent far enemy `fact` anti-DRAW marker is at (100,21) (no
+# longer (120,21) — the 112-wide tailored map can't hold x=120).
+base_map:
+  generator: arena
+  name: def-counter-battery-arena
+  width: 112
+  height: 40
+  cordon: 2
+  title: Counter-Battery Arena 112x40
+  obstacles:
+    # North flanking band near the agent base (frames the lane from
+    # the north; sits above hard's northern positions which start at
+    # y=8).
+    - {x: 14, y: 3, w: 8, h: 4}
+    # North obstacle behind the enemy battery (cover north of x=27,
+    # frames the rear of the battery).
+    - {x: 32, y: 3, w: 10, h: 4}
+    # South flanking band near the agent base (below hard's southern
+    # positions which end at y=34).
+    - {x: 14, y: 36, w: 8, h: 2}
+    # South obstacle behind the enemy battery.
+    - {x: 32, y: 36, w: 10, h: 2}
+    # Long northern band along the sight-line east toward the marker
+    # — pins the artillery lane visually.
+    - {x: 50, y: 3, w: 40, h: 5}
+    # Long southern band along the sight-line east toward the marker.
+    - {x: 50, y: 33, w: 40, h: 5}
 starting_cash: 0
 
 base:
@@ -184,20 +221,28 @@ levels:
   # turns and then has the rest of the budget to mop the screen for
   # the kill bar. stall / brute / screen-first all LOSE the fact.
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Your construction yard (fact) sits at the west edge (20,21), ringed
+    # by two pillboxes (pbox, range 5c, anti-infantry). A strike force of
+    # four medium tanks (2tnk) is staged just west of the base. The enemy
+    # is a frontline screen of fifteen rifle infantry (e1) with TWO long-
+    # range artillery pieces (arty, range 7c) posted in the rear — the
+    # artillery OUT-RANGES your pillboxes and is already shelling the
+    # construction yard. Counter-battery doctrine: drive the tanks PAST
+    # the infantry screen and destroy BOTH artillery pieces FIRST, before
+    # they raze the fact; then mop up the screen. Grinding the infantry
+    # screen while the artillery keeps firing loses the base. Win when 12
+    # enemy units are destroyed AND the construction yard is still
+    # standing, before tick 2700.
     description: >
-      Your construction yard (fact) sits at the west edge (20,21),
-      ringed by two pillboxes (pbox, range 5c, anti-infantry). A
-      strike force of four medium tanks (2tnk) is staged just west
-      of the base. The enemy is a frontline screen of fifteen rifle
-      infantry (e1) with TWO long-range artillery pieces (arty,
-      range 7c) posted in the rear — the artillery OUT-RANGES your
-      pillboxes and is already shelling the construction yard.
-      Counter-battery doctrine: drive the tanks PAST the infantry
-      screen and destroy BOTH artillery pieces FIRST, before they
-      raze the fact; then mop up the screen. Grinding the infantry
-      screen while the artillery keeps firing loses the base. Win
-      when 12 enemy units are destroyed AND the construction yard is
-      still standing, before tick 2700.
+      Your construction yard at (20,21) is ringed by two pillboxes; four
+      medium tanks sit just west. Fifteen enemy riflemen screen two long-range artillery in the rear — the artillery outranges your pillboxes
+      and is already shelling the yard. Drive the tanks past the screen,
+      kill BOTH guns first, then mop up the rifles. Twelve kills, yard
+      intact, within about 30 turns.
     overrides:
       actors:
         # Strike force — 4 medium tanks staged west of the base.
@@ -244,7 +289,7 @@ levels:
         # Persistent far enemy `fact` marker — keeps the episode
         # alive past enemy-elimination so the win/fail evaluator
         # sees the terminal frame (anti-DRAW; CLAUDE.md footgun).
-        - {type: fact, owner: enemy, position: [120, 21]}
+        - {type: fact, owner: enemy, position: [100, 21]}
     win_condition:
       all_of:
         # Kill bar 12 — ABOVE the ~9 kills a screen-first policy can
@@ -273,20 +318,28 @@ levels:
   # caps at ~6 kills before the fact falls; the intended strike
   # silences the three guns in ~4-5 turns and mops to the kill bar.
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Your construction yard (fact) sits at the west edge (20,21), ringed
+    # by three pillboxes. A strike force of six medium tanks (2tnk) is
+    # staged just west of the base. The enemy is a deep frontline screen
+    # of twenty-one rifle infantry (e1) with THREE long-range artillery
+    # pieces (arty, range 7c) posted in the rear — the artillery out-
+    # ranges your pillboxes and is shelling the construction yard. The
+    # heavier three-gun battery razes the yard faster than easy's two-gun
+    # battery. Counter-battery doctrine: drive the tanks past the infantry
+    # screen and destroy ALL THREE artillery pieces FIRST, then mop up the
+    # screen. Grinding the infantry screen while the artillery keeps
+    # firing loses the base. Win when 14 enemy units are destroyed AND the
+    # construction yard is still standing, before tick 2700.
     description: >
-      Your construction yard (fact) sits at the west edge (20,21),
-      ringed by three pillboxes. A strike force of six medium tanks
-      (2tnk) is staged just west of the base. The enemy is a deep
-      frontline screen of twenty-one rifle infantry (e1) with THREE
-      long-range artillery pieces (arty, range 7c) posted in the
-      rear — the artillery out-ranges your pillboxes and is shelling
-      the construction yard. The heavier three-gun battery razes the
-      yard faster than easy's two-gun battery. Counter-battery
-      doctrine: drive the tanks past the infantry screen and destroy
-      ALL THREE artillery pieces FIRST, then mop up the screen.
-      Grinding the infantry screen while the artillery keeps firing
-      loses the base. Win when 14 enemy units are destroyed AND the
-      construction yard is still standing, before tick 2700.
+      Three pillboxes ring the yard; six tanks stage just west. The enemy
+      line packs twenty-one rifles with three artillery pieces behind
+      them, and the heavier battery razes the yard fast. Punch through to
+      all three guns first, then clean the screen. Fourteen kills, yard
+      intact, within about 30 turns.
     overrides:
       actors:
         # Strike force — 6 medium tanks staged west of the base.
@@ -331,7 +384,7 @@ levels:
         - {type: arty, owner: enemy, position: [27, 19], stance: 2}
         - {type: arty, owner: enemy, position: [27, 21], stance: 2}
         - {type: arty, owner: enemy, position: [27, 23], stance: 2}
-        - {type: fact, owner: enemy, position: [120, 21]}
+        - {type: fact, owner: enemy, position: [100, 21]}
     win_condition:
       all_of:
         # Kill bar 14 — above the ~6 kills a screen-first policy
@@ -360,27 +413,35 @@ levels:
   # ground on the off-latitude seed. Battery size and kill bar match
   # medium (3 arty, K=14); the controlled axis is the spawn flip.
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Your construction yard sits at a seed-chosen latitude (NORTH base
+    # y=14 or SOUTH base y=28 — the whole base and the enemy formation
+    # flip together with the seed), ringed by three pillboxes, with six
+    # medium tanks staged just west of it. The enemy is a deep frontline
+    # screen of twenty-one rifle infantry (e1) with THREE long-range
+    # artillery pieces (arty, range 7c) posted in the rear — the artillery
+    # out-ranges your pillboxes and is shelling the construction yard.
+    # Counter-battery doctrine: drive the tanks past the infantry screen
+    # at YOUR base's latitude and destroy all three artillery pieces
+    # FIRST, then mop up the screen. Grinding the infantry screen while
+    # the artillery keeps firing loses the base. Win when 14 enemy units
+    # are destroyed AND the construction yard is still standing, before
+    # tick 2700.
     description: >
-      Your construction yard sits at a seed-chosen latitude (NORTH
-      base y=14 or SOUTH base y=28 — the whole base and the enemy
-      formation flip together with the seed), ringed by three
-      pillboxes, with six medium tanks staged just west of it. The
-      enemy is a deep frontline screen of twenty-one rifle infantry
-      (e1) with THREE long-range artillery pieces (arty, range 7c)
-      posted in the rear — the artillery out-ranges your pillboxes
-      and is shelling the construction yard. Counter-battery
-      doctrine: drive the tanks past the infantry screen at YOUR
-      base's latitude and destroy all three artillery pieces FIRST,
-      then mop up the screen. Grinding the infantry screen while the
-      artillery keeps firing loses the base. Win when 14 enemy units
-      are destroyed AND the construction yard is still standing,
-      before tick 2700.
+      Your yard and twelve tanks stage in the NORTH (y=14) or SOUTH (y=28)
+      band by seed; the enemy mirrors at the same latitude with twenty-one
+      rifles screening three long-range guns. Same doctrine — silence the
+      guns first, then sweep the screen. Fourteen kills, yard intact,
+      within about 30 turns.
     overrides:
       actors:
         # Persistent far enemy `fact` marker (anti-DRAW) — no
         # spawn_point, places every seed; on the symmetry axis
         # (y=21) so it sits on neither base's approach line.
-        - {type: fact, owner: enemy, position: [120, 21]}
+        - {type: fact, owner: enemy, position: [100, 21]}
         # ── spawn_point 0 — NORTH base (y=14) ──────────────────────
         - {type: 2tnk, owner: agent, position: [10,  9], stance: 1, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [10, 11], stance: 1, spawn_point: 0}

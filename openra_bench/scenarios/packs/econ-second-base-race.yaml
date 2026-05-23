@@ -1,0 +1,368 @@
+# ECON-SECOND-BASE-RACE — tempo expansion to a SPECIFIC second-base
+# location, with a load-bearing SPATIAL placement predicate.
+#
+# Capability under test: place_building('proc') at the RIGHT SPOT
+# quickly. The race is "drop the 2nd proc inside the contested target
+# zone by tick T". The map is custom-tailored to this skill — the
+# generic `rush-hour-arena` was a mirrored-east-west layout that
+# tested the cash bar but only indirectly tested spatial placement.
+# This pack now uses its own purpose-built arena where the optimal
+# 2nd-proc location is a specific south-east hex, far from the
+# agent's NW base, sitting right on a rich centre ore patch.
+#
+# Why a custom map (vs `rush-hour-arena`):
+#   • The pack measures TEMPO + SPATIAL placement. The win predicate
+#     now includes `building_in_region: {x: 88, y: 30, radius: 6,
+#     type: proc}` — a placement OUTSIDE that disk loses even if the
+#     cash bar is cleared (the failure mode that the EV-only bar
+#     could NOT catch). A custom geometry lets us tune the disk
+#     location, the near-base cash floor, and the path length so
+#     each scripted policy fails or wins for the RIGHT reason.
+#   • Agent NW corner (around (8, 8)) + far ENEMY sentinel SE
+#     corner. The 2nd-proc target zone centres at (88, 30) — ~80
+#     cells from the agent's fact by L1, on a rich patch with
+#     amount 12000 + radius 4 (~5100 cash ceiling).
+#   • A small near-base patch (radius 2, amount 3000) at (16, 8)
+#     gives the auto-spawned harv from a HOME-placed proc a
+#     working income channel — so the home-placement policy can
+#     STILL clear the EV bar (EV ≈ 4500 in the validation grid).
+#     This is what makes the SPATIAL predicate load-bearing: an EV-
+#     only win predicate would have rewarded the home-placement
+#     play. With the `building_in_region` clause, only forward
+#     placement WINS.
+#   • Map dimensions 112×40 (medium arena per the task spec).
+#     Generator: `arena` with a cordon=2 + a pair of WATER walls
+#     at x=48..51 (a "midline barrier" with a corridor between
+#     y=18..23) so the harv's path from the NW base to the SE
+#     patch is forced through a single corridor — adds tactical
+#     commitment to a forward placement (you can't take it back if
+#     you mis-spend).
+#
+# Engine facts the design depends on (verified in CLAUDE.md /
+# scripted-policy probe at /tmp/probe.py — re-run after any pack
+# edit):
+#
+# 1. `place_building('proc', x, y)` AUTO-SPAWNS a free `harv`
+#    adjacent to the new proc, and binds the new harv to the
+#    nearest refinery by path distance (CLAUDE.md "place_building
+#    auto-spawn + find_refinery_from"). The forward-placement
+#    intended play hinges on this: drop the proc adjacent to the
+#    centre patch and the auto-spawn harv lands ON the patch and
+#    starts cycling on the very tick the proc finishes.
+# 2. `place_building` does NOT enforce build-adjacency — the agent
+#    can legally drop the new proc at (86, 30) even though it is
+#    ~80 cells from its `fact` at (8, 8) (CLAUDE.md "place_building
+#    does NOT enforce build-adjacency"). One `build('proc')` +
+#    one `place_building('proc', 86, 30)` is the full intended
+#    sequence.
+# 3. Existing harvs do NOT re-snap to the new proc (CLAUDE.md
+#    "Existing harvesters do NOT re-snap"). The starting harv at
+#    (12, 8) stays bound to the lowest-id refinery (none initially)
+#    — it does not migrate to the new far proc. Income comes
+#    almost entirely from the auto-spawn harv at the contested
+#    patch. The cash bar is calibrated against that single-harv
+#    throughput.
+# 4. `fact` has cost 0 → not buildable (CLAUDE.md "fact has cost
+#    0"). The persistent far-corner enemy `fact` sentinel cannot
+#    be replaced by build orders; pre-place only. It serves the
+#    engine auto-`done` mitigation (a non-winning episode emits a
+#    real reachable LOSS at the after_ticks buzzer, not a DRAW
+#    from enemy-eliminated).
+# 5. `building_in_region` is Euclidean-disk: cell (bx, by) counts
+#    iff `(bx-x)² + (by-y)² ≤ radius²`. At centre (88, 30) and
+#    radius 6, the cell (86, 30) (distance 2) is well inside; the
+#    cell (13, 11) (home placement) is at distance √(75² + 19²) ≈
+#    77 — far outside. The radius 6 is a forgiving disk so the
+#    intended placement at (86, 30) — adjacent to the patch and
+#    near the harv auto-spawn cell (85, 29) — counts unambiguously.
+# 6. Tick alignment: `within_ticks ≤ 93 + 90·(max_turns − 1)`.
+#    All three tiers use max_turns 40 → ceiling = 93 + 90·39 =
+#    3603 ≥ 3600 ✓. The bar HEIGHT (easy 2400 / medium 3500 /
+#    hard 4500) and the SPATIAL clause separate the tiers; the
+#    deadline always bites as a LOSS, never a DRAW.
+# 7. `building_in_region` has a `_PHRASES` translation in
+#    `openra_bench/game_knowledge.py` (verified at L201) so the
+#    objective brief renders cleanly for the model.
+# 8. Hard tier spawn contract: TWO seed-driven agent spawn groups
+#    via `spawn_point` (CLAUDE.md ≥2 hard-tier requirement). The
+#    AGENT corner round-robins NW (y=8) vs SW (y=32); the
+#    contested 2nd-proc target zone shifts to the matching
+#    latitude (SE (88, 30) for NW spawn / NE (88, 8) for SW
+#    spawn). Each spawn group declares its own
+#    `building_in_region` candidate via the `any_of` predicate
+#    so either landing wins ON THE CORRECT DIAGONAL. The
+#    persistent far-corner enemy sentinel is duplicated across
+#    both spawn groups (per CLAUDE.md spawn-filter idiom).
+# 9. Scripted-policy validation grid (re-run after every pack
+#    edit) — all three tiers, seed 1:
+#       stall                         : LOSS (EV stuck at 2000, clock)
+#       home_proc_only                : LOSS (EV 4500 but OUTSIDE
+#                                       building_in_region disk)
+#       home_proc_+_harvest_near      : LOSS (same)
+#       mid_proc_no_patch (x=48)      : LOSS (no patch, no income,
+#                                       outside disk)
+#       forward_intended (x=86, y=30) : WIN  (EV 2500 at T≈18,
+#                                       inside disk)
+#    The home_proc cell is the discriminator: it clears the EV bar
+#    via the near patch (auto-spawn lands on it) but the SPATIAL
+#    clause locks it out.
+
+meta:
+  id: econ-second-base-race
+  title: 'Econ Second-Base Race — Plant the 2nd Proc at the Contested Spot'
+  capability: reasoning
+  real_world_meaning: >
+    Tempo expansion to a SPECIFIC second-base location under a hard
+    deadline. The agent owns a Construction Yard, a Power Plant, an
+    idle Ore Truck, and a small near-base ore patch in the NORTH-
+    WEST corner of a medium arena. A rich CONTESTED ore patch sits
+    far to the south-east — the only zone where a 2nd refinery
+    produces enough income to clear the cash bar inside the clock.
+    The capability under test is the TEMPO + SPATIAL decision to
+    drop the 2nd `proc` inside the contested target disk (radius 6
+    around the patch) on turn 1, rather than placing it at home
+    (the comfortable adjacency-to-fact play) or anywhere on the
+    map that is not the target spot. A home-placed `proc` still
+    runs an economy off the near-base patch — but the cash bar is
+    not the only gate: the `building_in_region` clause requires
+    the proc to be at the target zone, so a home play loses on the
+    spatial predicate even with the bar cleared.
+  robotics_analogue: >
+    Forward-deploy a processing module at a SPECIFIC contested
+    extraction site under a hard deadline. The home depot has a
+    small local deposit (sustaining income but well below quota);
+    the only way to hit the throughput SLA is to commit the
+    second module to the far site, accepting that you cannot
+    recover it if you mis-spend. The decision is geographic
+    commitment to a specific cell, not a directional gradient —
+    placing the module "somewhere forward" but missing the cell
+    fails the placement audit.
+  benchmark_anchor:
+    - "SC2 expansion timing / second-base race"
+    - "RTS contested-expand idiom (rich patch in the middle)"
+    - "tempo decision under a hard clock + spatial placement audit"
+  author: openra-bench
+
+# Pack-level `base_map` is the logical id of the custom arena
+# materialised by the per-level `base_map:` generator spec inside
+# each `overrides:` block (same idiom as
+# lh-defense-tech-second-base, mfb-third-base-against-clock).
+# The .oramap is built once into `data/maps/` by
+# `openra_bench.mapgen.materialize` (deterministic, content-
+# addressed) and the loader resolves it like any shipped map.
+base_map: econ-second-base-race-arena
+starting_cash: 2000
+
+base:
+  # Per-player cash plumbing is load-bearing (CLAUDE.md "Per-player
+  # starting cash is now plumbed end-to-end"): the bench's PlayerSetup
+  # defaults `agent.cash: 0`, and the engine honours per-player
+  # overrides OVER the top-level `starting_cash`. Without the explicit
+  # `agent: {cash: 2000}` the agent boots at 0 and `build('proc')`
+  # stalls at 0 progress, masking the real intended capability.
+  agent: {faction: allies, cash: 2000}
+  # `turtle` bot holds spawn + return-fires only (CLAUDE.md botgen) —
+  # this pack is a clean spatial/clock race, no force-wipe DRAW risk.
+  enemy: {faction: soviet, cash: 0, bot_type: turtle}
+  tools: [observe, build, place_building, move_units, harvest, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # 112×40 arena with a midline water barrier (x=48..51) split by a
+  # corridor (y=18..23). AGENT base at NW (8, 8): fact, powr (8, 11),
+  # harv (12, 8). NEAR-BASE patch at (16, 8) (radius 2, amount 3000
+  # — keeps a home-placed proc's auto-spawn harv productive so the
+  # SPATIAL predicate, not the EV bar, is the discriminator).
+  # CONTESTED patch at (88, 30) (radius 4, amount 12000 — ~5100 cash
+  # ceiling). Win disk radius 6 around (88, 30). EV bar 2400 (the
+  # intended forward play clears 2500 at T≈18). After_ticks 3601
+  # (reachable within max_turns 40 ⇒ 93 + 90·39 = 3603).
+  easy:
+    description: >
+      You command a Construction Yard ('fact'), a Power Plant
+      ('powr'), and one idle Ore Truck ('harv') in the NORTH-WEST
+      corner of a 112x40 arena. A small ore patch sits next to your
+      base at (16, 8); a RICH CONTESTED patch sits far away at the
+      SOUTH-EAST at (88, 30). You have $2000. Build an Ore Refinery
+      ('proc', cost 1400) and place it INSIDE the contested target
+      zone — a disk of radius 6 around (88, 30). `place_building`
+      auto-spawns a fresh harvester adjacent to the new refinery,
+      which lands on the patch and starts cycling immediately. Win
+      = the proc is inside the target disk AND economy_value ≥ 2400
+      before tick 3600. Placing the proc at your home base still
+      makes some income off the near patch but FAILS the spatial
+      clause; placing it anywhere else with no patch nearby earns
+      nothing AND fails the spatial clause; stalling earns nothing
+      and fails both.
+    starting_cash: 2000
+    overrides:
+      base_map:
+        generator: arena
+        name: econ-second-base-race-arena
+        width: 112
+        height: 40
+        cordon: 2
+        obstacles:
+          # Midline water barrier — splits the arena into a NW lobe
+          # and an SE lobe with a single corridor between them. The
+          # harv's path from the NW base to the SE patch is forced
+          # through y=18..23 (the gap between the two wall halves),
+          # adding ~20 cells of pathing over a straight line and
+          # making the forward-placement decision a real geographic
+          # commitment, not a back-and-forth.
+          - {x: 48, y: 4, w: 4, h: 14}     # upper wall (y=4..17)
+          - {x: 48, y: 24, w: 4, h: 14}    # lower wall (y=24..37)
+        title: 'Econ Second-Base Race Arena 112x40'
+      actors:
+        # AGENT base — NW corner.
+        - {type: fact, owner: agent, position: [8, 8]}
+        - {type: powr, owner: agent, position: [8, 11]}
+        - {type: harv, owner: agent, position: [12, 8]}
+        # Persistent far-corner enemy sentinel — engine auto-`done`
+        # mitigation (CLAUDE.md). Placed at the SE playable edge.
+        - {type: fact, owner: enemy, position: [102, 30]}
+      ore_patches:
+        # CONTESTED SE patch. radius 4 → 49 cells × 12/cell = 588
+        # ore (~5100 cash ceiling) — plenty above the hard 4500 bar.
+        - {x: 88, y: 30, amount: 12000, radius: 4}
+        # NEAR-BASE patch. radius 2 → 13 cells × 12/cell = 156 ore
+        # (~1400 cash). Sustains a home-placed proc's auto-spawn
+        # harv without making the EV bar trivial — the spatial
+        # clause is what gates the win, not the cash bar.
+        - {x: 16, y: 8, amount: 3000, radius: 2}
+    win_condition:
+      all_of:
+        - building_in_region: {x: 88, y: 30, radius: 6, type: proc, count: 1}
+        - economy_value_gte: 2400
+        - within_ticks: 3600
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+    max_turns: 40
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Same geography as easy, tighter EV bar (3500). Forward
+  # placement still clears (intended hits ~3500 by T≈25, ~5100
+  # ceiling). Home placement fails the spatial clause; the EV bar
+  # tightening is the medium axis (a quick forward placement + the
+  # near patch's auto-spawn harv income BOTH count, but the
+  # spatial clause is unchanged).
+  medium:
+    description: >
+      Same geography as easy — NW agent base, SE contested ore
+      patch at (88, 30). Tighter cash bar: economy_value >= 3500
+      before tick 3600. The spatial requirement is unchanged:
+      place the 2nd Ore Refinery INSIDE the disk of radius 6
+      around (88, 30). Stalling, home-placement, and anywhere-else
+      placement all lose.
+    starting_cash: 2000
+    overrides:
+      base_map:
+        generator: arena
+        name: econ-second-base-race-arena
+        width: 112
+        height: 40
+        cordon: 2
+        obstacles:
+          - {x: 48, y: 4, w: 4, h: 14}
+          - {x: 48, y: 24, w: 4, h: 14}
+        title: 'Econ Second-Base Race Arena 112x40'
+      actors:
+        - {type: fact, owner: agent, position: [8, 8]}
+        - {type: powr, owner: agent, position: [8, 11]}
+        - {type: harv, owner: agent, position: [12, 8]}
+        - {type: fact, owner: enemy, position: [102, 30]}
+      ore_patches:
+        - {x: 88, y: 30, amount: 12000, radius: 4}
+        - {x: 16, y: 8, amount: 3000, radius: 2}
+    win_condition:
+      all_of:
+        - building_in_region: {x: 88, y: 30, radius: 6, type: proc, count: 1}
+        - economy_value_gte: 3500
+        - within_ticks: 3600
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+    max_turns: 40
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # TWO seed-driven spawn groups via `spawn_point` (CLAUDE.md ≥2
+  # hard-tier requirement). The AGENT corner round-robins NW (y=8)
+  # vs SW (y=32) by seed; the contested 2nd-proc target zone shifts
+  # to the OPPOSITE-DIAGONAL corner (SE (88, 30) for NW spawn / NE
+  # (88, 8) for SW spawn) so the agent has to expand across the
+  # FULL DIAGONAL of the map (matched length, both seeds). Near-
+  # base patches are duplicated across both spawn groups (they
+  # follow the agent latitude). Persistent far-corner enemy
+  # sentinel is duplicated across both spawn groups per CLAUDE.md.
+  # Top-level `ore_patches:` do not honour `spawn_point`, so BOTH
+  # candidate contested patches materialise on every seed (only
+  # the one on the correct diagonal is reachable inside the clock;
+  # the `any_of` in the win predicate accepts either spawn-correct
+  # placement). Highest bar (4500) on the same 3600-tick clock.
+  hard:
+    description: >
+      Your Construction Yard, Power Plant, and idle Ore Truck spawn
+      in the NORTH-WEST or SOUTH-WEST corner of the map depending
+      on the seed. A near-base ore patch sits next to YOUR spawn
+      corner. A RICH CONTESTED patch sits at the OPPOSITE DIAGONAL
+      corner (SE if you spawn NW; NE if you spawn SW). Build an Ore
+      Refinery, place it INSIDE the disk of radius 6 around your
+      latitude's contested patch (centre (88, 30) for an NW spawn;
+      (88, 8) for an SW spawn). The `place_building` auto-spawn
+      lands a harvester on the patch and starts cycling
+      immediately. Win = correct-disk placement AND economy_value
+      >= 4500 before tick 3600. Stalling, home-placement, and
+      wrong-diagonal placement all lose.
+    starting_cash: 2000
+    overrides:
+      base_map:
+        generator: arena
+        name: econ-second-base-race-arena
+        width: 112
+        height: 40
+        cordon: 2
+        obstacles:
+          - {x: 48, y: 4, w: 4, h: 14}
+          - {x: 48, y: 24, w: 4, h: 14}
+        title: 'Econ Second-Base Race Arena 112x40'
+      actors:
+        # spawn_point 0 — NW agent base (y=8). Mirrored enemy
+        # sentinel at SE. Near-base patch sits next to the agent.
+        - {type: fact, owner: agent, position: [8, 8], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 11], spawn_point: 0}
+        - {type: harv, owner: agent, position: [12, 8], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [102, 30], spawn_point: 0}
+        # spawn_point 1 — SW agent base (y=32). Mirrored enemy
+        # sentinel at NE.
+        - {type: fact, owner: agent, position: [8, 32], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 29], spawn_point: 1}
+        - {type: harv, owner: agent, position: [12, 32], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [102, 8], spawn_point: 1}
+      ore_patches:
+        # Both candidate contested patches materialise every seed
+        # (ore_patches do not honour spawn_point); only the one on
+        # the opposite-diagonal of the agent's spawn is reachable
+        # inside the clock — the `any_of` win predicate accepts
+        # either spawn-correct placement.
+        - {x: 88, y: 30, amount: 12000, radius: 4}
+        - {x: 88, y: 8, amount: 12000, radius: 4}
+        # Near-base patches per spawn group (both materialise; only
+        # the one next to the active agent corner is useful).
+        - {x: 16, y: 8, amount: 3000, radius: 2}
+        - {x: 16, y: 32, amount: 3000, radius: 2}
+    win_condition:
+      all_of:
+        - any_of:
+            - building_in_region: {x: 88, y: 30, radius: 6, type: proc, count: 1}
+            - building_in_region: {x: 88, y: 8, radius: 6, type: proc, count: 1}
+        - economy_value_gte: 4500
+        - within_ticks: 3600
+    fail_condition:
+      any_of:
+        - after_ticks: 3601
+    max_turns: 40

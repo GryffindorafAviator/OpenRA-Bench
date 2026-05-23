@@ -99,6 +99,50 @@ def _agg(scores: list) -> dict:
     }
 
 
+def _find_win_trajectory(bank: str | Path, cell: str, seed: int) -> str | None:
+    """Path to a winning run's messages.json for this cell+seed, scanned
+    from a `--handoff-bank` directory of Playback runs — the good-prefix
+    source. None when the bank holds no matching win. (Engine actor ids
+    are seed-deterministic, so the trajectory must match pack/level/seed
+    for a faithful replay.)"""
+    base = cell.rsplit(":handoff-", 1)[0]  # "pack:level"
+    pack_id, _, level = base.partition(":")
+    for mf in sorted(Path(bank).rglob("manifest.json")):
+        try:
+            m = json.loads(mf.read_text())
+        except (ValueError, OSError):
+            continue
+        if (
+            str(m.get("pack_id")) == pack_id
+            and str(m.get("level")) == level
+            and int(m.get("seed", -1)) == int(seed)
+            and str(m.get("outcome")) == "win"
+            and (mf.parent / "messages.json").exists()
+        ):
+            return str(mf.parent / "messages.json")
+    return None
+
+
+def _handoff_wrap(agent, cell: str, seed: int, k: int, bank):
+    """Wrap `agent` in a HandoffController for a `:handoff-<kind>` cell.
+    Returns (controller, note)."""
+    from .handoff import HandoffController, TrajectoryController, stall_policy
+
+    kind = cell.rsplit(":handoff-", 1)[1]
+    if kind == "bad":  # losing prefix — the recovery / freeze test
+        return HandoffController(stall_policy, agent, k), ""
+    if kind == "good":  # winning prefix — capitalize-on-advantage
+        traj = _find_win_trajectory(bank, cell, seed) if bank else None
+        if traj is None:
+            return (
+                HandoffController(stall_policy, agent, 0),
+                f"no winning trajectory in bank for seed {seed} — ran as base",
+            )
+        return HandoffController(TrajectoryController(traj), agent, k), ""
+    # base — k=0; the model plays the whole episode (baseline passivity).
+    return HandoffController(stall_policy, agent, 0), ""
+
+
 def evaluate(
     packs: list[Path],
     levels: list[str],
@@ -117,12 +161,36 @@ def evaluate(
     dry_run: bool = False,
     report_path: str | Path | None = None,
     progress=None,
+    perception_sweep: bool = False,
+    handoff_sweep: bool = False,
+    handoff_k: int = 3,
+    handoff_bank: str | Path | None = None,
+    repeats: int = 1,
+    full_playback_root: str | Path | None = None,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
     `overall_held_out` and `generalization_gap` (public composite −
     held-out composite) — the anti-memorization metric the
     generalization literature (Procgen/SMACv2/lmgame-Bench) requires.
+
+    `perception_sweep` expands every pack×level into the 4 perception
+    ablation cells (`pack:level:<mode>` for mode in PERCEPTION_MODES —
+    vision/structured × fog/no-fog) instead of the raw 3 levels, so one
+    run yields the full channel-cost / fog-cost decomposition.
+
+    `handoff_sweep` expands every pack×level into handoff cells
+    (`pack:level:handoff-{base,bad,good}`): the model plays the whole
+    episode (`base`), or inherits a losing position after a `stall`
+    prefix (`bad` — the recovery / freeze-and-panic test), or a winning
+    position replayed from a `handoff_bank` trajectory (`good` — the
+    capitalize-on-advantage test). `handoff_k` is the prefix length.
+    Each record carries a `passivity` stat (observe/stop-only fraction).
+
+    `repeats` runs each (cell, seed) `N` times, varying only model
+    nondeterminism (assumes temperature > 0). Records carry a `repeat`
+    index 0..N-1, so aggregation can report mean ± CI and `pass^k`
+    (all-k wins) alongside `pass@k` — the reliability metric.
     """
     from .resilience import (
         BudgetExceeded,
@@ -201,9 +269,32 @@ def evaluate(
                 f"{pack.meta.quarantine_reason or 'excluded from default set'})"
             )
             continue
+        # Perception sweep: every level × the 4 modality cells
+        # (pack:level:<mode>). Overrides both declared configs and the
+        # raw enumeration — it is an explicit ablation request.
+        if perception_sweep:
+            from .scenarios.schema import PERCEPTION_MODES
+
+            unit_iter = []
+            for lv in levels:
+                for mode in PERCEPTION_MODES:
+                    cl = compile_level(pack, lv)
+                    cl.fog_mode = mode
+                    cl.config_name = f"{lv}:{mode}"
+                    unit_iter.append((cl, f"{pack.meta.id}:{lv}:{mode}"))
+        # Handoff sweep: each level as base / bad / good handoff cells.
+        # `good` needs a winning trajectory from the bank — emitted only
+        # when a bank is supplied; `base`/`bad` always run.
+        elif handoff_sweep:
+            kinds = ["base", "bad"] + (["good"] if handoff_bank else [])
+            unit_iter = [
+                (compile_level(pack, lv), f"{pack.meta.id}:{lv}:handoff-{kind}")
+                for lv in levels
+                for kind in kinds
+            ]
         # Declared configs (pack:config_name, each pins level+fog_mode)
         # supersede the raw 3-level enumeration when present.
-        if pack.configs:
+        elif pack.configs:
             from .scenarios.loader import is_map_supported
 
             ms = is_map_supported(pack.base_map)
@@ -215,22 +306,34 @@ def evaluate(
                 for c in pack.configs
             ]
         else:
-            unit_iter = [
-                (compile_level(pack, lv), f"{pack.meta.id}:{lv}")
-                for lv in levels
-            ]
+            # Apply the global fog_mode (from ProviderConfig / CLI) so a
+            # single-fog run can audit cells in the `image`/`structured`/
+            # `-clear` channels (compiled.fog_mode defaults to vision
+            # without this lift, which would silently downgrade every
+            # cell to the canonical vision-fogged modality).
+            _fog = getattr(provider_cfg, "fog_mode", None) if provider_cfg else None
+            unit_iter = []
+            for lv in levels:
+                cl = compile_level(pack, lv)
+                if _fog:
+                    cl.fog_mode = _fog
+                unit_iter.append((cl, f"{pack.meta.id}:{lv}"))
         for compiled, cell in unit_iter:
             if not compiled.map_supported:
                 skipped.append(f"{cell} (map not Rust-loadable)")
                 continue
             for split, slist in (("public", seeds), ("held_out", held_out_seeds)):
                 for seed in slist:
-                    tasks.append((compiled, cell, split, seed))
+                    for rep in range(max(1, repeats)):
+                        tasks.append((compiled, cell, split, seed, rep))
 
     def _run_one(task: tuple) -> dict:
-        compiled, cell, split, seed = task
+        compiled, cell, split, seed, rep = task
         pb = None
-        if playback_root is not None:
+        # Only the first repeat writes a Playback — the records (the
+        # lightweight per-rep results) carry the pass^k data; saving N
+        # full per-turn dumps per cell would just bloat disk.
+        if playback_root is not None and rep == 0:
             from .playback import Playback
 
             pb = Playback(
@@ -239,7 +342,58 @@ def evaluate(
                 seed,
             )
             pb.run_id, pb.model = run_id, model
-        res = run_level(compiled, factory(compiled), seed=seed, playback=pb)
+        # Audit-format playback (FullPlayback): one JSONL per cell at the
+        # canonical `<pack>__<level>__seed<N>__<fog>.jsonl` path the
+        # paper-collection script consumes. Same first-repeat gating as
+        # the legacy Playback.
+        fpb = None
+        if full_playback_root is not None and rep == 0:
+            from .full_playback import FullPlayback
+
+            # Derive (pack_id, level, fog_mode) from the cell. For
+            # perception-sweep cells, the cell is `pack:level:mode`; for
+            # legacy/configured cells, fall back to compiled fields.
+            parts = cell.split(":")
+            _pack_id = compiled.pack_id
+            _level = compiled.level
+            _fog = getattr(compiled, "fog_mode", "vision") or "vision"
+            if len(parts) >= 3:
+                _fog = parts[-1]
+            # `full_playback_root` is treated as the FINAL per-model dir
+            # — callers (e.g. scripts/collect_eval_data.py) already
+            # build `<out>/<timestamp>__<model>` and pass it through. We
+            # previously appended `<run_id>__<model>` here which
+            # produced a double-nested path; if the caller supplied a
+            # plain root we still want a per-model subdir, but only if
+            # the path doesn't already look like one. Heuristic: if the
+            # leaf already starts with the run_id or contains the model
+            # safe-name, treat it as final; otherwise append.
+            _fp_root = Path(full_playback_root)
+            _leaf = _fp_root.name
+            if (run_id and _leaf.startswith(run_id)) or _safe_model in _leaf:
+                _fp_dir = _fp_root
+            else:
+                _fp_dir = _fp_root / f"{run_id}__{_safe_model}"
+            fpb = FullPlayback(
+                _fp_dir,
+                pack_id=_pack_id,
+                level=_level,
+                seed=seed,
+                fog_mode=_fog,
+            )
+        ctrl = factory(compiled)
+        if handoff_sweep and ":handoff-" in cell:
+            ctrl, _hnote = _handoff_wrap(
+                ctrl, cell, seed, handoff_k, handoff_bank
+            )
+        else:
+            _hnote = ""
+        res = run_level(compiled, ctrl, seed=seed, playback=pb, full_playback=fpb)
+        hstats = getattr(ctrl, "handoff_stats", None)
+        if hstats is not None:
+            hstats = dict(hstats)
+            if _hnote:
+                hstats["note"] = _hnote
         sc = score_episode(compiled, res)
         if pb is not None:
             (pb.dir / "score.json").write_text(
@@ -263,6 +417,7 @@ def evaluate(
             "capability": compiled.meta.capability,
             "split": split,
             "seed": seed,
+            "repeat": rep,
             "outcome": sc.outcome,
             "composite": sc.composite,
             "perception": sc.perception,
@@ -273,6 +428,8 @@ def evaluate(
             "reward_vector": res.reward_vector,
             "turns": res.turns,
             "notes": sc.notes,
+            "passivity": hstats.get("passivity") if hstats else None,
+            "handoff": hstats,
             "_sc": sc,
         }
 
@@ -348,7 +505,7 @@ def evaluate(
             # not abort a multi-hour sweep or lose the report — record
             # it as outcome="error" and continue. Budget is the only
             # signal that intentionally stops the whole run.
-            compiled, cell, split, seed = task
+            compiled, cell, split, seed, rep = task
             try:
                 return _run_one(task)
             except BudgetExceeded:
@@ -360,6 +517,7 @@ def evaluate(
                     "capability": compiled.meta.capability,
                     "split": split,
                     "seed": seed,
+                    "repeat": rep,
                     "outcome": "error",
                     "composite": 0.0,
                     "perception": 0.0,
@@ -488,9 +646,14 @@ def write_report(stats: dict, path: str | Path) -> None:
 
 def _resolve_packs(spec: str | None) -> list[Path]:
     if not spec:
+        # Recurse so quarantined packs in `_archive/` are surfaced —
+        # they get short-circuited into `skipped` by the quarantine
+        # check in `evaluate(...)`, but they MUST be discoverable so
+        # the audit hygiene test can confirm the default sweep
+        # excludes them.
         return [
             p
-            for p in sorted(PACKS_DIR.glob("*.yaml"))
+            for p in sorted(PACKS_DIR.rglob("*.yaml"))
             if not p.name.startswith(("_", "TEMPLATE"))
         ]
     p = Path(spec)
@@ -575,8 +738,43 @@ def main(argv: list[str]) -> int:
         "'wandb/bf16' (no fallback) — premium routing off the free pool",
     )
     ap.add_argument("--fog-mode", default="vision",
-                    choices=["vision", "structured"],
-                    help="spatial channel: PNG minimap vs text fog")
+                    choices=[
+                        "vision", "vision-clear",
+                        "structured", "structured-clear",
+                        "image", "image-clear",
+                    ],
+                    help="spatial channel: PNG minimap (vision), text fog "
+                    "(structured), or image-primary (image). `-clear` "
+                    "variants run with no fog of war.")
+    ap.add_argument(
+        "--full-playback",
+        default=None,
+        help="audit-format playback dir: one JSONL per cell at "
+        "<dir>/<pack>__<level>__seed<N>__<fog>.jsonl with full obs / "
+        "request / response / engine warnings. Used by "
+        "scripts/collect_eval_data.py for paper-grade data capture.",
+    )
+    ap.add_argument("--perception-sweep", action="store_true",
+                    help="run the 2x2 perception ablation: every "
+                    "pack:level expanded into vision/structured x "
+                    "fog/no-fog (pack:level:<mode>)")
+    ap.add_argument("--handoff-sweep", action="store_true",
+                    help="run the handoff ablation: each pack:level as "
+                    "handoff-base / handoff-bad (recovery) / handoff-good "
+                    "(capitalize) cells")
+    ap.add_argument("--handoff-k", type=int, default=3,
+                    help="handoff prefix length in turns (default 3)")
+    ap.add_argument("--handoff-bank", default=None,
+                    help="dir of Playback runs — source of winning "
+                    "trajectories for the handoff-good prefix")
+    ap.add_argument("--repeats", type=int, default=1,
+                    help="run each (cell, seed) N times varying only "
+                    "model nondeterminism — enables mean +- CI and "
+                    "pass^k reliability metrics (needs temperature > 0)")
+    ap.add_argument("--temperature", type=float, default=None,
+                    help="sampling temperature for the model "
+                    "(overrides ProviderConfig.temperature). Set > 0 "
+                    "to make --repeats meaningful.")
     a = ap.parse_args(argv[1:])
 
     cfg = None
@@ -593,7 +791,7 @@ def main(argv: list[str]) -> int:
             if quant:
                 pr["quantizations"] = [quant]
             extra_body["provider"] = pr
-        cfg = ProviderConfig(
+        cfg_kw = dict(
             provider=a.provider,
             model=a.model,
             base_url=a.base_url,
@@ -602,6 +800,9 @@ def main(argv: list[str]) -> int:
             fog_mode=a.fog_mode,
             extra_body=extra_body,
         )
+        if a.temperature is not None:
+            cfg_kw["temperature"] = a.temperature
+        cfg = ProviderConfig(**cfg_kw)
 
     stats = evaluate(
         _resolve_packs(a.packs),
@@ -618,6 +819,12 @@ def main(argv: list[str]) -> int:
         smoke=a.smoke,
         dry_run=a.dry_run,
         report_path=a.out,
+        perception_sweep=a.perception_sweep,
+        handoff_sweep=a.handoff_sweep,
+        handoff_k=a.handoff_k,
+        handoff_bank=a.handoff_bank,
+        repeats=a.repeats,
+        full_playback_root=a.full_playback,
         progress=lambda d, n, rec, c: print(
             f"[{d}/{n}] {rec['cell']}:{rec['split']}#{rec['seed']} "
             f"{rec['outcome']} comp={rec['composite']} "

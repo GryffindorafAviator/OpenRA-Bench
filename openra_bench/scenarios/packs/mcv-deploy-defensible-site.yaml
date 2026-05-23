@@ -1,28 +1,35 @@
 meta:
   id: mcv-deploy-defensible-site
-  title: 'Deploy on Defensible Ground — Site the Conyard Under a Known Threat Axis'
+  title: 'Deploy on Defensible Ground — Read the Map''s Terrain Protection'
   capability: reasoning
   real_world_meaning: >
-    Resilience-first siting under a KNOWN threat axis. The MCV starts
-    mid-map and the rusher band is already committed from a known
-    direction (the NE corner). Two candidate deploy sites exist: a
-    SAFE corner (SW, protected by distance from the threat and the map
-    edge) and an EXPOSED central site (closer to the action but
-    directly in the rusher's lane). Once the MCV deploys, the site is
+    Resilience-first siting under a KNOWN threat axis, decided by
+    READING THE MAP'S DEFENSIVE GEOMETRY. The arena is a chokepoint
+    map: two open lobes joined by a single narrow corridor through a
+    thick water wall. The MCV starts AT the chokepoint mouth and a
+    rusher band is committed from the EAST. Two candidate deploy
+    sites exist: a DEFENSIBLE site BEHIND THE CHOKEPOINT WALL (in the
+    WEST lobe — the rushers must funnel through one 4-cell corridor
+    to reach it) and an INDEFENSIBLE site IN THE OPEN EAST LOBE
+    (closer to the action but on the rusher's side of the wall, with
+    no terrain protection). Once the MCV deploys, the site is
     committed — the conyard cannot be re-located. The decision is to
-    pay the travel cost to the defensible corner so the freshly placed
-    fact + power + barracks + the first defender survive long enough
-    to satisfy the build chain; siting at the convenient/exposed cell
-    gets the fact razed inside the deploy + bring-up window.
+    pay the travel cost through the corridor to the lobe BEHIND THE
+    WALL so the freshly placed fact + power + barracks + the first
+    defender survive long enough to satisfy the build chain; siting
+    on the indefensible (terrain-unprotected) side gets the fact
+    razed inside the deploy + bring-up window.
   robotics_analogue: >
     Autonomous facility placement under a known disaster-direction:
     a single relocatable mobile base must commit to one of two
     candidate sites with a wildfire / attack vector already advancing
-    from a known compass. The defensible (terrain- and distance-
-    protected) site costs travel time but survives bring-up; the
-    convenient (closer-to-resources, exposed) site is razed before the
-    facility comes online. Mirrors FOB site selection and resilience-
-    first siting in hazard-aware urban planning.
+    from a known compass. The DEFENSIBLE (terrain-protected — behind
+    a natural barrier with a single bottleneck) site costs travel
+    time but survives bring-up; the INDEFENSIBLE (no natural cover)
+    site is razed before the facility comes online. Mirrors FOB site
+    selection and resilience-first siting in hazard-aware urban
+    planning — the model must READ the map's defensive geometry, not
+    pick the closest convenient cell.
   benchmark_anchor:
     - 'MicroRTS terrain-aware build'
     - 'urban planning hazard-aware siting'
@@ -30,17 +37,18 @@ meta:
     - 'resilience-first facility siting'
   author: openra-bench
 
-# rush-hour-arena (128×40). Agent MCV starts mid-west (≈(20,20)). The
-# rusher band is committed from the NE corner of the map — agent reads
-# the threat axis, drives the MCV to the SAFE SW corner (≈(8,34)), and
-# deploys there. The win predicate requires the conyard fact to land
-# inside a tight radius of the SW corner — deploying at the exposed
-# central site fails the spatial check (and the rusher reaches the
-# central site before the bring-up chain finishes anyway, razing the
-# fact). Costs (live engine, verified): powr=300, tent=500, e1=100 →
-# 900cr for the minimum coherent build. Spec called for 800cr; floored
-# at 1000 so the chain fits with a 100cr buffer (no slack for spam).
-base_map: rush-hour-arena
+# chokepoint-arena (112×40). Two open lobes joined by a single 4-cell
+# corridor through a thick (9-cell-wide) WATER wall at x∈[52,60]; the
+# corridor is the y∈[18,21] gap. WEST lobe (x∈[2,51]) sits BEHIND
+# the wall relative to the EAST rusher origin — only the corridor
+# funnels them through. EAST lobe (x∈[61,109]) is the rusher's own
+# side of the wall and has no terrain protection. The MCV starts
+# AT the corridor mouth (≈(52,20)) — equidistant-ish between the
+# defensible WEST pocket (15,30) and the indefensible EAST candidate
+# (95,30). Pre-place cost (verified): powr=300, tent=500, e1=100 →
+# 900cr for the minimum coherent build. Floor at 1000cr so the chain
+# fits with a 100cr buffer (no slack for spam).
+base_map: mcv-deploy-defensible-site-arena
 starting_cash: 1000
 
 base:
@@ -49,7 +57,8 @@ base:
   # Concentrated charge at the agent's centroid every ~8 ticks. With
   # the MCV alive (and later the fresh fact), the centroid is the
   # deploy site itself; the band drives straight at whatever the agent
-  # commits to.
+  # commits to — but the chokepoint wall forces the band to funnel
+  # through one 4-cell corridor before it can reach the WEST lobe.
   enemy:
     faction: soviet
     bot_type: rusher
@@ -72,32 +81,60 @@ base:
   # The MCV is the only starting agent actor — it has to deploy
   # somewhere to satisfy any of the build bars. spawn_mcvs defaults
   # OFF so only this declared MCV is on the field.
+  spawn_mcvs: false
   actors:
-    - {type: mcv, owner: agent, position: [20, 20]}
+    - {type: mcv, owner: agent, position: [52, 20]}
 
 levels:
-  # ── EASY ── the bare site-choice skill. The enemy is a token NE
+  # ── EASY ── the bare site-choice skill. The enemy is a token EAST
   # detachment with the rusher bot REPLACED by `turtle` (hold spawn /
   # return-fire only) — the briefing's "threat axis" framing is
-  # consistent (enemies visible in the NE) but they do not actually
-  # advance, so the bring-up chain has unlimited time. The spatial
-  # win-predicate (SAFE region only) is what enforces the site choice
-  # at this tier; threat-timing pressure is introduced at medium.
-  # max_turns 60 → reachable tick ≥ 5400 in interrupt mode, comfortably
+  # consistent (enemies visible in the EAST lobe, on the OPEN side
+  # of the wall) but they do not actually advance, so the bring-up
+  # chain has unlimited time. The spatial win-predicate (the
+  # DEFENSIBLE region behind the chokepoint wall) is what enforces
+  # the site choice at this tier; threat-timing pressure is
+  # introduced at medium.
+  # max_turns 60 → reachable tick 93 + 90·59 = 5403, comfortably
   # past the 4801 fail deadline so a non-finisher is a real timeout
-  # LOSS, never a draw. Intended deploy-safe wins by tick ~3000.
+  # LOSS, never a draw.
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # The map is split by a vertical water wall with a single narrow
+    # corridor (y≈18..21). The EAST lobe is the threat side — an enemy
+    # detachment sits there. Your MCV starts at the corridor mouth.
+    # Drive WEST through the corridor into the DEFENSIBLE pocket BEHIND
+    # the wall around cell (15,30) and deploy there, then stand up the
+    # minimum base before the clock: a Construction Yard (fact) inside
+    # radius 5 of (15,30), at least one power plant (powr), at least
+    # one barracks (tent), and at least one own unit alive, before tick
+    # 4800. Deploying in the EAST lobe (the convenient/open site) fails
+    # the spatial check (and on harder tiers the freshly placed fact
+    # gets razed by the rushers); failing to deploy or losing the
+    # MCV/fact also fails.
     description: >
-      An enemy detachment sits in the north-east corner (the
-      established threat axis). Your MCV starts mid-west. Drive the
-      MCV to the safer south-west corner (around cell (8,34)) and
-      deploy there, then stand up the minimum base before the clock:
-      a Construction Yard (fact) inside radius 5 of (8,34), at least
-      one power plant (powr), at least one barracks (tent), and at
-      least one own unit alive, before tick 4800. Deploying mid-map
-      (the exposed convenient site) fails the spatial check; failing
-      to deploy or losing the MCV/fact also fails.
+      The map is split by a water wall with a single corridor. An enemy
+      detachment sits in the EAST lobe (the open, terrain-unprotected
+      side). Your MCV starts at the corridor mouth. Drive WEST through
+      the corridor into the DEFENSIBLE pocket BEHIND THE WALL around
+      (15,30) and deploy there, then build a power plant, a barracks,
+      and field at least one unit. Yard must land within radius 5 of
+      (15,30). Deploying in the open EAST lobe fails the spatial check.
+      Within about 54 turns.
     overrides:
+      base_map:
+        generator: chokepoint-arena
+        name: mcv-deploy-defensible-site-arena
+        width: 112
+        height: 40
+        cordon: 2
+        pinch_x: 56
+        pinch_width: 8
+        corridor_width: 4
+        corridor_y: 20
       # Easy disables the scripted rusher: the enemy holds spawn
       # (`turtle`) so they don't actually charge. Threat-timing
       # pressure starts at medium.
@@ -105,22 +142,25 @@ levels:
         faction: soviet
         bot_type: turtle
       actors:
-        # Agent: a single MCV at mid-west, ~(20,20). Equidistant-ish
-        # from both candidate sites so the choice is genuine.
-        - {type: mcv, owner: agent, position: [20, 20]}
-        # Token enemy detachment far NE — establishes the threat AXIS
-        # so the briefing's "north-east" framing is consistent with
-        # what the agent observes — without applying timing pressure
-        # at this tier (turtle bot, stance 1: return fire only).
-        - {type: e1, owner: enemy, position: [110, 8], stance: 1, count: 2}
+        # Agent: a single MCV at the chokepoint mouth ≈(52,20).
+        # Equidistant-ish from the DEFENSIBLE WEST pocket (15,30) and
+        # the INDEFENSIBLE EAST candidate (95,30) — the choice is
+        # genuine, gated only on reading the map's wall geometry.
+        - {type: mcv, owner: agent, position: [52, 20]}
+        # Token enemy detachment in the FAR EAST lobe — establishes
+        # the threat AXIS so the briefing's "open EAST lobe" framing
+        # is consistent with what the agent observes — without
+        # applying timing pressure at this tier (turtle bot, stance 1:
+        # return fire only).
+        - {type: e1, owner: enemy, position: [95, 8], stance: 1, count: 2}
         # Unarmed high-HP enemy marker far east: keeps the episode
         # alive past the last enemy death (otherwise the engine
         # auto-terminates on enemy-elimination and the win/fail check
         # never runs — DRAW degeneracy).
-        - {type: fact, owner: enemy, position: [124, 4]}
+        - {type: fact, owner: enemy, position: [108, 4]}
     win_condition:
       all_of:
-        - building_in_region: {x: 8, y: 34, radius: 5, type: fact, count: 1}
+        - building_in_region: {x: 15, y: 30, radius: 5, type: fact, count: 1}
         - has_building: powr
         - has_building: tent
         - own_units_gte: 1
@@ -145,68 +185,97 @@ levels:
             - after_ticks: 1500
             - not: {building_count_gte: {type: fact, n: 1}}
         # Mis-sited deploy: past the bring-up grace the agent owns a
-        # fact but it is NOT inside the SAFE region. The exposed
-        # central deploy lands the fact at the wrong cell — this
+        # fact but it is NOT inside the DEFENSIBLE region. The EAST
+        # (open-lobe) deploy lands the fact at the wrong cell — this
         # clause makes that a fast, deterministic LOSS instead of a
         # silent draw (the engine balance fixes let the exposed fact
-        # SURVIVE the rushers on some hard seeds, so it no longer
+        # SURVIVE the rushers on some seeds, so it no longer
         # self-razes; without this clause the wrong-region run draws
-        # at the turn budget). A correct SAFE deploy lands the fact
-        # inside the region, so this clause never fires on it.
+        # at the turn budget). A correct DEFENSIBLE deploy lands the
+        # fact inside the region, so this clause never fires on it.
         - all_of:
             - after_ticks: 2400
             - has_building: fact
             - not:
                 building_in_region:
-                  {x: 8, y: 34, radius: 5, type: fact, count: 1}
+                  {x: 15, y: 30, radius: 5, type: fact, count: 1}
     max_turns: 60
 
   # ── MEDIUM ── +1 controlled variable: the rusher bot now BITES.
-  # A real rusher band committed from the far NE charges the agent's
-  # centroid every ~8 ticks. The MCV starts closer to the SW (so the
-  # intended drive-to-safe + deploy completes inside ~3 turns and the
-  # bring-up chain — powr + tent + 1 e1 — finishes before the rushers
-  # reach the freshly placed fact; the SW corner is ≥80 cells from
-  # the rusher origin). A central deploy (≈40 cells from the rusher)
-  # is razed inside the bring-up window AND fails the spatial check.
-  # The win predicate is unchanged; only the threat-timing pressure
-  # is new.
+  # A real rusher band committed from the FAR EAST charges the agent's
+  # centroid every ~8 ticks. To reach the WEST lobe the rushers MUST
+  # funnel through the single 4-cell corridor (y∈[18,21]) in the
+  # water wall — that funnelling is the load-bearing terrain effect.
+  # An MCV deployed at the DEFENSIBLE pocket (15,30) is far from the
+  # corridor mouth (radius 5 around (15,30) is well south of the
+  # corridor band y=18..21), so a single e1 defender at the corner
+  # can hold the rushers off while bring-up completes. An MCV
+  # deployed in the EAST lobe (95,30) sits in the OPEN, on the same
+  # side of the wall as the rushers — no terrain protection — and
+  # the fact is razed inside the bring-up window AND fails the
+  # spatial check.
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # A rusher band is committed from the FAR EAST. The water wall
+    # FUNNELS them through a single 4-cell corridor at y≈18..21 —
+    # that's the terrain protection your deploy site has to USE.
+    # Your MCV starts at the corridor mouth. Drive WEST through the
+    # corridor into the DEFENSIBLE pocket BEHIND the wall around
+    # (15,30) and deploy there. The fact must land within radius 5
+    # of (15,30), with powr + tent built and at least one own unit
+    # alive, before tick 4800. Deploying in the EAST (open) lobe
+    # puts the fact directly under the rusher's charge with no
+    # wall between — the spatial-check predicate fails (wrong
+    # region) and the fact is razed before bring-up completes
+    # anyway. Stalling or losing the fact fails.
     description: >
-      A rusher band is committed from the north-east and will reach a
-      centrally-deployed Construction Yard in roughly three turns of
-      its travel. Your MCV starts in the south-western mid-band:
-      drive it the short distance to the safer south-west corner
-      (around (8,34)) and deploy there. The fact must land within
-      radius 5 of (8,34), with powr + tent built and at least one
-      own unit alive, before tick 4800. Deploying centrally puts the
-      fact directly under the rusher's charge — the spatial-check
-      predicate fails (wrong region) and the fact is razed before
-      bring-up completes anyway. Stalling or losing the fact fails.
+      A heavier rusher band is committed from the EAST lobe and must
+      funnel through the single corridor (y≈18..21) in the water wall
+      to reach the WEST side. Drive the MCV WEST through the corridor
+      into the DEFENSIBLE pocket BEHIND the wall around (15,30) and
+      deploy. Same kit: power, barracks, one unit alive. Within about
+      54 turns.
     overrides:
+      base_map:
+        generator: chokepoint-arena
+        name: mcv-deploy-defensible-site-arena
+        width: 112
+        height: 40
+        cordon: 2
+        pinch_x: 56
+        pinch_width: 8
+        corridor_width: 4
+        corridor_y: 20
       actors:
-        # MCV pushed SW (closer to the safe corner) so the drive-to-
-        # safe + deploy chain finishes inside the rusher's travel
-        # budget. The same MCV moving to the central exposed cell
-        # has a LONGER drive — and meets the rushers on the way.
-        - {type: mcv, owner: agent, position: [15, 28]}
-        # Rusher band committed from the FAR NE. ENGINE NOTE:
-        # certain mid-map cells (e.g. (50,12)/(60,12)/(70,12))
-        # silently fail to place enemy clusters and the engine
-        # instead seeds them next to the agent — breaking the
-        # threat-axis design. (95, 8) places correctly. From there,
-        # the rusher reaches the exposed centre (~40 cells) in ~3
-        # turns of its travel while the SAFE SW corner (~85 cells)
-        # is outside reach in the bring-up window. Pure e1 (no
-        # rocket e3) keeps the band defeatable by one e1 defender
-        # at the safe corner; an e3 with rocket range would have
+        # MCV at the corridor mouth ≈(52,20). Drive WEST → SW pocket
+        # is ~45 cells of clear ground; the WEST lobe is BEHIND the
+        # wall so rushers (from the FAR EAST) have to march the full
+        # length of the EAST lobe + funnel through the 4-cell
+        # corridor before they can reach the fresh fact.
+        - {type: mcv, owner: agent, position: [52, 20]}
+        # Rusher band committed from the FAR EAST on the corridor
+        # latitude. ENGINE NOTE: certain mid-map cells (e.g.
+        # (50,12)/(60,12)/(70,12)) silently fail to place enemy
+        # clusters and the engine seeds them next to the agent —
+        # breaking the threat-axis design. (95, 8) places correctly
+        # (proven by the existing rush-hour version of this pack).
+        # From there, the rusher has to cross the EAST lobe and the
+        # corridor (~50 cells of corridor-funnel travel) before it
+        # can hit a fact in the DEFENSIBLE WEST pocket; an EAST-lobe
+        # deploy at (95,30) is ≤25 cells from the rusher and gets
+        # razed inside the bring-up window. Pure e1 (no rocket e3)
+        # keeps the band defeatable by one e1 defender at the
+        # DEFENSIBLE corner; an e3 with rocket range would have
         # razed the fact through the defender.
         - {type: e1, owner: enemy, position: [95, 8], stance: 3, count: 5}
         # Anti-DRAW marker far east.
-        - {type: fact, owner: enemy, position: [124, 4]}
+        - {type: fact, owner: enemy, position: [108, 4]}
     win_condition:
       all_of:
-        - building_in_region: {x: 8, y: 34, radius: 5, type: fact, count: 1}
+        - building_in_region: {x: 15, y: 30, radius: 5, type: fact, count: 1}
         - has_building: powr
         - has_building: tent
         - own_units_gte: 1
@@ -234,72 +303,99 @@ levels:
             - has_building: fact
             - not:
                 building_in_region:
-                  {x: 8, y: 34, radius: 5, type: fact, count: 1}
+                  {x: 15, y: 30, radius: 5, type: fact, count: 1}
     max_turns: 60
 
   # ── HARD ── +1 controlled variable: the AGENT MCV's starting
   # latitude is round-robined between two spawn_point groups, so the
-  # agent must IDENTIFY the safe corner from each start (not just
-  # memorise "drive to (8,34)"). Either start uses the same fixed
-  # safe region anchor (SW, well clear of the NE threat axis on both
-  # latitudes), but the optimal MCV path differs by spawn. The rusher
-  # band is doubled (split across two NE rows) so the exposed-site
-  # inviability is sharp on both spawns. Same clock; same tick-aligned
-  # fail.
+  # agent must IDENTIFY the defensible pocket from each start (not
+  # just memorise "drive to (15,30)"). The DEFENSIBLE-side
+  # geometry — BEHIND the chokepoint wall — is the same on both
+  # spawns, but TWO defensible pockets are accepted by the win
+  # predicate: SW (15,30) and NW (15,10) — both inside the WEST
+  # lobe, both well clear of the corridor band y=18..21 that the
+  # rushers funnel through. The optimal pocket depends on which
+  # latitude the MCV spawns at. The rusher band is doubled (split
+  # across two EAST rows) so the EAST-lobe (open) deploy is razed
+  # on either spawn. Same clock; same tick-aligned fail.
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Same chokepoint geometry, but your MCV starts at one of two
+    # latitudes (the seed picks which). The DEFENSIBLE side is still
+    # the WEST lobe BEHIND the water wall — but the win predicate
+    # accepts EITHER the SW pocket (15,30) OR the NW pocket (15,10).
+    # Identify the defensible pocket from your actual start latitude
+    # and deploy there. Two stacked rusher bands hit any EAST-lobe
+    # (open) deploy inside the bring-up window; only the WEST-lobe
+    # pockets survive. Win: fact inside radius 5 of (15,30) OR (15,10)
+    # AND powr AND tent AND ≥1 own unit, before tick 4800. Stall,
+    # deploy in the open EAST lobe, or lose the fact and you fail.
     description: >
-      Same NE threat axis, but your MCV starts at one of two latitudes
-      (the seed picks which). Identify the safe corner from your
-      actual start position and deploy there — the south-west cell
-      (around (8,34)) is the only deploy region the win predicate
-      accepts. Two stacked rusher bands hit any centrally-deployed
-      fact inside the bring-up window; only the SW corner survives.
-      Win: fact inside radius 5 of (8,34) AND powr AND tent AND ≥1
-      own unit, before tick 4800. Stall, deploy at the exposed
-      centre, or lose the fact and you fail.
+      Same chokepoint geometry, but the MCV spawns at one of two
+      latitudes by seed. The DEFENSIBLE side is the WEST lobe BEHIND
+      the water wall — the win predicate accepts either the SW pocket
+      (15,30) or the NW pocket (15,10). Two stacked rusher bands hit
+      any EAST-lobe deploy. Read your start latitude, route through
+      the corridor to the closer DEFENSIBLE pocket, deploy, build
+      power and barracks, hold one unit. Within about 54 turns.
     overrides:
+      base_map:
+        generator: chokepoint-arena
+        name: mcv-deploy-defensible-site-arena
+        width: 112
+        height: 40
+        cordon: 2
+        pinch_x: 56
+        pinch_width: 8
+        corridor_width: 4
+        corridor_y: 20
       actors:
-        # spawn_point 0 — MCV starts in the WEST mid-band closer to
-        # the NORTH edge (~(15,22)). The safe SW corner is still
-        # (8,34) — agent must navigate around / past the rusher's
-        # interception line.
-        - {type: mcv, owner: agent, position: [15, 22], spawn_point: 0}
-        # spawn_point 1 — MCV starts in the WEST mid-band closer to
-        # the SOUTH edge (~(15,28)). The safe SW corner is the same;
-        # the optimal MCV path is shorter from this spawn. Same
-        # spatial predicate either way — the agent still has to
-        # IDENTIFY the safe corner given the NE threat axis.
-        - {type: mcv, owner: agent, position: [15, 28], spawn_point: 1}
+        # spawn_point 0 — MCV starts at the NORTH chokepoint mouth
+        # ≈(48,12). NORTH start → the NW pocket (15,10) is the closer
+        # DEFENSIBLE deploy (~33 cells of straight WEST travel inside
+        # the WEST lobe — no corridor traversal needed because the
+        # MCV is already on the WEST lobe's NORTH band). The SW
+        # pocket (15,30) is also accepted but requires a longer
+        # detour through the WEST lobe.
+        - {type: mcv, owner: agent, position: [48, 12], spawn_point: 0}
+        # spawn_point 1 — MCV starts at the SOUTH chokepoint mouth
+        # ≈(48,28). SOUTH start → the SW pocket (15,30) is the closer
+        # DEFENSIBLE deploy. Same spatial predicate either way — the
+        # agent still has to IDENTIFY which DEFENSIBLE pocket is
+        # closer given its actual start latitude.
+        - {type: mcv, owner: agent, position: [48, 28], spawn_point: 1}
         # The rusher mass is split into two bands at distinct y-rows
-        # in the NE (vs medium's single band) so the threat hits any
-        # centrally-deployed fact regardless of which agent spawn
-        # was chosen. Tuned to count: 3 per band (6 total) — empirically
-        # the largest band size at which a single trained e1 defender
-        # at the SAFE corner can still hold the freshly-placed fact
-        # long enough for tent + e1 bring-up to complete. Larger bands
-        # raze the fact through the lone defender; smaller defeats
-        # the spec's "rusher band 2x" intent. All e1 (no rocket e3)
-        # to keep the rocket-range razing-through-defender vector
-        # off — see the medium ENGINE NOTE.
+        # in the FAR EAST (vs medium's single band) so the threat
+        # hits any EAST-lobe (open) deploy regardless of which
+        # latitude the agent picks. Tuned to count: 3 per band (6
+        # total) — empirically the largest band size at which a
+        # single trained e1 defender at the DEFENSIBLE pocket can
+        # still hold the freshly-placed fact long enough for tent +
+        # e1 bring-up to complete. Larger bands raze the fact
+        # through the lone defender; smaller defeats the spec's
+        # "rusher band 2x" intent. All e1 (no rocket e3) to keep
+        # the rocket-range razing-through-defender vector off — see
+        # the medium ENGINE NOTE.
         - {type: e1, owner: enemy, position: [95, 6], stance: 3, count: 3}
         - {type: e1, owner: enemy, position: [95, 12], stance: 3, count: 3}
         # Anti-DRAW marker far east.
-        - {type: fact, owner: enemy, position: [124, 4]}
+        - {type: fact, owner: enemy, position: [108, 4]}
     win_condition:
       all_of:
-        - building_in_region: {x: 8, y: 34, radius: 5, type: fact, count: 1}
+        - any_of:
+            - building_in_region: {x: 15, y: 30, radius: 5, type: fact, count: 1}
+            - building_in_region: {x: 15, y: 10, radius: 5, type: fact, count: 1}
         - has_building: powr
         - has_building: tent
         - own_units_gte: 1
         - within_ticks: 4800
     # Three fail teeth: (1) the deadline at tick 4801 (reachable in
-    # 60 turns); (2) agent has no fact AND no own units — the only
-    # state that means "the run is dead" (MCV killed before deploy,
-    # OR fact razed AND the last defender dead) — bites immediately
-    # without spuriously firing on the MCV→fact transition (the agent
-    # has the fact at that instant); (3) the grace-gated no-fact
-    # belt-and-suspenders for the stall path where the MCV is alive
-    # forever but never deploys.
+    # 70 turns); (2) agent has no fact AND no own units — the only
+    # state that means "the run is dead"; (3) the grace-gated
+    # no-fact belt-and-suspenders for the stall path.
     fail_condition:
       any_of:
         - after_ticks: 4801
@@ -309,13 +405,20 @@ levels:
         - all_of:
             - after_ticks: 1500
             - not: {building_count_gte: {type: fact, n: 1}}
-        # Mis-sited deploy ⇒ deterministic LOSS (see easy).
+        # Mis-sited deploy ⇒ deterministic LOSS. The DEFENSIBLE
+        # region accepts EITHER pocket (SW or NW), so the fail
+        # clause negates the any_of — if a fact exists but it's in
+        # NEITHER defensible pocket (i.e. somewhere in the open
+        # EAST lobe), the run loses.
         - all_of:
             - after_ticks: 2400
             - has_building: fact
             - not:
-                building_in_region:
-                  {x: 8, y: 34, radius: 5, type: fact, count: 1}
+                any_of:
+                  - building_in_region:
+                      {x: 15, y: 30, radius: 5, type: fact, count: 1}
+                  - building_in_region:
+                      {x: 15, y: 10, radius: 5, type: fact, count: 1}
     # max_turns 70 (was 60): hard runs in interrupt mode with two
     # rusher bands, so the per-turn tick advance is shorter — at
     # max_turns 60 the episode reached only tick ~4578, BELOW the

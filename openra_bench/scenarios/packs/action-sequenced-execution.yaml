@@ -40,22 +40,30 @@ base:
   planning: true
   termination: {max_ticks: 8000}
   actors:
-    - {type: 2tnk, owner: agent, position: [5, 8], count: 2}
+    - {type: 2tnk, owner: agent, stance: 0, position: [5, 8], count: 2}
 
 levels:
   # ── EASY ── one column, ONE ordered 3-waypoint route, clear lanes,
   # generous budget. Tests pure "go in the given order, don't idle."
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Execute ONE given route IN ORDER: waypoint W1 (mid-south, marked
+    # by an enemy Power Plant) → W2 (north, enemy Ore Refinery) → W3 /
+    # final (far SE, enemy Construction Yard). You must reach them in
+    # that order — rushing straight to the final does NOT count. Keep
+    # the column moving: arrive within the time budget or you lose.
     description: >
-      Execute ONE given route IN ORDER: waypoint W1 (mid-south, marked
-      by an enemy Power Plant) → W2 (north, enemy Ore Refinery) → W3 /
-      final (far SE, enemy Construction Yard). You must reach them in
-      that order — rushing straight to the final does NOT count. Keep
-      the column moving: arrive within the time budget or you lose.
+      Visit three waypoints IN ORDER: enemy Power Plant (mid-south), then
+      Ore Refinery (north), then Construction Yard (far south-east).
+      Skipping or reordering does not count. Arrive within about 27
+      turns or you lose.
     overrides:
       actors:
-        - {type: 2tnk, owner: agent, position: [5, 8],  count: 2}
-        - {type: 1tnk, owner: agent, position: [7, 12], count: 2}
+        - {type: 2tnk, owner: agent, stance: 0, position: [5, 8],  count: 2}
+        - {type: 1tnk, owner: agent, stance: 0, position: [7, 12], count: 2}
         - {type: powr, owner: enemy, position: [40, 30]}   # W1
         - {type: proc, owner: enemy, position: [95, 9]}     # W2
         - {type: fact, owner: enemy, position: [118, 33]}   # W3 / final
@@ -80,23 +88,30 @@ levels:
   # execution (finish route N, then route S) overruns the budget —
   # only a genuine two-column parallel split clears it. Attrition cap.
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # TWO given routes that must BOTH be completed, each IN ORDER.
+    # Route N: N1 (W, enemy Power Plant) → N2 (mid-SOUTH, enemy Ore
+    # Refinery) → N3 (far-E NORTH, enemy Construction Yard). Route S:
+    # S1 (W-south, enemy Radar Dome) → S2 (mid-NORTH, enemy Power
+    # Plant) → S3 (far-E SOUTH, enemy Ore Refinery). The two routes
+    # cross in the middle: split into two columns and run them in
+    # parallel — doing one fully then the other overruns the clock.
+    # Lose ≤1 unit; arrive within budget or lose.
     description: >
-      TWO given routes that must BOTH be completed, each IN ORDER.
-      Route N: N1 (W, enemy Power Plant) → N2 (mid-SOUTH, enemy Ore
-      Refinery) → N3 (far-E NORTH, enemy Construction Yard). Route S:
-      S1 (W-south, enemy Radar Dome) → S2 (mid-NORTH, enemy Power
-      Plant) → S3 (far-E SOUTH, enemy Ore Refinery). The two routes
-      cross in the middle: split into two columns and run them in
-      parallel — doing one fully then the other overruns the clock.
-      Lose ≤1 unit; arrive within budget or lose.
+      Run TWO three-waypoint routes IN ORDER, both required. Routes cross
+      at mid-map; split into two columns. Each waypoint is an enemy
+      building. Arrive within about 34 turns and lose at most one unit.
     overrides:
       actors:
         # Northern staging cluster
-        - {type: 2tnk, owner: agent, position: [5, 8],  count: 2}
-        - {type: 1tnk, owner: agent, position: [7, 10]}
+        - {type: 2tnk, owner: agent, stance: 0, position: [5, 8],  count: 2}
+        - {type: 1tnk, owner: agent, stance: 0, position: [7, 10]}
         # Southern staging cluster
-        - {type: 1tnk, owner: agent, position: [5, 30], count: 2}
-        - {type: jeep, owner: agent, position: [7, 32]}
+        - {type: 1tnk, owner: agent, stance: 0, position: [5, 30], count: 2}
+        - {type: jeep, owner: agent, stance: 0, position: [7, 32]}
         # Route N markers
         - {type: powr, owner: enemy, position: [45, 8]}     # N1
         - {type: proc, owner: enemy, position: [90, 32]}    # N2
@@ -141,16 +156,24 @@ levels:
   # Seed picks the staging corner. Strict budget + attrition.
   hard:
     objective_coords: relative
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # TWO given routes across a large arena, each four ordered
+    # waypoints, described ONLY by direction — you are NOT given
+    # coordinates. Each waypoint is an enemy building hidden in fog:
+    # scout toward the stated direction and you will be interrupted the
+    # instant a unit sights the marker, revealing it; then move on to
+    # it and continue the route IN ORDER. Both routes must be completed
+    # (split into two columns and run them together). Keep advancing —
+    # idling, skipping, or doing one route then the other overruns the
+    # clock. Lose ≤1 unit.
     description: >
-      TWO given routes across a large arena, each four ordered
-      waypoints, described ONLY by direction — you are NOT given
-      coordinates. Each waypoint is an enemy building hidden in fog:
-      scout toward the stated direction and you will be interrupted the
-      instant a unit sights the marker, revealing it; then move on to
-      it and continue the route IN ORDER. Both routes must be completed
-      (split into two columns and run them together). Keep advancing —
-      idling, skipping, or doing one route then the other overruns the
-      clock. Lose ≤1 unit.
+      TWO four-waypoint routes across a large fogged arena, described only
+      by compass direction. Each waypoint is a hidden enemy building.
+      Split into two columns; run both IN ORDER. Arrive within about 67
+      turns and lose at most one unit.
     overrides:
       # Larger arena for real fog scouting across dispersed enemy bases
       # (rush-hour-arena 128x40 is too cramped). Generated on demand via
@@ -161,13 +184,13 @@ levels:
         enemy_building_spotted: true
       actors:
         # spawn_point 0 — north-west staging (seed may pick this)
-        - {type: 2tnk, owner: agent, position: [10, 10], count: 2, spawn_point: 0}
-        - {type: 1tnk, owner: agent, position: [12, 14], count: 2, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [10, 18], count: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, stance: 0, position: [10, 10], count: 2, spawn_point: 0}
+        - {type: 1tnk, owner: agent, stance: 0, position: [12, 14], count: 2, spawn_point: 0}
+        - {type: jeep, owner: agent, stance: 0, position: [10, 18], count: 2, spawn_point: 0}
         # spawn_point 1 — south-west staging (same two routes to run)
-        - {type: 2tnk, owner: agent, position: [10, 62], count: 2, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [12, 58], count: 2, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [10, 54], count: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, stance: 0, position: [10, 62], count: 2, spawn_point: 1}
+        - {type: 1tnk, owner: agent, stance: 0, position: [12, 58], count: 2, spawn_point: 1}
+        - {type: jeep, owner: agent, stance: 0, position: [10, 54], count: 2, spawn_point: 1}
         # Route A markers (dispersed enemy bases, fogged)
         - {type: powr, owner: enemy, position: [40, 14]}    # A1 far NW
         - {type: proc, owner: enemy, position: [90, 60]}    # A2 S-centre

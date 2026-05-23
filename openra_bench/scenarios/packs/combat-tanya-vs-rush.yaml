@@ -1,0 +1,227 @@
+# combat-tanya-vs-rush — Tanya commando holds the line vs an e1 rush.
+#
+# Real-world: hero / commando doctrine — a single high-DPS asset
+# kept active is worth a whole squad of soft conscripts, but only if
+# it is actively engaging; an idle hero with hold-fire stance loses
+# the trade.
+#
+# Discrimination (the script-policy bar):
+#   • stall (only observe): tanya defaults to no-orders; with stance
+#     set to 0 (HoldFire) on the actor she never fires back. The rush
+#     of 4-6 e1 walks up and shreds her ⇒ own_units_gte:1 fails ⇒ LOSS.
+#   • brute attack_move with the WRONG stance (stance:0 hold-fire):
+#     the engine respects HoldFire on auto-engage, so tanya still
+#     never fires. Hidden defect: the actor was placed stance:0; the
+#     policy must explicitly flip stance OR issue attack orders.
+#   • intended explicit attack-move (or attack_unit on each e1):
+#     tanya's pistol (5x M1Carbine damage, 2x fire rate) kills the
+#     e1 rush faster than they can dent her 150k HP. ≥4 kills AND
+#     tanya alive → WIN.
+#
+# Why the spec works (verified against the engine combat sheet):
+#   • tanya HP 150000 = 3x e1; e1 M1Carbine damage 1000 per shot,
+#     reload 20 ticks → 4 e1 dump ~200 dps total at point blank.
+#     Tanya pistol: damage 5000, reload 10 → 500 dps; she ends an
+#     e1 in 10 ticks then the next, clearing 4 e1 in ~40-60 ticks
+#     while taking ~200·60/90 ≈ 130 hp of damage — survives easy.
+#   • A stance:0 (HoldFire) tanya never auto-fires even when shot;
+#     she's a sandbag. The discrimination is whether the policy
+#     actively engages the rush or stalls.
+
+meta:
+  id: combat-tanya-vs-rush
+  title: 'Tanya vs e1 Rush — Hero Engagement'
+  capability: action
+  real_world_meaning: >
+    A single Allied commando (Tanya) holds the centre against a small
+    rush of conscript rifle infantry. Tanya is a hero unit: 3x the HP
+    of a basic rifleman, fast, and her sidearm out-DPSes a small e1
+    pack. But she spawns on hold-fire stance — a do-nothing policy
+    leaves her standing still under fire and she dies. The decision
+    is "actively engage the hero asset" vs "observe / stall". The
+    intended policy issues attack-move (or flips her stance to defend
+    /attack-anything) and wins; stall loses.
+  robotics_analogue: >
+    Hero / commando doctrine — a single high-DPS asset is force-multiplying only when active. A door-kicker robot held in
+    standby while threats approach is wasted. The capability is
+    "commit the hero asset to the engagement" — operators who fail
+    to commit, lose the asset and the engagement.
+  benchmark_anchor:
+    - "RA hero unit (Tanya commando)"
+    - "RTS micro: engage the hero"
+    - "asymmetric high-value asset doctrine"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop, set_stance]
+  planning: true
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 4500}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # One Tanya at (60,20), HoldFire stance (stance:0). Four e1 rush
+  # in from the east at (64..67, 20), stance:3 (AttackAnything) so
+  # they march toward tanya and open fire on contact. A stall policy
+  # never orders her to act; she stands while the four e1s shred her
+  # ⇒ own_units_gte:1 fails ⇒ LOSS. The intended policy issues
+  # attack_move east (or attack_unit per e1) and tanya kills the
+  # rush before she dies.
+  easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # A single Allied Tanya commando stands at (60,20) on hold-fire
+    # stance. A rush of FOUR Soviet rifle infantry (e1) advances from the
+    # east edge of the centre (x=64..67, y=20) on attack-anything stance.
+    # Tanya's pistol out-DPSes a small e1 pack at point blank, but she
+    # will not fire unless you order her to. Issue attack_move (or
+    # attack_unit on each e1) and tanya kills the rush; observe and she
+    # dies. Win when ≥4 enemy units are killed AND tanya is still alive,
+    # before tick 2700.
+    description: >
+      A lone Tanya commando stands at (60,20) on HoldFire. Four Soviet
+      riflemen rush from the east on attack-anything stance. Tanya's
+      pistol shreds them at point-blank, but only if you give the order —
+      observe and she dies. Issue an attack and kill all four, keeping her
+      alive, within about 30 turns.
+    overrides:
+      actors:
+        # Tanya — stance:0 HoldFire so a stall policy (or a blind
+        # auto-engage) does NOT win for free. The capability is
+        # active engagement.
+        - {type: tanya, owner: agent, position: [60, 20], stance: 0}
+        # Four e1 rushers — stance:3 AttackAnything, so they advance
+        # toward tanya and open fire on contact (no need for the
+        # enemy to be ordered; they deliver themselves).
+        - {type: e1, owner: enemy, position: [64, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [65, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [66, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [67, 20], stance: 3}
+        # Far persistent enemy marker — prevents engine auto-done
+        # when the rush is wiped so the win/fail evaluator sees the
+        # terminal frame (no DRAW collapse).
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 4}
+        - {own_units_gte: 1}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 axis: bigger rush (6 e1 in two ranks), wider opening fan.
+  # The kill bar tightens to 6. Same hero-engagement decision; the
+  # bigger pack is a real DPS test — a tanya who delays her first
+  # shot by a turn or two takes meaningful damage before clearing.
+  medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # A single Allied Tanya commando stands at (60,20) on hold-fire
+    # stance. A rush of SIX Soviet rifle infantry (e1) advances from two
+    # close ranks at the east (front rank x=64, rear rank x=65) on attack-
+    # anything stance. Issue attack_move (or attack_unit on each e1) and
+    # tanya kills the whole pack; observe and she dies. Win when ≥6 enemy
+    # units are killed AND tanya is still alive, before tick 2700.
+    description: >
+      Tanya holds at (60,20) on HoldFire. Six rifles rush from two tight
+      ranks at the east. Give her the order — attack_move or attack each
+      in turn — and she'll cut down the whole pack at close range. Observe
+      and she's overwhelmed. Six kills, Tanya alive, within about 30
+      turns.
+    overrides:
+      actors:
+        - {type: tanya, owner: agent, position: [60, 20], stance: 0}
+        # Front rank — three e1 across y=19..21 at x=64.
+        - {type: e1, owner: enemy, position: [64, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [64, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [64, 21], stance: 3}
+        # Rear rank — three more e1 across y=19..21 at x=65.
+        - {type: e1, owner: enemy, position: [65, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [65, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [65, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {own_units_gte: 1}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis: rush spawns from one of two seed-driven corridors
+  # (north y=15..17 OR south y=23..25) so tanya cannot pre-aim;
+  # the policy has to read the spawn direction and commit. Same
+  # hero-engagement bar; the spawn-axis variation is anti-
+  # memorisation. Rush of 6 e1 in a 2x3 block.
+  hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # A single Allied Tanya commando stands at (60,20) on hold-fire
+    # stance. A rush of SIX Soviet rifle infantry (e1) advances on attack-
+    # anything stance from ONE of two corridors (NORTH y=15..17 OR SOUTH
+    # y=23..25, x=64..65), chosen by seed. Read the rush direction, issue
+    # attack_move (or attack_unit on each e1) toward it, and tanya kills
+    # the pack. Observe and she dies. Win when ≥6 enemy units are killed
+    # AND tanya is still alive, before tick 2700.
+    description: >
+      Tanya stands on HoldFire at (60,20). Six rifles rush from the north
+      (y=15..17) or south (y=23..25) corridor depending on seed. Read
+      which way they come, point Tanya at them, and she shreds the pack.
+      Sitting idle lets them gang up. Six kills, Tanya alive, within about
+      30 turns.
+    overrides:
+      actors:
+        - {type: tanya, owner: agent, position: [60, 20], stance: 0}
+        # spawn_point 0 — NORTH corridor (y=15..17, x=64..65).
+        - {type: e1, owner: enemy, position: [64, 15], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [64, 16], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [64, 17], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [65, 15], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [65, 16], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [65, 17], stance: 3, spawn_point: 0}
+        # spawn_point 1 — SOUTH corridor (y=23..25, x=64..65).
+        - {type: e1, owner: enemy, position: [64, 23], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [64, 24], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [64, 25], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [65, 23], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [65, 24], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [65, 25], stance: 3, spawn_point: 1}
+        # Per agent-side spawn_point rule: persistent enemy markers
+        # must be duplicated across BOTH spawn groups. But here the
+        # spawn_point is on the enemy axis (enemy-side filter); the
+        # persistent fact must be duplicated across BOTH enemy spawn
+        # groups so it places every seed.
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 1}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 6}
+        - {own_units_gte: 1}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30

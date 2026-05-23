@@ -662,14 +662,19 @@ class InteractiveSession:
         record: bool = True,
         playback_root: Any = None,
         player: str = "Human",
+        fog_mode: str = "vision",
     ) -> "InteractiveSession":
-        """Compile a pack by id and open a session on it."""
+        """Compile a pack by id and open a session on it. `fog_mode`
+        selects the observation modality — `vision-clear` (or any
+        `-clear` mode) reveals the whole map (engine `reveal_map`), the
+        no-fog condition of the human-study fog-penalty pair."""
         from .scenarios import load_pack
         from .scenarios.loader import PACKS_DIR, compile_level
 
         compiled = compile_level(
             load_pack(PACKS_DIR / f"{pack_id}.yaml"), level
         )
+        compiled.fog_mode = fog_mode
         return cls(
             compiled, seed=seed, record=record,
             playback_root=playback_root, player=player,
@@ -761,16 +766,20 @@ class InteractiveSession:
                 self._pb_terrain = terrain_png_for(
                     self.compiled.scenario.base_map
                 )
-            from .prompt_v2 import minimap_b64 as _v2_mm
+            png = None
+            try:
+                from .prompt_v2 import minimap_b64 as _v2_mm
 
-            png = _v2_mm(
-                rs, self._pb_terrain, self._pb_explored,
-                constant_colors=self.compiled.level in ("easy", "medium"),
-            )
+                png = _v2_mm(
+                    rs, self._pb_terrain, self._pb_explored,
+                    constant_colors=self.compiled.level in ("easy", "medium"),
+                )
+            except Exception:  # noqa: BLE001
+                pass
             if png is None:
-                from .agent import _render_minimap_b64
+                from .minimap import render_b64
 
-                png = _render_minimap_b64(rs, self._pb_terrain)
+                png = render_b64(rs, self._pb_terrain)
             return png
         except Exception:  # noqa: BLE001
             return None

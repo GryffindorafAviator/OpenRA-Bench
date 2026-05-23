@@ -1,3 +1,104 @@
+# MCV-DEPLOY-SECOND-BASE — Deploy the 2nd MCV at the RIGHT expansion
+# site. The capability under test is the SPATIAL CHOICE of where to
+# put base #2: deploying next to the primary base (the comfortable
+# adjacency play) duplicates the primary's coverage and FAILS the
+# `building_in_region` spatial clause; deploying at the briefed
+# expansion region (a far flank that has its own ore patch and adds
+# real geographic / production capacity) WINS.
+#
+# Capability scaffolding:
+#   • The win predicate is `building_count_gte: {fact, 2}` AND
+#     `building_in_region: {x: GOOD_X, y: GOOD_Y, radius: 8, fact, 1}`.
+#     The agent owns one fact at the primary base from t=0; the
+#     `n: 2` floor forces a SECOND fact (i.e. a real deploy); the
+#     `building_in_region` clause forces that 2nd fact INSIDE the
+#     good-site disk — a deploy near the primary base satisfies the
+#     count clause but FAILS the spatial clause.
+#   • The "good" site has its OWN ore patch right next to the deploy
+#     centre. After deploying the 2nd fact, the agent can chain
+#     `build('proc')` + `place_building('proc', GOOD_X, GOOD_Y)` to
+#     stand up a second economy (place_building auto-spawns a free
+#     harv at the new proc, which lands on the patch and starts
+#     cycling — CLAUDE.md "place_building('proc') auto-spawns harv").
+#     This is map-shape narrative — the win predicate is binary
+#     deploy-in-disk — but it justifies WHY the good site is the
+#     right site (it adds real capacity, not just a duplicate yard).
+#   • The "bad" site duplicates primary coverage and has no fresh
+#     ore patch — even if a misguided policy deploys there it gains
+#     nothing AND loses on the spatial clause.
+#
+# Why a custom map (vs the generic rush-hour-arena):
+#   • The previous version used the shared 128×40 rush-hour-arena —
+#     a featureless rectangle with no geographic differentiation
+#     between the "good" and "bad" expansion sites. The spatial
+#     predicate worked but the map gave no AFFORDANCES for the
+#     decision: no ore at either candidate, no obstacles forcing
+#     commitment, no visual cue distinguishing the lobes.
+#   • This tailored map carves the arena into a WEST primary lobe
+#     and an EAST expansion lobe via a midline water wall with a
+#     single corridor. The primary's existing ore patch lives in
+#     the west lobe (already exploited); the rich contested patch
+#     sits in the east lobe (only reachable by committing the MCV
+#     across the corridor — a real geographic decision).
+#   • The MCV starts at the corridor mouth, so "drive east" and
+#     "drive back to base" cost the same first few cells but
+#     diverge IMMEDIATELY after — making the wrong-site policy
+#     visibly wrong on the very first move.
+#
+# Engine facts the design depends on (CLAUDE.md):
+#   1. `deploy` works for scenario-declared MCVs: `Command.deploy
+#      ([mcv_id])` removes the MCV and creates an agent `fact` at
+#      offset (mcv_x-1, mcv_y-1). So an MCV at (95, 30) → fact at
+#      (94, 29), well inside the good-site disk of radius 8 around
+#      (95, 30) (distance √2 ≈ 1.4).
+#   2. `place_building('proc')` auto-spawns a fresh harv at the
+#      NEW proc's footprint and binds it to the closest refinery
+#      by PATH distance — so a 2nd-proc-near-the-east-patch makes
+#      the east deploy a real economy. The 2nd-fact win predicate
+#      doesn't require the proc, but the auto-spawn fact justifies
+#      the narrative "this site adds capacity".
+#   3. `place_building` does NOT enforce build-adjacency — the
+#      agent can drop the new proc anywhere in bounds, including
+#      ~80 cells east of the primary fact. The deploy-then-place-
+#      proc-on-the-patch combo is a single decision frame.
+#   4. Multiple `weap` (or `tent`) buildings produce IN PARALLEL —
+#      a 2nd fact at the east site enables a 2nd `tent`/`weap`
+#      there for parallel production, the real "two factories =
+#      2× throughput" capability ramp. (This pack doesn't gate on
+#      throughput, but the parallel-production fix is what makes
+#      the good-site deploy a meaningful operational upgrade vs
+#      the bad-site duplicate.)
+#   5. `fact` has cost 0 → not buildable via build/place_building
+#      (the engine gates `StartProduction` on cost > 0). The 2nd
+#      fact can ONLY come from a MCV deploy — so the win predicate
+#      is decisively gated on the deploy verb, not on cash.
+#   6. Persistent unarmed enemy `fact` marker at the far edge keeps
+#      the episode alive past any partial outcome (prevents the
+#      engine's all-enemies-eliminated auto-`done` from collapsing
+#      a non-winner into a DRAW). The marker sits well outside
+#      every win-region disk.
+#   7. Tick budget: `within_ticks ≤ 93 + 90·(max_turns − 1)`.
+#      Easy 5400 ≤ 93+90·69 = 6303 ✓ (max_turns 70).
+#      Medium 4500 ≤ 93+90·59 = 5403 ✓ (max_turns 60).
+#      Hard 3800 ≤ 93+90·49 = 4503 ✓ (max_turns 50). The deadline
+#      always bites as a LOSS (never a DRAW from a non-reachable
+#      after_ticks).
+#   8. Hard tier: TWO seed-driven AGENT spawn groups via
+#      `spawn_point` (CLAUDE.md ≥2 hard-tier requirement). The
+#      MCV staging axis rotates NE-leaning vs SE-leaning per seed;
+#      both candidate expansion sites have their own ore patch
+#      (each "good" relative to the matched-corner staging). The
+#      primary base / enemy sentinel actors are duplicated across
+#      both spawn groups per the spawn-filter idiom.
+#   9. Scripted-policy validation grid (all tiers, seed 1):
+#        stall                          : LOSS (no 2nd fact, clock)
+#        deploy_at_primary (mcv→west)   : LOSS (2 facts but outside
+#                                         good-site disk)
+#        deploy_at_good_site            : WIN  (fact lands in disk)
+#      Hard tier (seeds 1-4): stall LOSS every seed; deploy-at-
+#      nearest-good-site WIN every seed; deploy-at-far-corner LOSS
+#      every seed (clock + wrong-disk).
+
 meta:
   id: mcv-deploy-second-base
   title: 'Second-Base Ramp-Up — Deploy the 2nd MCV at the Target Region'
@@ -7,30 +108,40 @@ meta:
     a duplicate; it must be PLACED at the right location (the briefed
     expansion region) to add real capacity / redundancy. Deploying the
     spare MCV next to base #1, or in an unrelated corner, gives the
-    headline "two facilities online" but ZERO geographic ramp-up.
-    The decision is WHERE to put base #2, not whether to deploy at all.
+    headline "two facilities online" but ZERO geographic ramp-up. The
+    good site has its own ore patch and unlocks a second economy + a
+    second production queue (the parallel-production fix means a 2nd
+    factory at the good site genuinely doubles throughput). The bad
+    site duplicates the primary's coverage and adds nothing.
   robotics_analogue: >
     Autonomous fleet establishing a second forward operating base at a
     strategic location: the spare base-builder unit has to drive to the
-    designated expansion zone and stand up the new FOB there, not just
-    park next to FOB #1 or end up in the wrong sector.
-  author: autonomous-loop
+    designated expansion zone — a flank with its own resource patch —
+    and stand up the new FOB there, not just park next to FOB #1 or
+    end up in the wrong sector. The new FOB unlocks a second
+    production line (parallel-production: 2 factories = 2× build
+    throughput) AND a second supply channel (its own patch); a
+    duplicate-coverage FOB next to FOB #1 unlocks neither.
+  author: openra-bench
   benchmark_anchor:
     - SC2LE 2-base macro
     - MicroRTS expansion timing
     - geographic-expansion product strategy
     - multi-site facility ramp-up for redundancy / capacity
 
-# Map: rush-hour-arena (128x40) — wide enough to put base #1 in the
-# WEST (x≈15) and the briefed expansion region in the EAST (x≈90),
-# with the spare MCV staged at center so deploying NEXT TO base #1 is
-# clearly different from deploying at the target region.
-base_map: rush-hour-arena
+# Pack-level `base_map` is the logical id of the custom arena
+# materialised by the per-level `base_map:` generator spec inside each
+# `overrides:` block (same idiom as econ-second-base-race and mcv-
+# deploy-third-base). The .oramap is built once into `data/maps/` by
+# `openra_bench.mapgen.materialize` (deterministic, content-addressed)
+# and the loader resolves it by id like any shipped map.
+base_map: mcv-deploy-second-base-arena
 
-# Enough for a couple of cheap structures at the new site after
-# deploy; not enough to win by spam. The target predicate is purely
-# "place a fact at (90,y) within radius 8" — cash is flavor, not the
-# load-bearing decision.
+# Enough for a couple of cheap structures at the new site after deploy
+# (a 2nd proc is the natural follow-up — cost 1400 — to convert the
+# deploy into an economy). The target predicate is purely
+# `building_in_region:fact,1` + `building_count_gte:fact,2`; cash is
+# flavor, not the load-bearing decision.
 starting_cash: 500
 
 base:
@@ -48,85 +159,144 @@ base:
     - build
     - place_building
     - stop
+  spawn_mcvs: false
   planning: true
   termination:
     max_ticks: 30000
-  # NOTE: every agent actor in this pack carries an explicit
-  # `spawn_point` because hard adds a second spawn group; per the
-  # spawn-filter rule (CLAUDE.md), once ANY agent actor declares a
-  # spawn_point, every agent actor without one is filtered out. easy
-  # and medium use only group 0 — group 0 is the singleton spawn,
-  # round-robin still picks group 0 on every seed. Hard overrides
-  # this list and supplies both groups (NE vs SE staging).
-  actors:
-    # ── Pre-placed base #1 (WEST) — fact + tent + powr + proc ──
-    # Far enough west that base #1 is OUTSIDE the eastern target
-    # region (radius 8 around (90,20)), so a "deploy MCV next to
-    # existing base" play satisfies `building_count_gte:fact,2` but
-    # FAILS the `building_in_region:fact,1` clause.
-    - {type: fact, owner: agent, position: [15, 20], spawn_point: 0}
-    - {type: tent, owner: agent, position: [15, 23], spawn_point: 0}
-    - {type: powr, owner: agent, position: [18, 20], spawn_point: 0}
-    - {type: proc, owner: agent, position: [18, 23], spawn_point: 0}
-    # ── Spare MCV at map center; deploy at target region for the win
-    - {type: mcv, owner: agent, position: [60, 20], spawn_point: 0}
-    # ── Persistent unarmed enemy `fact` in the far NE so the engine
-    # does not auto-`done` on enemy-elimination before the win/fail
-    # predicates are evaluated (CLAUDE.md auto-done footgun). Placed
-    # well outside the target region so it doesn't satisfy any
-    # agent-side predicate.
-    - {type: fact, owner: enemy, position: [124, 4]}
+  actors: []
 
 levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Single seed, no enemy combat. Primary base at NW lobe; spare MCV
+  # at the corridor mouth (60, 20); good expansion site centred at
+  # (95, 30) in the SE lobe with its own rich ore patch. Bad site is
+  # next to primary base (~25, 10) — duplicates coverage and is
+  # OUTSIDE the win disk. The decision is purely "drive east through
+  # the corridor and deploy in the SE lobe" vs "deploy here / drive
+  # west and deploy near base".
   easy:
     description: >
-      You have base #1 in the WEST (a Construction Yard at ~(15,20)
-      with tent, powr, proc). A SECOND MCV is parked at the center of
-      the map (~(60,20)). Your task: drive that second MCV to the
-      EASTERN expansion region (centered at (90,20), radius 8) and
-      DEPLOY it there to create a second Construction Yard. WIN when
-      you own ≥2 facts AND at least one fact sits inside the eastern
-      region, within 5400 ticks. Deploying the MCV next to base #1 or
-      leaving it parked does NOT win — the second fact must be IN the
-      eastern region.
+      Your primary base (Construction Yard, Barracks, Power Plant,
+      Refinery) sits in the WEST lobe with its own small ore patch. A
+      spare MCV is staged at the corridor mouth in the MAP CENTRE. A
+      RICH ORE PATCH sits in the EAST lobe — the briefed expansion
+      region centred at (95, 30), radius 8. Drive the MCV through the
+      corridor and deploy at the eastern region: the second yard must
+      land inside that disk, not next to base #1. Two yards total,
+      within about 60 turns. Deploying near the primary base
+      duplicates coverage and FAILS the spatial clause.
+    overrides:
+      base_map:
+        generator: arena
+        name: mcv-deploy-second-base-arena
+        width: 128
+        height: 40
+        cordon: 2
+        # Midline water wall splitting the arena into a WEST lobe
+        # (primary base + near-base patch) and an EAST lobe (good
+        # expansion site + rich patch). A single corridor at y=18..22
+        # forces the MCV to commit through one gap — adds geographic
+        # weight to the deploy decision and makes the "drive east"
+        # vs "drive back to base" branch visible from turn 1.
+        obstacles:
+          - {x: 62, y: 2, w: 4, h: 16}    # upper wall (y=2..17)
+          - {x: 62, y: 23, w: 4, h: 15}   # lower wall (y=23..37)
+        title: 'MCV Deploy Second-Base Arena 128x40'
+      actors:
+        # ── Primary base — WEST lobe (NW corner). Fact + tent + powr
+        # + proc + harv. The starting harv works the near-base patch
+        # at (22, 10) and feeds the existing primary proc — the
+        # primary already has a self-sustaining economy from t=0.
+        - {type: fact, owner: agent, position: [15, 10]}
+        - {type: tent, owner: agent, position: [15, 13]}
+        - {type: powr, owner: agent, position: [18, 10]}
+        - {type: proc, owner: agent, position: [18, 13]}
+        - {type: harv, owner: agent, position: [22, 10]}
+        # ── Spare MCV at corridor mouth — equidistant from "drive
+        # east into the SE lobe" and "drive back to primary". Once
+        # past the corridor it's committed (the wall makes
+        # backtracking costly).
+        - {type: mcv, owner: agent, position: [60, 20]}
+        # ── Persistent unarmed enemy `fact` marker at the far NE
+        # corner (well outside the good-site disk at (95, 30) and
+        # outside the primary's vicinity). Keeps the episode alive
+        # past partial outcomes (anti-auto-done) so a non-winner
+        # emits a real LOSS on the deadline, never a DRAW.
+        - {type: fact, owner: enemy, position: [124, 4]}
+      ore_patches:
+        # Rich contested patch sitting INSIDE the good-site disk.
+        # radius 4 → ~49 cells × 12/cell = ~588 ore (~5100 cash
+        # ceiling). After deploying the MCV at (95, 30), a follow-up
+        # `place_building('proc', 95, 30)` auto-spawns a harv that
+        # lands on this patch and starts cycling — converting the
+        # deploy into a real second economy.
+        - {x: 95, y: 30, amount: 12000, radius: 4}
+        # Small near-primary patch (radius 2 → ~13 cells × 12 = ~156
+        # ore, ~1400 cash). Sustains the starting harv at (22, 10)
+        # so the primary base's economy is alive from t=0 — the
+        # decision isn't "feed the primary first", it's "where to
+        # put base #2".
+        - {x: 22, y: 10, amount: 3000, radius: 2}
     win_condition:
       all_of:
         - building_count_gte: {type: fact, n: 2}
-        - building_in_region:
-            {x: 90, y: 20, radius: 8, type: fact, count: 1}
+        - building_in_region: {x: 95, y: 30, radius: 8, type: fact, count: 1}
         - within_ticks: 5400
     # after_ticks ≤ 93 + 90·(max_turns-1) ⇒ the deadline must be
     # REACHABLE inside max_turns (else timeout draws instead of
-    # losing). 5401 ≤ 93 + 90·70 = 6393. ✓
+    # losing). 5401 ≤ 93 + 90·69 = 6303. ✓
     fail_condition:
       any_of:
         - after_ticks: 5401
         - not: {has_building: fact}
     max_turns: 70
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Same geography as easy, tighter clock + a lone enemy patrol near
+  # the good site. A careless straight-line MCV approach can be
+  # intercepted en route through the corridor; the right play is
+  # still drive-east-and-deploy, with attention to the patrol's
+  # position. Same custom map (regenerates the same .oramap).
   medium:
     description: >
-      Same multi-site expansion: deploy the second MCV at the EASTERN
-      region (centered at (90,20), radius 8). A lone enemy patrol
-      lurks near the target region — the MCV is fragile, so a careless
-      straight-line approach can be intercepted before deploy.
-      Tighter clock; the right play is still drive-east-and-deploy,
-      with awareness of the patrol.
+      Same WEST primary base and spare MCV at the corridor mouth; same
+      eastern expansion region at (95, 30) with its rich ore patch. A
+      lone enemy patrol now lurks near the target — a careless
+      straight-line approach can intercept the fragile MCV. Drive east
+      mindfully, deploy in the disc. Within about 50 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: mcv-deploy-second-base-arena
+        width: 128
+        height: 40
+        cordon: 2
+        obstacles:
+          - {x: 62, y: 2, w: 4, h: 16}
+          - {x: 62, y: 23, w: 4, h: 15}
+        title: 'MCV Deploy Second-Base Arena 128x40'
       actors:
-        - {type: fact, owner: agent, position: [15, 20], spawn_point: 0}
-        - {type: tent, owner: agent, position: [15, 23], spawn_point: 0}
-        - {type: powr, owner: agent, position: [18, 20], spawn_point: 0}
-        - {type: proc, owner: agent, position: [18, 23], spawn_point: 0}
-        - {type: mcv, owner: agent, position: [60, 20], spawn_point: 0}
-        # Lone patrol near the target region (light pressure, stance:2).
-        - {type: e1, owner: enemy, position: [95, 20], stance: 2, count: 2}
+        # Same primary base as easy.
+        - {type: fact, owner: agent, position: [15, 10]}
+        - {type: tent, owner: agent, position: [15, 13]}
+        - {type: powr, owner: agent, position: [18, 10]}
+        - {type: proc, owner: agent, position: [18, 13]}
+        - {type: harv, owner: agent, position: [22, 10]}
+        # Spare MCV at corridor mouth.
+        - {type: mcv, owner: agent, position: [60, 20]}
+        # Lone patrol OFFSET from the good-site centre (so a direct
+        # approach to (95, 30) only grazes the patrol; a meandering
+        # MCV gets intercepted). stance 2 = return-fire only.
+        - {type: e1, owner: enemy, position: [100, 25], stance: 2, count: 2}
         # Persistent off-map enemy fact (anti auto-done).
         - {type: fact, owner: enemy, position: [124, 4]}
+      ore_patches:
+        - {x: 95, y: 30, amount: 12000, radius: 4}
+        - {x: 22, y: 10, amount: 3000, radius: 2}
     win_condition:
       all_of:
         - building_count_gte: {type: fact, n: 2}
-        - building_in_region:
-            {x: 90, y: 20, radius: 8, type: fact, count: 1}
+        - building_in_region: {x: 95, y: 30, radius: 8, type: fact, count: 1}
         - within_ticks: 4500
     # 4501 ≤ 93 + 90·59 = 5403. ✓
     fail_condition:
@@ -134,42 +304,75 @@ levels:
         - after_ticks: 4501
         - not: {has_building: fact}
     max_turns: 60
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # TWO seed-driven agent spawn groups via `spawn_point`. Two
+  # candidate expansion regions — NE (95, 10) and SE (95, 30) — each
+  # has its OWN rich ore patch (so either candidate is a "good site"
+  # for parallel production / second economy). Each seed stages the
+  # MCV CLOSER to one candidate; cutting diagonally to the far
+  # candidate costs time AND brushes the wrong-corner patrol. The
+  # `any_of` win predicate accepts either candidate deploy.
   hard:
     description: >
-      Two candidate expansion regions — one in the NORTH-EAST (around
-      (95,10), radius 8), one in the SOUTH-EAST (around (95,30),
-      radius 8). Each seed stages your spare MCV closer to ONE corner
-      (NE staging vs SE staging); both corners have enemy patrols.
-      Drive the MCV to the NEAREST candidate region and deploy there —
-      cutting diagonally to the FAR corner costs both time and a
-      collision with the wrong-corner patrol. Either NE or SE deploy
-      counts; deploying next to base #1 does NOT.
+      Two candidate expansion regions — NE (95, 10) and SE (95, 30) —
+      each with its own ore patch and each guarded by a small patrol.
+      Your spare MCV stages closer to one of them depending on the
+      seed. Drive to the NEAREST candidate and deploy there. Within
+      about 43 turns. Cutting diagonally costs time and brushes the
+      wrong patrol.
     overrides:
+      base_map:
+        generator: arena
+        name: mcv-deploy-second-base-arena
+        width: 128
+        height: 40
+        cordon: 2
+        obstacles:
+          - {x: 62, y: 2, w: 4, h: 16}
+          - {x: 62, y: 23, w: 4, h: 15}
+        title: 'MCV Deploy Second-Base Arena 128x40'
       actors:
-        # Base #1 is fixed for both seed groups: duplicate every
-        # garrison/structure actor across spawn_point 0 AND 1 at the
-        # SAME coords (per the spawn-filter rule in CLAUDE.md — once
-        # any agent actor declares spawn_point, anything without one
-        # is filtered out).
-        - {type: fact, owner: agent, position: [15, 20], spawn_point: 0}
-        - {type: tent, owner: agent, position: [15, 23], spawn_point: 0}
-        - {type: powr, owner: agent, position: [18, 20], spawn_point: 0}
-        - {type: proc, owner: agent, position: [18, 23], spawn_point: 0}
-        - {type: fact, owner: agent, position: [15, 20], spawn_point: 1}
-        - {type: tent, owner: agent, position: [15, 23], spawn_point: 1}
-        - {type: powr, owner: agent, position: [18, 20], spawn_point: 1}
-        - {type: proc, owner: agent, position: [18, 23], spawn_point: 1}
-        # MCV staging varies by seed: NE-leaning vs SE-leaning.
-        - {type: mcv, owner: agent, position: [60, 10], spawn_point: 0}
-        - {type: mcv, owner: agent, position: [60, 30], spawn_point: 1}
+        # Primary base is fixed for both seed groups — duplicate
+        # every persistent agent actor across spawn_point 0 AND 1 at
+        # the SAME coords (CLAUDE.md spawn-filter idiom: once any
+        # agent actor declares spawn_point, every agent actor
+        # without one is filtered out per seed).
+        - {type: fact, owner: agent, position: [15, 10], spawn_point: 0}
+        - {type: tent, owner: agent, position: [15, 13], spawn_point: 0}
+        - {type: powr, owner: agent, position: [18, 10], spawn_point: 0}
+        - {type: proc, owner: agent, position: [18, 13], spawn_point: 0}
+        - {type: harv, owner: agent, position: [22, 10], spawn_point: 0}
+        - {type: fact, owner: agent, position: [15, 10], spawn_point: 1}
+        - {type: tent, owner: agent, position: [15, 13], spawn_point: 1}
+        - {type: powr, owner: agent, position: [18, 10], spawn_point: 1}
+        - {type: proc, owner: agent, position: [18, 13], spawn_point: 1}
+        - {type: harv, owner: agent, position: [22, 10], spawn_point: 1}
+        # MCV staging varies by seed: NE-leaning vs SE-leaning. The
+        # spare MCV is on the EAST side of the corridor for both
+        # seeds (the corridor crossing is no longer the load-bearing
+        # decision on hard; the assignment to the nearest candidate
+        # is the decision). NE staging at (70, 10); SE at (70, 30).
+        - {type: mcv, owner: agent, position: [70, 10], spawn_point: 0}
+        - {type: mcv, owner: agent, position: [70, 30], spawn_point: 1}
         # Two enemy patrols (light pressure), one at each candidate
         # corner. The patrol at the FAR corner hardens the wrong-way
-        # play; the near-corner patrol is small enough that a careful
-        # straight-in deploy still completes in budget.
-        - {type: e1, owner: enemy, position: [95, 10], stance: 2, count: 2}
-        - {type: e1, owner: enemy, position: [95, 30], stance: 2, count: 2}
+        # play; the near-corner patrol is small enough that a
+        # careful straight-in deploy still completes in budget.
+        - {type: e1, owner: enemy, position: [100, 10], stance: 2, count: 2}
+        - {type: e1, owner: enemy, position: [100, 30], stance: 2, count: 2}
         # Persistent off-map enemy fact (anti auto-done).
         - {type: fact, owner: enemy, position: [124, 4]}
+      ore_patches:
+        # Both candidate sites have their own rich patch — the deploy
+        # at either candidate unlocks a real second economy. Only the
+        # patch matching the seed's MCV staging is reachable in
+        # budget.
+        - {x: 95, y: 10, amount: 12000, radius: 4}
+        - {x: 95, y: 30, amount: 12000, radius: 4}
+        # Near-primary patch (same for both seed groups — primary
+        # is shared).
+        - {x: 22, y: 10, amount: 3000, radius: 2}
     win_condition:
       all_of:
         - building_count_gte: {type: fact, n: 2}
@@ -179,8 +382,9 @@ levels:
             - building_in_region:
                 {x: 95, y: 30, radius: 8, type: fact, count: 1}
         - within_ticks: 3800
-    # 3801 ≤ 93 + 90·49 = 4503. ✓ Tight enough that crossing diagonally
-    # to the wrong corner (≈ 40 cells + traffic) won't finish.
+    # 3801 ≤ 93 + 90·49 = 4503. ✓ Tight enough that crossing
+    # diagonally to the wrong corner (≈ 20 cells of vertical detour
+    # + the wrong-corner patrol) won't finish.
     fail_condition:
       any_of:
         - after_ticks: 3801

@@ -50,7 +50,7 @@ def resolve_map_path(base_map: str) -> Path | None:
 def load_pack(path: str | Path) -> ScenarioPack:
     """Parse and validate a single pack YAML."""
     path = Path(path)
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     try:
         return ScenarioPack(**data)
@@ -72,7 +72,14 @@ def discover_packs(directory: str | Path | None = None) -> list[ScenarioPack]:
     return packs
 
 
-def is_map_supported(base_map: str) -> bool:
+def is_map_supported(base_map: str | dict) -> bool:
+    # A dict `base_map` is a generator spec (see `mapgen.resolve_base_map`).
+    # We materialise it to a real id first, then resolve the resulting
+    # `.oramap` path the loader scans.
+    if isinstance(base_map, dict):
+        from ..mapgen import resolve_base_map
+
+        base_map = resolve_base_map(base_map)
     return resolve_map_path(base_map) is not None
 
 

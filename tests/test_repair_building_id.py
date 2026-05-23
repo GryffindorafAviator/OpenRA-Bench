@@ -48,7 +48,7 @@ _PACK_YAML = textwrap.dedent(
     base_map: rush-hour-arena
     starting_cash: 5000
     base:
-      agent: {faction: allies}
+      agent: {faction: allies, cash: 5000}
       enemy: {faction: soviet, cash: 0}
       tools: [observe, repair]
       spawn_mcvs: false

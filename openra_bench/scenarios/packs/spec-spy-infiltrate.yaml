@@ -1,0 +1,252 @@
+# Validate: python -m openra_bench.scenarios.validate packs/spec-spy-infiltrate.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# SPEC-SPY-INFILTRATE — special-ability capability cell for the
+# `Command.infiltrate` engine order using a `spy` infiltrator. A spy
+# walks into an enemy building and on adjacency triggers a one-shot
+# scan: every structure owned by the target's owner enters the agent's
+# `enemy_buildings_seen_ids` set (surviving fog), and the spy is
+# consumed.
+#
+# Capability under test: "infiltrate to OBSERVE — gain perfect
+# information of the enemy's structures without firing a shot". The
+# load-bearing win predicate is `buildings_discovered_gte: K` where K
+# strictly exceeds the count of enemy buildings the spy can see by
+# walking up to the target alone — so the load-bearing fact is the
+# scan, not the walk.
+#
+# Map design — the per-tier `spy-infiltrate-{easy,medium,hard}` arenas
+# (replaces the generic rush-hour-arena). Spy sight is 5c so the proc
+# must spawn ≤5 cells from the spy for the intended `move_units(proc)
+# → infiltrate` policy to fire on turn 0. The maps therefore co-locate
+# the spy and the proc in the west, and use obstacle CLUSTERS around
+# them to:
+#   * give route CHOICE on the approach (north-of vs. south-of a
+#     cover column),
+#   * keep the hidden enemy buildings 80+ cells east in fog — only
+#     the infiltrate scan reveals them, so a walk-up-to-the-proc
+#     play (which would also reveal the proc by LOS) still falls
+#     short of `buildings_discovered_gte: K` and loses.
+# The hard tier adds a stance:2 e1 defender stationed off the
+# direct spy→proc lane (its threat punishes wander/exploration but
+# does not gun the intended beeline), plus a second spy as
+# redundancy. The previous version of this pack reused the generic
+# rush-hour-arena and placed enemy structures at y=80..100 — those
+# are silently dropped on any 40-high map. The redesign re-anchors
+# every actor inside the new per-tier map's playable bounds.
+#
+# Why brute / stall / wrong-target policies LOSE:
+#   * `stall` (observe-only) — the hidden enemy buildings stay
+#     fogged, `buildings_discovered_gte` never trips, fail_condition
+#     after_ticks bites.
+#   * `wander` (move_units toward unrelated cells) — the spy never
+#     reaches the proc, no scan, same timeout.
+#   * `attack_unit` (impossible — spy carries no Armament; the order
+#     is a no-op) — proc stays alive but unrevealed; timeout.
+#   * `move_units` to the proc cell — the spy walks adjacent (which
+#     ALSO reveals the proc by sight) but does NOT scan the rest;
+#     only the proc enters the discovered set (count = 1 < K).
+# Only `Command.infiltrate([spy_id], proc_id)` wins.
+#
+# Real-world anchor: a non-combatant operative pre-positioned at a
+# civilian-coded facility (a meter reader, an inspector, a hot-mic
+# planted at a substation) — entry triggers a one-shot intelligence
+# dump of the operator's full network, not just the visited node.
+
+meta:
+  id: spec-spy-infiltrate
+  title: 'Spy Infiltrate — One-Shot Scan of an Enemy Network'
+  capability: action
+  real_world_meaning: >
+    Specialist re-tasked from "observe-by-line-of-sight" to
+    "observe-by-infiltration" — entering a single facility reveals
+    the operator's FULL portfolio of structures, not just the
+    visited node. The spy is consumed in the process, so the
+    decision is irreversible and the operator chooses WHICH facility
+    to enter (only one chance per spy).
+  robotics_analogue: >
+    A passive sensor smuggled inside an unattended adversary node
+    that, on arrival, beacons home an inventory of every other node
+    on the operator's network. Single-use; the sensor cannot be
+    recovered.
+  author: engine-infiltrate-task
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Minimal toolset — infiltrate is the load-bearing verb.
+  # move_units / attack_unit / observe are present so brute / wander /
+  # stall policies can be expressed (and demonstrated to LOSE).
+  tools: [observe, move_units, attack_unit, infiltrate]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # 112×40 corridor. Spy + proc are co-located in the west (proc 4
+  # cells east of spy → just inside the 5c spy sight). Two cover
+  # clusters flank the approach (north and south) so the agent has
+  # route CHOICE — the lane stays open down the middle but the
+  # geometry creates a discernible "skirt the cover" tactical look.
+  # Three hidden enemy structures sit in fog along the east edge —
+  # discovered-set threshold ≥4 forces the infiltrate scan (a bare
+  # walk-up reveals only the proc by LOS, count = 1 < 4).
+  easy:
+    description: >
+      Walk your spy into the enemy refinery (proc) to scan the
+      enemy network. The scan reveals every enemy structure on
+      the map, including ones outside your spy's line of sight.
+      Win = ≥4 enemy buildings discovered before tick 2000.
+    starting_cash: 0
+    overrides:
+      base_map:
+        generator: arena
+        name: spy-infiltrate-easy
+        width: 112
+        height: 40
+        cordon: 2
+        title: 'Spy Infiltrate — Approach Corridor'
+        obstacles:
+          # North cover cluster — gives the spy a place to skirt.
+          - {x: 14, y: 4,  w: 6, h: 13}    # N cluster y=4..16
+          # South cover cluster — symmetric option on the south side.
+          - {x: 14, y: 23, w: 6, h: 13}    # S cluster y=23..35
+      actors:
+        # stance:0 HoldFire on the spy — the engine default for an
+        # agent unit is stance:3 AttackAnything which makes the spy
+        # auto-march toward the nearest visible enemy, abandoning the
+        # agent's intended path. stance:0 keeps the spy under the
+        # agent's explicit move/infiltrate orders only.
+        - {type: spy,  owner: agent, position: [10, 20], stance: 0}
+        - {type: proc, owner: enemy, position: [14, 20]}
+        # Three additional enemy structures placed in fog far from
+        # the spy's natural walk path — only the infiltrate scan
+        # reveals them. All inside the 112×40 playable bounds.
+        - {type: powr, owner: enemy, position: [100, 6]}
+        - {type: barr, owner: enemy, position: [105, 30]}
+        - {type: silo, owner: enemy, position: [108, 18]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 4}
+        - {within_ticks: 2000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2001}
+        - not: {unit_type_count_gte: {type: spy, n: 1}}
+    max_turns: 25
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # 112×40 with three cover clusters arranged so the spy must skirt
+  # one (or both) on the way to the proc. Spy at (10,20), proc at
+  # (15,20) (5 cells = just within sight). A 3-cell-wide gap between
+  # the spy and the proc forces a 1-cell-detour either side of a
+  # central cover block, exercising the route-choice axis without
+  # losing initial LOS on the proc. Five hidden enemy structures sit
+  # in fog far east — discovered ≥6 forces the scan.
+  medium:
+    description: >
+      Walk your spy past a cover cluster into the enemy refinery
+      (proc), then infiltrate to scan their network. Win = ≥6
+      enemy buildings discovered before tick 3000.
+    starting_cash: 0
+    overrides:
+      base_map:
+        generator: arena
+        name: spy-infiltrate-medium
+        width: 112
+        height: 40
+        cordon: 2
+        title: 'Spy Infiltrate — Medium Cover Field'
+        obstacles:
+          # Two flanking cover clusters around the spy/proc corridor,
+          # leaving the central lane y=19..21 open. A bare beeline
+          # still goes through but the agent has the option to skirt
+          # north or south for cover.
+          - {x: 12, y: 4,  w: 4, h: 14}   # N cluster y=4..17
+          - {x: 12, y: 22, w: 4, h: 14}   # S cluster y=22..35
+      actors:
+        # stance:0 — see note on easy tier.
+        - {type: spy,  owner: agent, position: [10, 20], stance: 0}
+        - {type: proc, owner: enemy, position: [15, 20]}
+        # Five hidden enemy structures scattered along the east half
+        # within the 112×40 playable bounds.
+        - {type: powr, owner: enemy, position: [100, 6]}
+        - {type: powr, owner: enemy, position: [100, 32]}
+        - {type: barr, owner: enemy, position: [105, 14]}
+        - {type: silo, owner: enemy, position: [105, 26]}
+        - {type: fact, owner: enemy, position: [108, 20]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 6}
+        - {within_ticks: 3000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3001}
+        - not: {unit_type_count_gte: {type: spy, n: 1}}
+    max_turns: 35
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # 128×40 with denser cover and a stance:2 e1 defender. The defender
+  # sits 9 cells south of the proc — out of weapon range (~4c) of the
+  # direct spy→proc walk along y=20, so the intended beeline still
+  # wins, but ANY exploration / wandering south puts the spy in rifle
+  # range. Two spies provide redundancy in case the first walks
+  # through fog and clips the defender. Discover threshold ≥7 (1
+  # proc + 6 hidden).
+  hard:
+    description: >
+      Defended target: a stance:2 enemy e1 guards the south
+      approach to the proc. The agent has two spies (redundancy);
+      a direct walk to the proc stays out of rifle range, but any
+      south detour or wander dies. Win = ≥7 enemy buildings
+      discovered before tick 4000.
+    starting_cash: 0
+    overrides:
+      base_map:
+        generator: arena
+        name: spy-infiltrate-hard
+        width: 128
+        height: 40
+        cordon: 2
+        title: 'Spy Infiltrate — Hard Defended Gauntlet'
+        obstacles:
+          # Three cover clusters around the spy/proc lane.
+          - {x: 14, y: 4,  w: 6, h: 13}    # N cluster y=4..16
+          - {x: 14, y: 24, w: 6, h: 12}    # S cluster y=24..35
+          # A free-standing block between the proc and the defender
+          # — gives the spy a hard cover lane to use, and keeps the
+          # defender's LOS off the y=20 corridor.
+          - {x: 18, y: 24, w: 4, h: 6}     # mid-south block y=24..29
+      actors:
+        # stance:0 — see note on easy tier.
+        - {type: spy,  owner: agent, position: [11, 18], stance: 0}
+        - {type: spy,  owner: agent, position: [11, 22], stance: 0}
+        - {type: proc, owner: enemy, position: [15, 20]}
+        # Defender 9 cells south of the proc — out of weapon range
+        # of a spy walking the y=18..22 corridor (chebyshev ≥7), but
+        # in range of anything wandering south past y=25. e1 weapon
+        # range is ~4 cells; the LOS to y=20 is also blocked by the
+        # mid-south block obstacle.
+        - {type: e1,   owner: enemy, position: [18, 32], stance: 2}
+        # Six hidden enemy structures, scattered along the east half
+        # within the 128×40 playable bounds.
+        - {type: powr, owner: enemy, position: [115, 6]}
+        - {type: powr, owner: enemy, position: [115, 32]}
+        - {type: barr, owner: enemy, position: [120, 14]}
+        - {type: silo, owner: enemy, position: [120, 26]}
+        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: tent, owner: enemy, position: [118, 20]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 7}
+        - {within_ticks: 4000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4001}
+        - not: {unit_type_count_gte: {type: spy, n: 1}}
+    max_turns: 50

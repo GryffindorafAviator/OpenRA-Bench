@@ -1,0 +1,182 @@
+# Validate: python -m openra_bench.scenarios.validate packs/spec-engineer-capture.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# SPEC-ENGINEER-CAPTURE — special-ability capability cell for the new
+# `Command.capture_actor` order (Allied/Soviet engineer `e6` walks to
+# an enemy building and CAPTURES it: ownership transfers to the
+# capturer's player AND the engineer is consumed).
+#
+# Capability under test: "use the engineer to seize an enemy
+# structure" — a unique action verb that ISN'T destroy/move/attack.
+# The win predicate is `has_building: proc` (the target enemy
+# refinery, once captured, surfaces in the agent's `own_buildings`).
+# A brute / attack-only policy LOSES because:
+#   • a single `e1`/`e3` can't even scratch a `proc` (90 000 HP) in
+#     the agent's budget;
+#   • the engineer carries no weapon — sending it on `attack_unit`
+#     is a no-op and the engineer just stands there;
+#   • a stall policy never moves the engineer, the proc stays enemy-
+#     owned, and the explicit `after_ticks` fail clause bites.
+# Only `Command.capture_actor([engineer_id], proc_id)` wins.
+#
+# Real-world anchor: civilian / non-combat operative re-tasked to
+# transfer an asset's ownership (an installer pre-deploys credentials
+# onto a target machine, a salvage crew claims a derelict, a
+# physical-world hijack of an unmanned facility).
+#
+# MAP REDESIGN (2026-05): each level uses a bespoke generated map
+# tailored to the capability cell, not the shared rush-hour-arena.
+#   • easy   — small open 80x36 arena (engineer adjacent to proc;
+#              isolates the bare capture verb with zero pathing).
+#   • medium — chokepoint-arena 112x40 (single 4-cell corridor at
+#              y=18..21 through a water wall at x=52..60). The
+#              engineer must find the only path between the open west
+#              lobe and the open east lobe; a wrong-direction or
+#              blocked-axis move can never reach the proc.
+#   • hard   — 140x44 arena with TWO water-obstacle clusters
+#              (x=60..73, y=12..19 and y=24..31) creating a 4-cell
+#              flank lane at y=20..23 across the middle band. A
+#              stance:2 enemy rifleman parked west of the proc covers
+#              the flank lane; the agent has two engineers
+#              (redundancy) but must still time the capture before
+#              the defender or the clock wipes them.
+
+meta:
+  id: spec-engineer-capture
+  title: 'Engineer Capture — Seize an Enemy Building'
+  capability: action
+  real_world_meaning: >
+    Specialist re-assignment of an enemy asset's OWNERSHIP — the
+    win condition is "the target is mine now", not "the target is
+    destroyed". The only worker that can do it is the engineer
+    (e6); attacking it with anything else either no-ops or destroys
+    the asset and loses the capture window.
+  robotics_analogue: >
+    A non-combat utility robot dispatched to an unattended adversary
+    facility to flip its ownership (load fresh credentials / re-key
+    a lock / claim a derelict), consuming the agent in the process.
+  author: engine-capture-task
+
+# Per-level maps (overrides.base_map) tailored to the cell.
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Minimal toolset — capture_actor is the load-bearing verb;
+  # move_units / attack_unit are present so the brute / wrong-tool
+  # policies can be expressed and observed to LOSE.
+  tools: [observe, move_units, attack_unit, capture_actor]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Small open 80x36 arena. Engineer 4 cells west of an undefended
+  # enemy proc — one capture_actor call wins.
+  easy:
+    description: >
+      Engineer next door to an undefended enemy refinery on a small
+      open arena. One capture_actor call wins.
+    starting_cash: 0
+    overrides:
+      base_map:
+        generator: arena
+        name: engineer-capture-easy-arena
+        width: 80
+        height: 36
+        cordon: 2
+      actors:
+        - {type: e6,   owner: agent, position: [16, 18]}
+        - {type: proc, owner: enemy, position: [20, 18]}
+    win_condition:
+      all_of:
+        - {has_building: proc}
+        - {within_ticks: 2000}
+    fail_condition: {after_ticks: 2001}
+    max_turns: 25
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # 112x40 chokepoint-arena: a vertical water wall at x=52..60 splits
+  # the map into open west / east lobes, breached only by a 4-cell
+  # corridor at y=18..21. The engineer starts in the west lobe and the
+  # proc sits in the east lobe — the model must path through the only
+  # corridor (no flank route exists).
+  medium:
+    description: >
+      Engineer in the west lobe must traverse a single 4-cell corridor
+      (the only opening through a vertical water wall) to reach the
+      enemy refinery on the east side. Pathing finds the corridor
+      automatically; the deadline is tight.
+    starting_cash: 0
+    overrides:
+      base_map:
+        generator: chokepoint-arena
+        name: engineer-capture-chokepoint-arena
+        width: 112
+        height: 40
+        cordon: 2
+        pinch_x: 56
+        pinch_width: 8
+        corridor_width: 4
+        corridor_y: 20
+      actors:
+        - {type: e6,   owner: agent, position: [12, 20]}
+        - {type: proc, owner: enemy, position: [96, 20]}
+    win_condition:
+      all_of:
+        - {has_building: proc}
+        - {within_ticks: 3000}
+    fail_condition: {after_ticks: 3001}
+    max_turns: 35
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # 140x44 arena with two staggered water-obstacle clusters
+  # (x=40..53, y=8..19 and x=80..93, y=24..35) carving a serpentine
+  # route across the middle band. The engineer must traverse a long
+  # path with two forced flanks (north of the first obstacle, then
+  # south of the second) before reaching the proc on the far east
+  # side. A stance:2 enemy rifleman sits SOUTH of the proc to deny
+  # the south approach to the capture cell — the engineer must
+  # arrive from the north (the path the obstacles already force).
+  # Two engineers provide redundancy in case the model mis-paths.
+  hard:
+    description: >
+      Long escort: two staggered water-obstacle clusters force a
+      serpentine route across the map. The engineer reaches an
+      enemy refinery on the far east; a stance:2 enemy rifleman
+      south of the proc denies a south approach. The agent has two
+      engineers (redundancy) but the clock is tight.
+    starting_cash: 0
+    overrides:
+      base_map:
+        generator: arena
+        name: engineer-capture-serpentine-arena
+        width: 140
+        height: 44
+        cordon: 2
+        obstacles:
+          # Cluster A — sits in the upper-west band, forces engineer
+          # to slip BELOW (around y=20..21).
+          - {x: 40, y: 8,  w: 14, h: 12}
+          # Cluster B — sits in the lower-east band, forces engineer
+          # to slip ABOVE (around y=22..23).
+          - {x: 80, y: 24, w: 14, h: 12}
+      actors:
+        - {type: e6,   owner: agent, position: [10, 22]}
+        - {type: e6,   owner: agent, position: [10, 23]}
+        - {type: proc, owner: enemy, position: [128, 20]}
+        # Defender south of the proc — covers the south approach to
+        # the capture cell. Engineers arriving from the NORTH side
+        # of the proc (the route the serpentine already forces) stay
+        # outside the defender's range.
+        - {type: e1,   owner: enemy, position: [128, 35], stance: 2}
+    win_condition:
+      all_of:
+        - {has_building: proc}
+        - {within_ticks: 4000}
+    fail_condition: {after_ticks: 4001}
+    max_turns: 50

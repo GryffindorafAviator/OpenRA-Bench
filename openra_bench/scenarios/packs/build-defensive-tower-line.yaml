@@ -1,64 +1,136 @@
+# build-defensive-tower-line — Build a Defensive Pillbox LINE Across a WIDE Front
+#
+# REASONING focus: when the threat is funnelled along a WIDE front (a
+# rush spread across the full vertical width of the map, not pinched
+# through a single corridor cell), the right defensive architecture is
+# ONE pillbox per row across the FULL width — a LINE that no enemy unit
+# can slip past on an unguarded row. A dense cluster at the centre row
+# wastes overlapping fire on one cell while the flanks stay open; a
+# scatter near the base never engages the rush at all.
+#
+# This pack is the SISTER / INVERSE of `def-tower-line-vs-cluster` (which
+# enforces CLUSTER topology at a single-cell chokepoint, graph min-cut
+# doctrine). Together the two packs discriminate whether the model
+# understands the FORCING GEOMETRY: a chokepoint (single cell on a wide
+# approach → cluster) vs a wide front (full vertical width where every
+# row carries a rush column → line).
+#
+# Real-world anchor:
+#   • military perimeter doctrine — when an attacker can approach across
+#     the full width of a sector, perimeter posts cover EVERY lane
+#     across the front; concentrating the entire garrison at one post
+#     leaves the rest of the front traversable.
+#   • firewall / IDS rule placement — one inspection rule per
+#     protocol/port across the full inspection surface; duplicated rules
+#     on one port leave the rest open.
+#   • MicroRTS defense placement — defending a wide approach demands
+#     spread coverage; concentrating into one cell of an open arena is
+#     known to LOSE to a multi-lane advance.
+#
+# Map: `rush-hour-arena` (128×40, fully open). The agent base sits on
+# the WEST (fact at x=10); the rush wave is injected at the EAST edge
+# (x=100) spread across MULTIPLE distinct y rows that span the full
+# vertical width of the playable area. The `rusher` scripted bot then
+# charges the agent fact centroid, so each row's spawn group walks WEST
+# through the central x=60 column on its way to the fact — different
+# rows cross x=60 at DIFFERENT y values, forcing a LINE topology to
+# intercept every row.
+#
+# pbox is the load-bearing weapon. After the engine pbox-weapon fix
+# (`fix(engine): pbox gets a direct-fire Armament`) a BUILT pbox is an
+# active direct-fire anti-infantry tower (M60mg burst-5; one burst
+# one-shots an e1). With NO pre-placed agent combat screen the pbox
+# LINE is the SOLE source of kill output — a stall / wrong-placement
+# layout kills nothing AND the rush razes the fact.
+#
+# Win predicate (load-bearing decomposition):
+#   • `building_count_gte:{pbox,n:K}` — built the full budget;
+#   • `building_in_region:{pbox, x:60, y:<rung>, radius:0.5, count:1}`
+#     for EACH of the K rung rows across the full front (radius 0.5 ⇒
+#     cell-exact; a cluster on the middle row misses every flank rung,
+#     a scatter near the base misses every rung);
+#   • `units_killed_gte:K` — the pbox LINE must actively KILL the rush,
+#     not just stand (a stall / pure-army layout kills 0);
+#   • `building_count_gte:{fact,n:1}` (PRESENT-TENSE — `has_building`
+#     is the documented CLAUDE.md "ever-seen" footgun);
+#   • `within_ticks` + `after_ticks` fail clause ⇒ a non-finisher is a
+#     real reachable timeout LOSS (no interrupts ⇒ exactly 90 ticks per
+#     step, so `max_turns` is a hard tick budget the `after_ticks`
+#     deadline reliably bites in).
+#
+# Discrimination (four-script bar — scripted, no model needed):
+#   • stall (observe-only): spends nothing; the rush razes the fact →
+#     fact-alive fail clause fires → LOSS. The `after_ticks` deadline is
+#     a backstop so a staller who somehow keeps the fact also times out
+#     (no draw degeneracy).
+#   • cluster-on-centre (K pboxes piled on the y=20 row): satisfies the
+#     count but EVERY flank rung region is empty (radius 0.5 ⇒
+#     cell-exact, the central pile doesn't touch the flanks); the win
+#     never latches and the unguarded flank rows let the rush leak
+#     through → LOSS.
+#   • scatter-near-base (K pboxes hugging the fact west of x=20): every
+#     rung region is empty AND the pboxes are too far west to engage
+#     the rush before it reaches the fact → LOSS.
+#   • intended LINE (one pbox at each of the K corridor rungs at x=60):
+#     every row is covered AND the wave is killed at the central
+#     column AND the fact survives → WIN.
+#
+# Engine footguns honoured:
+#   • `place_building` does NOT enforce build-adjacency (CLAUDE.md) — the
+#     LINE rungs sit deep at x=60 with no nearby agent base; the engine
+#     places them anyway.
+#   • Building / Defense queues feed from the construction yard
+#     (single-stream); the agent must build pboxes serially. The tick
+#     budget on every tier gives the LINE time to assemble BEFORE the
+#     scheduled rush wave hits.
+#   • Hard tier defines TWO agent spawn_point groups (NORTH y=12 / SOUTH
+#     y=28) round-robined by seed (CLAUDE.md hard-tier contract). Enemy
+#     actors do not honour spawn_point, so the rush wave is fixed on the
+#     full-width spawn axis and crosses the LINE rungs identically for
+#     both base latitudes — what flips per seed is the BEARING the rush
+#     approaches the agent fact from, not the rung topology itself.
+#   • An unarmed high-HP enemy `fact` marker at (120,20) keeps the
+#     engine alive past full rush annihilation so the win/fail check
+#     fires (CLAUDE.md auto-`done` mitigation).
+#   • NO pre-placed agent combat screen — one non-combatant e1 in a far
+#     corner per spawn group satisfies the hard-tier env-reset
+#     non-empty-units check while contributing ZERO kills, so a
+#     wrong-placement spend cannot pass the kill clause off it.
+
 meta:
   id: build-defensive-tower-line
-  title: 'Build a Defensive Tower LINE Across the Choke (Not a Cluster, Not a Scatter)'
+  title: 'Build a Defensive Tower LINE Across a WIDE Front (Not a Cluster, Not a Scatter)'
   capability: reasoning
   real_world_meaning: >
-    Where do you commit your defensive structures when the threat is
-    funnelled through a known corridor whose width matters? Military
-    perimeter doctrine and firewall rule design both say: spread the
-    coverage across the full width of the corridor so no enemy unit
-    can slip past on an unguarded row. A single dense cluster wastes
-    overlapping fire on one cell while the corridor edges stay open;
-    a scatter across the map leaves the corridor itself uncovered.
+    Where do you commit your defensive towers when the threat is a rush
+    spread across the FULL WIDTH of the map — not pinched through a
+    single corridor cell, but advancing on every row of a wide front?
+    Military perimeter doctrine and firewall rule design both say:
+    cover EVERY lane across the front, one post per row, so no enemy
+    unit can slip past on an unguarded row. A single dense cluster on
+    one row wastes overlapping fire on one cell while every other row
+    stays open; a scatter near the base never engages the rush at all.
     The win predicate makes the LINE topology load-bearing — total
     pillbox count alone is not enough; ≥1 pillbox must sit on EACH of
-    the corridor's vertical rungs (the four narrow sub-regions that
-    span y=18..22 at the choke column), AND those pillboxes must
-    actually KILL the rush funnelled through the corridor.
+    the front's rung rows (cell-exact via radius 0.5), AND those
+    pillboxes must actually KILL the rush spread across the front.
   robotics_analogue: >
     Network firewall / Web Application Firewall rule placement: when
-    every connection MUST traverse a known ingress (the public WAN
-    edge / the only API gateway), the right architecture is one rule
-    per protocol/port across the FULL inspection surface, not three
-    duplicated rules on one port while the rest stay open. Likewise a
-    physical perimeter patrol covers the WHOLE corridor width — a
-    cluster at one waypoint or a scatter across unrelated nodes both
-    leave the actual approach lane traversable.
+    every protocol/port could be the path of compromise, the right
+    architecture is one rule per port across the full inspection
+    surface, not three duplicated rules on one port while the rest stay
+    open. Likewise a physical perimeter patrol covers EVERY approach
+    lane across the front — a cluster at one waypoint or a scatter
+    across unrelated nodes both leave the actual front lanes
+    traversable. Defense in depth across a wide approach demands one
+    responder per lane, not many responders at one waypoint.
   benchmark_anchor:
     - "ERQA"
     - "MicroRTS defense"
     - "military perimeter"
   author: openra-bench
 
-# rush-hour-arena (128×40). The map has a narrow lane around y≈18..22
-# at mid-map (x≈60); the agent fact sits on the WEST (x=10). The rush
-# arrives as a `scheduled_events: spawn_actors` wave injected EAST of
-# the corridor (x≈80) at a fixed tick — AFTER the agent has had time to
-# build all 4 pillboxes serially. The `rusher` bot charges the agent
-# centroid (the fact on the west), so the wave is forced THROUGH the
-# x=60 corridor on its way to the fact on every seed.
-#
-# pbox is the load-bearing weapon. After the engine pbox-weapon fix
-# (`fix(engine): pbox gets a direct-fire Armament`) a BUILT pbox is an
-# active direct-fire tower (M60mg anti-infantry MG: one burst one-shots
-# an e1). The win predicate now demands a KILL quota the pbox LINE must
-# deliver — there are NO pre-placed agent defenders, so the only source
-# of kill output is the agent's own pillbox LINE. A mis-placed pbox
-# layout (cluster on the centre row, scatter near the base) leaves the
-# corridor rungs open: the rush slips past on an unguarded row, kills
-# nothing, and razes the fact.
-#
-# An unarmed high-HP enemy `fact` far east keeps the engine alive past
-# rush annihilation so the win/fail check actually runs.
-#
-# SISTER PACK: def-tower-line-vs-cluster inverts the topology bar to
-# enforce CLUSTER (graph min-cut doctrine); this pack enforces LINE
-# (corridor-width perimeter doctrine). The two together discriminate
-# whether the model understands the FORCING GEOMETRY: a chokepoint
-# (single cell on a wide approach → cluster) vs a corridor (full
-# vertical width that any one row can leak through → line).
 base_map: rush-hour-arena
-starting_cash: 2400
 
 base:
   agent:
@@ -75,74 +147,87 @@ base:
     - attack_move
     - stop
   planning: true
-  # No interrupts — perimeter design is a STATIC up-front decision
-  # (the corridor is known a priori, the rush composition is fixed).
-  # Dropping interrupts also makes the tick budget deterministic
-  # (each step is exactly 90 ticks ⇒ max_turns is a hard tick
-  # budget that the `after_ticks` fail clause reliably bites in).
+  # No interrupts — perimeter design is a STATIC up-front decision (the
+  # front geometry is known a priori, the rush composition is fixed).
+  # Dropping interrupts also makes the tick budget deterministic (each
+  # step is exactly 90 ticks ⇒ max_turns is a hard tick budget that the
+  # `after_ticks` fail clause reliably bites in).
   interrupts: {}
   termination:
     max_ticks: 12000
   actors: []   # every level supplies its own actor list via overrides.
 
 levels:
-  # ── EASY ── bare LINE skill. Budget covers exactly 4 pbox (2400cr).
-  # Win requires ≥1 pbox in EACH of the 4 corridor rungs (y=18,19,21,22
-  # at x=60, radius 0.5 — only the exact rung cell counts, so a cluster
-  # on y=20 misses ALL FOUR), the full count (4 pbox), a kill quota
-  # (≥4 of the 6-unit rush) AND the fact alive. The rush arrives at
-  # tick 1800 — after the LINE has had time to assemble. A cluster at
-  # (60,20) satisfies the count clause but FAILS each rung AND lets the
-  # rush leak past the open rungs; a random scatter near the base
-  # misses every rung AND kills nothing; a stall loses on the count
-  # clause AND the fact razed by the rush.
+  # ── EASY ── bare LINE skill. Budget covers exactly 3 pbox (1800cr).
+  # Win requires ≥1 pbox in EACH of the 3 front rungs (y=8, 20, 32 at
+  # x=60, radius 0.5 — only the exact rung cell counts, so a cluster on
+  # y=20 misses the y=8 and y=32 flank rungs). The rush arrives at
+  # tick 1500 — after the LINE has had time to assemble. A cluster at
+  # (60,20) satisfies the count clause but FAILS the flank rung clauses
+  # AND lets the flank rush leak through the open rows; a random
+  # scatter near the base misses every rung AND kills nothing; a stall
+  # loses on the count clause AND the fact razed by the rush.
   # max_turns 60 ⇒ reachable tick 93+90·59 = 5403; deadline 5400.
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # A rifle rush will charge across the FULL WIDTH of the front (3
+    # distinct rows: y=8, y=20, y=32 at the east edge). Budget is
+    # exactly $1800 — drop one pillbox on each of those three rows at
+    # x=60 so nothing slips past on any row. A cluster on the centre
+    # row misses both flank rungs and lets the flank rush leak through;
+    # a scatter near the base never engages the rush. Kill at least
+    # four and keep your construction yard standing, within about 60
+    # turns.
     description: >
-      A rusher band will spawn east of the corridor and must traverse
-      the narrow corridor at x=60, y=18..22 to reach your base on the
-      west. Build 4 pillboxes (pbox — 600cr each, budget exactly 2400)
-      AND place ONE on each of the four corridor rungs (at (60,18),
-      (60,19), (60,21), (60,22)) so the rusher cannot slip past on any
-      row. A cluster on the middle of the corridor satisfies the count
-      but FAILS every rung and lets the rush leak through; a random
-      scatter near the base fails every rung and kills nothing; a
-      pure-army layout (no pbox) fails the count and lets the rush
-      raze the fact. Your pillboxes must kill at least 4 of the rush;
-      your fact must survive.
-    starting_cash: 2400
+      A rifle rush charges across the full vertical width of the map —
+      three lanes at y=8, y=20, and y=32 — toward your yard on the west.
+      Budget $1800 — three pillboxes. Drop one on each of those three
+      rows at x=60 so no lane is open. A cluster on the centre row
+      leaves both flanks unguarded; a scatter near the base never meets
+      the rush. Four kills, yard intact, within about 60 turns.
+    starting_cash: 1800
     overrides:
       actors:
+        # Pre-placed agent base on the WEST. NO combat units near the
+        # base — the pbox LINE must be the sole source of kill output.
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: tent, owner: agent, position: [14, 18]}
         - {type: powr, owner: agent, position: [14, 22]}
         # ONE non-combatant agent e1 parked in the far SW corner,
-        # nowhere near the y=20 rush lane. It exists only so
-        # units_summary is non-empty (hard-tier env-reset check); it
-        # never reaches combat and contributes ZERO kills — the pbox
-        # LINE is the sole source of kill output.
+        # nowhere near any rush lane. It exists only so units_summary
+        # is non-empty (hard-tier env-reset check); it never reaches
+        # combat and contributes ZERO kills — the pbox LINE is the sole
+        # source of kill output, so a scatter or stall play cannot pass
+        # the kill clause off it.
         - {type: e1, owner: agent, position: [4, 36], stance: 2}
         # Unarmed high-HP marker (anti-DRAW): keeps the episode alive
         # past full rusher elimination so the win/fail check fires.
         - {type: fact, owner: enemy, position: [120, 20]}
-      # Scheduled rush wave — injected at tick 1800, EAST of the
-      # corridor on the y=20 lane. The rusher bot charges the agent
-      # centroid (the fact at x=10), so the wave is forced WEST through
-      # the x=60 corridor. By tick 1800 all 4 LINE pillboxes are built;
-      # a complete LINE shreds the wave at the corridor.
+      # Scheduled rush wave — 6 e1 spread across the full vertical
+      # width (2 per row × 3 rows: y=8, y=20, y=32), injected at tick
+      # 1500 from the east at x=100. By tick 1500 all 3 LINE pillboxes
+      # are built (the 3rd pbox completes ~tick 1350 from a fresh-cash
+      # tent + serial defense queue). The rusher charges the agent
+      # centroid (fact at (10,20)), so each row's spawn group walks
+      # WEST through x=60 — the y=8 and y=32 flank groups cross x=60 at
+      # their starting y values, demanding a LINE that covers every
+      # row.
       scheduled_events:
-        - tick: 1800
+        - tick: 1500
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 5}
-            - {type: e3, owner: enemy, position: [82, 20], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 8],  stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [100, 32], stance: 3, count: 2}
     win_condition:
       all_of:
-        - building_count_gte: {type: pbox, n: 4}
-        - building_in_region: {type: pbox, x: 60, y: 18, radius: 0.5, count: 1}
-        - building_in_region: {type: pbox, x: 60, y: 19, radius: 0.5, count: 1}
-        - building_in_region: {type: pbox, x: 60, y: 21, radius: 0.5, count: 1}
-        - building_in_region: {type: pbox, x: 60, y: 22, radius: 0.5, count: 1}
+        - building_count_gte: {type: pbox, n: 3}
+        - building_in_region: {type: pbox, x: 60, y: 8,  radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 20, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 32, radius: 0.5, count: 1}
         - units_killed_gte: 4
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 5400
@@ -152,48 +237,67 @@ levels:
         - not: {building_count_gte: {type: fact, n: 1}}
     max_turns: 60
 
-  # ── MEDIUM ── +1 axis: HEAVIER wave (rusher band ~doubled, +1 e3)
-  # with the SAME tight 4-pbox budget and a higher kill bar (≥7). The
-  # cluster, scatter, and pure-army layouts still all lose the same way
-  # as easy. The LINE must be COMPLETE (all four rungs covered) so the
-  # corridor leaks nothing — a single open rung lets enough of the
-  # heavier wave through to fail the kill bar AND raze the fact.
-  # max_turns 60 ⇒ reachable tick 5403; deadline 5400.
+  # ── MEDIUM ── +1 axis: 5-pbox LINE across the full front (rungs at
+  # y=4, 12, 20, 28, 36 — finer spacing than easy, covering the full
+  # 36-cell playable height). Budget covers exactly 5 pbox (3000cr).
+  # The rush wave is 10 e1 (2 per row × 5 rows), so a complete LINE
+  # must hold every row — a 3-rung easy-style layout leaves 2 rows
+  # unguarded and the flanks leak. A cluster on y=20 misses the y=4 /
+  # y=12 / y=28 / y=36 rungs (radius 0.5 ⇒ cell-exact). max_turns 60
+  # ⇒ reachable tick 5403; deadline 5400.
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # The rush widens to 5 distinct rows (y=4, 12, 20, 28, 36). Build 5
+    # pillboxes (budget 3000cr = exactly 5 pbox at 600 each) AND place
+    # ONE on each of those five rows at x=60. The complete 5-rung LINE
+    # is required — any open rung lets the rush slip past on that row.
+    # Kill at least seven and keep your construction yard, within about
+    # 60 turns.
     description: >
-      Same forced rusher corridor at x=60, y=18..22. Build 4 pillboxes
-      (budget 2400cr = exactly 4 pbox at 600 each) AND place ONE on
-      each of the four corridor rungs (at (60,18), (60,19), (60,21),
-      (60,22)). The rush wave is heavier than easy — the complete LINE
-      must shred it at the corridor. Your pillboxes must kill at least
-      7 of the rush; a cluster, a scatter, and a pure-army layout all
-      lose; the fact must survive.
-    starting_cash: 2400
+      A wider rush now: five lanes at y=4, y=12, y=20, y=28, y=36 spread
+      across the full vertical front. Budget $3000 — five pillboxes.
+      One on each of those five rows at x=60; an easy-style three-rung
+      line leaves two flank rows open. Seven kills, yard intact, within
+      about 60 turns.
+    starting_cash: 3000
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: tent, owner: agent, position: [14, 18]}
         - {type: powr, owner: agent, position: [14, 22]}
-        # Non-combatant SW-corner e1 (see easy) — non-empty
-        # units_summary, zero kill contribution.
+        # Two powr to cover the 5-pbox power draw (5×-20 = -100; tent
+        # also draws; one powr +100 not enough margin once the rush
+        # damages buildings, so use 2 powr for stability).
+        - {type: powr, owner: agent, position: [14, 16]}
+        # Non-combatant SW-corner e1 (see easy).
         - {type: e1, owner: agent, position: [4, 36], stance: 2}
         # Anti-DRAW marker.
         - {type: fact, owner: enemy, position: [120, 20]}
-      # Heavier rush wave: 8×e1 + 2×e3, all on the y=20 lane east of
-      # the corridor, injected at tick 1800.
+      # Heavier rush wave: 10 e1 (2 per row × 5 rows), injected at tick
+      # 2200 — after the intended 5-pbox LINE has time to assemble (~
+      # tick 1700 for the 5th from a fresh-cash tent + serial defense
+      # queue). The rusher charges the agent centroid, so each row's
+      # spawn group walks WEST through x=60 on its starting y.
       scheduled_events:
-        - tick: 1800
+        - tick: 2200
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 8}
-            - {type: e3, owner: enemy, position: [82, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [100, 4],  stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [100, 12], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [100, 28], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [100, 36], stance: 3, count: 2}
     win_condition:
       all_of:
-        - building_count_gte: {type: pbox, n: 4}
-        - building_in_region: {type: pbox, x: 60, y: 18, radius: 0.5, count: 1}
-        - building_in_region: {type: pbox, x: 60, y: 19, radius: 0.5, count: 1}
-        - building_in_region: {type: pbox, x: 60, y: 21, radius: 0.5, count: 1}
-        - building_in_region: {type: pbox, x: 60, y: 22, radius: 0.5, count: 1}
+        - building_count_gte: {type: pbox, n: 5}
+        - building_in_region: {type: pbox, x: 60, y: 4,  radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 12, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 20, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 28, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 36, radius: 0.5, count: 1}
         - units_killed_gte: 7
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 5400
@@ -203,65 +307,102 @@ levels:
         - not: {building_count_gte: {type: fact, n: 1}}
     max_turns: 60
 
-  # ── HARD ── +1 axis: TWO spawn_point groups so the agent base
-  # latitude flips by seed (NORTH (10,12) vs SOUTH (10,28)). The
-  # rusher band is symmetric across y=20 and ALWAYS places (enemy
-  # actors don't honour spawn_point — CLAUDE.md), so the corridor
-  # column at x=60 remains the choke for both seeds, but the rush
-  # geometry approaches each base from a different bearing. The
-  # corridor is still y=18..22 at x=60 (it's a fixed map feature) so
-  # the LINE topology is identical across seeds — what flips is the
-  # agent's interpretation of "which corridor" to defend (the NORTH
-  # spawn could be tempted to cover y=14..18, the SOUTH spawn to
-  # cover y=22..26; both are WRONG — the corridor itself is at
-  # y=18..22 regardless of base latitude). max_turns 70 ⇒ reachable
-  # tick 93+90·69 = 6303; deadline 6300.
+  # ── HARD ── +2 axes: (1) a 6-rung LINE (y=4, 10, 16, 22, 28, 34 at
+  # x=60) covering the full front with TIGHTER spacing AND (2) ATTRITION
+  # over time via TWO scheduled waves (tick 1800 and tick 3000), so a
+  # pbox damaged in wave 1 may fall to wave 2 — the agent must REBUILD
+  # any rung the first wave razes before the second wave hits. Budget
+  # 4800cr = exactly 8 pbox (6 rungs + 2 rebuilds), so the cash is
+  # tight: there is no slack for a 7th rung OR a pbox parked near the
+  # base. Hard tier also flips the agent base latitude per seed (NORTH
+  # y=12 / SOUTH y=28 round-robined via spawn_point) — the LINE
+  # topology is identical across seeds (the front rungs are fixed map
+  # geometry at x=60) but the agent base bearing flips, so a memorised
+  # relative-to-base placement plan cannot generalise. Enemies don't
+  # honour spawn_point (CLAUDE.md), so the rush waves inject on both
+  # bases' candidate latitudes regardless of seed — but the rush
+  # geometry is the SAME because the rusher charges the agent centroid,
+  # and on either base latitude the LINE rungs at x=60 are what catches
+  # the rush before it reaches the fact. max_turns 70 ⇒ reachable tick
+  # 93+90·69 = 6303; deadline 6300.
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # The full front widens to 6 rungs (y=4, 10, 16, 22, 28, 34) and the
+    # rush arrives in TWO waves (attrition): wave 1 at tick 1800 plus
+    # wave 2 at tick 3000. Budget 4800cr (= 8 pbox) — enough for the 6
+    # rungs PLUS 2 rebuilds for any rung the first wave razes. Your
+    # base latitude flips between NORTH (y=12) and SOUTH (y=28) by seed,
+    # so the bearing the rush approaches the fact from changes per
+    # seed; the LINE rungs themselves stay fixed at x=60. Kill at least
+    # 8, keep the fact, within about 70 turns.
     description: >
-      Agent base latitude flips between NORTH (y=12) and SOUTH (y=28)
-      by seed. Build 4 pillboxes (budget 2400cr = exactly 4 pbox at
-      600 each) AND place ONE on each of the four corridor rungs
-      (at (60,18), (60,19), (60,21), (60,22)). The corridor at x=60
-      y=18..22 is a fixed map feature — covering the rows next to your
-      base instead (y=14..18 for NORTH, y=22..26 for SOUTH) FAILS the
-      rung clauses and lets the rush leak through. Your pillboxes must
-      kill at least 7 of the rush; the fact must survive.
-    starting_cash: 2400
+      The front widens to six lanes (y=4, 10, 16, 22, 28, 34) and the
+      rush arrives in TWO waves — pbox attrition is real, you must
+      rebuild lost rungs between waves. Budget $4800 = six rungs plus
+      two rebuilds. Your base flips NORTH/SOUTH by seed; the rungs at
+      x=60 don't. Eight kills, yard intact, within about 70 turns.
+    starting_cash: 4800
     overrides:
       actors:
-        # spawn_point 0 — NORTH base at y=12. Fact at (10, 12);
-        # tent/powr offset west so they aren't directly on the
-        # rusher path. Non-combatant corner e1 in the far SW.
+        # spawn_point 0 — NORTH base at y=12. Fact at (10, 12); tent/
+        # powr offset west so they aren't directly on the rusher path.
+        # Two powr for the 8-pbox power draw (8×-20=-160; 2 powr=+200).
+        # Non-combatant corner e1 in the far SW.
         - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
         - {type: tent, owner: agent, position: [6,  12], spawn_point: 0}
         - {type: powr, owner: agent, position: [6,  14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [6,  10], spawn_point: 0}
         - {type: e1,   owner: agent, position: [4, 36], stance: 2, spawn_point: 0}
         # spawn_point 1 — SOUTH base at y=28 (mirror across y=20).
+        # Non-combatant corner e1 in the far NW.
         - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
         - {type: tent, owner: agent, position: [6,  28], spawn_point: 1}
         - {type: powr, owner: agent, position: [6,  26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [6,  30], spawn_point: 1}
         - {type: e1,   owner: agent, position: [4,  4], stance: 2, spawn_point: 1}
         # Anti-DRAW marker (enemy fact doesn't honour spawn_point).
         - {type: fact, owner: enemy, position: [120, 20]}
-      # Scheduled rush wave — symmetric on the y=20 lane east of the
-      # corridor, injected at tick 1800. The rusher charges the agent
-      # centroid so its path crosses the x=60 corridor on every seed
-      # regardless of which base latitude was picked. The scheduled
-      # spawn list is not spawn_point-filtered, so it injects once.
+      # Two-wave attrition. Each wave is 6 e1 (1 per row × 6 rows) at
+      # tick 1800 and tick 3000. The first wave finishes ~tick 2500,
+      # giving the agent a ~500-tick window to rebuild any razed rung
+      # before wave 2 lands. The serial defense queue can build 1
+      # pbox per ~270 ticks, so 2 rebuilds in 500 ticks is the budget
+      # the design enforces. A pure-stamp policy that places 6 pboxes
+      # and walks away will lose ANY rung wave 1 razed, then the
+      # surviving line fails to cover that row in wave 2 → rung clause
+      # unmet → LOSS.
       scheduled_events:
         - tick: 1800
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 8}
-            - {type: e3, owner: enemy, position: [82, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [100, 4],  stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 10], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 16], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 22], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 28], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 34], stance: 3, count: 1}
+        - tick: 3000
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [100, 4],  stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 10], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 16], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 22], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 28], stance: 3, count: 1}
+            - {type: e1, owner: enemy, position: [100, 34], stance: 3, count: 1}
     win_condition:
       all_of:
-        - building_count_gte: {type: pbox, n: 4}
-        - building_in_region: {type: pbox, x: 60, y: 18, radius: 0.5, count: 1}
-        - building_in_region: {type: pbox, x: 60, y: 19, radius: 0.5, count: 1}
-        - building_in_region: {type: pbox, x: 60, y: 21, radius: 0.5, count: 1}
+        - building_count_gte: {type: pbox, n: 6}
+        - building_in_region: {type: pbox, x: 60, y: 4,  radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 10, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 16, radius: 0.5, count: 1}
         - building_in_region: {type: pbox, x: 60, y: 22, radius: 0.5, count: 1}
-        - units_killed_gte: 7
+        - building_in_region: {type: pbox, x: 60, y: 28, radius: 0.5, count: 1}
+        - building_in_region: {type: pbox, x: 60, y: 34, radius: 0.5, count: 1}
+        - units_killed_gte: 8
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 6300
     fail_condition:

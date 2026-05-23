@@ -1,17 +1,31 @@
 # def-multi-direction.yaml
 #
-# REASONING capability — Wave-7 Group C distributed-defense seed.
-# THREE rusher bands attack the construction yard CONCURRENTLY from
-# three latitudes (NORTH y=8, MID y=20, SOUTH y=32). The agent
-# commands SIX medium tanks (2tnk) staged centrally and must SPLIT
-# them 2/2/2 across three defensive zones — one per lane — to absorb
-# each wave before it reaches the fact. Concentrating all six tanks
-# on a single lane wins THAT lane but the other two lanes' waves
-# stride untouched to the construction yard and raze it. Sibling of
-# `def-pre-position-mobile-reserve` (the FORWARD-INTERCEPT variant
-# at the lane mouth) — this pack tests DISTRIBUTED DEFENSE at the
-# base perimeter instead: every lane needs ≥2 tanks of static
-# coverage or its wave breaks through.
+# REASONING capability — Wave-7 Group C DISTRIBUTED-DEFENSE seed.
+# The construction yard sits in the MIDDLE of the arena and enemy
+# bands close on it from MULTIPLE cardinal directions concurrently.
+# The agent commands a central defender pool and must SPLIT it
+# evenly across all open lanes — concentrating on any single lane
+# leaves the others uncontested and those waves stride to the fact.
+#
+# Per-tier lane SCALE (the controlled variable):
+#   * EASY  — TWO lanes (NORTH + SOUTH). Bare distributed-defence
+#     skill: 4 tanks must split 2/2 between the two lane mouths.
+#   * MEDIUM — THREE lanes (NORTH + SOUTH + EAST). 6 tanks split
+#     2/2/2; an extra `units_lost_lte` cap punishes a sloppy
+#     intercept that bleeds the line.
+#   * HARD  — FOUR lanes (NW + NE + SW + SE — the four diagonal
+#     corners). 8 tanks split 2/2/2/2 across the four corners,
+#     AND the base latitude rotates by seed (NORTH base y=14 /
+#     SOUTH base y=26 via two agent spawn_point groups), so a
+#     memorised absolute-zone quad cannot generalise.
+#
+# Per-tier MAP (rebuilt by `openra_bench.mapgen` at compile time):
+# every tier is a 128×40 `arena` with WATER obstacles painted to
+# carve each lane's approach into a SEPARATE corridor — the lanes
+# are physically distinct (a unit cannot cross between corridors
+# en route, so concentration on one corridor really does leave the
+# others uncontested). The base sits in the CENTRE column (x=64,
+# y=20 on easy/medium; y in {14,26} per spawn on hard).
 #
 # Real-world anchors (binding meta.benchmark_anchor):
 #   - Graph min-cut / multi-source attack: the optimal defence
@@ -32,60 +46,42 @@
 #     sectors are wide open to attack.
 #
 # DISCRIMINATIONS (the bar — every lazy / wrong-commit play LOSES,
-# only the intended 2/2/2 split WINS):
+# only the intended even-split WINS):
 #
-#   • stall (only `observe`): the 6 tanks idle at central staging
-#     at stance:2 (Defend — auto-fire on an in-range enemy but
-#     never advance). Each `hunt` band walks at the nearest agent
-#     unit, i.e. the central cluster; the clustered tanks fire on
-#     whatever closes into weapon range but cannot occupy three
-#     separated zones at once. The combined three-band pressure
-#     overwhelms the static knot and razes the fact → real LOSS on
-#     `not has_building:fact` (also: the three defensive-zone
-#     clauses all stay empty — only MID is even on the boundary).
+#   - stall (only `observe`): the tanks idle at central staging at
+#     stance:2 (Defend — auto-fire on an in-range enemy but never
+#     advance). They sit ~8 cells from the nearest lane defensive
+#     zone so the LANE `units_in_region_gte` clauses see ZERO tanks
+#     in every lane zone. The two/three/four `hunt` bands close on
+#     the central knot; the clustered tanks fire on whatever enters
+#     weapon range but cannot occupy all lane zones at once, and
+#     the unintercepted bands raze the fact → real LOSS on
+#     `not has_building:fact` (the lane zone clauses also stay
+#     empty).
 #
-#   • concentrate-NORTH (whole reserve sent to the N defensive zone):
-#     the N zone clause is satisfied (6 ≥ 1 tank at (25,8)) but the
-#     MID and S defensive zones are EMPTY (0 < 1). Each of the MID
-#     and S clauses fails on its own. Beyond the predicate-level
-#     LOSS, the MID and S `hunt` bands have no defenders in their
-#     lanes — they walk to the fact and raze it → `not has_building:
-#     fact` also bites. Real reachable LOSS.
+#   - concentrate-on-one-lane (whole reserve sent to a single zone):
+#     the one lane-zone clause is satisfied; the other lane zone
+#     clauses are EMPTY (0 < 1) and fail the conjunction. Beyond
+#     the predicate-level LOSS, the unopposed lanes' `hunt` bands
+#     path straight to the fact and raze it → `not has_building:
+#     fact` bites too. Real reachable LOSS.
 #
-#   • concentrate-MID (whole reserve at (25,20)): same shape —
-#     N and S zone clauses fail (0 tanks); the N + S `hunt` bands,
-#     finding no nearer agent unit in their own lanes, path at the
-#     central knot but bleed past it toward the fact, and the
-#     unopposed flanks raze the fact before the clock → LOSS.
-#
-#   • concentrate-SOUTH: symmetric to concentrate-NORTH; N and MID
-#     zone clauses fail; N and MID bands take the fact → LOSS.
-#
-#   • split-2/3 (no MID defenders, e.g. 3 N + 3 S): MID zone clause
-#     is empty (0 < 1); the MID band reaches the fact unopposed
-#     (the N and S defenders are too far off-axis to intercept the
-#     central column in time) → fact razed → LOSS.
-#
-#   • intended 2/2/2 split (≥1 tank in EACH of N, MID, S defensive
-#     zones at (25,8), (25,20), (25,32) — the 2-per-zone doctrine
-#     builds in attrition headroom on top of the n=1 floor): all
-#     three defensive-zone clauses hold; each band is met and
-#     destroyed by the 2 tanks the agent allocated to that lane
-#     (2tnk vs e1 is ~1-shot dominance per CLAUDE.md /
-#     combat-focus-fire-priority — the agent actively `attack_unit`s
-#     the band in each lane since stance:2 does not advance); the
-#     kill bar clears (easy ≥4, medium/hard ≥6); fact intact → WIN.
+#   - intended even-split (>=1 tank in EACH lane's defensive zone):
+#     all lane zone clauses hold; each band is met and destroyed
+#     by the pair the agent allocated to its lane (2tnk vs e1 is
+#     ~1-shot dominance per CLAUDE.md / combat-focus-fire-
+#     priority); the kill bar clears; fact intact → WIN.
 #
 # ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
 #   - `hunt` bot — each enemy unit attacks the NEAREST agent unit,
 #     so a band placed in lane Y engages whatever defenders the
-#     agent allocated to lane Y; the three lanes are genuinely
-#     independent threats. The DISTRIBUTED-DEFENCE test is enforced
-#     both by the lane geometry AND by the THREE `units_in_region_
-#     gte` zone clauses (a concentration satisfies one and fails
-#     two). (`rusher` was used pre-engine-balance-pass — it pools
-#     all three bands onto the agent centroid, collapsing the
-#     three lanes into a single fight; under the corrected stance
+#     agent allocated to lane Y; the lanes are genuinely
+#     independent threats. The distributed-defence test is enforced
+#     both by the lane geometry AND by the per-lane
+#     `units_in_region_gte` zone clauses (concentration satisfies
+#     one and fails the rest). (`rusher` was used pre-engine-balance
+#     pass — it pools all bands onto the agent centroid, collapsing
+#     the lanes into a single fight; under the corrected stance
 #     semantics that no longer exercises per-lane coverage.)
 #   - Agent tanks are `stance:2` (Defend): they auto-fire on an
 #     in-range enemy but NEVER advance — so a stall cluster cannot
@@ -94,12 +90,17 @@
 #     AttackAnything was used pre-fix; under the corrected stance
 #     semantics it auto-hunts the entire map, letting a stall
 #     policy clear every band for free — the no-cheat bar broke.)
+#   - Per-tier MAP via `openra_bench.mapgen.materialize`: an arena
+#     128x40 with WATER obstacles painted as wall segments between
+#     adjacent lane mouths so each enemy band's `hunt` path stays
+#     in its own corridor. The base centre is open (defenders can
+#     fan to any zone) but the obstacles prevent a unit from
+#     sliding sideways between two lane corridors mid-approach.
 #   - Enemy actors with NO spawn_point ALWAYS place regardless of
-#     the agent's spawn group (CLAUDE.md). All three enemy bands
-#     always materialise every seed — the "react to all three lanes"
-#     capability is enforced by having ALL THREE LANES active on
-#     every seed (the strictly harder test).
-#   - Inert enemy `fact` marker far east (anti-DRAW): without a
+#     the agent's spawn group (CLAUDE.md). All lane bands always
+#     materialise every seed — the "react to all lanes" capability
+#     is enforced by every lane being active.
+#   - Inert enemy `fact` marker far corner (anti-DRAW): without a
 #     persistent enemy actor the engine auto-`done`s on enemy-elim
 #     before the win/fail evaluator runs (CLAUDE.md footgun).
 #   - `enemy_unit_spotted` interrupt → defenders re-decide the
@@ -107,19 +108,17 @@
 #   - `own_unit_destroyed` interrupt → re-decide when a defender
 #     falls (so a damaged lane can be reinforced from a quiet one).
 #   - `units_in_region_gte: {x, y, radius, n}` — load-bearing
-#     distribution clause: REQUIRES ≥1 tank in EACH of three
-#     defensive zones (n=1, not n=2 — the 2-per-lane doctrine
-#     remains the agent's recommended allocation but the predicate
-#     floors at n=1 to absorb the inevitable one-per-lane attrition
-#     from the heavier waves). A concentration in one zone fails
-#     the other two clauses regardless of n.
+#     distribution clause: requires >=1 tank in EACH lane's zone
+#     (n=1, not n=2 — the 2-per-lane doctrine remains the agent's
+#     recommended allocation but the predicate floors at n=1 to
+#     absorb the inevitable one-per-lane attrition from heavier
+#     waves). A concentration in one zone fails the other zones.
 #   - 2tnk vs e1 dominance per CLAUDE.md / combat-focus-fire-
-#     priority. 2 tanks reliably clear a 3-rifle wave without
-#     losing the lane; this is what makes 2/2/2 a tight floor (1
-#     tank per lane bleeds through).
+#     priority. 2 tanks reliably clear a 2-3-rifle wave without
+#     losing the lane.
 #   - Tick budget: ~90 ticks/turn fixed-step, ~60 ticks/turn in
-#     interrupt mode. max_turns 50 → reachable tick ≈ 3000 in
-#     interrupt mode and ≈ 4503 fixed-step; `within_ticks: 2700`
+#     interrupt mode. max_turns 50 → reachable tick ~3000 in
+#     interrupt mode and ~4503 fixed-step; `within_ticks: 2700`
 #     and `after_ticks: 2701` are both reachable well inside
 #     max_turns so stall hits the deadline as a real LOSS (not a
 #     draw degeneracy).
@@ -133,14 +132,14 @@ meta:
   title: 'Distributed Defense — Split Across Concurrent Lanes'
   capability: reasoning
   real_world_meaning: >
-    Three enemy waves attack the base concurrently from three
-    latitudes (north, mid, south). With six defenders against three
-    concurrent waves, distributing 2/2/2 holds every lane while
-    concentrating on one lane leaves the other two uncontested —
-    those waves stride untouched to the construction yard and raze
-    it. This is the canonical multi-front / graph min-cut allocation
-    problem: defensive capacity must be matched to the cardinality
-    of concurrent threats, not to the loudest single threat.
+    Enemy waves attack the centrally-placed base concurrently from
+    multiple cardinal directions. Distributing defenders evenly
+    across each active lane holds every approach; concentrating on
+    one lane leaves the other lanes uncontested — those waves
+    stride untouched to the construction yard and raze it. This is
+    the canonical multi-front / graph min-cut allocation problem:
+    defensive capacity must be matched to the cardinality of
+    concurrent threats, not to the loudest single threat.
   robotics_analogue: >
     Distributed-systems load balancing under N concurrent request
     streams: each stream needs at least one worker, or its queue
@@ -155,15 +154,7 @@ meta:
     - "military multi-front"
   author: openra-bench
 
-# rush-hour-arena: 128×40 playable (x in [2..126], y in [2..38]).
-# Agent base at the west (fact at x=10). Three rush bands spawn at
-# x=80 across three latitudes (NORTH y=8, MID y=20, SOUTH y=32) and
-# drive west; each `hunt` band heads for the nearest agent unit in
-# its own lane. The three defensive zones sit at
-# x=25 (well east of the fact at x=10 — defenders must MOVE OUT of
-# the central staging cluster at (30,20) to occupy them, but stay
-# close enough to the fact that an under-defended zone breaks through
-# in time for the lane's wave to raze the fact before the clock).
+# Default base_map (overridden per tier with a tailored geometry).
 base_map: rush-hour-arena
 starting_cash: 0
 
@@ -176,17 +167,11 @@ base:
     cash: 0
     # `hunt`: each enemy unit attacks the nearest agent unit, so
     # each band engages whichever defenders the agent placed in
-    # that band's lane — the THREE lanes are genuinely independent.
-    # The DISTRIBUTED-DEFENCE discriminator is the THREE
-    # `units_in_region_gte` zone clauses in the win predicate: tanks
-    # MUST be in all three (25,*) zones simultaneously, so a
-    # concentration policy satisfies one zone and fails the other
-    # two. (`rusher` was used before the engine balance pass — it
-    # pools all three bands onto the agent CENTROID, collapsing the
-    # three lanes into one fight; under the corrected stance
-    # semantics a `rusher` funnel no longer exercises per-lane
-    # coverage, so the pack uses `hunt` to keep each lane a
-    # separate threat that must be met by its own defenders.)
+    # that band's lane — the lanes are genuinely independent.
+    # The DISTRIBUTED-DEFENCE discriminator is the per-lane
+    # `units_in_region_gte` zone clauses in the win predicate:
+    # tanks MUST be in EVERY lane's zone simultaneously, so a
+    # concentration policy satisfies one zone and fails the rest.
     bot_type: hunt
   # Combat-only toolset (no build / no harvest): the test is
   # ALLOCATION of a fixed defender pool across concurrent threats,
@@ -210,84 +195,78 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Bare distributed-defense skill: three CONCURRENT lanes, LIGHT
-  # waves (2 e1 per lane = 6 total). 2tnk-vs-e1 dominance means
-  # 2 tanks per lane reliably clears the 2-rifle wave without
-  # losing a defender. The load-bearing clauses are THREE
-  # `units_in_region_gte` zones (N (25,8), MID (25,20), S (25,32)),
-  # each requiring ≥1 tank — any concentration policy satisfies
-  # one zone and fails two. max_turns 50 → reachable tick ~3000
-  # in interrupt mode (~4503 fixed-step); `after_ticks: 2701`
-  # bites well before max_turns.
+  # Bare distributed-defense skill: TWO concurrent lanes (NORTH +
+  # SOUTH), light waves (2 e1 per lane = 4 total). The base sits
+  # in the centre (64,20) with 4 medium tanks staged adjacent. The
+  # map has horizontal WATER walls at y=11..12 and y=28..29 that
+  # block every column EXCEPT a 12-cell gap at x=58..69 — so the
+  # NORTH band at (64,4) must funnel south through (64,12) (the N
+  # defensive zone) and the SOUTH band at (64,36) must funnel
+  # north through (64,28) (the S defensive zone). Defenders MUST
+  # occupy BOTH lane zones (2 `units_in_region_gte` clauses,
+  # n=1 each) or the unopposed lane's band walks to the fact.
   easy:
     description: >
-      Your construction yard (fact) sits at the west edge (10,20). A
-      defensive force of 6 medium tanks (2tnk) is staged at the
-      central choke (30,20). THREE rifle-infantry rush bands are
-      incoming concurrently — NORTH (y=8), MID (y=20), and SOUTH
-      (y=32). SPLIT the defenders 2/2/2 across three forward
-      defensive zones at (25,8), (25,20), and (25,32) — each zone
-      must hold AT LEAST 1 tank at win time (the 2-per-zone
-      doctrine builds in attrition headroom), AND you must destroy
-      ≥4 of the 6 rushers AND keep ≥3 tanks alive AND keep the fact
-      standing, AND finish before tick 2700. Holding the reserve at
-      the centre satisfies at most the MID zone (and even that only
-      on the boundary); concentrating all six tanks on a single
-      lane satisfies one zone but fails the other two clauses.
+      Yard at the centre (64,20); four medium tanks at central staging.
+      Two concurrent rifle rushes are inbound — NORTH (spawn 64,4) and
+      SOUTH (spawn 64,36). The map's east-west walls force each band
+      through a single chokepoint per lane (N at 64,12 and S at 64,28).
+      Split the tanks 2/2 between the two zones; concentration on one
+      side leaves the other open. Three kills, two alive, yard intact,
+      within about thirty turns.
     overrides:
+      # Custom arena: horizontal walls (water bands at y=11..12 and
+      # y=28..29) with a single central gap (x=58..69) per band.
+      # The gap is the ONLY way for the N/S bands to reach the
+      # central staging — the gap centre IS the defensive zone.
+      base_map:
+        generator: arena
+        name: def-multi-direction-easy
+        width: 128
+        height: 40
+        cordon: 2
+        title: 'Multi-Direction Defense — 2 Lanes (N+S)'
+        obstacles:
+          # North wall (y=11..12), west half — blocks NW flanking.
+          - {x: 4,  y: 11, w: 54, h: 2}
+          # North wall (y=11..12), east half — blocks NE flanking.
+          - {x: 70, y: 11, w: 55, h: 2}
+          # South wall (y=28..29), west half — blocks SW flanking.
+          - {x: 4,  y: 28, w: 54, h: 2}
+          # South wall (y=28..29), east half — blocks SE flanking.
+          - {x: 70, y: 28, w: 55, h: 2}
       actors:
-        # Agent construction yard — WEST edge, the rusher target.
-        - {type: fact, owner: agent, position: [10, 20]}
-        # 6× 2tnk defensive force staged at the CENTRAL CHOKE
-        # (30,20). stance:2 (Defend) — auto-fires on an in-range
-        # enemy but never advances, so the agent must actively
-        # order each lane's pair to engage its band. The
-        # discriminator is the THREE defensive-zone clauses: a
-        # passive central cluster never reaches ANY of the (25,*)
-        # zones, and a concentration in one zone fails the other
-        # two clauses.
-        - {type: 2tnk, owner: agent, position: [30, 19], stance: 2}
-        - {type: 2tnk, owner: agent, position: [30, 20], stance: 2}
-        - {type: 2tnk, owner: agent, position: [30, 21], stance: 2}
-        - {type: 2tnk, owner: agent, position: [31, 19], stance: 2}
-        - {type: 2tnk, owner: agent, position: [31, 20], stance: 2}
-        - {type: 2tnk, owner: agent, position: [31, 21], stance: 2}
-        # THREE CONCURRENT rush bands — NORTH (y=8), MID (y=20),
-        # SOUTH (y=32). e1-only so 2 tanks per lane dominates the
-        # engagement (per CLAUDE.md / combat-focus-fire-priority).
-        # 2 e1 per lane = 6 e1 total; the LIGHT load means 2 tanks
-        # per lane reliably hold without losing a defender (so the
-        # n=1 zone clause keeps holding through the engagement).
-        - {type: e1, owner: enemy, position: [80,  8], stance: 3, count: 2}
-        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 2}
-        - {type: e1, owner: enemy, position: [80, 32], stance: 3, count: 2}
-        # Inert enemy `fact` marker far east (anti-DRAW): without it
-        # the engine auto-`done`s on enemy-elim before the win/fail
-        # evaluator runs (CLAUDE.md footgun). Placed off-axis (y=4)
-        # so the head-on MID band doesn't path through it.
+        # Agent construction yard — CENTRE of the map (the rusher
+        # target). Both lanes converge on (64,20).
+        - {type: fact, owner: agent, position: [64, 20]}
+        # 4x 2tnk defensive force staged adjacent to the fact.
+        # stance:2 (Defend) — auto-fires on an in-range enemy but
+        # never advances; the agent must actively split them N/S.
+        - {type: 2tnk, owner: agent, position: [62, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [63, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [62, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [63, 20], stance: 2}
+        # NORTH band at (64,4) — must funnel through (64,12) gap.
+        - {type: e1, owner: enemy, position: [64,  4], stance: 3, count: 2}
+        # SOUTH band at (64,36) — must funnel through (64,28) gap.
+        - {type: e1, owner: enemy, position: [64, 36], stance: 3, count: 2}
+        # Inert enemy `fact` marker far NE (anti-DRAW). Placed in
+        # the walled-off NE quadrant so it never sits on a band's
+        # approach line.
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
-        # Kill bar (4 of 6 e1) is a soft floor — the LOAD-BEARING
-        # discriminator is the THREE zone clauses below. With the
-        # intended 2/2/2 split, the lanes' e1 attrition across 2700
-        # ticks reliably clears 4 kills. Concentration policies
-        # fail two of the three zone clauses anyway (and a stall
-        # never reaches any zone).
-        - {units_killed_gte: 4}
-        - {own_units_gte: 3}
+        # Kill bar (3 of 4 e1) is a soft floor — the load-bearing
+        # discriminator is the TWO lane zone clauses below.
+        - {units_killed_gte: 3}
+        - {own_units_gte: 2}
         - {has_building: fact}
-        # THREE defensive zones — each MUST hold ≥1 tank. The
-        # n=1 floor (rather than n=2) builds in attrition headroom:
-        # the 2/2/2 doctrine survives a single defender loss per
-        # lane without dropping a zone clause. Stall (everyone at
-        # centre) puts 0 tanks in N+S zones (distance
-        # sqrt(5²+12²) ≈ 13 > radius 5 to the N/S zones) — only
-        # MID is on the boundary; concentrate-NORTH puts 6 in N
-        # but 0 in MID and SOUTH — those two clauses fail.
-        - {units_in_region_gte: {x: 25, y:  8, radius: 5, n: 1}}
-        - {units_in_region_gte: {x: 25, y: 20, radius: 5, n: 1}}
-        - {units_in_region_gte: {x: 25, y: 32, radius: 5, n: 1}}
+        # TWO lane defensive zones — each MUST hold >=1 tank.
+        # Stall (everyone at centre y=20) leaves both zones empty
+        # (distance 8 > radius 5); concentrate-N puts 4 in N but
+        # 0 in S — S clause fails.
+        - {units_in_region_gte: {x: 64, y: 12, radius: 5, n: 1}}
+        - {units_in_region_gte: {x: 64, y: 28, radius: 5, n: 1}}
         - {within_ticks: 2700}
     fail_condition:
       any_of:
@@ -297,55 +276,69 @@ levels:
     max_turns: 50
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 controlled variable vs easy: HEAVIER waves (3 e1 per lane =
-  # 9 total vs easy's 6) AND a LOSS CAP (`units_lost_lte: 3` — at
-  # most 3 tanks lost). The 2/2/2 split still wins but a sloppy
-  # intercept that bleeds more than 3 defenders busts the cap. A
-  # wrong allocation (e.g. 6/0/0) doesn't just fail the empty zone
-  # clauses — the two lanes' bands with no defenders raze the fact,
-  # and the over-concentrated cluster bleeds attrition. Same clock
-  # as easy (within_ticks 2700 / after_ticks 2701).
+  # +1 lane vs easy: THREE concurrent lanes (NORTH + SOUTH + EAST)
+  # with HEAVIER waves (3 e1 per lane = 9 total). Plus a LOSS CAP
+  # (`units_lost_lte: 3`) — a sloppy intercept that bleeds more
+  # than 3 defenders busts the cap. Map adds a vertical wall east
+  # of the central staging with a single (108,18..22) gap that
+  # channels the EAST band through (108,20) — the E defensive
+  # zone. The 2/2/2 split across (64,12), (64,28), (108,20) wins;
+  # concentration on any single zone fails the other two clauses.
   medium:
     description: >
-      Same THREE concurrent rush bands but each band is heavier
-      (3 rifle infantry per lane = 9 total vs easy's 6). Same
-      SIX-tank defensive force at central staging (30,20); same
-      2/2/2 split requirement across N (25,8), MID (25,20), S
-      (25,32) defensive zones. Win additionally requires losing
-      AT MOST 3 tanks — a sloppy intercept that bleeds the line
-      busts the cap. The kill bar is ≥6, ≥3 tanks alive, fact
-      standing, finish before tick 2700. Concentration policies
-      fail two zone clauses; a sloppy split that bleeds the line
-      fails the loss cap.
+      Same central yard with six tanks staging adjacent — but now THREE
+      concurrent lanes converge (NORTH, SOUTH, and a third lane from the
+      EAST). Each lane is heavier (nine rifles total). Walls funnel each
+      band through one chokepoint per lane (N at 64,12; S at 64,28; E at
+      108,20). Maintain the 2/2/2 split, hold the loss cap at three,
+      kill six, keep three tanks alive and the yard standing, within
+      about thirty turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-multi-direction-medium
+        width: 128
+        height: 40
+        cordon: 2
+        title: 'Multi-Direction Defense — 3 Lanes (N+S+E)'
+        obstacles:
+          # North horizontal walls — gap x=58..69 for N lane.
+          - {x: 4,   y: 11, w: 54, h: 2}
+          - {x: 70,  y: 11, w: 35, h: 2}   # stops at x=104 so E lane is open
+          # South horizontal walls — gap x=58..69 for S lane.
+          - {x: 4,   y: 28, w: 54, h: 2}
+          - {x: 70,  y: 28, w: 35, h: 2}
+          # East vertical walls — gap y=18..22 for E lane (channels
+          # E band at (124,20) through (108,20) into the centre).
+          - {x: 106, y: 4,  w: 2, h: 14}
+          - {x: 106, y: 23, w: 2, h: 15}
       actors:
-        - {type: fact, owner: agent, position: [10, 20]}
-        - {type: 2tnk, owner: agent, position: [30, 19], stance: 2}
-        - {type: 2tnk, owner: agent, position: [30, 20], stance: 2}
-        - {type: 2tnk, owner: agent, position: [30, 21], stance: 2}
-        - {type: 2tnk, owner: agent, position: [31, 19], stance: 2}
-        - {type: 2tnk, owner: agent, position: [31, 20], stance: 2}
-        - {type: 2tnk, owner: agent, position: [31, 21], stance: 2}
-        # Heavier waves vs easy (3 e1 per lane = 9 total vs easy's 6).
-        # Still e1-only so 2 tanks per lane remains the floor (no
-        # grenadiers / rockets — those would break the 2tnk
-        # dominance). The bleed risk grows with the heavier wave →
-        # the units_lost_lte:3 cap is the medium-specific axis.
-        - {type: e1, owner: enemy, position: [80,  8], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [80, 32], stance: 3, count: 3}
+        - {type: fact, owner: agent, position: [64, 20]}
+        # 6x 2tnk central staging (2 cols x 3 rows around the fact).
+        - {type: 2tnk, owner: agent, position: [62, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [63, 19], stance: 2}
+        - {type: 2tnk, owner: agent, position: [62, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [63, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [62, 21], stance: 2}
+        - {type: 2tnk, owner: agent, position: [63, 21], stance: 2}
+        # Three concurrent rush bands — N at (64,4), S at (64,36),
+        # E at (124,20). e1-only so 2 tanks per lane dominates the
+        # engagement.
+        - {type: e1, owner: enemy, position: [64,   4], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [64,  36], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [124, 20], stance: 3, count: 3}
+        # Inert enemy `fact` marker far NE (anti-DRAW); inside the
+        # walled-off NE quadrant.
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
-        # Kill bar 6 of 9 e1 — the LOAD-BEARING axis remains the
-        # zone clauses below; the kill bar is a soft floor.
         - {units_killed_gte: 6}
         - {own_units_gte: 3}
         - {units_lost_lte: 3}
         - {has_building: fact}
-        - {units_in_region_gte: {x: 25, y:  8, radius: 5, n: 1}}
-        - {units_in_region_gte: {x: 25, y: 20, radius: 5, n: 1}}
-        - {units_in_region_gte: {x: 25, y: 32, radius: 5, n: 1}}
+        - {units_in_region_gte: {x: 64,  y: 12, radius: 5, n: 1}}
+        - {units_in_region_gte: {x: 64,  y: 28, radius: 5, n: 1}}
+        - {units_in_region_gte: {x: 108, y: 20, radius: 5, n: 1}}
         - {within_ticks: 2700}
     fail_condition:
       any_of:
@@ -356,94 +349,115 @@ levels:
     max_turns: 50
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # +1 controlled variable on top of medium: ≥2 agent spawn_point
-  # groups so the BASE LATITUDE (and thus the lane GEOMETRY) flips
-  # by seed (NORTH base y=14 ⇒ lanes at y=2, y=14, y=26; SOUTH
-  # base y=26 ⇒ lanes at y=14, y=26, y=38). The 2/2/2 distributed-
-  # defence DOCTRINE generalises across either spawn; a memorised
-  # "send 2 tanks to (25,8)" cell does not — the canonical
-  # defensive zones flip with the base. Win uses `any_of` across
-  # the two candidate three-zone layouts so a model that picks the
-  # base-matched zones wins on both seeds. Loss cap and kill bar
-  # match medium (units_lost_lte:3, units_killed_gte:6); same clock.
+  # +1 lane vs medium: FOUR concurrent lanes (NW + NE + SW + SE —
+  # the four diagonal corners). PLUS the base latitude rotates by
+  # seed via two agent spawn_point groups (NORTH base y=14 / SOUTH
+  # base y=26), so the canonical four-zone quad shifts with the
+  # base — a memorised absolute zone layout wins one seed and
+  # loses the other. 8 tanks split 2/2/2/2 across the four
+  # corners. Heavier waves (3 e1 per lane x 4 active lanes = 12
+  # total) with the same loss cap (units_lost_lte:3) and clock.
   hard:
     description: >
-      Your construction yard sits at a seed-chosen latitude (NORTH
-      base y=14 or SOUTH base y=26 — the lane geometry flips with
-      the base). SIX defenders are staged at central staging
-      (30, base_y). THREE concurrent rush bands attack at the
-      base-matched latitudes (3 rifle infantry each). Split the
-      defenders 2/2/2 across the three matching defensive zones at
-      x=25, keep ≥3 tanks alive, lose AT MOST 3 tanks, destroy ≥6
-      rushers, keep the fact standing, finish before tick 2700. A
-      single memorised "send to (25,8)/(25,20)/(25,32)" plan wins
-      one seed and loses the other; the 2/2/2 doctrine matched to
-      the actual base latitude generalises.
+      Your yard and eight tanks spawn in the NORTH (y=14) or SOUTH
+      (y=26) band by seed. Four concurrent rush lanes hit the four
+      diagonal corners (NW, NE, SW, SE). Split the defenders 2/2/2/2
+      across the four forward zones at YOUR latitude; a memorised
+      mid-map plan only wins one seed. Eight kills, three alive, loss
+      cap three, yard intact, within about thirty turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-multi-direction-hard
+        width: 128
+        height: 40
+        cordon: 2
+        title: 'Multi-Direction Defense — 4 Lanes (NW/NE/SW/SE)'
+        obstacles:
+          # Central column wall (x=63..64) separates W half from
+          # E half EXCEPT at the two candidate base latitudes
+          # (y=12..16 and y=24..28) where the base sits. This
+          # forces the western bands to stay west of x=64 and the
+          # eastern bands to stay east of x=64 — the four corner
+          # lanes are physically distinct.
+          - {x: 63, y: 4,  w: 2, h: 8}    # y=4..11 (above N base)
+          - {x: 63, y: 17, w: 2, h: 6}    # y=17..22 (between bases)
+          - {x: 63, y: 29, w: 2, h: 9}    # y=29..37 (below S base)
+          # Central row wall (y=19..20) separates N half from S
+          # half EXCEPT at the central x corridor (x=39..88)
+          # where the bases sit. This puts the SW/SE bands south
+          # of y=21 and the NW/NE bands north of y=19, ensuring
+          # the corner lanes converge at distinct corners.
+          - {x: 4,  y: 19, w: 35, h: 2}   # y=19..20 west half
+          - {x: 89, y: 19, w: 35, h: 2}   # y=19..20 east half
       actors:
-        # spawn_point 0 — NORTH base (y=14). All buildings/units
-        # tagged spawn_point: 0; lane geometry is y=2 / y=14 / y=26.
-        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [30, 13], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [30, 14], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [30, 15], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [31, 13], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [31, 14], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [31, 15], stance: 2, spawn_point: 0}
-        # spawn_point 1 — SOUTH base (y=26). Mirrored layout; lane
-        # geometry is y=14 / y=26 / y=38.
-        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [30, 25], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [30, 26], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [30, 27], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [31, 25], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [31, 26], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [31, 27], stance: 2, spawn_point: 1}
-        # SIX enemy bands (3 per candidate base): NORTH base lanes
-        # at y=2 / y=14 / y=26 AND SOUTH base lanes at y=14 / y=26
-        # / y=38. The shared y=14 + y=26 bands appear once each
-        # (they serve as the OUTER lane for one base and the
-        # CENTRE lane for the other). y=2 is the NORTH-base
-        # northern outer; y=38 is the SOUTH-base southern outer.
-        # The agent base sits at the spawn-active y so each `hunt`
-        # band's nearest-agent-unit pathing lands in the
-        # spawn-matched defensive geometry. The off-spawn outer
-        # band's nearest agent units are the wrong-latitude
-        # defenders, so it doesn't engage in time.
-        - {type: e1, owner: enemy, position: [80,  2], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [80, 14], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [80, 26], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [80, 38], stance: 3, count: 3}
-        # Inert enemy `fact` marker far east (anti-DRAW). Placed at
-        # (120,20) — between the two candidate base latitudes so it
-        # never sits on a rusher-band approach line.
+        # spawn_point 0 — NORTH base (y=14). Lane-zone latitudes
+        # at y=8 (north pair) and y=20 (south pair).
+        - {type: fact, owner: agent, position: [64, 14], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [62, 13], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [63, 13], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [65, 13], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [62, 14], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [65, 14], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [62, 15], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [63, 15], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [65, 15], stance: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=26). Lane-zone latitudes
+        # at y=20 (north pair) and y=32 (south pair).
+        - {type: fact, owner: agent, position: [64, 26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [62, 25], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [63, 25], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [65, 25], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [62, 26], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [65, 26], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [62, 27], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [63, 27], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [65, 27], stance: 2, spawn_point: 1}
+        # Eight enemy bands — one per (candidate-base x corner)
+        # combination. For spawn 0 (NORTH base y=14): the four
+        # "active" lanes are NW (28,2), NE (100,2), SW (28,24),
+        # SE (100,24). For spawn 1 (SOUTH base y=26): the four
+        # "active" lanes are NW (28,16), NE (100,16), SW (28,38),
+        # SE (100,38). Off-spawn bands path at the wrong-latitude
+        # defenders and don't engage in time.
+        - {type: e1, owner: enemy, position: [28,   2], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [100,  2], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [28,  16], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [100, 16], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [28,  24], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [100, 24], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [28,  38], stance: 3, count: 3}
+        - {type: e1, owner: enemy, position: [100, 38], stance: 3, count: 3}
+        # Inert enemy `fact` marker far east mid-latitude (anti-
+        # DRAW). Placed at (120,20) — between the two candidate
+        # base latitudes so it never sits on a band's approach.
         - {type: fact, owner: enemy, position: [120, 20]}
-    # `any_of` across the two candidate three-zone layouts. Spawn 0
-    # (NORTH base y=14) ⇒ zones at (25,2), (25,14), (25,26).
-    # Spawn 1 (SOUTH base y=26) ⇒ zones at (25,14), (25,26), (25,38).
-    # A model that always picks the same three zones wins one seed
-    # and loses the other; matching zones to the actual base
-    # latitude generalises.
+    # `any_of` across the two candidate four-zone layouts. Spawn 0
+    # (NORTH base y=14) ⇒ zones at NW(36,8), NE(92,8), SW(36,20),
+    # SE(92,20). Spawn 1 (SOUTH base y=26) ⇒ zones at NW(36,20),
+    # NE(92,20), SW(36,32), SE(92,32). A model that always picks
+    # the same four zones wins one seed and loses the other.
     win_condition:
       all_of:
-        # Kill bar 6 of 9 e1 reaching the active-spawn lanes (the
-        # off-spawn outer band doesn't engage in time — its targets
-        # are the wrong-latitude defenders). LOAD-BEARING axis is
-        # the `any_of` over the two candidate three-zone layouts.
-        - {units_killed_gte: 6}
+        # Kill bar 8 of 24 e1 — the off-spawn four bands path at
+        # the wrong-latitude defenders and may not engage in time;
+        # the active four bands (~12 e1) carry the kill bar.
+        - {units_killed_gte: 8}
         - {own_units_gte: 3}
         - {units_lost_lte: 3}
         - {has_building: fact}
         - {within_ticks: 2700}
         - any_of:
           - all_of:
-            - {units_in_region_gte: {x: 25, y:  2, radius: 5, n: 1}}
-            - {units_in_region_gte: {x: 25, y: 14, radius: 5, n: 1}}
-            - {units_in_region_gte: {x: 25, y: 26, radius: 5, n: 1}}
+            - {units_in_region_gte: {x: 36, y:  8, radius: 5, n: 1}}
+            - {units_in_region_gte: {x: 92, y:  8, radius: 5, n: 1}}
+            - {units_in_region_gte: {x: 36, y: 20, radius: 5, n: 1}}
+            - {units_in_region_gte: {x: 92, y: 20, radius: 5, n: 1}}
           - all_of:
-            - {units_in_region_gte: {x: 25, y: 14, radius: 5, n: 1}}
-            - {units_in_region_gte: {x: 25, y: 26, radius: 5, n: 1}}
-            - {units_in_region_gte: {x: 25, y: 38, radius: 5, n: 1}}
+            - {units_in_region_gte: {x: 36, y: 20, radius: 5, n: 1}}
+            - {units_in_region_gte: {x: 92, y: 20, radius: 5, n: 1}}
+            - {units_in_region_gte: {x: 36, y: 32, radius: 5, n: 1}}
+            - {units_in_region_gte: {x: 92, y: 32, radius: 5, n: 1}}
     fail_condition:
       any_of:
         - {after_ticks: 2701}
