@@ -6,8 +6,11 @@ Adapters:
 * `OpenAICompatibleProvider` — OpenAI Chat Completions wire format. Covers
   local **vLLM** (matches Training's rollout path) and **OpenRouter**
   (the Phase-0 test target) by base_url alone.
-* `BedrockProvider` — AWS Bedrock Converse. Stubbed with a precise
-  NotImplementedError so the wiring exists before the dependency does.
+* `BedrockProvider` — AWS Bedrock Converse. Translates the agent's
+  OpenAI-shape messages + tool schemas to Bedrock Converse and back to
+  the same `ChatReply` the OpenAI path returns, so the agent stays
+  provider-agnostic. Auth comes from the AWS credential chain (env /
+  shared config / role) — never hardcoded.
 
 Selection is pure config (`ProviderConfig`); no provider-specific code
 leaks into the agent.
@@ -46,6 +49,14 @@ _PRESETS: dict[str, dict[str, str]] = {
     "together": {
         "base_url": "https://api.together.xyz/v1",
         "api_key_env": "TOGETHER_API_KEY",
+    },
+    # AWS Bedrock — auth via the boto3 credential chain (env, shared
+    # config, instance/role). `base_url` is unused (the SDK derives the
+    # endpoint from the region). `api_key_env` is unused (left for
+    # interface parity); `bedrock_region` on ProviderConfig wins.
+    "bedrock": {
+        "base_url": "",
+        "api_key_env": "",
     },
 }
 
@@ -88,6 +99,11 @@ class ProviderConfig:
     max_history_turns: int = 16  # sliding wire-history window (0=unbounded)
     price_in_per_m: float = 0.0   # USD / 1M prompt tokens
     price_out_per_m: float = 0.0  # USD / 1M completion tokens
+    # AWS Bedrock: inference region. Sonnet 4.6 is exposed via the
+    # `us.anthropic.claude-sonnet-4-6` cross-region inference profile,
+    # which routes from `us-west-2` (the on-demand model id returns
+    # ValidationException — only the inference profile is callable).
+    bedrock_region: str = "us-west-2"
 
     def resolved_base_url(self) -> str:
         if self.base_url:
@@ -443,23 +459,376 @@ class OpenAICompatibleProvider(ChatProvider):
 
 
 class BedrockProvider(ChatProvider):
-    """AWS Bedrock Converse. Wired but not yet implemented."""
+    """AWS Bedrock Converse adapter.
 
-    def __init__(self, cfg: ProviderConfig):
+    Translates between the agent's OpenAI-shape messages + tool
+    schemas and the Bedrock Converse wire format, and translates the
+    response back to a `ChatReply` so the agent and FullPlayback see
+    the SAME shape they get from the OpenAI-compatible path. Auth
+    flows through boto3's standard credential chain — env vars, the
+    shared config file, IAM role, etc. The model id is the inference
+    profile id (`us.anthropic.claude-sonnet-4-6`), not the on-demand
+    model id (which returns ValidationException).
+
+    Wire-shape mapping:
+      * OpenAI `system` messages         → top-level `system: [{text}]`
+      * OpenAI text user/assistant       → `content: [{text}]`
+      * OpenAI multimodal user content   → `content: [{text}, {image}]`
+      * OpenAI assistant `tool_calls`    → `content: [{toolUse}]`
+      * OpenAI `tool` reply              → user `[{toolResult}]`
+      * OpenAI `tools` (JSON-Schema)     → `toolConfig: {tools: [{toolSpec}]}`
+      * Bedrock `output.message.content` → ChatReply.text + tool_calls
+      * Bedrock `usage.{input,output}Tokens` → usage.{prompt,completion}_tokens
+
+    Tool-call ids: Bedrock requires a `toolUseId` on every assistant
+    `toolUse` and the matching user `toolResult`. The bench agent
+    canonicalises these as `c0/c1/...` per turn, so the translation
+    passes them straight through.
+    """
+
+    def __init__(self, cfg: ProviderConfig, *, rate_limiter=None,
+                 cost_meter=None, client=None):
         self.cfg = cfg
+        self.model_id = cfg.model
+        from .resilience import CostMeter, RateLimiter, RetryPolicy
+
+        self._rl = rate_limiter or RateLimiter(cfg.qps)
+        self._cost = cost_meter or CostMeter(
+            cfg.price_in_per_m, cfg.price_out_per_m
+        )
+        self._policy = RetryPolicy(
+            max_attempts=max(1, cfg.max_retries),
+            base=cfg.retry_base_s,
+            cap=cfg.retry_cap_s,
+        )
+        # Lazy import: keep boto3 a soft dep — only providers='bedrock'
+        # forces the dependency, never the OpenRouter / vLLM paths.
+        if client is not None:
+            self._client = client
+        else:
+            try:
+                import boto3
+            except ImportError as e:  # pragma: no cover — env-dep
+                raise RuntimeError(
+                    "BedrockProvider needs boto3. Install with "
+                    "`pip install boto3`."
+                ) from e
+            self._client = boto3.client(
+                "bedrock-runtime", region_name=cfg.bedrock_region
+            )
+        # Audit hook (parallels OpenAICompatibleProvider): when set to
+        # a list, every successful complete() appends a record so
+        # FullPlayback can capture literal request + raw response.
+        self.request_log: list[dict] | None = None
+
+    @property
+    def cost_meter(self):
+        return self._cost
+
+    # ── Wire translation: OpenAI → Bedrock ──────────────────────────
+
+    @staticmethod
+    def _to_bedrock_messages(messages: list[dict]) -> tuple[list[dict], list[dict]]:
+        """Pure: split OpenAI messages into (system, conversation).
+
+        System messages are concatenated into a list of `{text}` blocks
+        for Bedrock's top-level `system` parameter. Tool replies
+        (`role=tool`) become user-role `toolResult` content blocks; an
+        assistant message with `tool_calls` becomes Bedrock `toolUse`
+        content blocks (text content, if any, is preserved alongside).
+        Adjacent same-role messages are merged because Bedrock REQUIRES
+        strictly alternating user/assistant turns — a `tool` reply
+        followed by another user briefing must collapse into ONE
+        Bedrock user message with multiple content blocks.
+        """
+        sys_blocks: list[dict] = []
+        out: list[dict] = []
+        for m in messages:
+            role = m.get("role")
+            if role == "system":
+                txt = m.get("content")
+                if isinstance(txt, list):
+                    txt = "\n".join(
+                        p.get("text", "") for p in txt
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                if txt:
+                    sys_blocks.append({"text": str(txt)})
+                continue
+            blocks = BedrockProvider._content_to_blocks(m)
+            if not blocks:
+                continue
+            br_role = "user" if role in ("user", "tool") else "assistant"
+            if out and out[-1]["role"] == br_role:
+                out[-1]["content"].extend(blocks)
+            else:
+                out.append({"role": br_role, "content": blocks})
+        return sys_blocks, out
+
+    @staticmethod
+    def _content_to_blocks(msg: dict) -> list[dict]:
+        """Pure: OpenAI message → list of Bedrock content blocks."""
+        role = msg.get("role")
+        # Tool-result reply → toolResult block.
+        if role == "tool":
+            tcid = msg.get("tool_call_id") or ""
+            content = msg.get("content")
+            if isinstance(content, list):
+                content = " ".join(
+                    p.get("text", "") for p in content
+                    if isinstance(p, dict) and p.get("type") == "text"
+                )
+            return [{
+                "toolResult": {
+                    "toolUseId": str(tcid),
+                    "content": [{"text": str(content) if content else "ok"}],
+                }
+            }]
+        blocks: list[dict] = []
+        c = msg.get("content")
+        if isinstance(c, str):
+            if c:
+                blocks.append({"text": c})
+        elif isinstance(c, list):
+            for part in c:
+                if not isinstance(part, dict):
+                    continue
+                t = part.get("type")
+                if t == "text":
+                    txt = part.get("text", "")
+                    if txt:
+                        blocks.append({"text": txt})
+                elif t == "image_url":
+                    iu = part.get("image_url") or {}
+                    url = iu.get("url", "") if isinstance(iu, dict) else ""
+                    img = BedrockProvider._image_block_from_data_url(url)
+                    if img is not None:
+                        blocks.append(img)
+        # Assistant tool_calls → toolUse blocks (after any text).
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+            if not isinstance(args, dict):
+                args = {}
+            blocks.append({
+                "toolUse": {
+                    "toolUseId": str(tc.get("id") or ""),
+                    "name": fn.get("name", ""),
+                    "input": args,
+                }
+            })
+        return blocks
+
+    @staticmethod
+    def _image_block_from_data_url(url: str) -> dict | None:
+        """Pure: turn a `data:image/png;base64,...` URL into a Bedrock
+        `{image: {format, source: {bytes}}}` block. Bedrock accepts
+        png / jpeg / gif / webp; the bench only emits png minimaps."""
+        import base64
+
+        if not url.startswith("data:"):
+            return None
+        try:
+            header, b64 = url.split(",", 1)
+        except ValueError:
+            return None
+        fmt = "png"
+        if "image/" in header:
+            mt = header.split("image/", 1)[1].split(";", 1)[0].lower()
+            if mt in ("png", "jpeg", "jpg", "gif", "webp"):
+                fmt = "jpeg" if mt == "jpg" else mt
+        try:
+            raw = base64.b64decode(b64)
+        except (ValueError, TypeError):
+            return None
+        return {"image": {"format": fmt, "source": {"bytes": raw}}}
+
+    @staticmethod
+    def _to_bedrock_tools(tools: list[dict]) -> dict | None:
+        """Pure: OpenAI tool list → Bedrock `toolConfig`. The OpenAI
+        schema is `{type: "function", function: {name, description,
+        parameters}}`; Bedrock wants `{toolSpec: {name, description,
+        inputSchema: {json: <parameters>}}}`. Bedrock additionally
+        requires `inputSchema.json.type` (some agents emit empty
+        params) — we backfill an empty object schema."""
+        if not tools:
+            return None
+        specs = []
+        for t in tools:
+            fn = t.get("function") or {}
+            params = fn.get("parameters") or {"type": "object", "properties": {}}
+            if "type" not in params:
+                params = {"type": "object", **params}
+            specs.append({
+                "toolSpec": {
+                    "name": fn.get("name", ""),
+                    "description": fn.get("description", ""),
+                    "inputSchema": {"json": params},
+                }
+            })
+        return {"tools": specs}
+
+    # ── Wire translation: Bedrock → ChatReply ───────────────────────
+
+    @staticmethod
+    def _reply_from_bedrock(resp: dict) -> ChatReply:
+        """Pure: parse a Bedrock Converse response into a ChatReply.
+
+        Bedrock emits one assistant message; its content blocks are
+        either `{text}` (plain reply) or `{toolUse}` (a function call).
+        We concatenate text blocks and lift toolUse blocks into the
+        same `[{name, arguments}]` list the OpenAI parser produces."""
+        msg = (resp.get("output") or {}).get("message") or {}
+        content_blocks = msg.get("content") or []
+        text_parts: list[str] = []
+        calls: list[dict] = []
+        reasoning_parts: list[str] = []
+        for blk in content_blocks:
+            if not isinstance(blk, dict):
+                continue
+            if "text" in blk:
+                text_parts.append(blk["text"])
+            elif "toolUse" in blk:
+                tu = blk["toolUse"]
+                calls.append({
+                    "name": tu.get("name", ""),
+                    "arguments": tu.get("input") or {},
+                })
+            elif "reasoningContent" in blk:
+                # Bedrock surfaces extended thinking under
+                # reasoningContent.{reasoningText: {text}} — preserve
+                # it on the reply for FullPlayback.
+                rc = blk["reasoningContent"] or {}
+                rt = rc.get("reasoningText") or {}
+                t = rt.get("text") if isinstance(rt, dict) else None
+                if t:
+                    reasoning_parts.append(str(t))
+        usage = resp.get("usage") or {}
+        return ChatReply(
+            text="".join(text_parts),
+            tool_calls=calls,
+            reasoning="".join(reasoning_parts),
+            usage={
+                "prompt_tokens": int(usage.get("inputTokens", 0) or 0),
+                "completion_tokens": int(usage.get("outputTokens", 0) or 0),
+            },
+            raw=resp,
+        )
+
+    # ── Public API ──────────────────────────────────────────────────
+
+    def _converse_once(self, system_blocks, br_messages, tool_config,
+                       inference_cfg) -> dict:
+        from .resilience import FatalProviderError
+        try:
+            kwargs = {
+                "modelId": self.model_id,
+                "messages": br_messages,
+                "inferenceConfig": inference_cfg,
+            }
+            if system_blocks:
+                kwargs["system"] = system_blocks
+            if tool_config:
+                kwargs["toolConfig"] = tool_config
+            return self._client.converse(**kwargs)
+        except Exception as e:  # noqa: BLE001
+            # Boto raises ClientError with a `response[Error][Code]`.
+            code = ""
+            status = 0
+            try:
+                err = getattr(e, "response", {}) or {}
+                meta = err.get("ResponseMetadata") or {}
+                status = int(meta.get("HTTPStatusCode", 0) or 0)
+                code = (err.get("Error") or {}).get("Code", "")
+            except Exception:  # noqa: BLE001
+                pass
+            transient = status in (408, 425, 429, 500, 502, 503, 504) or code in (
+                "ThrottlingException",
+                "ServiceUnavailableException",
+                "ModelTimeoutException",
+                "InternalServerException",
+                "ModelStreamErrorException",
+            )
+            cls = RuntimeError if transient else FatalProviderError
+            new = cls(f"bedrock {code or status or 'error'}: {e}")
+            new.transient = transient  # type: ignore[attr-defined]
+            new.retry_after = None  # type: ignore[attr-defined]
+            raise new from e
 
     def complete(self, messages: list[dict], tools: list[dict]) -> ChatReply:
-        raise NotImplementedError(
-            "BedrockProvider not implemented yet. Use provider='openrouter' "
-            "or 'vllm' for Phase 0; Bedrock Converse adapter is a tracked "
-            "follow-up (needs boto3 + message/tool shape translation)."
+        from .resilience import retry_call
+
+        cfg = self.cfg
+        sys_blocks, br_messages = self._to_bedrock_messages(messages)
+        tool_config = self._to_bedrock_tools(tools)
+        inference_cfg = {
+            "temperature": cfg.temperature,
+            "maxTokens": cfg.max_tokens,
+        }
+
+        self._rl.acquire()
+        resp = retry_call(
+            lambda: self._converse_once(
+                sys_blocks, br_messages, tool_config, inference_cfg,
+            ),
+            self._policy,
         )
+        reply = self._reply_from_bedrock(resp)
+        u = reply.usage or {}
+        self._cost.add(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
+        self._cost.check()
+        if self.request_log is not None:
+            try:
+                # Redact image bytes from the request log (they're
+                # huge, and duplicated per turn). Replace with a
+                # short placeholder; the rest of the body is small.
+                def _redact(b):
+                    if isinstance(b, dict):
+                        return {k: _redact(v) for k, v in b.items()}
+                    if isinstance(b, list):
+                        return [_redact(x) for x in b]
+                    if isinstance(b, (bytes, bytearray)):
+                        return f"<bytes:{len(b)}>"
+                    return b
+
+                self.request_log.append({
+                    "request": {
+                        "model": self.model_id,
+                        "system": _redact(sys_blocks),
+                        "messages": _redact(br_messages),
+                        "toolConfig": tool_config,
+                        "inferenceConfig": inference_cfg,
+                    },
+                    "response": {
+                        "raw": _redact(reply.raw),
+                        "text": reply.text,
+                        "tool_calls": reply.tool_calls,
+                        "reasoning": reply.reasoning,
+                        "usage": dict(reply.usage or {}),
+                        "finish_reason": resp.get("stopReason"),
+                    },
+                })
+            except Exception:  # noqa: BLE001 — audit must never break a run
+                pass
+        return reply
+
+    def close(self) -> None:  # noqa: D401 — interface parity
+        # boto3 clients don't need explicit close; provided for
+        # symmetry with OpenAICompatibleProvider.
+        pass
 
 
 def make_provider(cfg: ProviderConfig, *, rate_limiter=None,
                   cost_meter=None) -> ChatProvider:
     if cfg.provider == "bedrock":
-        return BedrockProvider(cfg)
+        return BedrockProvider(
+            cfg, rate_limiter=rate_limiter, cost_meter=cost_meter,
+        )
     if cfg.provider in ("openai", "vllm", "openrouter", "together"):
         # together.ai's newer Qwen3.x and Llama-3.x families gate on
         # streaming (`streaming_required` 400 in non-stream mode); flip
