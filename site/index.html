@@ -22,8 +22,11 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 
 /* Selection screen */
 #selection{padding:24px;max-width:1200px;margin:0 auto}
-.filters{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.filters{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .filters input{flex:1;min-width:200px}
+.queue-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+.queue-controls label{font-size:12px;color:var(--muted)}
+.queue-controls input{width:54px;font-size:13px;padding:4px 8px}
 .cap-btn{padding:4px 12px;border-radius:16px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text);transition:.2s}
 .cap-btn.active{color:#fff}
 .cap-btn[data-cap="perception"].active{background:var(--accent)}
@@ -86,9 +89,15 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .game-help{font-size:12px;color:var(--muted);margin:-4px 0 10px}
 .game-legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:8px 0 12px}
 .game-legend span{display:inline-flex;align-items:center;gap:4px}
-.legend-mark{display:inline-block;width:12px;height:12px;border:1px solid rgba(0,0,0,.65);background:#45d86a}
+.legend-mark{display:inline-block;width:12px;height:12px;border:1px solid rgba(0,0,0,.65);background:#45d86a;flex:0 0 auto}
+.legend-mark.circle{border-radius:50%}
 .legend-mark.diamond{transform:rotate(45deg);width:10px;height:10px}
+.legend-mark.triangle{clip-path:polygon(50% 0,100% 100%,0 100%)}
+.legend-mark.tridown{clip-path:polygon(0 0,100% 0,50% 100%);background:#ffcd75}
+.legend-mark.building{background:#7497db}
 .legend-mark.enemy{background:#e05252}
+.legend-mark.enemy-building{background:#d2683c}
+.legend-mark.ore{background:#c99a39;border-radius:50%}
 .legend-mark.selected{box-shadow:0 0 0 2px #fff}
 .legend-mark.arrow{width:18px;height:3px;background:#ffe45c;border:none;position:relative}
 .legend-mark.arrow:after{content:"";position:absolute;right:-1px;top:-4px;border-left:7px solid #ffe45c;border-top:5px solid transparent;border-bottom:5px solid transparent}
@@ -124,6 +133,16 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
   <div class="filters">
     <input type="text" id="search" placeholder="Search scenarios..." oninput="renderCards()">
     <div id="cap-filters"></div>
+  </div>
+  <div class="queue-controls">
+    <label>Annotator</label>
+    <input type="number" id="queue-annotator" min="0" value="0" onchange="saveQueueConfig()">
+    <label>of</label>
+    <input type="number" id="queue-total" min="1" value="5" onchange="saveQueueConfig()">
+    <label>Round</label>
+    <input type="number" id="queue-round" min="1" value="1" onchange="saveQueueConfig()">
+    <button class="btn-primary btn-sm" onclick="startHumanEvalQueue()">Start Assigned 20</button>
+    <button class="btn-secondary btn-sm" onclick="resetHumanEvalQueue()">Rebuild Queue</button>
   </div>
   <div class="count-bar" id="count-bar"></div>
   <div class="scenario-grid" id="grid"></div>
@@ -194,9 +213,8 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
             <img id="game-minimap-img" style="display:none" draggable="false">
             <div class="game-coords" id="game-coords" style="display:none"></div>
           </div>
-          <div class="game-legend">
-            <span><i class="legend-mark"></i> light tank / unit</span>
-            <span><i class="legend-mark diamond"></i> medium tank / unit type</span>
+          <div class="game-legend" id="game-legend">
+            <span><i class="legend-mark"></i> unit</span>
             <span><i class="legend-mark enemy"></i> enemy</span>
             <span><i class="legend-mark selected"></i> selected</span>
             <span><i class="legend-mark arrow"></i> queued order</span>
@@ -207,7 +225,6 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
             <button class="btn-secondary btn-sm" onclick="gameClearSelection()">Clear Selection</button>
             <button class="btn-secondary btn-sm" onclick="gameClearQueue()">Cancel Orders</button>
             <button class="btn-endturn" id="game-endturn-btn" onclick="gameEndTurn()" disabled>End Turn</button>
-            <button class="btn-secondary btn-sm" id="game-export-run-btn" onclick="gameExportRun()" disabled>Export Run JSON</button>
           </div>
         </div>
         <div class="game-side-col">
@@ -224,7 +241,8 @@ const CAPS=["perception","reasoning","action","adversarial"];
 
 let scenarios=[], filtered=[], currentIdx=-1, currentLang="en", currentDiff="easy";
 let activeCaps=new Set(CAPS);
-let progress={};
+let progress={}, humanEvalQueue=[], queueConfig={annotator:0,total:5,round:1};
+const QUEUE_ROUNDS=5, QUEUE_ROUND_SIZE=20;
 
 // ── Data loading ──
 async function loadData(){
@@ -233,6 +251,7 @@ async function loadData(){
     scenarios=await r.json();
   }catch(e){scenarios=[];}
   loadProgress();
+  ensureHumanEvalQueue();
   renderCapFilters();
   renderCards();
   updateHeaderProgress();
@@ -251,6 +270,15 @@ function loadProgress(){
   }catch(e){progress={};}
 }
 function getStatus(id){return progress[id]||"not_started";}
+function setMissionStatus(s, opts={}){
+  if(currentIdx<0)return;
+  const id=scenarios[currentIdx].scenarioId;
+  progress[id]=s;
+  localStorage.setItem("openra-progress",JSON.stringify(progress));
+  updateHeaderProgress();
+  updateQueueProgressText();
+  if(opts.render!==false){renderMission();renderCards();}
+}
 
 // ── Header progress ──
 function updateHeaderProgress(){
@@ -276,7 +304,7 @@ function renderCards(){
        !(s.humanReadable.summary.en||"").toLowerCase().includes(q))return false;
     return true;
   });
-  document.getElementById("count-bar").textContent=`Showing ${filtered.length} of ${scenarios.length} scenarios`;
+  document.getElementById("count-bar").textContent=`Showing ${filtered.length} of ${scenarios.length} scenarios${humanEvalQueueText()}`;
   const grid=document.getElementById("grid");
   grid.innerHTML=filtered.map((s,i)=>{
     const st=getStatus(s.scenarioId);
@@ -285,7 +313,7 @@ function renderCards(){
       <div><span class="badge badge-${s.capability}">${s.capabilityLabel.en}</span>
       <span class="status-badge status-${st}">${stLabel}</span></div>
       <div class="title">${i+1}. ${esc(s.title)}</div>
-      <div class="meta">${s.scenarioId} &middot; ${s.map.baseMap}</div>
+      <div class="meta">#${scenarioOrdinal(s.scenarioId)} &middot; ${s.scenarioId} &middot; ${s.map.baseMap}</div>
       <div class="summary">${esc(s.humanReadable.summary.en)}</div>
     </div>`;
   }).join("");
@@ -294,6 +322,112 @@ function openMissionFiltered(fi){
   const s=filtered[fi];
   const idx=scenarios.indexOf(s);
   openMission(idx);
+}
+
+function humanEvalQueueText(){
+  if(!humanEvalQueue.length)return "";
+  const done=humanEvalQueue.filter(id=>progress[id]==="complete"||progress[id]==="annotated").length;
+  const capacity=queueConfig.total*QUEUE_ROUNDS*QUEUE_ROUND_SIZE;
+  const coverage=capacity>=scenarios.length?"covers all":"needs more rounds";
+  return ` | Assigned queue: ${done}/${humanEvalQueue.length} (annotator ${queueConfig.annotator}/${queueConfig.total}, round ${queueConfig.round}/${QUEUE_ROUNDS}, ${coverage})`;
+}
+function updateQueueProgressText(){
+  const bar=document.getElementById("count-bar");
+  if(bar&&document.getElementById("selection").style.display!=="none")renderCards();
+}
+function uniqueScenarioIds(){
+  return [...new Set(scenarios.map(s=>s.scenarioId).filter(Boolean))];
+}
+function scenarioOrdinal(id){
+  return uniqueScenarioIds().indexOf(id);
+}
+function readQueueConfig(){
+  try{queueConfig={...queueConfig,...JSON.parse(localStorage.getItem("openra-human-eval-config")||"{}")} }catch(e){}
+  const a=document.getElementById("queue-annotator");
+  const t=document.getElementById("queue-total");
+  const r=document.getElementById("queue-round");
+  queueConfig.total=Math.max(1,parseInt(queueConfig.total)||5);
+  queueConfig.annotator=Math.max(0,Math.min(queueConfig.total-1,parseInt(queueConfig.annotator)||0));
+  queueConfig.round=Math.max(1,parseInt(queueConfig.round)||1);
+  queueConfig.round=Math.min(queueConfig.round,QUEUE_ROUNDS);
+  if(a)a.value=queueConfig.annotator;
+  if(t)t.value=queueConfig.total;
+  if(r){r.value=queueConfig.round;r.max=QUEUE_ROUNDS;}
+}
+function saveQueueConfig(){
+  const total=Math.max(1,parseInt(document.getElementById("queue-total").value)||5);
+  const annotator=Math.max(0,Math.min(total-1,parseInt(document.getElementById("queue-annotator").value)||0));
+  queueConfig={annotator,total,round:Math.max(1,parseInt(document.getElementById("queue-round").value)||1)};
+  queueConfig.round=Math.min(queueConfig.round,QUEUE_ROUNDS);
+  localStorage.setItem("openra-human-eval-config",JSON.stringify(queueConfig));
+  readQueueConfig();
+  buildHumanEvalQueue();
+  renderCards();
+}
+function assignedRoundScenarioIds(annotator,total,round){
+  const ids=uniqueScenarioIds();
+  if(!ids.length)return [];
+  const startSlot=(round-1)*QUEUE_ROUND_SIZE*total+annotator;
+  const out=[];
+  for(let k=0;k<QUEUE_ROUND_SIZE;k++){
+    const slot=startSlot+k*total;
+    out.push(ids[slot%ids.length]);
+  }
+  return out;
+}
+function buildHumanEvalQueue(){
+  readQueueConfig();
+  humanEvalQueue=assignedRoundScenarioIds(queueConfig.annotator,queueConfig.total,queueConfig.round);
+  localStorage.setItem("openra-human-eval-queue",JSON.stringify(humanEvalQueue));
+}
+function ensureHumanEvalQueue(){
+  readQueueConfig();
+  try{humanEvalQueue=JSON.parse(localStorage.getItem("openra-human-eval-queue")||"[]");}
+  catch(e){humanEvalQueue=[];}
+  const expected=assignedRoundScenarioIds(queueConfig.annotator,queueConfig.total,queueConfig.round);
+  const same=humanEvalQueue.length===expected.length&&humanEvalQueue.every((id,i)=>id===expected[i]);
+  if(!same)buildHumanEvalQueue();
+}
+function startHumanEvalQueue(){
+  buildHumanEvalQueue();
+  if(!humanEvalQueue.length){alert("No scenarios assigned for this annotator/round.");return;}
+  const next=humanEvalQueue.find(id=>progress[id]!=="complete"&&progress[id]!=="annotated")||humanEvalQueue[0];
+  const idx=scenarios.findIndex(s=>s.scenarioId===next);
+  if(idx>=0)openMission(idx);
+}
+function resetHumanEvalQueue(){
+  buildHumanEvalQueue();
+  renderCards();
+  alert("Assigned queue rebuilt. Across annotators and rounds, scenarios are covered globally before repeats fill the 100-task quota.");
+}
+function advanceHumanEvalQueueAfterCompletion(doneId){
+  const pos=humanEvalQueue.indexOf(doneId);
+  if(pos<0)return;
+  let next=null;
+  for(let step=1;step<=humanEvalQueue.length;step++){
+    const id=humanEvalQueue[(pos+step)%humanEvalQueue.length];
+    if(progress[id]!=="complete"&&progress[id]!=="annotated"){next=id;break;}
+  }
+  if(!next){gameLog("Human eval queue complete.");return;}
+  const idx=scenarios.findIndex(s=>s.scenarioId===next);
+  if(idx<0)return;
+  gameLog("Next queued mission: "+next);
+  setTimeout(()=>openMission(idx),900);
+}
+function gameResetForMissionSwitch(){
+  if(gameSession&&gameServerUrl){
+    fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"}).catch(()=>{});
+  }
+  gameSession=null; gameState=null;
+  gameSelected.clear(); gameQueue=[];
+  const body=document.getElementById("game-body");
+  if(body)body.style.display="none";
+  const start=document.getElementById("game-start-btn");
+  const stop=document.getElementById("game-stop-btn");
+  const end=document.getElementById("game-endturn-btn");
+  if(start){start.style.display="";start.disabled=!gameServerOk;}
+  if(stop)stop.style.display="none";
+  if(end)end.disabled=true;
 }
 
 // ── Mission page ──
@@ -307,6 +441,7 @@ function showSelection(){
 function openMission(idx){
   console.log("openMission called with idx="+idx+" scenarios.length="+scenarios.length);
   if(idx<0||idx>=scenarios.length){console.log("idx out of range, returning");return;}
+  if(currentIdx!==idx)gameResetForMissionSwitch();
   currentIdx=idx;
   if(getStatus(scenarios[idx].scenarioId)==="not_started"){
     progress[scenarios[idx].scenarioId]="in_progress";
@@ -326,7 +461,7 @@ function renderMission(){
 }
 function _renderMissionInner(s){
   document.getElementById("m-title").textContent="#"+(currentIdx+1)+" "+s.title;
-  document.getElementById("m-id").textContent=s.scenarioId;
+  document.getElementById("m-id").textContent="#"+scenarioOrdinal(s.scenarioId)+" · "+s.scenarioId;
   const st=getStatus(s.scenarioId);
   document.getElementById("m-badges").innerHTML=
     `<span class="badge badge-${s.capability}">${s.capabilityLabel[currentLang]||s.capability}</span>`;
@@ -387,7 +522,6 @@ function esc(s){const d=document.createElement("div");d.textContent=s||"";return
 // ── Game engine integration ──
 let gameSession=null, gameServerUrl="", gameServerOk=false;
 let gameSelected=new Set(), gameQueue=[], gameState=null;
-let gameRunMeta=null, latestGameRun=null;
 
 async function checkServer(){
   const url=document.getElementById("server-url").value.replace(/\/$/,"");
@@ -427,16 +561,6 @@ async function gameStart(){
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
     gameState=await r.json();
     gameSession=gameState.session_id;
-    gameRunMeta={
-      scenarioId:s.scenarioId,
-      title:s.title,
-      level,
-      seed,
-      startedAt:new Date().toISOString(),
-    };
-    latestGameRun=null;
-    const exportBtn=document.getElementById("game-export-run-btn");
-    if(exportBtn)exportBtn.disabled=true;
     gameSelected.clear(); gameQueue=[];
     document.getElementById("game-body").style.display="";
     document.getElementById("game-start-btn").style.display="none";
@@ -457,9 +581,6 @@ async function gameStop(){
     await fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"});
   }catch(e){}
   gameSession=null; gameState=null;
-  gameRunMeta=null; latestGameRun=null;
-  const exportBtn=document.getElementById("game-export-run-btn");
-  if(exportBtn)exportBtn.disabled=true;
   gameSelected.clear(); gameQueue=[];
   document.getElementById("game-body").style.display="none";
   document.getElementById("game-start-btn").style.display="";
@@ -483,12 +604,12 @@ async function gameEndTurn(){
     gameRender();
     if(gameState.done){
       gameLog("GAME OVER — "+gameState.outcome.toUpperCase()+" at turn "+gameState.turn);
-      latestGameRun=gameBuildRunExport(gameState);
-      gameStoreRun(latestGameRun);
-      const exportBtn=document.getElementById("game-export-run-btn");
-      if(exportBtn)exportBtn.disabled=false;
+      const completedId=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
+      setMissionStatus("complete",{render:false});
       if(gameState.save_path)gameLog("Playback saved: "+gameState.save_path);
-      gameLog("Use Export Run JSON to save this playthrough.");
+      gameLog("Mission marked complete locally.");
+      renderMission();
+      if(completedId)advanceHumanEvalQueueAfterCompletion(completedId);
       document.getElementById("game-endturn-btn").disabled=true;
     }else{
       gameLog("Turn "+gameState.turn+"/"+gameState.max_turns+
@@ -570,11 +691,11 @@ function gameMinimapClick(e){
     gameLog((allSelected?"Deselected ":"Selected ")+ownHere.length+" unit(s) at ("+ownHere[0].cell_x+","+ownHere[0].cell_y+").");
   }else if(gameSelected.size>0&&enemyHere.length>0){
     gameQueueAttack(enemyHere[0]);
-    gameSelected.clear();
   }else if(gameSelected.size>0){
-    gameQueue.push({mode:"move",unit_ids:[...gameSelected],target_x:p.cx,target_y:p.cy});
-    gameLog("Queued MOVE to ("+p.cx+","+p.cy+") with "+gameSelected.size+" unit(s).");
+    const n=gameSelected.size;
+    gameQueueOrder({mode:"move",unit_ids:[...gameSelected],target_x:p.cx,target_y:p.cy});
     gameSelected.clear();
+    gameLog("Queued MOVE to ("+p.cx+","+p.cy+") with "+n+" unit(s). Selection cleared so another unit can receive a different order this turn.");
   }else{
     gameLog("No unit selected. Click a friendly marker or use Select All first.");
   }
@@ -600,58 +721,24 @@ function gameClearQueue(){
   gameRender();
 }
 
-function gameBuildRunExport(state){
-  const log=[...document.querySelectorAll("#game-log div")].map(el=>el.textContent);
-  return {
-    kind:"openra-bench-human-play-run",
-    version:1,
-    scenarioId:gameRunMeta&&gameRunMeta.scenarioId,
-    title:gameRunMeta&&gameRunMeta.title,
-    level:gameRunMeta&&gameRunMeta.level,
-    seed:gameRunMeta&&gameRunMeta.seed,
-    startedAt:gameRunMeta&&gameRunMeta.startedAt,
-    endedAt:new Date().toISOString(),
-    sessionId:state.session_id,
-    outcome:state.outcome,
-    done:state.done,
-    turn:state.turn,
-    maxTurns:state.max_turns,
-    gameTick:state.game_tick,
-    objective:state.objective,
-    playbackPath:state.save_path||null,
-    exploredPercent:state.explored_percent,
-    unitsKilled:state.units_killed,
-    unitsLost:state.units_lost,
-    cash:state.cash,
-    units:state.units,
-    enemies:state.enemies,
-    ownBuildings:state.own_buildings,
-    log,
-  };
-}
-
-function gameStoreRun(run){
-  if(!run)return;
-  const runs=JSON.parse(localStorage.getItem("openra-play-runs")||"[]");
-  runs.push(run);
-  localStorage.setItem("openra-play-runs",JSON.stringify(runs));
-}
-
-function gameExportRun(){
-  const run=latestGameRun||(gameState&&gameState.done?gameBuildRunExport(gameState):null);
-  if(!run){alert("Finish a game first, then export the run.");return;}
-  const blob=new Blob([JSON.stringify(run,null,2)],{type:"application/json"});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  const sid=(run.scenarioId||"scenario").replace(/[^a-z0-9_-]+/gi,"-");
-  a.download="openra-human-run-"+sid+"-"+(run.level||"level")+"-seed"+(run.seed||"")+".json";
-  a.click();URL.revokeObjectURL(a.href);
+function gameQueueOrder(order){
+  const ids=new Set((order.unit_ids||[]).map(String));
+  if(!ids.size)return;
+  const next=[];
+  for(const existing of gameQueue){
+    const remaining=(existing.unit_ids||[]).filter(id=>!ids.has(String(id)));
+    if(remaining.length)next.push({...existing,unit_ids:remaining});
+  }
+  next.push(order);
+  gameQueue=next;
 }
 
 function gameQueueAttack(target){
   if(!target||!gameSelected.size)return;
-  gameQueue.push({mode:"attack",unit_ids:[...gameSelected],target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
-  gameLog("Queued ATTACK on "+target.id+" at ("+target.cell_x+","+target.cell_y+") with "+gameSelected.size+" unit(s).");
+  const n=gameSelected.size;
+  gameQueueOrder({mode:"attack",unit_ids:[...gameSelected],target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
+  gameSelected.clear();
+  gameLog("Queued ATTACK on "+target.id+" at ("+target.cell_x+","+target.cell_y+") with "+n+" unit(s). Selection cleared so another unit can receive a different order this turn.");
 }
 
 function gameAttackEnemy(enemyId){
@@ -697,6 +784,7 @@ function gameRender(){
     img.style.display="none"; ph.style.display="flex";
     ph.textContent="No minimap available";
   }
+  gameRenderLegend();
   gameRenderUnits();
 }
 
@@ -729,6 +817,8 @@ function gameRenderAsciiMinimap(ascii){
   for(let x=0;x<=mw;x+=10){ctx.beginPath();ctx.moveTo(x*scale+.5,0);ctx.lineTo(x*scale+.5,mh*scale);ctx.stroke();}
   for(let y=0;y<=mh;y+=10){ctx.beginPath();ctx.moveTo(0,y*scale+.5);ctx.lineTo(mw*scale,y*scale+.5);ctx.stroke();}
 
+  gameDrawAxes(ctx,mw,mh,scale);
+
   for(const a of gameQueue){
     const units=(gameState.units||[]).filter(u=>a.unit_ids.includes(u.id));
     if(!units.length||a.target_x==null||a.target_y==null)continue;
@@ -737,13 +827,78 @@ function gameRenderAsciiMinimap(ascii){
     gameDrawArrow(ctx,sx,sy,a.target_x,a.target_y,scale,a.mode==="attack"?"#ff8a4c":"#ffe45c");
   }
 
-  gameDrawStacks(ctx,gameState.enemies||[],scale,"#e05252",false);
-  gameDrawStacks(ctx,gameState.units||[],scale,"#45d86a",true);
+  gameDrawStacks(ctx,gameState.enemies||[],scale,"enemy");
+  gameDrawStacks(ctx,gameState.own_buildings||[],scale,"own-building");
+  gameDrawStacks(ctx,gameState.units||[],scale,"own");
 }
 
-function gameDrawStacks(ctx,items,scale,color,isOwn){
+function gameDrawAxes(ctx,mw,mh,scale){
+  ctx.save();
+  ctx.font="bold 10px ui-monospace,monospace";
+  ctx.textBaseline="top";
+  ctx.lineWidth=3;
+  const stroke="rgba(0,0,0,.85)";
+  const fill="#f3f6ff";
+  for(let x=0;x<mw;x+=10){
+    const px=x*scale+2;
+    ctx.textAlign="left";
+    ctx.strokeStyle=stroke;ctx.fillStyle=fill;
+    ctx.strokeText(String(x),px,2);
+    ctx.fillText(String(x),px,2);
+  }
+  for(let y=0;y<mh;y+=10){
+    const py=y*scale+2;
+    ctx.textAlign="left";
+    ctx.strokeStyle=stroke;ctx.fillStyle=fill;
+    ctx.strokeText(String(y),2,py);
+    ctx.fillText(String(y),2,py);
+  }
+  ctx.textAlign="right";
+  ctx.strokeText("x",mw*scale-4,2);
+  ctx.fillText("x",mw*scale-4,2);
+  ctx.textAlign="left";
+  ctx.strokeText("y",2,mh*scale-13);
+  ctx.fillText("y",2,mh*scale-13);
+  ctx.restore();
+}
+
+function gameTypeKey(type){return String(type||"?").toLowerCase();}
+function gameTypeLabel(type){
+  const t=gameTypeKey(type);
+  const names={"1tnk":"light tank","2tnk":"medium tank","3tnk":"heavy tank","4tnk":"mammoth tank",
+    "harv":"harvester","proc":"refinery","fact":"construction yard","powr":"power plant","weap":"war factory",
+    "barr":"barracks","silo":"silo","e1":"rifle infantry","e3":"rocket soldier","jeep":"ranger","mcv":"MCV"};
+  return names[t]?names[t]+" ("+t+")":t;
+}
+function gameShapeFor(type,isBuilding){
+  const t=gameTypeKey(type);
+  if(isBuilding)return "building";
+  if(t.startsWith("harv"))return "tridown";
+  if(t.startsWith("e")&&/^e\d+$/.test(t))return "circle";
+  if(t==="2tnk")return "diamond";
+  if(t==="3tnk"||t==="4tnk")return "triangle";
+  return "square";
+}
+function gameColorFor(side,isBuilding,type){
+  if(side==="enemy")return isBuilding?"#d2683c":"#e05252";
+  if(isBuilding)return "#7497db";
+  if(gameTypeKey(type).startsWith("harv"))return "#ffcd75";
+  return "#45d86a";
+}
+function gameDrawMarker(ctx,x,y,r,shape){
+  if(shape==="circle"){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);return;}
+  if(shape==="diamond"){ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y);ctx.lineTo(x,y+r);ctx.lineTo(x-r,y);ctx.closePath();return;}
+  if(shape==="triangle"||shape==="tridown"){
+    ctx.beginPath();
+    if(shape==="triangle"){ctx.moveTo(x,y-r);ctx.lineTo(x+r,y+r);ctx.lineTo(x-r,y+r);}
+    else{ctx.moveTo(x-r,y-r);ctx.lineTo(x+r,y-r);ctx.lineTo(x,y+r);}
+    ctx.closePath();return;
+  }
+  ctx.beginPath();ctx.rect(x-r,y-r,r*2,r*2);
+}
+function gameDrawStacks(ctx,items,scale,side){
   const groups=new Map();
-  for(const u of items){
+  for(const u of items||[]){
     const key=u.cell_x+","+u.cell_y;
     if(!groups.has(key))groups.set(key,[]);
     groups.get(key).push(u);
@@ -751,17 +906,16 @@ function gameDrawStacks(ctx,items,scale,color,isOwn){
   for(const group of groups.values()){
     const u=group[0];
     const x=(u.cell_x+.5)*scale, y=(u.cell_y+.5)*scale;
+    const isOwn=side==="own";
+    const isBuilding=side==="own-building"||!!u.is_building;
     const selected=isOwn&&group.some(g=>gameSelected.has(g.id));
+    const shape=gameShapeFor(u.type,isBuilding);
     ctx.save();
-    ctx.fillStyle=color;
+    ctx.fillStyle=gameColorFor(side,isBuilding,u.type);
     ctx.strokeStyle=selected?"#fff":"rgba(0,0,0,.65)";
     ctx.lineWidth=selected?3:1.5;
-    const r=isOwn?(selected?6:5):7;
-    if(isOwn&&u.type&&u.type.includes("2tnk")){
-      ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y);ctx.lineTo(x,y+r);ctx.lineTo(x-r,y);ctx.closePath();
-    }else{
-      ctx.beginPath();ctx.rect(x-r,y-r,r*2,r*2);
-    }
+    const r=selected?6:5;
+    gameDrawMarker(ctx,x,y,isBuilding?7:r,shape);
     ctx.fill();ctx.stroke();
     if(group.length>1){
       ctx.fillStyle="#fff";
@@ -792,6 +946,39 @@ function gameDrawArrow(ctx,sx,sy,tx,ty,scale,color){
   ctx.restore();
 }
 
+function gameLegendEntry(cls,label){
+  return `<span><i class="legend-mark ${cls}"></i> ${esc(label)}</span>`;
+}
+function gameRenderLegend(){
+  const el=document.getElementById("game-legend");
+  if(!el||!gameState)return;
+  const entries=[];
+  const seen=new Set();
+  function add(cls,label,key){
+    const k=key||cls+":"+label;
+    if(seen.has(k))return;
+    seen.add(k);entries.push(gameLegendEntry(cls,label));
+  }
+  for(const u of gameState.units||[]){
+    const t=gameTypeKey(u.type);
+    add(gameShapeFor(t,false),gameTypeLabel(t),"own:"+t);
+  }
+  for(const b of gameState.own_buildings||[]){
+    const t=gameTypeKey(b.type);
+    add("building",gameTypeLabel(t),"own-building:"+t);
+  }
+  const hasEnemy=(gameState.enemies||[]).some(e=>!e.is_building);
+  const hasEnemyBuilding=(gameState.enemies||[]).some(e=>e.is_building);
+  if(hasEnemy)add("enemy","enemy unit","enemy");
+  if(hasEnemyBuilding)add("enemy-building","enemy building","enemy-building");
+  if((gameState.harvesters||0)>0&&!seen.has("own:harv"))add("tridown","harvester (harv)","harv");
+  if((gameState.resource_capacity||0)>0)add("ore","ore / stored resources","resources");
+  add("selected","selected");
+  add("arrow","queued order");
+  entries.push("<span><b>number</b> stacked units</span>");
+  el.innerHTML=entries.join("");
+}
+
 function gameRenderUnits(){
   if(!gameState)return;
   const el=document.getElementById("game-units");
@@ -801,6 +988,13 @@ function gameRenderUnits(){
     html+=`<tr class="${sel?'selected':''}" onclick="gameToggleUnit('${u.id}')">
       <td>${sel?"▶":""}</td><td>${u.id}</td><td>${u.type}</td>
       <td>(${u.cell_x},${u.cell_y})</td><td>${u.hp}</td><td>${u.activity||"idle"}</td></tr>`;
+  }
+  if((gameState.own_buildings||[]).length){
+    html+='<tr><th colspan="6" style="color:var(--accent);padding-top:8px">Own Buildings</th></tr>';
+    for(const b of gameState.own_buildings){
+      html+=`<tr><td>■</td><td>${b.id}</td><td>${b.type}</td>
+        <td>(${b.cell_x},${b.cell_y})</td><td>${b.hp}</td><td>building</td></tr>`;
+    }
   }
   if(gameState.enemies.length){
     html+='<tr><th colspan="6" style="color:var(--red);padding-top:8px">Visible Enemies</th></tr>';
