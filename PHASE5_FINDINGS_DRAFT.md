@@ -110,3 +110,48 @@ from the findings list pending replay.
 3. Replay any LOSS or DRAW that doesn't fit F1/F2/F3 to classify.
 4. Finalize as `PHASE5_FINDINGS.md` (no -DRAFT).
 5. Cross-link into PAPER_PLAN.md §3 (findings catalog).
+
+---
+
+## F1 deeper triage (post-tool-list-confirmation)
+
+The tool list IS correctly surfaced in the model request (verified
+via `body.tools` drill-down). So `capture_actor` IS available to
+Qwen3.5-9B but isn't being invoked. The richer triage from the
+JSONL `briefing` field reveals the actual failure shape:
+
+**spec-engineer-capture medium**, the engineer starts at (10, 25) on
+the 'different latitude' from the enemy proc at ~(22, 18). With e6
+sight-range 4, the proc is **invisible from spawn** (Chebyshev
+distance ~13). The briefing shows `Enemies: none visible` on turn 1.
+
+The model walks east-SOUTH-east: (10,25)→(20,25)→(30,25)→(40,25)→
+(50,25)→(60,25)→... The proc is NORTH-east, not SOUTH-east. The
+model is exploring the wrong half-plane.
+
+**Reclassification of F1:**
+- Action axis: NOT broken (the model would issue `capture_actor`
+  if the proc were visible)
+- Reasoning axis: ROUTE-PLANNING UNDER PARTIAL INFO is the failure.
+  The model has the objective brief ("engineer is on a different
+  latitude — must path around") but doesn't translate that into a
+  search policy that biases toward the OPPOSITE latitude.
+- Perception axis: model correctly observes "Enemies: none
+  visible" — perception is fine.
+
+This is the same class as the existing "freeze and panic" finding —
+the model defaults to a simple direction (east) instead of
+reasoning about the briefing's hint about latitude.
+
+**For the paper:** F1 is best framed as **"Reasoning failure: brief
+hint not translated to search policy."** Tests if the model can
+extract "different latitude → search the other latitude" from a
+natural-language briefing.
+
+## Phase 5 status (rolling)
+
+- 19 of 240 cells complete (Qwen3.5-9B only so far).
+- F1, F2, F3 documented above.
+- F4 (1-turn DRAW) dropped — not reproducing on Phase 4 collection.
+- Next data milestone: when Qwen3.6-Plus cells land, retest F1
+  scale hypothesis (does the Plus model translate the brief hint?).
