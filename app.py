@@ -1780,5 +1780,6 @@ def build_app() -> gr.Blocks:
 if __name__ == "__main__":
     app = build_app()
     app.launch(
-        allowed_paths=[str(SUBMISSIONS_DIR), str(PLAYBACK_ROOT)]
+        allowed_paths=[str(SUBMISSIONS_DIR), str(PLAYBACK_ROOT)],
+        ssr=False,
     )
