@@ -251,6 +251,30 @@ modality gap = `score(structured) − score(image)`, fog penalty =
 
 ## 11. Threats to validity / limitations to preempt
 
+### 11.1 Out-of-scope engine features (paper must scope around them)
+The Rust engine is a *RA-Lite* — ground-only, no resource layer.
+The following features are **not implemented** and the bench has
+zero packs for them. They are documented future work, NOT silently
+missing:
+
+- **Engineer capture** (`capture_actor`) — task #11 (S8).
+- **Superweapons** — nuke, iron-curtain, chronosphere — S8.
+- **Spies / thief** — infiltration, steal — S8.
+- **Tanya** (Allied commando hero unit) — new unit type, not in plan.
+- **Air units** — yak / mig / heli — needs `Aircraft` trait + flight.
+- **Naval** — dd / ca / pt / lst + water mapgen.
+- **Resource layer / ore patches** — `Resource` trait + harvester
+  contention. The 1v1 map `rush-hour-arena` has **no ore patches**;
+  economy is driven by `starting_cash` only. No mining contestation.
+- **APC ground transport** — engine HAS `enter_transport` /
+  `unload` + cargo storage; the bench has ~1 pack — could author
+  more but the mechanism is sound.
+
+**Paper scope:** "macro economy + combat micro + multi-base +
+perception, in a ground-only RA-Lite engine." The features above are
+documented as out-of-scope; reviewers will see the explicit list.
+
+### 11.2 Methodological caveats (the standard list)
 - **One game (RA).** Lean on the capability taxonomy
   (`meta.benchmark_anchor`) + the ERQA transfer for generality.
 - **Engine is a reimplementation.** Deterministic + validated is the
@@ -261,6 +285,19 @@ modality gap = `score(structured) − score(image)`, fog penalty =
   the probes in §7.
 - **SFT leakage.** Loud train/eval scenario split.
 - **ELO methodology.** Game count, pairing, confidence intervals.
+
+### 11.3 Triage coverage (`scripts/triage.py`)
+Per-pack `INTENDED` policy attestation comes from each pack's
+dedicated `tests/test_<pack>.py` file (when present) — every such
+test is in the suite and the suite is green, so the test passing
+proves the intended policy still wins against the current engine.
+Post defect-fix wave:
+- **167 / 196 packs** (85%) have a dedicated test → "VERIFIED."
+- **29 / 196 packs** (15%) are stall-bar-only verified (no test).
+  Either add a test or rely on full-run empirical attestation.
+- **1 pack** (`def-with-ambush`) is exempt by design (positional-
+  discipline scenario where do-nothing IS the intended policy).
+- **0 packs** fail the stall-must-lose bar.
 
 ---
 
