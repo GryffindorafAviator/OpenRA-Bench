@@ -49,6 +49,26 @@
 # 8. The persistent unarmed enemy `fact` marker at the far edge keeps
 #    the engine from auto-`done`-ing on "all enemies eliminated"
 #    before the win/fail clause is evaluated (CLAUDE.md footgun).
+#
+# MAP — per-scenario (replaces the generic rush-hour-arena, 2026-05).
+# The capability under test is GEOGRAPHIC PLACEMENT of one building
+# relative to ONE (or two) ore patches; nothing else on the map matters.
+# A bespoke 96x40 open arena makes the near-vs-far throughput gap the
+# only axis of variation:
+#   * Width 96 (vs rush-hour-arena's 128) — the agent's base anchors at
+#     x≈10 and the ore patch sits at x≈60, so a refinery placed AT the
+#     base is ~47 cells from the patch but a refinery placed ADJACENT
+#     to the patch is ~3 cells. The far/near throughput gap is the
+#     entire test.
+#   * Height 40 — leaves room for the hard tier's NORTH (y=12) / SOUTH
+#     (y=28) spawn-point rotation while keeping the easy/medium row at
+#     y=20 well clear of either spawn band (no actor overlap risk).
+#   * Cordon 2 — the standard impassable frame; playable area is
+#     (2..94, 2..38), and every authored cell sits inside it.
+#   * Open (no obstacles / no water) — the harv path-length is
+#     proportional to Chebyshev distance, so the cash-bar/clock
+#     arithmetic is predictable. Obstacle bands would just inject
+#     pathfinding noise without sharpening the placement axis.
 
 meta:
   id: econ-mine-and-grow
@@ -76,7 +96,17 @@ meta:
     - "facility-siting near a raw-resource node"
     - "RTS first-refinery-on-the-patch idiom"
 
-base_map: rush-hour-arena
+# Per-scenario arena. Materialised once by `mapgen.materialize` into
+# `data/maps/econ-mine-and-grow-arena.oramap`; the spec is content-
+# addressed by name so the same byte-identical file is reused across
+# runs. See the MAP block in the header comment for the design rationale.
+base_map:
+  generator: arena
+  name: econ-mine-and-grow-arena
+  width: 96
+  height: 40
+  cordon: 2
+  title: Mine and Grow Arena 96x40
 starting_cash: 2000
 
 base:
@@ -92,21 +122,30 @@ base:
 # the terrain (independent of the actor list). Cells are surfaced in
 # the observation as `ore_cells: [{cell_x, cell_y, amount}, ...]`.
 # Levels can override via `overrides.ore_patches: [...]`.
+# Pack-level default (used by easy + medium): one east-side patch at
+# (60, 20), well clear of the agent's west-side base at x≈10.
+# Sizing: amount=20000 with radius=4 yields a ~49-cell disk where the
+# engine's `clamp(amount/cells, 1, 12)` saturates at 12 ore per cell
+# (≈588 total harvestable ore). At ~25 cash per ore, that's a ceiling
+# of ~14000 cash from one patch — enough headroom for the highest
+# cash_gte: 5000 bar with margin. A radius=2 (13-cell) disk only
+# produces ~156 ore (~3900 cash ceiling) which falls SHORT of the
+# medium/hard bars even with a perfectly-placed refinery.
 ore_patches:
-  - {x: 24, y: 20, amount: 2000, radius: 2}
+  - {x: 60, y: 20, amount: 20000, radius: 4}
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # One ore patch immediately east of the base. Generous clock,
-  # generous bar. Intended: build proc, place at (21, 20) — adjacent
-  # to the patch. Stall = no proc → no income. Brute = place at the
-  # far west of the base (e.g. (10, 20)) → too slow.
+  # One ore patch east of the base on the central east-west axis.
+  # Intended: build proc, place adjacent to the patch (e.g. (57, 20)).
+  # Stall = no proc → no income. Brute = place at the base (e.g.
+  # (14, 20), ~45 cells from the patch) → too slow.
   # max_turns 40 → ceiling 93 + 90·39 = 3603 > 3600 ✓.
   easy:
     description: >
       You have a Construction Yard ('fact'), a Power Plant ('powr'),
       and one Ore Truck ('harv'), and an ore patch is visible on the
-      ore-cells channel centred at (24, 20). You have $2000. Build an
+      ore-cells channel centred at (60, 20). You have $2000. Build an
       Ore Refinery ('proc', cost 1400) and place it ADJACENT to the
       ore patch — the harvester auto-mines as soon as a refinery
       exists. Win = cash ≥ 3000 before tick 3600. Stalling leaves the
@@ -116,11 +155,11 @@ levels:
     starting_cash: 2000
     overrides:
       actors:
-        - {type: fact, owner: agent, position: [15, 20]}
-        - {type: powr, owner: agent, position: [15, 18]}
-        - {type: harv, owner: agent, position: [18, 20]}
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [10, 18]}
+        - {type: harv, owner: agent, position: [13, 20]}
         # Persistent far enemy marker — LOSS-not-DRAW guarantee.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [90, 20]}
     win_condition:
       all_of:
         - has_building: proc
@@ -133,11 +172,11 @@ levels:
 
   # ── MEDIUM ───────────────────────────────────────────────────────
   # Tighter bar (4000) on the same one-patch geometry. A NEAR-placed
-  # proc still clears; a slightly-off placement (e.g. (19,20),
-  # 5 cells from the patch) misses by a small margin.
+  # proc still clears; a slightly-off placement (e.g. (30, 20),
+  # halfway along the east-west axis) misses by a margin.
   medium:
     description: >
-      Same geography as easy (one ore patch at (24, 20)), tighter
+      Same geography as easy (one ore patch at (60, 20)), tighter
       bar: cash ≥ 4000 before tick 3600. The harvester's round-trip
       time per bale dominates throughput, so the refinery's placement
       relative to the patch is the only decision that matters. Stall,
@@ -145,10 +184,10 @@ levels:
     starting_cash: 2000
     overrides:
       actors:
-        - {type: fact, owner: agent, position: [15, 20]}
-        - {type: powr, owner: agent, position: [15, 18]}
-        - {type: harv, owner: agent, position: [18, 20]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [10, 18]}
+        - {type: harv, owner: agent, position: [13, 20]}
+        - {type: fact, owner: enemy, position: [90, 20]}
     win_condition:
       all_of:
         - has_building: proc
@@ -177,21 +216,21 @@ levels:
     starting_cash: 2000
     overrides:
       actors:
-        # spawn_point 0 — NORTH base (y=14). The near patch is the
-        # NORTH patch at (24, 14); the SOUTH patch is the far one.
-        - {type: fact, owner: agent, position: [15, 14], spawn_point: 0}
-        - {type: powr, owner: agent, position: [15, 12], spawn_point: 0}
-        - {type: harv, owner: agent, position: [18, 14], spawn_point: 0}
-        # spawn_point 1 — SOUTH base (y=26). The near patch is the
-        # SOUTH patch at (24, 26); the NORTH patch is the far one.
-        - {type: fact, owner: agent, position: [15, 26], spawn_point: 1}
-        - {type: powr, owner: agent, position: [15, 28], spawn_point: 1}
-        - {type: harv, owner: agent, position: [18, 26], spawn_point: 1}
+        # spawn_point 0 — NORTH base (y=12). The near patch is the
+        # NORTH patch at (60, 12); the SOUTH patch is the far one.
+        - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [13, 12], spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=28). The near patch is the
+        # SOUTH patch at (60, 28); the NORTH patch is the far one.
+        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 30], spawn_point: 1}
+        - {type: harv, owner: agent, position: [13, 28], spawn_point: 1}
         # Persistent far enemy marker (shared across spawns).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [90, 20]}
       ore_patches:
-        - {x: 24, y: 14, amount: 2000, radius: 2}
-        - {x: 24, y: 26, amount: 2000, radius: 2}
+        - {x: 60, y: 12, amount: 20000, radius: 4}
+        - {x: 60, y: 28, amount: 20000, radius: 4}
     win_condition:
       all_of:
         - has_building: proc
