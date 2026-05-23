@@ -103,6 +103,31 @@ def test_simplify_text_replaces_short_codes_and_phrases():
     assert simplify_text("mcvent") == "mcvent"
 
 
+def test_simplify_text_handles_plural_forms():
+    """The per-turn briefing line `Funds: ... | Harvesters: 0` would
+    otherwise leak un-substituted `Harvesters` even though `harvester`
+    → `miner` is in the dict. Pin the plural-aware substitution so a
+    refactor of the regex can't regress the briefing-line UX (the
+    smoke-test friction the Playlist pass uncovered)."""
+    # Plural single-word keys round-trip with the plural preserved.
+    assert simplify_text("harvesters") == "miners"
+    assert simplify_text("Harvesters") == "miners"  # case-insensitive
+    assert simplify_text("MCVs") == "base builders"
+    assert simplify_text("pillboxes") == "guard towers"
+    # The actual briefing line shape — the repro the smoke-test caught.
+    out = simplify_text(
+        "Funds: $0 (cash=$0 + ore=$0) | Power: +0 | Harvesters: 0"
+    )
+    assert "Harvesters" not in out
+    assert "miners: 0" in out
+    # Whole-word still applies to the plural — `mcvents` must NOT match
+    # `mcv` even though the suffix is `s`.
+    assert simplify_text("mcvents") == "mcvents"
+    # An identity-passthrough plural key (`engineer` → `engineer`) is
+    # still pluralised correctly.
+    assert simplify_text("engineers") == "engineers"
+
+
 def test_simplify_objective_strips_machine_block():
     """The Playlist plain-English objective drops the structured
     `WIN WHEN: …` / `YOU LOSE IF: …` machine block — those go behind

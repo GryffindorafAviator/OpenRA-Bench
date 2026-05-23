@@ -200,31 +200,71 @@ JARGON_TO_PLAIN: dict[str, str] = {
 
 
 # Pre-compile a single regex: longest keys first, escaped, word-bounded.
+# A trailing `s` / `es` is captured as an optional plural suffix so the
+# briefing line `Harvesters: 0` simplifies to `miners: 0` (not the
+# half-converted `Harvesters: 0` that leaks the unsubstituted jargon
+# plural). The plural is reattached to the substitution. Multi-word
+# keys (`ore refinery`) don't get a plural suffix — pluralising
+# "ore refineries" is not a token boundary the substitution dict targets.
 def _compile_jargon_pattern() -> "re.Pattern[str]":
     keys = sorted(JARGON_TO_PLAIN.keys(), key=len, reverse=True)
     # Use lookarounds so short codes (e1, mcv) only match as whole
     # tokens — but multi-word keys like "ore refinery" still match the
-    # full phrase even with internal spaces.
+    # full phrase even with internal spaces. Capture an optional
+    # trailing `s` / `es` for plural forms of single-word keys.
     parts = []
     for k in keys:
         esc = re.escape(k)
-        parts.append(rf"(?<![A-Za-z0-9_-]){esc}(?![A-Za-z0-9_-])")
+        if " " in k:
+            parts.append(rf"(?<![A-Za-z0-9_-]){esc}(?![A-Za-z0-9_-])")
+        else:
+            parts.append(rf"(?<![A-Za-z0-9_-]){esc}(?:es|s)?(?![A-Za-z0-9_-])")
     return re.compile("|".join(parts), flags=re.IGNORECASE)
 
 
 _JARGON_RE = _compile_jargon_pattern()
 
 
+def _pluralise(word: str) -> str:
+    """Naive English plural for the substituted plain-text replacement.
+    `miner` → `miners`; `infantry factory` → `infantry factories`;
+    `guard tower` → `guard towers`; `box` → `boxes`. Used only when the
+    matched jargon was itself plural — keeps `harvesters` → `miners`."""
+    if not word:
+        return word
+    last = word[-1].lower()
+    if word.lower().endswith("y") and len(word) >= 2 and word[-2].lower() not in "aeiou":
+        return word[:-1] + "ies"
+    if last in ("s", "x", "z") or word.lower().endswith(("sh", "ch")):
+        return word + "es"
+    return word + "s"
+
+
 def simplify_text(text: str) -> str:
     """Apply `JARGON_TO_PLAIN` substitutions to a single string. The
     match is case-insensitive, but each replacement is lowercased so
-    the briefing reads as plain prose — `MCV` and `mcv` both render
-    as `base builder`."""
+    the briefing reads as plain prose — `MCV` and `mcv` both render as
+    `base builder`. A trailing plural `s`/`es` on a single-word key is
+    preserved on the substitution (`harvesters` → `miners`) — without
+    this, a non-gamer reading the per-turn briefing line `Harvesters: 0`
+    would see un-substituted jargon despite the dict promising the
+    `harvester` → `miner` translation."""
     if not text:
         return text
 
     def _sub(m: "re.Match[str]") -> str:
-        return JARGON_TO_PLAIN[m.group(0).lower()]
+        matched = m.group(0)
+        lower = matched.lower()
+        if lower in JARGON_TO_PLAIN:
+            return JARGON_TO_PLAIN[lower]
+        # Plural suffix: peel `es` first, then `s`; whichever leaves a
+        # known key is the right split.
+        for suffix in ("es", "s"):
+            if lower.endswith(suffix):
+                stem = lower[: -len(suffix)]
+                if stem in JARGON_TO_PLAIN:
+                    return _pluralise(JARGON_TO_PLAIN[stem])
+        return matched
 
     return _JARGON_RE.sub(_sub, text)
 

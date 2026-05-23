@@ -1858,7 +1858,13 @@ def _playlist_summary_df(st: dict):
 def _playlist_render(st: dict, prev_sess):
     """Open a Playlist session for `st`'s current cell and render it.
     Mirrors `_study_render` but produces the simplified Playlist
-    panel set."""
+    panel set.
+
+    Returns visibility updates for the start / skip-wait / play-row
+    buttons — pre-session only `Start` shows; mid-session only the play
+    buttons show; on game-over `Skip wait` surfaces until the auto-
+    advance timer fires. A non-gamer never sees a button that does
+    nothing on click (smoke-test friction fix)."""
     if prev_sess is not None:
         try:
             prev_sess.close()
@@ -1867,6 +1873,10 @@ def _playlist_render(st: dict, prev_sess):
     empty_units = _play_units_df(None, [])
     pl = st.get("playlist") or []
     idx = int(st.get("idx", 0) or 0)
+    # Default visibility — overridden per branch below.
+    vis_start = gr.update(visible=True)        # Start playlist
+    vis_skip = gr.update(visible=False)        # Skip wait ▶
+    vis_play_row = gr.update(visible=False)    # End turn / clear / cancel
     if idx >= len(pl):
         # Playlist complete — return the summary view, no session.
         return (
@@ -1874,6 +1884,7 @@ def _playlist_render(st: dict, prev_sess):
             empty_units, st, _playlist_progress_md(st),
             _playlist_summary_df(st), gr.update(visible=True),
             gr.update(visible=False),
+            vis_start, vis_skip, vis_play_row,
         )
     pack, level = pl[idx]
     try:
@@ -1896,8 +1907,15 @@ def _playlist_render(st: dict, prev_sess):
             empty_units, st, _playlist_progress_md(st),
             _playlist_summary_df(st), gr.update(visible=False),
             gr.update(visible=False),
+            vis_start, vis_skip, vis_play_row,
         )
     img, _brief, _status, _units = _play_render(sess, [], [], False)
+    # In-session: hide Start (re-clicking it would silently re-launch
+    # from scratch and lose progress); show End-turn / clear row;
+    # surface Skip-wait only once the game is over.
+    vis_start = gr.update(visible=False)
+    vis_play_row = gr.update(visible=True)
+    vis_skip = gr.update(visible=bool(getattr(sess, "done", False)))
     return (
         sess, [], [], _playlist_objective_md(sess), img,
         _playlist_details_md(sess), _playlist_status_md(sess, st),
@@ -1905,6 +1923,7 @@ def _playlist_render(st: dict, prev_sess):
         _playlist_progress_md(st), _playlist_summary_df(st),
         gr.update(visible=False),  # summary panel hidden during play
         gr.update(visible=_playlist_should_show_build(sess)),
+        vis_start, vis_skip, vis_play_row,
     )
 
 
@@ -1943,10 +1962,15 @@ def _playlist_record_outcome(sess, st: dict) -> dict:
     return new_st
 
 
-def _playlist_click(sess, sel, queue, show_obj, evt):
+def _playlist_click(sess, sel, queue, show_obj, evt: gr.SelectData):
     """Wrapper around `_play_click` that swaps the unit-table output
     for the jargon-simplified version. Matches `_play_click`'s 5-output
-    signature so it drops in to the same `pl_img.select` wiring."""
+    signature so it drops in to the same `pl_img.select` wiring.
+
+    The `evt: gr.SelectData` annotation is REQUIRED — without it Gradio
+    treats `evt` as an explicit input and the wiring (which only passes
+    4 explicit inputs) silently mismatches, dropping the click event so
+    the minimap becomes inert. Pinned by the Playlist smoke-test."""
     new_sel, new_queue, brief, _units, img = _play_click(
         sess, sel, queue, show_obj, evt
     )
@@ -1979,7 +2003,8 @@ def _playlist_build_item(sess, sel, queue, item, show_obj):
 def _playlist_end_turn(sess, sel, queue, st):
     """End-turn for Playlist mode. After advancing the engine, if the
     game just ended, stamp `done_at` so the auto-advance countdown can
-    fire."""
+    fire AND surface the Skip-wait button so the tester can advance
+    sooner than the 5s timer (it's hidden mid-game)."""
     if sess is not None and not sess.done:
         try:
             sess.submit_turn(list(queue))
@@ -1987,11 +2012,13 @@ def _playlist_end_turn(sess, sel, queue, st):
             logger.warning("playlist submit_turn failed: %s", e)
     img, _brief, _status, _units = _play_render(sess, [], [], False)
     new_st = _playlist_record_outcome(sess, st or {})
+    skip_visible = bool(getattr(sess, "done", False))
     return (
         sess, [], [], img, _playlist_details_md(sess),
         _playlist_status_md(sess, new_st),
         _playlist_simplified_units_df(sess, []), new_st,
         gr.update(visible=_playlist_should_show_build(sess)),
+        gr.update(visible=skip_visible),
     )
 
 
@@ -2006,7 +2033,7 @@ def _playlist_advance(prev_sess, st):
     return _playlist_render(new_st, prev_sess)
 
 
-_PL_TICK_NOOP_OUTPUTS = 13  # length of _pl_render_outs
+_PL_TICK_NOOP_OUTPUTS = 16  # length of _pl_render_outs (incl. button-vis trio)
 
 
 def _playlist_tick(sess, st):
@@ -2579,11 +2606,19 @@ def build_app() -> gr.Blocks:
                         label="Your name", placeholder="e.g. Alex",
                         scale=3,
                     )
+                    # Start is the only button visible pre-session;
+                    # `_playlist_render` hides it once a game is open.
                     pl_start_btn = gr.Button(
                         "▶ Start playlist", variant="primary", scale=1,
+                        visible=True,
                     )
+                    # Skip-wait is hidden until a game ends — clicking
+                    # it before that did nothing useful and confused a
+                    # smoke-tester ("which one starts? Start or Skip?").
+                    # `_playlist_render` / `_playlist_end_turn` toggle
+                    # it visible on game-over.
                     pl_skip_btn = gr.Button(
-                        "Skip wait ▶", scale=1, visible=True,
+                        "Skip wait ▶", scale=1, visible=False,
                     )
 
                 pl_objective = gr.Markdown()
@@ -2607,7 +2642,13 @@ def build_app() -> gr.Blocks:
                         scale=2,
                     )
                     pl_build_btn = gr.Button("Queue build", scale=1)
-                with gr.Row():
+                # The play-action row is hidden until a session is
+                # live — clicking End Turn / Clear / Cancel before
+                # Start did nothing useful and tester reports show a
+                # non-gamer reads them as "what do I do first" UI noise.
+                # `_playlist_render` toggles this row visible once a
+                # session opens.
+                with gr.Row(visible=False) as pl_play_row:
                     pl_clearsel_btn = gr.Button(
                         "✖ Clear selected units", scale=1,
                     )
@@ -2642,6 +2683,8 @@ def build_app() -> gr.Blocks:
                     pl_details, pl_status, pl_units, pl_state,
                     pl_progress, pl_summary_df, pl_summary_panel,
                     pl_build_row,
+                    # Button visibility — smoke-test friction fixes.
+                    pl_start_btn, pl_skip_btn, pl_play_row,
                 ]
                 pl_start_btn.click(
                     _playlist_start, inputs=[pl_sess, pl_player],
@@ -2671,6 +2714,7 @@ def build_app() -> gr.Blocks:
                     outputs=[
                         pl_sess, pl_sel, pl_queue, pl_img, pl_details,
                         pl_status, pl_units, pl_state, pl_build_row,
+                        pl_skip_btn,
                     ],
                 )
                 pl_clearsel_btn.click(
