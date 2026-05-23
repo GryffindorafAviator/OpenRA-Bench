@@ -20,7 +20,9 @@ from openra_bench.scenarios.win_conditions import WinContext, evaluate
 
 PACKS = Path(__file__).parent.parent / "openra_bench" / "scenarios" / "packs"
 FAMILY = [
-    "artofwar-decoy-sacrifice",
+    # artofwar-decoy-sacrifice was archived (see
+    # openra_bench/scenarios/packs/_archive/); the sister packs cover
+    # the decoy/sacrifice idiom in the active set.
     "artofwar-indirect-approach",
     "artofwar-lure-the-tiger",
     "artofwar-sequenced-citadel",
@@ -120,14 +122,9 @@ def test_indirect_easy_short_lane_loss_fails_and_timeout_loses():
     assert 4001 <= 93 + 90 * (c.max_turns - 1)
 
 
-def test_decoy_hard_loss_cap_allows_bait_not_army():
-    c = compile_level(load_pack(PACKS / "artofwar-decoy-sacrifice.yaml"),
-                       "hard")
-    # Redesigned: far-east objective (112,20); hard caps losses at 2
-    # (only the two bait jeeps may be spent — burning a tank fails).
-    at_obj = [(112, 20)] * 3
-    assert evaluate(c.win_condition, _ctx(at_obj, 5000, lost=2)) is True
-    assert evaluate(c.win_condition, _ctx(at_obj, 5000, lost=3)) is False
+# test_decoy_hard_loss_cap_allows_bait_not_army was removed when
+# artofwar-decoy-sacrifice was archived (file moved to _archive/ and
+# marked status: quarantine).
 
 
 def test_lure_the_tiger_win_requires_preserved_main_body_in_budget():

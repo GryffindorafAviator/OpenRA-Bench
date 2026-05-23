@@ -28,7 +28,8 @@ UPGRADED = [
     "adversarial-duel",
     # adversarial-skirmish/-siege consolidated into adversarial-duel
     # (quarantined) — see SCENARIO_QUALITY.md de-dup.
-    "artofwar-decoy-sacrifice",
+    # artofwar-decoy-sacrifice archived (moved to _archive/, status:
+    # quarantine); the sister art-of-war packs cover the idiom.
     "artofwar-indirect-approach",
     "artofwar-lure-the-tiger",
     "artofwar-sequenced-citadel",
