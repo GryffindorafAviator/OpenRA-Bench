@@ -17,9 +17,17 @@ A scenario is defective if any of the following hold:
 1. The win predicate is satisfiable by a play that ignores the
    advertised capability (the "laziest play wins" inversion).
 2. `within_ticks` or `after_ticks` is set above the tick reachable
-   within `max_turns` (engine advances ~90 ticks per decision turn ⇒
-   `tick ≤ 93 + 90·(max_turns − 1)`); the deadline never bites ⇒ the
-   episode times out as a **DRAW**, not a LOSS.
+   within `max_turns`; the deadline never bites ⇒ the episode times
+   out as a **DRAW**, not a LOSS. The engine constant is
+   `DEFAULT_TICKS_PER_STEP = 30` (`openra-train/src/env.rs:33`), so a
+   non-interrupt-mode pack reaches `tick ≈ 30·max_turns`. Interrupt-
+   mode runs (any pack with a non-empty `interrupts:` block) advance
+   1–`max_ticks` ticks per turn (`max_ticks` defaults to 5 in the
+   bench call site, `openra_bench/eval_core.py`), so per-turn tick
+   advance is variable — read the actual value from
+   `info["ticks_advanced"]` instead of assuming it. The historical
+   "engine advances ~90 ticks per decision turn" estimate is wrong;
+   triaged in `docs/ENGINE_FOLLOWUPS_TRIAGE.md` finding #1.
 3. There is no `fail_condition`, or it only triggers on full
    force-wipe; a stall / preserve / partial outcome silently draws.
 4. The intended capability is not solvable inside the declared budget
@@ -57,9 +65,15 @@ A scenario is defective if any of the following hold:
 
 ## Engine facts you must internalise
 
-- **Ticks/turn:** ~90. Max tick at `max_turns` ≈ `93 + 90·(max_turns
-  − 1)`. Any `within_ticks` / `after_ticks` above this is **inert**
-  (won't bite) ⇒ draw degeneracy.
+- **Ticks/turn:** non-interrupt mode advances exactly
+  `DEFAULT_TICKS_PER_STEP = 30` ticks per `env.step()`
+  (`openra-train/src/env.rs:33`). Max tick at `max_turns` ≈
+  `30·max_turns`. Interrupt mode (`step_until_event`, used whenever
+  `interrupts:` is non-empty) advances 1–`max_ticks` ticks per turn
+  (variable; default `max_ticks = 5`) and breaks on the first signal
+  — read `info["ticks_advanced"]` rather than computing
+  arithmetically. Any `within_ticks` / `after_ticks` above the
+  reachable tick is **inert** (won't bite) ⇒ draw degeneracy.
 - **Engine auto-done:** the engine sets `done=True` when all enemy
   actors are eliminated, or sometimes when an agent unit reaches an
   enemy-key location. Without a persistent enemy actor a win-by-reach

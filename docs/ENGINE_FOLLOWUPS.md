@@ -10,26 +10,33 @@ Filed 2026-05-23 from Wave 12 + Wave 13 agent reports.
 
 ---
 
-## 1. Tick-rate discrepancy (medium severity)
+## 1. Tick-rate discrepancy (medium severity) — RESOLVED (doc fix)
 
 **Finding** (def-position-revealed-direction agent, Wave 13)
 
-CLAUDE.md says "engine advances ~90 ticks per decision turn".
+CLAUDE.md said "engine advances ~90 ticks per decision turn".
 Empirically measured under interrupt mode: **~64 ticks/turn**, not 90.
 
-**Impact**: per-pack `within_ticks` / `after_ticks` deadlines tuned via
-the CLAUDE.md formula `tick ≤ 93 + 90·(max_turns − 1)` may either bite
-LATER than intended (silent draw-degeneracy) or NOT AT ALL inside
-`max_turns`. The agent had to tighten `within_ticks: 5400 → 3600` to
-make the deadline actually bite.
+**Resolution (2026-05-23, post-merge):** The engine constant is
+`DEFAULT_TICKS_PER_STEP = 30` (`OpenRA-Rust/openra-train/src/env.rs:33`).
+Non-interrupt mode advances exactly 30 ticks per `env.step()`;
+interrupt mode (`step_until_event`) advances 1–`max_ticks` ticks per
+turn, variable per call. `OpenRA-Bench/CLAUDE.md` updated in two
+places — the "~90 ticks/turn" estimate is gone; replaced with the
+actual constant + a note to read `info["ticks_advanced"]` instead of
+calculating arithmetically. See `docs/ENGINE_FOLLOWUPS_TRIAGE.md`
+finding #1.
 
-**Action options**
-- (a) Re-measure tick-rate under all bench code paths (interrupt vs
-  non-interrupt; varying `parallel_cells`) and update CLAUDE.md with
-  the empirical number.
-- (b) Audit every pack's `within_ticks` against the empirical rate;
-  flag packs whose deadline is now unreachable.
-- (c) Stabilize the engine's tick-per-turn to a documented constant.
+**Impact (resolved)**: per-pack `within_ticks` / `after_ticks` deadlines
+tuned via the bogus `tick ≤ 93 + 90·(max_turns − 1)` formula may bite
+LATER than intended (silent draw-degeneracy) or NOT AT ALL inside
+`max_turns`. The bench has manual tightening evidence in
+`combat-attack-from-behind-fog.yaml:105`,
+`econ-protect-harvester-route.yaml:159`,
+`combat-protect-vip-escort.yaml:144`, `tp-survive-n-turns.yaml:151`,
+`rob-deadline-shortened-midway.yaml:107` already manually compensating
+— these are correct (the deadlines were tightened to bite under 30
+ticks/step) and stay.
 
 ---
 
@@ -139,25 +146,35 @@ capability from the bench.
 
 ## 6. Arena generator's default 4-corner mpspawns rotate per-seed (medium severity)
 
-**Finding** (perception-target-vs-fog agent, Wave 13)
+**Finding** (perception-target-vs-fog agent, Wave 13). **CORRECTED
+2026-05-23 — original wording was misleading; see triage doc finding
+#6 for the post-merge re-read.**
 
-`openra_bench/mapgen.py::_arena` emits 4 default corner mpspawns.
-The engine picks one mpspawn per seed and **OFFSETS pre-placed actor
-coords relative to it** — authored `position: [6, 5]` actually appears
-at y=29-33 on some seeds.
+`openra_bench/mapgen.py::_arena` emits 4 default corner mpspawns. The
+engine does NOT offset pre-placed actor coordinates — `position:
+[6, 5]` lands at exactly (6, 5) every seed (`build_scenario_actor`,
+`openra-train/src/env.rs:2338+`, places actors at literal `sa.position`).
+What DOES vary per seed is the **auto-spawned MCV**:
+`assign_spawn_points` (`world.rs:4684+`) picks one mpspawn cell per
+playable slot, deterministic on `seed`. So if a pack relies on the
+auto-MCV being at a specific corner (rather than its absolute
+position), the corner DOES rotate across seeds.
 
-**Impact**: per-scenario maps using the `arena` generator with
-default spawns get unexpectedly seed-rotated, breaking position
-invariants. Several Wave 12 packs may be affected silently.
+**Impact**: per-scenario maps using the `arena` generator with default
+spawns and depending on a fixed agent-base location see the auto-MCV
+land at a different corner per seed — breaking position invariants
+that assume "the agent's MCV is always at (6,5)".
 
 **Workaround**: declare exactly one mpspawn per generator spec:
-`spawns: [[6, 5]]`. Documented inline in the affected pack.
+`spawns: [[6, 5]]`. Documented inline in the affected pack
+(`perception-target-vs-fog.yaml:62-68, 157, 200, 252`).
 
 **Action options**
-- (a) Default `arena` generator to a SINGLE centred mpspawn so
-  position invariants hold by default.
+- (a) Default `arena` generator to a SINGLE centred mpspawn so the
+  auto-MCV's corner is fixed by default.
 - (b) Add a runtime warning when a generator emits multiple mpspawns
-  AND the scenario has `position:` actors that could be offset.
+  AND the scenario has `position:`-anchored agent actors AND no
+  `spawn_point:` axis is declared.
 - (c) Add `mapgen.py` docstring warning.
 
 ---
