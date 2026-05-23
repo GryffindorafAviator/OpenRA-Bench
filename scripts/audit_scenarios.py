@@ -35,6 +35,16 @@ from openra_bench.scenarios.loader import PACKS_DIR, compile_level  # noqa: E402
 LEVELS = ("easy", "medium", "hard")
 SEEDS = (1,)
 
+# Packs where "do nothing" is the INTENDED winning policy by design —
+# the audit's stall-wins-is-a-defect rule doesn't apply. Each pack
+# here is justified in its own test file's docstring.
+STALL_WINS_BY_DESIGN: frozenset[str] = frozenset({
+    # Positional-discipline pack: pre-positioned `stance:2` flanker
+    # crossfire — the player's job is NOT to move the flankers, so
+    # `observe` IS the intended policy. See tests/test_def_with_ambush.py.
+    "def-with-ambush",
+})
+
 
 def stall(_render_state, Command):
     return [Command.observe()]
@@ -97,8 +107,12 @@ def report_static(records: list[dict]) -> None:
     errors: list[tuple[str, str, str]] = []    # (pack, level, reason)
     skips: list[tuple[str, str, str]] = []
     clean_packs = 0
+    exempt_noted: list[str] = []
     for pack, rs in by_pack.items():
         outs = {r["level"]: r for r in rs}
+        if pack in STALL_WINS_BY_DESIGN:
+            exempt_noted.append(pack)
+            continue
         if all(r["outcome"] == "loss" for r in rs):
             clean_packs += 1
         for lv, r in outs.items():
@@ -118,6 +132,8 @@ def report_static(records: list[dict]) -> None:
     print(f"  defects (stall wins or draws)          : {len(stall_wins)}")
     print(f"  errors                                  : {len(errors)}")
     print(f"  skipped (map not loadable)             : {len(skips)}")
+    print(f"  exempt (stall-wins-by-design)          : {len(exempt_noted)}"
+          f"  {exempt_noted if exempt_noted else ''}")
     if stall_wins:
         print("\n--- DEFECTS — laziest play wins (re-author or retune) ---")
         for pack, lv in sorted(stall_wins):
