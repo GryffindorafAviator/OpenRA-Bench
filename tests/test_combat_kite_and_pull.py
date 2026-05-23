@@ -3,8 +3,18 @@
 Kiting micro: a fast light strike force must hit-and-PULL a slow
 heavy enemy — strike at weapon range, retreat out of the heavy's
 lethal close-range window before it can fire back, repeat. Standing
-and fighting LOSES (the heavy cannon out-trades the raider stack
+and fighting LOSES (the heavy cannon out-trades the kiter stack
 head-on); only the move-away + attack_unit kite cycle WINS.
+
+Per-tier escalation in kiter count + chaser toughness:
+
+  easy   — 1 kiter vs 1 chaser at 35% HP   (bare kite skill;
+           survival bar ≥1)
+  medium — 2 kiters vs 1 chaser at 40% HP  (paired kite +
+           both-survive bar)
+  hard   — 3 kiters vs 1 chaser at 70% HP + seed-spawn flip
+           (full-formation kite + all-three-survive bar +
+           tighter clock + spawn variation)
 
 Bar (CLAUDE.md "no defect, no cheat, no draw"):
 
@@ -17,8 +27,8 @@ Bar (CLAUDE.md "no defect, no cheat, no draw"):
   * brute / wrong-path (one attack_move far east, no disengage)
     LOSES every tier / seed — same close-range trade.
   * intended kite-and-pull (retreat when the heavy closes within
-    ~7 cells, else attack_unit) WINS every tier / every hard seed,
-    preserving ALL THREE raiders (own_units_gte:3 on medium/hard).
+    ~6 cells, else attack_unit) WINS every tier / every hard seed,
+    preserving the survival bar (≥1 easy, ≥2 medium, ≥3 hard).
   * hard tier defines ≥2 agent spawn_point groups (NORTH y=10 /
     SOUTH y=30 corridor) round-robined by seed so a memorised
     opening cannot generalise.
@@ -42,16 +52,19 @@ PACK = PACKS_DIR / "combat-kite-and-pull.yaml"
 LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
 
+# Per-tier expected survival bar (own_units_gte). Mirrors the YAML.
+SURVIVAL_BAR = {"easy": 1, "medium": 2, "hard": 3}
+
 
 # ── scripted policies ───────────────────────────────────────────────
 
 
-def _raiders(rs):
+def _kiters(rs):
     return [u for u in rs.get("units_summary", []) if u.get("type") == "2tnk"]
 
 
 def _stall(rs, C):
-    """Observe-only. A passive ReturnFire stack that never kites is
+    """Observe-only. A passive ReturnFire kiter that never kites is
     overrun by the hunting heavy → LOSS."""
     return [C.observe()]
 
@@ -59,16 +72,16 @@ def _stall(rs, C):
 def _stand(rs, C):
     """Stand-and-fight: attack_move straight onto the heavy and never
     retreat. The heavy cannon out-trades the stack head-on → LOSS."""
-    own = _raiders(rs)
+    own = _kiters(rs)
     if not own:
         return [C.observe()]
-    return [C.attack_move([str(u["id"]) for u in own], target_x=81, target_y=20)]
+    return [C.attack_move([str(u["id"]) for u in own], target_x=70, target_y=20)]
 
 
 def _brute(rs, C):
     """Brute / wrong-path: one attack_move far east, no disengage.
     Same close-range trade as stand-and-fight → LOSS."""
-    own = _raiders(rs)
+    own = _kiters(rs)
     if not own:
         return [C.observe()]
     return [
@@ -80,11 +93,20 @@ def _brute(rs, C):
 
 def _kite(rs, C):
     """Intended kite-and-pull: each turn, if the heavy has closed
-    within ~7 cells of a raider, MOVE that raider ~10 cells AWAY
-    along its lane (the PULL); otherwise attack_unit the heavy from
-    range (the STRIKE). The cycle is purely reactive — derived each
-    turn from geometry, no memory."""
-    own = _raiders(rs)
+    within ~6 cells of a kiter, MOVE that kiter ~8 cells AWAY along
+    its lane (the PULL); otherwise attack_unit the heavy from range
+    (the STRIKE). When no heavy is yet visible, advance east to draw
+    the hunting chaser into vision (capped at x=50 — far enough to
+    contact, not so far as to march into the heavy's lethal close
+    range without warning). The cycle is purely reactive — derived
+    each turn from geometry, no memory.
+
+    The retreat-threshold ≤6 and retreat-distance 8 are deliberately
+    matched to the 2tnk weapon range (~4.75 cells): the kiter
+    retreats just before the chaser enters its own attack range,
+    opening a window where attack_unit closes the kiter ONTO the
+    chaser to fire and then the next retreat pulls back."""
+    own = _kiters(rs)
     if not own:
         return [C.observe()]
     enemies = rs.get("enemy_summary") or []
@@ -98,11 +120,11 @@ def _kite(rs, C):
                 + abs(e["cell_y"] - u["cell_y"]),
             )
             d = abs(u["cell_x"] - t["cell_x"]) + abs(u["cell_y"] - t["cell_y"])
-            if d <= 7:
+            if d <= 6:
                 cmds.append(
                     C.move_units(
                         [str(u["id"])],
-                        target_x=max(4, u["cell_x"] - 10),
+                        target_x=max(4, u["cell_x"] - 8),
                         target_y=u["cell_y"],
                     )
                 )
@@ -110,11 +132,12 @@ def _kite(rs, C):
                 cmds.append(C.attack_unit([str(u["id"])], str(t["id"])))
     else:
         # No vision yet — march east on the staging lane until the
-        # hunting heavy comes into sight.
+        # hunting heavy comes into sight (cap at x=50 so the kiter
+        # does not blind-march into the heavy's lethal close range).
         cmds.append(
             C.move_units(
                 [str(u["id"]) for u in own],
-                target_x=min(70, own[0]["cell_x"] + 10),
+                target_x=min(50, own[0]["cell_x"] + 5),
                 target_y=own[0]["cell_y"],
             )
         )
@@ -141,7 +164,7 @@ def test_enemy_uses_hunt_bot_on_every_level():
     pack = load_pack(PACK)
     for lvl in LEVELS:
         c = compile_level(pack, lvl)
-        assert c.map_supported, f"{lvl}: rush-hour-arena terrain required"
+        assert c.map_supported, f"{lvl}: tailored arena terrain required"
         enemy = c.scenario.enemy
         bot = getattr(enemy, "bot_type", None) or getattr(enemy, "bot", None)
         assert str(bot).lower() == "hunt", f"{lvl}: enemy bot must be 'hunt'; got {bot}"
@@ -184,18 +207,48 @@ def test_every_level_has_a_fail_condition():
         assert c.fail_condition is not None, f"{lvl} needs a fail_condition"
 
 
-def test_medium_and_hard_require_all_three_raiders():
-    """The tightened pull bar: medium/hard win only if ALL THREE
-    raiders survive (own_units_gte:3)."""
+def test_survival_bar_scales_with_tier():
+    """Per-tier escalation: own_units_gte rises from 1 (easy 1v1) to
+    2 (medium 2v1) to 3 (hard 3v1). A kite that loses a kiter on
+    easy passes easy but fails medium/hard — the bar tightens as the
+    formation grows."""
     pack = load_pack(PACK)
-    for lvl in ("medium", "hard"):
+    for lvl in LEVELS:
         L = pack.levels[lvl]
         bar = next(
             int(c["own_units_gte"])
             for c in L.win_condition.model_dump()["all_of"]
             if "own_units_gte" in c
         )
-        assert bar == 3, f"{lvl}: survival bar must be 3; got {bar}"
+        assert bar == SURVIVAL_BAR[lvl], (
+            f"{lvl}: survival bar must be {SURVIVAL_BAR[lvl]}; got {bar}"
+        )
+
+
+def test_kiter_count_matches_survival_bar():
+    """The number of pre-placed 2tnk kiters per tier equals the
+    survival bar — easy has 1, medium has 2, hard has 3 per
+    spawn_point group. This is the load-bearing "preserve every
+    kiter" check the bar enforces."""
+    pack = load_pack(PACK)
+    for lvl in LEVELS:
+        c = compile_level(pack, lvl)
+        agent_2tnks = [a for a in c.scenario.actors if a.owner == "agent" and a.type == "2tnk"]
+        if lvl == "hard":
+            # Hard has 2 spawn_point groups; each group has SURVIVAL_BAR["hard"] kiters
+            by_sp: dict[int, int] = {}
+            for a in agent_2tnks:
+                sp = a.spawn_point if a.spawn_point is not None else 0
+                by_sp[sp] = by_sp.get(sp, 0) + 1
+            assert set(by_sp) == {0, 1}, f"hard must have spawn groups 0+1; got {sorted(by_sp)}"
+            for sp, n in by_sp.items():
+                assert n == SURVIVAL_BAR["hard"], (
+                    f"hard spawn {sp}: expected {SURVIVAL_BAR['hard']} kiters; got {n}"
+                )
+        else:
+            assert len(agent_2tnks) == SURVIVAL_BAR[lvl], (
+                f"{lvl}: expected {SURVIVAL_BAR[lvl]} kiters; got {len(agent_2tnks)}"
+            )
 
 
 def test_hard_has_two_seed_driven_spawn_groups():
@@ -222,13 +275,13 @@ def test_in_bounds_actors_on_every_level():
 # ── predicate-level (no engine) ─────────────────────────────────────
 
 
-def _ctx(*, tick=0, killed=0, n_units=3):
+def _ctx(*, tick=0, killed=0, n_units=2, start=2):
     import types
 
     sig = types.SimpleNamespace(
         game_tick=tick,
         units_killed=killed,
-        units_lost=3 - n_units,
+        units_lost=start - n_units,
         own_buildings=[],
         own_building_types=set(),
         enemies_seen_ids=set(),
@@ -246,21 +299,27 @@ def _ctx(*, tick=0, killed=0, n_units=3):
 
 def test_predicates_enforce_kill_and_survival():
     pe = compile_level(load_pack(PACK), "easy")
-    # easy: kill 1, ≥2 alive, in time → WIN
-    assert evaluate(pe.win_condition, _ctx(tick=1000, killed=1, n_units=2))
+    # easy: kill 1, ≥1 alive, in time → WIN
+    assert evaluate(pe.win_condition, _ctx(tick=1000, killed=1, n_units=1, start=1))
     # easy: kill 0 → not win
-    assert not evaluate(pe.win_condition, _ctx(tick=1000, killed=0, n_units=3))
-    # easy: 1 raider left → fail (need ≥2)
-    assert evaluate(pe.fail_condition, _ctx(tick=1000, killed=1, n_units=1))
+    assert not evaluate(pe.win_condition, _ctx(tick=1000, killed=0, n_units=1, start=1))
+    # easy: 0 kiters left → fail (need ≥1)
+    assert evaluate(pe.fail_condition, _ctx(tick=1000, killed=1, n_units=0, start=1))
 
     pm = compile_level(load_pack(PACK), "medium")
-    # medium: all 3 alive + kill → WIN
-    assert evaluate(pm.win_condition, _ctx(tick=1000, killed=1, n_units=3))
-    # medium: only 2 alive → not win, and fail fires
-    assert not evaluate(pm.win_condition, _ctx(tick=1000, killed=1, n_units=2))
-    assert evaluate(pm.fail_condition, _ctx(tick=1000, killed=1, n_units=2))
+    # medium: both kiters alive + kill → WIN
+    assert evaluate(pm.win_condition, _ctx(tick=1000, killed=1, n_units=2, start=2))
+    # medium: only 1 kiter alive → not win, and fail fires
+    assert not evaluate(pm.win_condition, _ctx(tick=1000, killed=1, n_units=1, start=2))
+    assert evaluate(pm.fail_condition, _ctx(tick=1000, killed=1, n_units=1, start=2))
     # medium: past deadline → fail
-    assert evaluate(pm.fail_condition, _ctx(tick=4502, killed=0, n_units=3))
+    assert evaluate(pm.fail_condition, _ctx(tick=4502, killed=0, n_units=2, start=2))
+
+    ph = compile_level(load_pack(PACK), "hard")
+    # hard: all 3 kiters alive + kill → WIN
+    assert evaluate(ph.win_condition, _ctx(tick=1000, killed=1, n_units=3, start=3))
+    # hard: only 2 kiters alive → fail (need ≥3)
+    assert evaluate(ph.fail_condition, _ctx(tick=1000, killed=1, n_units=2, start=3))
 
 
 # ── engine-driven: every lazy/wrong policy LOSES, intended WINS ──────

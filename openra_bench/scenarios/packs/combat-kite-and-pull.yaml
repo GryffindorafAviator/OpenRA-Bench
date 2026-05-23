@@ -1,5 +1,5 @@
 # combat-kite-and-pull — ACTION, kiting micro: hit-and-PULL a slow
-# heavy enemy with a fast light strike force (Wave-12).
+# heavy enemy with a fast light strike force.
 #
 # The capability under test is the STRIKE-then-PULL cycle: a fast
 # light unit closes to weapon range, FIRES, then retreats out of the
@@ -20,40 +20,54 @@
 #     concentrated foe by exploiting a mobility asymmetry rather
 #     than by mass.
 #
-# Distinct from `combat-kite-jeep-vs-tank` (Wave-4): that pack frames
-# the trade as "preserve ≥2 of 3"; this pack tightens the bar to a
-# perfect PULL — medium and hard require ALL THREE raiders to survive
-# (`own_units_gte:3` — a sloppy kite that trades even one raider for
-# the heavy LOSES) and carries an explicit "no-disengage" brute /
-# wrong-path policy in its four-policy bar. The shared idiom —
-# diagonal-lag geometry, hunt-bot heavy, the move-away + attack_unit
-# cycle — is the proven engine-realised kite test
-# (`combat-kite-jeep-vs-tank` medium/hard).
+# Per-tier escalation in kiter count + chaser toughness — each tier
+# adds one kiter AND raises the chaser's HP. The easy 1v1 baseline is
+# the bare kite micro skill; medium 2v1 layers in coordinating a pair
+# while a tougher chaser eats more hits; hard 3v1 carries the
+# multi-unit coordination forward against the toughest chaser AND
+# flips the start corridor per seed so a memorised opening cannot
+# generalise.
 #
 # Engine-realised pairing note: in OpenRA-Rust the literal jeep MG is
 # anti-infantry and does not dent heavy armour (engine weapons
-# table), so the fast "raider" is the allied medium tank 2tnk
+# table), so the fast "kiter" is the allied medium tank 2tnk
 # (faster than the soviet 3tnk heavy, and its cannon CAN damage heavy
 # armour). The capability under test is the kite-and-pull cycle —
 # the unit pairing is the vehicle for that test, not the point.
 #
+# Engine combat economics — why kiter counts have to escalate per
+# tier. 2tnk (90mm cannon, 4000 dmg, ReloadDelay 50, burst 1, HP 260)
+# vs 3tnk (105mm cannon, 4000 dmg, ReloadDelay 70, **burst 2**, HP
+# 400). The chaser's burst-2 makes its effective DPS ≈ 1.43× the
+# kiter's; even with a faster reload, two cannons at parity range out-
+# trade one. In a static slugfest the chaser kills the kiter with ~25%
+# HP to spare. The kite cycle equalises the trade by giving the kiter
+# more attack-cycle ticks than the chaser at the cost of distance
+# control — but the maths only break in the kiter's favour when EITHER
+# the kiter outnumbers the chaser by ≥2:1 (so concentrated kite fire
+# closes the DPS gap) OR the chaser starts with reduced HP so the
+# cycle can finish before the kiter is whittled down. This pack uses
+# BOTH knobs together: low chaser HP on easy (so 1v1 is winnable);
+# medium HP on medium with a 2-kiter formation; full-ish HP on hard
+# with a 3-kiter formation + seed-spawn flip.
+#
 # The four-policy bar (CLAUDE.md "no defect, no cheat, no draw"):
-#   • stall (observe only)            → LOSS. The raiders are
+#   • stall (observe only)            → LOSS. The kiters are
 #     stance:1 (ReturnFire) — they auto-return fire ONLY after the
 #     heavy shoots them, but a passive stack that never kites is
 #     out-traded and overrun by the closing heavy force → the
 #     survival bar fails and/or the `after_ticks` deadline bites.
 #   • stand-and-fight (attack_move onto the heavy, never retreat)
-#     → LOSS. The heavy cannon out-trades the raider stack head-on;
-#     the raiders die before the heavy's HP runs out → the survival
+#     → LOSS. The heavy cannon out-trades the kiter stack head-on;
+#     the kiters die before the heavy's HP runs out → the survival
 #     bar (own_units_gte) fails.
 #   • brute / wrong-path (one attack_move order far east, chase the
 #     heavy with no disengage) → LOSS. Same close-range trade as
-#     stand-and-fight; no kite cycle ⇒ the raiders are overrun.
+#     stand-and-fight; no kite cycle ⇒ the kiters are overrun.
 #   • intended kite-and-pull (each turn: if the heavy is within ~6
-#     cells, MOVE the raiders AWAY along the lane; else attack_unit
+#     cells, MOVE the kiters AWAY along the lane; else attack_unit
 #     the heavy; repeat) → WIN. The speed advantage keeps the heavy
-#     at the edge of the raiders' fire envelope, whittling it down
+#     at the edge of the kiters' fire envelope, whittling it down
 #     across fire-then-retreat cycles while preserving the survival
 #     bar.
 #
@@ -62,19 +76,32 @@
 # rush-hour-arena it replaces, but cordon-only with NO interior
 # obstacles so the kiter has unimpeded reverse-fire mobility along
 # the lane — a stalled retreat cannot be blamed on terrain):
-#   • Raiders stage centre-west, spread across three cells (not
-#     stacked — a stack pin-piles in retreat).
+#   • Kiters stage centre-west on a north corridor (y=10) so the
+#     retreat vector is unimpeded west and the chaser must close
+#     diagonally — the "diagonal lag" geometry that lets the kite
+#     cycle open at all (stage on the heavy's latitude and the heavy
+#     contacts a blind-marching kiter already inside its own
+#     weapon range, eating a free burst-2 volley on the opening move).
 #   • The heavy starts centre-east on the MID latitude (y=20) under
-#     the hunt bot so it pursues the raiders' centroid — the agent
+#     the hunt bot so it pursues the kiters' centroid — the agent
 #     must out-pace it, and the hunt advance is what brings the
 #     heavy into vision so the kite cycle has a target.
-#   • Raiders stage OFF the heavy's latitude (a north corridor on
-#     easy/medium; on hard the corridor flips per seed between
-#     y=10 north and y=30 south for spawn variation).
 #   • The arena is fully open inside the cordon — the kiter has the
 #     ENTIRE west half available to retreat into without snagging on
 #     terrain, which is the load-bearing freedom the kite-and-pull
 #     cycle needs to keep the heavy at standoff range.
+#   • Per-tier composition (controlled variables, kiter count
+#     scales 1 → 2 → 3 as chaser HP scales 35% → 40% → 70%):
+#       easy   — 1 kiter vs 1 chaser at 35% HP   (bare kite skill;
+#                survival bar ≥1)
+#       medium — 2 kiters vs 1 chaser at 40% HP  (paired kite +
+#                BOTH-survive bar — a sloppy cycle that lets a
+#                cannon shot land on either kiter trades it and
+#                busts the bar)
+#       hard   — 3 kiters vs 1 chaser at 70% HP, NORTH/SOUTH spawn
+#                flip by seed (full-formation kite + ALL-THREE-
+#                survive bar + tighter clock + spawn variation so a
+#                memorised opening cannot generalise)
 #   • Persistent unarmed enemy `fact` far east (x=124) keeps the
 #     episode alive past the heavy's death so the win/fail evaluator
 #     runs (CLAUDE.md auto-done footgun).
@@ -129,7 +156,7 @@ base_map:
 
 base:
   agent: {faction: allies, cash: 0}
-  # `hunt` bot: the heavy actively PURSUES the raiders' centroid so
+  # `hunt` bot: the heavy actively PURSUES the kiters' centroid so
   # the engagement starts on contact (no fog-blind opening) and the
   # kite cycle has a moving target to pull. A stance:2 heavy left
   # idle in the fog would never be discoverable; the hunt advance is
@@ -142,49 +169,82 @@ base:
 
 levels:
   # ── EASY ────────────────────────────────────────────────────────
-  # Bare kite-and-pull skill: 3 medium-tank raiders vs ONE heavy
-  # (3tnk). Raiders stage off the heavy's latitude (north corridor
-  # y=10) so the kite cycle has a reactive window. Survival bar ≥2
-  # raiders. Stall LOSES (HoldFire raiders never engage → kill bar
-  # unmet → deadline). Stand-and-fight / brute LOSE (the heavy
-  # cannon out-trades the stack head-on).
+  # Bare 1v1 kite-and-pull skill: ONE medium-tank kiter vs ONE
+  # heavy (3tnk) at 35% HP. The diagonal-lag geometry (kiter on
+  # north corridor y=10, heavy on mid latitude y=20) opens the
+  # kite cycle's reactive window. The reduced chaser HP is what
+  # makes 1v1 mathematically winnable — at full HP the chaser
+  # out-trades a solo kiter even with a perfect cycle (the
+  # chaser's burst-2 105mm has ~1.43× the kiter's effective DPS).
+  # Survival bar ≥1 (the lone kiter must finish alive).
+  #
+  # Stall LOSES — a passive ReturnFire kiter is closed-on and
+  # killed before its retaliatory fire whittles the chaser down
+  # past its remaining HP. Stand-and-fight / brute LOSE — the
+  # heavy cannon out-trades the kiter head-on / on a beeline.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Three fast medium-tank raiders (2tnk) stage at the centre-west north
-    # corridor (y=10). ONE enemy heavy tank (3tnk) sits centre-east on the
-    # mid latitude (x≈80, y=20). The heavy out-trades your raiders at
-    # close range — standing and fighting LOSES. The only winning play is
-    # the kite-and-PULL cycle: each turn, if the heavy has closed within
-    # ~6 cells, MOVE your raiders a few cells AWAY along the lane;
-    # otherwise attack_unit the heavy from range; repeat. Kill the heavy
-    # and keep at least TWO raiders alive before tick 4500. Stall (observe
-    # only) LOSES — your raiders hold fire and never engage. Standing
-    # still or bruting east with no disengage LOSES — the heavy cannon
-    # collapses the stack.
     description: >
-      Three medium-tank raiders stage on the north corridor (y=10). One
-      enemy heavy tank sits centre-east at roughly (80,20) — it out-trades
-      you head-on and would shred a stand-and-fight. Kite: when the heavy
-      closes inside six cells, move your raiders back along the lane;
-      otherwise shoot from range. One kill, two raiders alive, within
-      about 50 turns.
+      One medium-tank kiter stages on the north corridor (y=10). One
+      enemy heavy tank sits centre-east at roughly (80,20) — it
+      out-trades you head-on and would shred a stand-and-fight. Kite:
+      when the heavy closes inside six cells, move your kiter back
+      along the lane; otherwise shoot from range. One kill, kiter
+      alive, within about 50 turns.
     overrides:
       actors:
-        # RAIDERS — 3 medium tanks, stance:1 (ReturnFire): they
-        # return fire when shot but never open an engagement or
-        # advance on their own, so the agent must drive the kite
-        # cycle. Spread across three cells (a stack pin-piles in
-        # retreat).
-        - {type: 2tnk, owner: agent, position: [28,  9], stance: 1}
-        - {type: 2tnk, owner: agent, position: [30, 10], stance: 1}
-        - {type: 2tnk, owner: agent, position: [28, 11], stance: 1}
-        # THE HEAVY — soviet 3tnk under the hunt bot: it pursues
-        # the raiders' centroid. Mid latitude staging.
-        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2}
+        # KITER — 1 medium tank, stance:1 (ReturnFire): returns fire
+        # when shot but never opens an engagement or advances on its
+        # own, so the agent must drive the kite cycle.
+        - {type: 2tnk, owner: agent, position: [20, 10], stance: 1}
+        # THE HEAVY — soviet 3tnk under the hunt bot at 35% HP so
+        # the 1v1 trade is winnable by a perfect kite. At full HP
+        # the chaser kills a solo kiter before the kite cycle can
+        # finish, and at HP ≤30 a passive ReturnFire kiter wins on
+        # its own (stall WIN — defect); the 35% window is the
+        # narrow band where every wrong policy LOSES and the
+        # kite WINS.
+        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2, health: 35}
         # Persistent unarmed far-east enemy marker — anti-DRAW.
+        - {type: fact, owner: enemy, position: [124, 20]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {own_units_gte: 1}
+        - {within_ticks: 4500}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4501}
+        - {not: {own_units_gte: 1}}
+    max_turns: 51
+
+  # ── MEDIUM ──────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: TWO kiters paired on the north
+  # corridor, vs ONE chaser at 40% HP. The survival bar tightens to
+  # `own_units_gte:2` — BOTH kiters must finish alive. A sloppy
+  # cycle that lets the chaser land even one cannon shot on either
+  # kiter trades it and busts the bar. The chaser HP rises from
+  # 35% (easy) to 40% (medium) so the paired kite must land more
+  # shots to finish — the additional kiter is the additional
+  # damage the agent has to coordinate, not slack to throw away.
+  medium:
+    description: >
+      Two medium-tank kiters stage in tight formation on the north
+      corridor (y=9 / y=11). One enemy heavy tank hunts from the mid
+      latitude (80,20). Kite as a pair — back off whenever the heavy
+      enters six cells, snipe from outside — and kill the heavy with
+      BOTH kiters alive, within about 50 turns.
+    overrides:
+      actors:
+        # KITERS — paired ReturnFire formation, y=9 and y=11 so
+        # they cover the same lane without stacking on one cell.
+        - {type: 2tnk, owner: agent, position: [20,  9], stance: 1}
+        - {type: 2tnk, owner: agent, position: [20, 11], stance: 1}
+        # THE HEAVY — 40% HP. Higher than easy (35%) — the kite
+        # cycle must whittle more HP than easy with the same kill
+        # bar, so the paired kite must land MORE shots while
+        # preserving BOTH kiters. The chaser still out-trades a
+        # 2-kiter stand-and-fight head-on, so stand / brute LOSE.
+        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2, health: 40}
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
@@ -197,92 +257,37 @@ levels:
         - {not: {own_units_gte: 2}}
     max_turns: 51
 
-  # ── MEDIUM ──────────────────────────────────────────────────────
-  # +1 controlled variable: the survival bar tightens to ALL THREE
-  # raiders (`own_units_gte:3`). The kite-and-pull must be PERFECT —
-  # a sloppy cycle that lets the heavy land even one cannon shot
-  # trades a raider and busts the bar. Same single-heavy diagonal-lag
-  # geometry as easy (two heavies are unkiteable by a 3-raider force
-  # in the engine combat sheet — verified — so the medium escalation
-  # is bar tightness, not enemy count).
-  medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Three medium-tank raiders (2tnk) stage at the centre-west north
-    # corridor (y=10). ONE enemy heavy tank (3tnk) starts centre-east on
-    # the mid latitude (x≈80, y=20) and HUNTS your raiders. The heavy out-
-    # trades your raiders head-on. Win by kiting: each turn, if the heavy
-    # is within ~6 cells MOVE your raiders AWAY along the lane, else
-    # attack_unit the heavy; repeat. Kill the heavy and keep ALL THREE
-    # raiders alive before tick 4500 — a kite that lets the heavy land
-    # even one cannon shot trades a raider and LOSES. Stall, stand-and-
-    # fight, and brute attack_move all LOSE.
-    description: >
-      Three raiders on the north corridor face one enemy heavy tank that
-      actively hunts. The heavy out-trades you in close, so any cannon hit
-      costs a raider. Kite hard — back off whenever the heavy enters six
-      cells, snipe from outside — and kill the heavy without losing one of
-      three raiders, within about 50 turns.
-    overrides:
-      actors:
-        - {type: 2tnk, owner: agent, position: [28,  9], stance: 1}
-        - {type: 2tnk, owner: agent, position: [30, 10], stance: 1}
-        - {type: 2tnk, owner: agent, position: [28, 11], stance: 1}
-        # ONE heavy on the mid latitude.
-        - {type: 3tnk, owner: enemy, position: [80, 20], stance: 2}
-        - {type: fact, owner: enemy, position: [124, 20]}
-    win_condition:
-      all_of:
-        - {units_killed_gte: 1}
-        - {own_units_gte: 3}
-        - {within_ticks: 4500}
-    fail_condition:
-      any_of:
-        - {after_ticks: 4501}
-        - {not: {own_units_gte: 3}}
-    max_turns: 51
-
   # ── HARD ────────────────────────────────────────────────────────
-  # +2 controlled variables vs medium:
-  #   1. Tighter deadline (~3600 ticks) — the kite cadence must be
-  #      efficient: dawdle and the clock LOSES.
-  #   2. TWO agent spawn_point groups (NORTH y=10 / SOUTH y=30
+  # +3 controlled variables vs medium:
+  #   1. Kiter count rises to 3 (full formation) and the survival
+  #      bar rises with it to `own_units_gte:3` — ALL THREE kiters
+  #      must finish alive. With three kiters the chaser can focus
+  #      fire on one lead unit, so the formation must spread or
+  #      retreat together.
+  #   2. Chaser HP rises to 70%. Even with 3-cannon concentrated
+  #      fire, the chaser at 70% HP takes substantially longer to
+  #      kill than the 35%/40% easy/medium values — the kite
+  #      cadence must be efficient. Dawdle on retreat and the
+  #      tighter clock (3600 ticks vs 4500) bites.
+  #   3. TWO agent spawn_point groups (NORTH y=10 / SOUTH y=30
   #      corridor) round-robined by seed, so the pull vector flips
   #      per seed and a memorised "always retreat on y=10" opening
   #      cannot generalise. The heavy sits on the mid latitude
   #      (y=20) between the corridors so both spawns face a
-  #      symmetric engagement geometry. The all-three survival bar
-  #      carries over from medium.
-  # Recalibrated after the engine move-fire / no-teleport-attack
-  # fixes: the heavy is staged at x=70 (was x=80) and at health:70.
-  # With moving raiders now taking fire while kiting, an x=80 heavy
-  # contacts a blind-marching raider already inside its lethal
-  # window; x=70 gives the kite enough standoff to open, and the
-  # 70%-HP heavy is killable in fewer strike passes so all three
-  # raiders survive on the tight hard clock — while still
-  # out-trading a stand-and-fight stack head-on.
+  #      symmetric engagement geometry.
+  # Heavy staged at x=70 (not x=80) so the hunting chaser enters
+  # the kiters' vision with enough STANDOFF for the kite cycle to
+  # open — at x=80 a kiter blind-marching east would first see the
+  # heavy already inside its lethal close-range window (engine
+  # move-fire fix: a moving unit takes fire in passing).
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Three medium-tank raiders (2tnk) stage at ONE of two centre-west
-    # corridors (NORTH y=10 OR SOUTH y=30, chosen by seed). ONE enemy
-    # heavy tank (3tnk) starts centre-east on the mid latitude (y=20)
-    # between the two corridors and HUNTS your raiders. The heavy out-
-    # trades your raiders head-on; the only winning play is the kite-and-
-    # PULL cycle — when the heavy closes within ~6 cells MOVE your raiders
-    # AWAY along your lane, else attack_unit the heavy; repeat. Kill the
-    # heavy and keep ALL THREE raiders alive before tick 3600. Stall,
-    # stand-and-fight, and brute attack_move all LOSE. The start corridor
-    # varies by seed so a memorised opening cannot generalise.
     description: >
-      Three raiders stage in the north (y=10) or south (y=30) corridor by
-      seed; one enemy heavy hunts from the middle latitude. The kite-and-pull cycle is the same — retreat past six cells, attack from range —
-      but the clock tightens to about 40 turns. All three raiders must
-      survive.
+      Three kiters stage in the north (y=10) or south (y=30) corridor
+      by seed; one enemy heavy hunts from the middle latitude. The
+      kite-and-pull cycle is the same — retreat past six cells, attack
+      from range — but the clock tightens to about 40 turns. All three
+      kiters must survive. The start corridor varies by seed so a
+      memorised opening cannot generalise.
     overrides:
       actors:
         # spawn_point 0 — NORTH corridor (y=10)
@@ -294,19 +299,11 @@ levels:
         - {type: 2tnk, owner: agent, position: [30, 30], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [28, 31], stance: 1, spawn_point: 1}
         # One heavy on the mid latitude — symmetric engagement
-        # geometry from either spawn corridor. Recalibrated after
-        # the engine move-fire / no-teleport-attack fixes: the heavy
-        # is staged at x=70 (not x=80) so the hunting heavy enters
-        # the raiders' vision with enough STANDOFF for the kite
-        # cycle to open — at x=80 a raider blind-marching east to
-        # find the heavy first sees it already inside the lethal
-        # close-range window and eats a free volley while moving.
-        # health:70 — moving raiders now take fire while kiting (no
-        # sprint-invincibility), so the heavy is staged at 70% HP:
-        # it still out-trades a stand-and-fight raider stack
+        # geometry from either spawn corridor. health:70 — the
+        # chaser still out-trades a stand-and-fight raider stack
         # head-on (stand / stall / brute all LOSE) but the
         # hit-and-pull cycle can whittle it down across fewer
-        # strike passes, keeping ALL THREE raiders alive on the
+        # strike passes, keeping ALL THREE kiters alive on the
         # tight hard clock (intended kite WINS every seed).
         - {type: 3tnk, owner: enemy, position: [70, 20], stance: 2, health: 70}
         - {type: fact, owner: enemy, position: [124, 20]}
