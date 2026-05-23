@@ -2723,9 +2723,33 @@ def build_app() -> gr.Blocks:
                                  "Turns", "Max Turns"],
                         interactive=False, wrap=True,
                     )
+                    # B9 nit #5: a single-click `Submit baseline`
+                    # button posted immediately, so a misclick after
+                    # the summary panel rendered (the player's mouse
+                    # is already there from scrolling) recorded the
+                    # baseline without confirmation. Add an
+                    # intermediate "Are you sure?" step:
+                    #   1. Clicking the primary button reveals the
+                    #      confirm row (Yes / Cancel) and HIDES itself
+                    #      so a second misclick can't double-fire.
+                    #   2. Yes posts the baseline and re-renders the
+                    #      panel; the confirm row hides.
+                    #   3. Cancel just hides the confirm row and
+                    #      brings the primary button back — no post.
+                    # Gradio doesn't ship a real Modal in 6.x; an
+                    # inline two-step row is the minimum-friction
+                    # equivalent.
                     pl_submit_btn = gr.Button(
                         "Submit baseline", variant="primary",
                     )
+                    with gr.Row(visible=False) as pl_submit_confirm_row:
+                        pl_submit_yes_btn = gr.Button(
+                            "Yes — submit my baseline",
+                            variant="primary", scale=2,
+                        )
+                        pl_submit_cancel_btn = gr.Button(
+                            "Cancel", scale=1,
+                        )
                     pl_submit_msg = gr.Markdown()
 
                 # Background timer — fires every 1s while the tab is
@@ -2825,9 +2849,48 @@ def build_app() -> gr.Blocks:
                         pl_img,
                     ],
                 )
+                # Submit-baseline 2-step (B9 nit #5):
+                #   click the primary → reveal confirm row, hide primary
+                #   click "Yes"       → run submit, hide confirm row
+                #   click "Cancel"    → hide confirm row, re-show primary
+                def _pl_submit_request():
+                    return (
+                        gr.update(visible=False),  # hide primary
+                        gr.update(visible=True),   # show confirm row
+                        "_Click **Yes** to record this session as your "
+                        "human baseline, or **Cancel** to keep playing._",
+                    )
+
+                def _pl_submit_cancel():
+                    return (
+                        gr.update(visible=True),   # re-show primary
+                        gr.update(visible=False),  # hide confirm row
+                        "",                         # clear pending message
+                    )
+
+                def _pl_submit_confirmed(st):
+                    msg, new_st = _playlist_submit_baseline(st)
+                    return (
+                        gr.update(visible=False),  # primary stays hidden
+                        gr.update(visible=False),  # hide confirm row
+                        msg,
+                        new_st,
+                    )
+
                 pl_submit_btn.click(
-                    _playlist_submit_baseline, inputs=[pl_state],
-                    outputs=[pl_submit_msg, pl_state],
+                    _pl_submit_request, inputs=[],
+                    outputs=[pl_submit_btn, pl_submit_confirm_row,
+                             pl_submit_msg],
+                )
+                pl_submit_cancel_btn.click(
+                    _pl_submit_cancel, inputs=[],
+                    outputs=[pl_submit_btn, pl_submit_confirm_row,
+                             pl_submit_msg],
+                )
+                pl_submit_yes_btn.click(
+                    _pl_submit_confirmed, inputs=[pl_state],
+                    outputs=[pl_submit_btn, pl_submit_confirm_row,
+                             pl_submit_msg, pl_state],
                 )
 
             # ── About Tab ─────────────────────────────────────────────────
