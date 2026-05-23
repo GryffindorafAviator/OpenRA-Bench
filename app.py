@@ -2206,9 +2206,6 @@ def build_app() -> gr.Blocks:
     return app
 
 
-os.environ["GRADIO_SSR_MODE"] = "false"
-
-
 if __name__ == "__main__":
     app = build_app()
     app.launch(
