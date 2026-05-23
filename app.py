@@ -22,7 +22,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import gradio as gr
+import gradio_client.utils as _gc_utils
 import pandas as pd
+
+_orig_json_schema_to_python_type = _gc_utils._json_schema_to_python_type
+def _patched_json_schema_to_python_type(schema, defs=None):
+    if not isinstance(schema, dict):
+        return "Any"
+    return _orig_json_schema_to_python_type(schema, defs)
+_gc_utils._json_schema_to_python_type = _patched_json_schema_to_python_type
 
 from evaluate_runner import DIFFICULTY_MULTIPLIER, DEFAULT_SERVER, compute_composite_score, compute_game_metrics
 
@@ -2198,8 +2206,11 @@ def build_app() -> gr.Blocks:
     return app
 
 
+os.environ["GRADIO_SSR_MODE"] = "false"
+
+
 if __name__ == "__main__":
     app = build_app()
     app.launch(
-        allowed_paths=[str(SUBMISSIONS_DIR), str(PLAYBACK_ROOT)]
+        allowed_paths=[str(SUBMISSIONS_DIR), str(PLAYBACK_ROOT)],
     )

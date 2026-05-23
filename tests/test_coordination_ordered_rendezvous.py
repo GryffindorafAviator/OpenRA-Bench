@@ -9,6 +9,7 @@ does NOT satisfy the sequence).
 from __future__ import annotations
 
 from pathlib import Path
+import importlib.util
 
 import pytest
 
@@ -16,6 +17,11 @@ import pytest
 # load (schema.py:15), so collection fails without the wheel. Skip the
 # whole module if the env is missing — matches test_building_planning.
 pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
+
+ENGINE_TEST = pytest.mark.skipif(
+    importlib.util.find_spec("openra_train") is None,
+    reason="Rust env wheel not installed",
+)
 
 from openra_bench.scenarios import load_pack
 from openra_bench.scenarios.loader import compile_level
@@ -249,6 +255,7 @@ def _make_intended(c):
 
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@ENGINE_TEST
 def test_stall_loses(level, seed):
     """Stall (observe-only) must LOSE on every (level, seed) — never
     moves a unit, so the within_ticks deadline expires as a real
@@ -266,6 +273,7 @@ def test_stall_loses(level, seed):
 
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@ENGINE_TEST
 def test_brute_beeline_loses(level, seed):
     """A beeline to the final waypoint skips the ordered prefix — the
     waypoint_sequence latch never advances → timeout LOSS."""
@@ -281,6 +289,7 @@ def test_brute_beeline_loses(level, seed):
 
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@ENGINE_TEST
 def test_wrongpath_loses(level, seed):
     """Out-of-order delivery never satisfies the W1→W2→… latch → LOSS."""
     from openra_bench.eval_core import run_level
@@ -295,6 +304,7 @@ def test_wrongpath_loses(level, seed):
 
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@ENGINE_TEST
 def test_intended_ordered_rendezvous_wins(level, seed):
     """The routing-aware ordered parallel rendezvous must WIN on every
     (level, seed) — load-bearing solvency for the capability."""
