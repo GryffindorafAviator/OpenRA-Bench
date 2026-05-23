@@ -1781,24 +1781,60 @@ def _playlist_details_md(sess) -> str:
 def _playlist_status_md(sess, st: dict) -> str:
     """Status line under the minimap. After a game ends, append the
     auto-advance countdown so the player knows the next scenario is
-    coming."""
+    coming.
+
+    On game-over the Playlist tab APPENDS a plain-English explanation
+    sentence ("You ran out of time." / "Your last unit was destroyed."
+    / "You reached the objective.") so a non-gamer reading the bare
+    ``**LOSS**`` token from the Play tab status line knows WHY the
+    game ended. (B9 Playlist nit #1.)"""
     base = _play_status_md(sess)
     if sess is None or not getattr(sess, "done", False):
         return base
-    from openra_bench.playlist import AUTO_ADVANCE_WAIT_SECONDS
+    from openra_bench.playlist import (
+        AUTO_ADVANCE_WAIT_SECONDS, explain_outcome,
+    )
+
+    status = sess.status()
+    outcome = str(status.get("outcome", "draw") or "draw").lower()
+    own_units = None
+    has_base = None
+    try:
+        rs = sess.render_state() or {}
+        # `units_summary` is the CURRENT-frame agent unit list (the
+        # accumulating `own_building_types` set on signals would lie
+        # about a destroyed base). `own_buildings` is the parallel
+        # current-frame agent-building list, with `fact` as the base.
+        own_units = len(rs.get("units_summary") or [])
+        bld_types = {
+            str(b.get("type", "")).lower()
+            for b in (rs.get("own_buildings") or [])
+        }
+        has_base = "fact" in bld_types
+    except Exception:  # noqa: BLE001
+        # Engine signals unavailable — fall back to the time/generic
+        # branches in `explain_outcome`.
+        pass
+    explanation = explain_outcome(
+        outcome,
+        turn=int(status.get("turn", 0) or 0),
+        max_turns=int(status.get("max_turns", 0) or 0),
+        own_units=own_units,
+        has_base=has_base,
+    )
 
     pl = st.get("playlist") or []
     idx = int(st.get("idx", 0) or 0)
     n = len(pl)
-    outcome = (getattr(sess, "outcome", "draw") or "draw").upper()
+    outcome_label = outcome.upper()
     if idx + 1 >= n:
         tail = "Final scenario complete — see your **Session summary** below."
     else:
         tail = (
-            f"**Game {idx + 1} of {n}: {outcome}** — next scenario in "
+            f"**Game {idx + 1} of {n}: {outcome_label}** — next scenario in "
             f"{int(AUTO_ADVANCE_WAIT_SECONDS)}s. Click **Skip wait ▶** to go now."
         )
-    return f"{base}\n\n{tail}"
+    return f"{base} — {explanation}\n\n{tail}"
 
 
 def _playlist_should_show_build(sess) -> bool:

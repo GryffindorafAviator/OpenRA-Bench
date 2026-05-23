@@ -20,6 +20,7 @@ from openra_bench.playlist import (
     JARGON_TO_PLAIN,
     NOVICE_PLAYLIST,
     PLAYLIST_TOOLS,
+    explain_outcome,
     needs_build_tool,
     playlist_progress,
     playlist_progress_bar,
@@ -252,6 +253,59 @@ def test_progress_bar_text_format():
     assert "100%" in playlist_progress_bar(20, 20)
     full = playlist_progress_bar(20, 20)
     assert full.startswith("▮" * 20)
+
+
+# ── Plain-English outcome explanation (B9 nit #1) ───────────────────
+
+
+def test_explain_outcome_win_is_objective_reached():
+    """`win` always renders as 'You reached the objective.' regardless
+    of the optional signals — pinning the constant string here keeps
+    the non-gamer wording stable across UI refactors."""
+    assert explain_outcome("win") == "You reached the objective."
+    # Optional signals don't change the win branch.
+    assert (
+        explain_outcome("win", turn=10, max_turns=10, own_units=0)
+        == "You reached the objective."
+    )
+
+
+def test_explain_outcome_loss_branches_pick_most_specific():
+    """Loss explanations are most-specific first: a base destroyed +
+    timer expired loss reads as 'last unit destroyed' / 'base
+    destroyed' — never the generic timer line."""
+    # No own units → unit-destroyed branch wins over timer.
+    assert (
+        explain_outcome("loss", turn=20, max_turns=20, own_units=0)
+        == "Your last unit was destroyed."
+    )
+    # Has units, no base → base-destroyed branch.
+    assert (
+        explain_outcome(
+            "loss", turn=10, max_turns=20, own_units=2, has_base=False
+        )
+        == "Your base was destroyed."
+    )
+    # Has units, has base, deadline expired → timer branch.
+    assert (
+        explain_outcome(
+            "loss", turn=20, max_turns=20, own_units=3, has_base=True
+        )
+        == "You ran out of time."
+    )
+    # No optional signals — generic fallback.
+    assert (
+        explain_outcome("loss")
+        == "The objective was not reached in time."
+    )
+
+
+def test_explain_outcome_draw_is_no_winner():
+    """Draws are rare under the bench bar but the helper still emits a
+    non-gamer-friendly sentence rather than a bare token."""
+    assert explain_outcome("draw") == "The game ended without a winner."
+    # Empty / None outcome falls through to the draw branch.
+    assert explain_outcome("") == "The game ended without a winner."
 
 
 def test_session_summary_row_shape():

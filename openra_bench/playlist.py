@@ -379,3 +379,57 @@ def session_summary_row(
         "Turns": int(turns or 0),
         "Max Turns": int(max_turns or 0),
     }
+
+
+# ── Plain-English game-over explanation (non-gamer UX) ──────────────
+# B9 nit: the Playlist status line printed raw `**LOSS**` markdown with
+# no context. A non-gamer reads "loss" and doesn't know whether the
+# clock ran out, the base was destroyed, or something else. The helper
+# below maps (outcome, turn, max_turns, units_alive, has_base) into a
+# 1-sentence plain-English explanation so the status line reads
+# "Game over — LOSS. You ran out of time." instead of the bare token.
+
+def explain_outcome(
+    outcome: str,
+    *,
+    turn: int = 0,
+    max_turns: int = 0,
+    own_units: int | None = None,
+    has_base: bool | None = None,
+) -> str:
+    """A 1-sentence plain-English outcome explanation for the Playlist
+    status line. Non-gamer-friendly — never references RTS jargon
+    ("fact", "MustBeDestroyed", "after_ticks").
+
+    The branches mirror the `human_labeling.InteractiveSession` outcome
+    rules:
+      * `win` — agent satisfied the win predicate ⇒ "You reached the
+        objective."
+      * `loss` AND `own_units == 0` ⇒ "Your last unit was destroyed."
+      * `loss` AND `not has_base` (base building lost) ⇒ "Your base
+        was destroyed."
+      * `loss` AND turn >= max_turns ⇒ "You ran out of time."
+      * `loss` (no other signal) ⇒ generic "The objective was not
+        reached in time." — covers the residual after_ticks case
+        when callers don't pass the optional inputs.
+      * `draw` ⇒ "The game ended without a winner." (rare — the bench
+        bar requires every loss to be a real LOSS, not a DRAW.)
+
+    `own_units` / `has_base` are optional — when omitted the explainer
+    falls back to the time / generic branches. This keeps the helper
+    callable even when a caller doesn't have engine signals in hand
+    (e.g. a session_summary_row replay).
+    """
+    o = (outcome or "draw").lower()
+    if o == "win":
+        return "You reached the objective."
+    if o == "draw":
+        return "The game ended without a winner."
+    # Loss branches — most-specific first.
+    if own_units is not None and own_units <= 0:
+        return "Your last unit was destroyed."
+    if has_base is False:
+        return "Your base was destroyed."
+    if max_turns > 0 and turn >= max_turns:
+        return "You ran out of time."
+    return "The objective was not reached in time."
