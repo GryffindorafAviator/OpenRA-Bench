@@ -1,102 +1,93 @@
 # def-surprise-flank-react.yaml
 #
-# REASONING capability — Group C surprise-axis reaction. The model is
-# told (in the brief, the "intel") that the enemy will attack from the
-# NORTH, and the world is pre-rigged to MATCH that intel: 2 pillboxes
-# are already standing NORTH of the base at (20,14)/(22,14), and four
-# rifle defenders are already lined up NORTH at y≈14 next to the
-# pre-built pillboxes — the canonical pre-positioned "prepared
-# defence". BUT the enemy rush actually arrives from the SOUTH, walking
-# around the entire NORTH pillbox line. The pre-built defenders + the
-# pre-built pillbox triple do NOTHING — they sit in their northern
-# lane while the rushers stride past them on the southern lane and
-# raze the construction yard.
-#
-# The intended capability — and the SOLE difference between WIN and
-# LOSS — is detecting the actual attack axis from the observation
-# (rusher units visible to the south of the base, not the north) and
-# RE-POSITIONING the four pre-placed defenders SOUTH to intercept the
-# rush before it reaches the fact. The 2 NORTH pillboxes are dead
-# wood for this engagement. The brief explicitly hints "intel said
-# NORTH but be ready for anything" — the model must NOT trust the
-# stated direction blindly and must commit to what it ACTUALLY
-# observes.
+# REASONING capability — Group C surprise-axis reaction. The brief
+# (intel) tells the model the enemy will attack from the NORTH and the
+# map LOOKS like the intel is right: a band of rocky terrain along the
+# north edge forms a natural chokepoint, with a single narrow opening
+# in the centre. Two pre-built pillboxes (the canonical "prepared
+# defence") sit just south of that chokepoint, watching the only
+# obvious northern lane. BUT the actual rush arrives MID-EPISODE from
+# the SOUTH (the open, undefended flank) via `scheduled_events:
+# spawn_actors` — the world's terrain implies one approach, the intel
+# announces the same approach, and the enemy comes from the OPPOSITE
+# direction.
 #
 # Real-world anchors:
-#   - Adversarial robustness on a directional axis: a stated cue is
-#     misdirection; the agent must react to the ground-truth signal,
-#     not the stated one.
+#   - Adversarial robustness on a directional axis: a stated cue +
+#     terrain-implied cue are misdirection; the agent must react to
+#     the ground-truth signal (where the rusher band actually spawns).
 #   - Opponent-modelling under deception: detect that the announced
 #     plan and the observed plan differ; replan around the truth.
 #   - Military reactive defence / flank discipline: a fortified flank
 #     that the enemy has bypassed must be ABANDONED in favour of the
 #     actual contact axis; "fighting the plan, not the enemy" is the
-#     classical military failure mode this trains against.
+#     classical failure mode this trains against.
 #   - CICERO deception handling: when announced behaviour contradicts
-#     observed behaviour, the agent should treat the announcement as
-#     a signal to NOT trust the plan and to commit to the observation.
+#     observed behaviour, treat the announcement as a signal NOT to
+#     trust the plan and commit to the observation.
 #
 # DISCRIMINATIONS (the scripted bar — every brute / lazy play LOSES,
 # only the detect-and-redeploy play WINS):
 #
-#   • stall (only `observe`): defenders idle NORTH of the base; the
-#     SOUTH rusher band marches straight at the fact (the agent
-#     centroid is dominated by the NORTH defenders so the band
-#     targets a north-of-fact point and PASSES THROUGH the fact on
-#     the way). Fact razed → `not has_building:fact` LOSS.
+#   • stall (only `observe`): defenders sit idle wherever they
+#     spawned; the SOUTH rusher band spawns at tick 800 and walks
+#     straight at the fact → fact razed → LOSS.
 #
-#   • stay-NORTH-with-pre-built-defence (do not move defenders): the
-#     pre-built NORTH pillbox line is far enough north of the fact
-#     that the south-coming rusher band reaches the fact without
-#     ever entering pbox range. Defenders never engage because the
-#     rush is on the OTHER side of the base. Fact razed → LOSS.
-#     (This is the canonical "fighting the announced plan" trap.)
+#   • stay-NORTH-with-pre-built-defence (move defenders to the
+#     intel/pbox lane): the defenders re-park on the NORTH lane next
+#     to the pillboxes. When the south rush spawns mid-episode, the
+#     defenders are 12+ cells off-axis and the rusher band reaches
+#     the fact unopposed → LOSS.
 #
-#   • pure-build-no-react: the model uses the small starting cash to
-#     queue (or attempt to queue) more buildings but never moves the
-#     defenders. With no tent in the pre-placed base the infantry
-#     queue is empty, and a single pbox at 600cr placed somewhere
-#     near the existing NORTH line does NOT intercept the SOUTH
-#     rush either. Same outcome as stay-NORTH → LOSS.
+#   • pure-build-no-react: queue/place a third pbox on the NORTH
+#     lane (where the intel + terrain say the rush will come). The
+#     pre-built defenders + the new pbox never face south and the
+#     rusher band razes the fact → LOSS.
 #
-#   • intended detect-and-redeploy SOUTH: observe (rushers are to
-#     the south), `move_units` all four defenders south to a y≈26
-#     intercept line, then `attack_move` them onto the spotted
-#     rusher cluster. The 4 defenders trade ~4-vs-4 against the
-#     rifle infantry rush on favourable focus-fire terms (concentrated
-#     on the rusher centroid, no splash, e1-vs-e1 even), keep ≥3
-#     alive, kill ≥4 of the rushers, fact survives → WIN.
+#   • intended detect-and-redeploy: hold a mobile-reserve posture
+#     (do not pre-commit defenders to the intel lane), observe the
+#     spawned rusher band the instant `enemy_unit_spotted` fires,
+#     then `attack_unit` all four defenders onto the south rusher
+#     cluster. Keep ≥2 alive, kill ≥4, fact survives → WIN.
 #
 # ENGINE FACTS used (CLAUDE.md / SCENARIO_QUALITY.md):
-#   - The `rusher` bot drives every unit at the agent centroid every
-#     ~8 ticks (openra-sim/src/scripted_bot.rs::Rusher). With 4
-#     defenders NORTH at y=14 and the fact at y=20, the centroid is
-#     near y=17 — south-rusher-band targets y≈17 and walks straight
-#     through y=20 (the fact) to get there → fact razed in the
-#     stay-NORTH path. When the defenders relocate SOUTH, the
-#     centroid drops to y≈22..24 and the band engages defenders
-#     SOUTH of the fact (intercepted before fact contact).
-#   - Enemy actors with NO spawn_point ALWAYS place regardless of the
-#     agent's spawn group (per CLAUDE.md) — so on hard we tag the
-#     N/S agent groups and place TWO opposite-direction rusher
-#     bands; the seed-driven agent spawn dictates which intel-axis
-#     pair is the "surprise" one, but the bands themselves are
-#     symmetric.
+#   - `scheduled_events: spawn_actors` injects fresh-id actors at a
+#     scheduled tick (Wave-9 feature; test_scheduled_events). The
+#     surprise SOUTH rush is INJECTED at tick 800 (easy) or in two
+#     waves (medium); a t=0 placement cannot exercise "react to a
+#     reveal that develops". Spawned actors get fresh ids so the
+#     `enemy_unit_spotted` interrupt fires on their appearance.
+#   - The `rusher` bot drives every unit at the agent centroid
+#     every ~8 ticks. With defenders distributed near the fact at
+#     (20,20), the centroid sits on the fact and the south rusher
+#     band walks straight at it.
+#   - Enemy actors with NO spawn_point ALWAYS place regardless of
+#     the agent's spawn group (per CLAUDE.md). On hard we tag
+#     agent N/S spawn groups so the seed-driven AGENT longitude
+#     varies (and the matching surprise direction with it); the
+#     scheduled south rush also varies its x-target per spawn via
+#     the scheduled-events block in `overrides:`.
 #   - Inert enemy `fact` marker far east (anti-DRAW): without a
 #     persistent enemy actor the engine auto-`done`s on enemy-elim
 #     before the win/fail evaluator runs.
 #   - `enemy_unit_spotted` interrupt → re-decide the instant the
-#     rusher band becomes visible (faster detection of the actual
-#     axis).
+#     scheduled rusher band materialises (the detection event).
 #   - `own_unit_destroyed` interrupt → re-decide when a defender
 #     falls.
 #   - Tick budget: ~90 ticks/turn. `max_turns 50` → reachable tick
-#     93 + 90·49 = 4503 ≥ 4501 (the after_ticks fail) so a
-#     non-winner is a real reachable timeout LOSS, never a draw.
+#     93 + 90·49 = 4503 ≥ 4501 (the after_ticks fail) so a non-
+#     winner is a real reachable timeout LOSS, never a draw. The
+#     scheduled spawn at tick 800 leaves >3700 ticks for the
+#     detect-and-redeploy intercept.
 #   - No tent in the pre-placed base + cash 800 means the model
 #     CAN'T cheese the win by mass-training fresh defenders — the
-#     intended play is RE-POSITIONING the 4 starting defenders,
-#     which is the controlled capability.
+#     intended play is RE-POSITIONING the 4 starting defenders.
+#   - Tailored terrain (`def-surprise-flank-react-arena`): two
+#     northern rocky bands form a visual chokepoint that "matches"
+#     the intel; the south is fully open. The terrain reinforces
+#     the misdirection — a model reading the minimap should see
+#     "north is the fortifiable lane" and the brief agrees, but
+#     the south spawn proves the cue is false.
 #
 # Distinct from siblings (Group C):
 #   * def-position-expected-direction — intel is TRUE; commit defence
@@ -108,13 +99,12 @@
 #   * defense-rush-survive — opening rush vs sustained throughput;
 #     no directional misdirection.
 #   * THIS pack — intel is FALSE (or just unreliable). The pre-built
-#     defence + pre-positioned defenders are ON THE WRONG AXIS. The
-#     model must DETECT that the announced and observed axes differ
-#     and RE-POSITION accordingly.
+#     pillbox line is on the WRONG axis. The model must DETECT (via
+#     the mid-episode scheduled spawn) that the announced and
+#     observed axes differ and RE-POSITION accordingly.
 #
 # Validate (no model / no network):
-#   python3 -m openra_bench.scenarios.validate \
-#     openra_bench/scenarios/packs/def-surprise-flank-react.yaml
+#   python3 -m pytest tests/test_def_surprise_flank_react.py -q
 
 meta:
   id: def-surprise-flank-react
@@ -122,18 +112,16 @@ meta:
   capability: reasoning
   real_world_meaning: >
     The mission brief states the enemy will attack from the NORTH and
-    the world is pre-rigged accordingly: two pillboxes are already
-    standing NORTH of the base, four rifle defenders are pre-positioned
-    on the NORTH lane next to them — the canonical prepared defence.
-    BUT the rusher band actually arrives from the SOUTH and walks
-    around the entire northern fortification. The decision is whether
-    the agent trusts the announced direction blindly (and watches its
-    construction yard get razed while its pre-built defence sits idle)
-    or detects the actual attack axis from the observation, abandons
-    the wrong-axis prepared defence, and re-positions its defenders
-    SOUTH to intercept the real rush before it reaches the fact. The
-    pre-built NORTH pillboxes do nothing for this engagement; the
-    capability is the reactive re-positioning, not the build.
+    the terrain reinforces it: a rocky band on the north edge forms a
+    natural chokepoint, with two pillboxes pre-built to cover it. The
+    four pre-placed defenders are distributed around the construction
+    yard — not yet committed to either lane. MID-EPISODE a rusher band
+    actually arrives from the SOUTH (the open flank) via a scheduled
+    spawn. The decision is whether the agent trusts the announced
+    direction + terrain cue and watches its construction yard get
+    razed, or detects the actual attack axis from the spawn event,
+    leaves the wrong-axis pillboxes silent, and commits the defenders
+    SOUTH to intercept the real rush before it reaches the fact.
   robotics_analogue: >
     Misdirection-aware defence / military adversarial robustness on
     a directional axis: a fortified flank that the enemy has bypassed
@@ -153,29 +141,49 @@ meta:
     - 'CICERO deception handling'
   author: openra-bench
 
-# rush-hour-arena (128×40, playable x∈[2..126], y∈[2..38]). Agent base
-# at (20, 20): fact + 4 pre-placed e1 defenders + 2 pre-built pbox.
-# The 2 pbox and the 4 defenders are NORTH of the base (y≈14..16) —
-# the prepared "expected" defence per the intel. The rusher band
-# spawns SOUTH (y≈32..34) and walks around the entire NORTH defence
-# line on its way to the fact at (20, 20).
-base_map: rush-hour-arena
+# Tailored arena: 128×40 with a northern rocky band forming a visual
+# chokepoint at x≈14..26 (the only narrow northern opening — the
+# pre-built pillboxes at (20,14)/(22,14) sit just south of it and
+# "cover" the intel-direction approach). The southern half is fully
+# open — the surprise-rush spawn at y=36 has clear path to the fact.
+# The terrain is the second leg of the misdirection: terrain implies
+# the same axis the intel announces.
+base_map:
+  generator: arena
+  name: def-surprise-flank-react-arena
+  width: 128
+  height: 40
+  cordon: 2
+  title: Surprise Flank Arena 128x40
+  obstacles:
+    # Northern rocky band — west of the central chokepoint.
+    - {x: 4,  y: 4, w: 10, h: 4}
+    # Northern rocky band — east of the central chokepoint.
+    - {x: 26, y: 4, w: 12, h: 4}
+    # Northern rocky band — far-east (continues the natural-fortress
+    # impression across the full north edge).
+    - {x: 50, y: 4, w: 76, h: 4}
+    # NOTE: the only north opening is x=14..26 at y=4..7; the pre-
+    # built pillboxes at (20,14)/(22,14) cover this opening, so
+    # the world LOOKS like the prepared defence is sensible. The
+    # south is deliberately left wide open.
 
 # Pack-wide budget — a small float (800cr). Not enough to spam a
-# second pillbox line on the south, and without a `tent` the infantry
-# queue is empty so the cash can't be turned into fresh defenders.
-# The intended play is RE-POSITIONING the four pre-placed defenders;
-# the cash exists so the model has the OPTION to attempt a build
-# (which is part of the discrimination — a pure-build-no-react policy
-# also LOSES).
+# second pillbox line on the south, and without a `tent` the
+# infantry queue is empty so the cash can't be turned into fresh
+# defenders. The intended play is RE-POSITIONING the four pre-
+# placed defenders; the cash exists so the model has the OPTION to
+# attempt a build (which is part of the discrimination — a pure-
+# build-no-react policy also LOSES).
 starting_cash: 800
 
 base:
   agent:
     faction: allies
   # Concentrated charge at the agent centroid every ~8 ticks — the
-  # canonical rush-defence opponent. The bot's SPAWN POSITION is the
-  # surprise: the brief says NORTH, the bot is placed SOUTH.
+  # canonical rush-defence opponent. The bot's SPAWN POSITION is
+  # the surprise (the brief says NORTH, the bot is spawned SOUTH
+  # via scheduled_events).
   enemy:
     faction: soviet
     bot_type: rusher
@@ -188,7 +196,7 @@ base:
     - attack_move
     - stop
   planning: true
-  # React the INSTANT a rusher unit is spotted (the south-axis
+  # React the INSTANT the scheduled south rush materialises (the
   # detection event) or a defender is lost — the re-positioning
   # decision is reactive, not on fixed 90-tick boundaries.
   interrupts:
@@ -200,83 +208,74 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # The bare surprise-axis detect-and-react skill. One light SOUTH
-  # rush (4 e1). The model is TOLD "intel said NORTH but be ready
-  # for anything" in the brief — i.e. the prior is unreliable.
-  # Pre-built NORTH defence: 2 pillboxes at (20,14)/(22,14) and 4
-  # defenders along y=14. The intended play is moving all 4
-  # defenders south to y≈26 and attack-moving onto the south rush.
-  # max_turns 50 → reachable tick 93 + 90·49 = 4503 ≥ 4501, so the
-  # after_ticks fail bites comfortably before the turn cap.
+  # The bare surprise-axis detect-and-react skill. The intel says
+  # NORTH, the terrain (a north-edge natural chokepoint with the
+  # pillboxes already covering it) AGREES, but a single light SOUTH
+  # rush (4× e1) materialises at tick 800 via scheduled spawn. The
+  # 4 defenders start DISTRIBUTED around the construction yard
+  # (NOT pre-committed to the intel lane); the intended play is to
+  # commit them SOUTH the instant the rush is spotted.
+  # max_turns 50 → reachable tick 93 + 90·49 = 4503 ≥ 4501.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # INTEL said the enemy will attack from the NORTH — but be ready for
-    # anything. You start with a construction yard at (20, 20), two
-    # pillboxes already standing NORTH of the base at (20, 14) and (22,
-    # 14), and four rifle defenders lined up next to them on the NORTH
-    # lane (y=14..16). Available cash 800. Identify the ACTUAL attack
-    # direction from your observation, then act: destroy at least 4 enemy
-    # units AND keep ≥3 of your own units alive AND keep the construction
-    # yard standing before tick 4500. Stalling, leaving the defenders on
-    # the NORTH lane next to the pre-built pillboxes, and building extra
-    # structures without re-positioning the defenders all LOSE — the
-    # construction yard is razed because the pre-built defence and the
-    # pre-positioned defenders are on the WRONG axis.
     description: >
-      Intel said the enemy would come from the NORTH — your pillboxes and
-      four defenders are already lined up there. But the actual rush comes
-      from elsewhere. Identify the live axis from observation, redeploy
-      the defenders, and kill at least four with the yard intact. Two
-      units alive, within about 50 turns. Trusting the intel layout loses
-      the yard.
+      Intel said the enemy would come from the NORTH and the terrain
+      agrees — a north-edge chokepoint with two pillboxes already in
+      place. Four defenders are staged around the construction yard
+      (not yet committed to either lane). Mid-episode the actual rush
+      arrives from elsewhere. Identify the live axis from observation,
+      commit the defenders, and kill at least four with the yard
+      intact. Two units alive, within about 50 turns. Pre-committing
+      to the intel lane loses the yard.
     overrides:
       actors:
         # Agent base — construction yard at the centre. Pre-placed at
         # `health: 50` (HP %): post the engine movement+combat fixes a
-        # 4-rifle south rush that reaches an UNDEFENDED fact razes it
-        # comfortably inside the 4500-tick budget (~turn 45) — the
-        # damaged starting HP keeps the lazy/stall outcome a real
-        # reachable LOSS rather than a budget-cap DRAW (the 4 idle
-        # HoldFire defenders would otherwise soak the rush long
-        # enough for a full-HP fact to survive the cap). The intended
-        # detect-and-redeploy play intercepts the rush SOUTH of the
-        # base and never lets it touch the fact, so the starting HP
-        # is irrelevant to the WIN path.
+        # 4-rifle south rush that reaches an UNDEFENDED fact razes
+        # it comfortably inside the 4500-tick budget — the damaged
+        # starting HP keeps the lazy/stall outcome a real reachable
+        # LOSS rather than a budget-cap DRAW. The intended detect-
+        # and-redeploy play intercepts SOUTH of the base and never
+        # lets it touch the fact.
         - {type: fact, owner: agent, position: [20, 20], health: 50}
         # Pre-built NORTH pillbox line — the "prepared" defence per
-        # the intel. These are far enough NORTH of the fact (y=14
-        # vs fact y=20) that the south-coming rusher band reaches
-        # the fact without ever entering pbox range — they sit
-        # silent the entire engagement unless the agent leaves the
-        # defenders next to them (in which case the defenders also
-        # sit silent and the fact dies anyway).
+        # the intel + terrain. Sits just south of the only northern
+        # chokepoint opening (x=14..26 at y=4..7); the world LOOKS
+        # like the prepared defence is sensible. Far enough north
+        # of the fact (y=14 vs fact y=20) that the south-coming
+        # rusher band reaches the fact without ever entering pbox
+        # range — they sit silent the entire engagement.
         - {type: pbox, owner: agent, position: [20, 14]}
         - {type: pbox, owner: agent, position: [22, 14]}
-        # Four pre-placed e1 defenders lined up on the NORTH lane,
-        # stance:2 (defend — auto-fires at hostiles in range,
-        # doesn't chase). stance:2 keeps them parked on the wrong
-        # axis if the agent never issues a move; if the agent
-        # explicitly `move_units` them south, they relocate.
-        - {type: e1, owner: agent, position: [18, 14], stance: 0}
-        - {type: e1, owner: agent, position: [20, 16], stance: 0}
-        - {type: e1, owner: agent, position: [22, 16], stance: 0}
-        - {type: e1, owner: agent, position: [24, 14], stance: 0}
-        # SOUTH rusher band — 4× e1 at y=32. The rusher bot drives
-        # them at the agent centroid (~y=17 with 4 defenders
-        # NORTH); they walk straight NORTH through y=20 (the fact)
-        # on the way → fact razed unless intercepted SOUTH of it.
-        # 4 e1 vs 4 defenders engaged head-on with focus-fire
-        # trades cleanly (~1 defender lost on the engagement),
-        # the kill bar (4) is exactly met when the rush is wiped.
-        - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 4}
+        # Four pre-placed e1 defenders DISTRIBUTED around the fact
+        # (not pre-committed to the intel lane). stance:0 HoldFire
+        # so they don't engage passively — the model must issue
+        # explicit orders. With defenders centred near the fact
+        # the rusher centroid sits on the fact and the south rush
+        # walks straight at it.
+        - {type: e1, owner: agent, position: [18, 20], stance: 0}
+        - {type: e1, owner: agent, position: [22, 20], stance: 0}
+        - {type: e1, owner: agent, position: [20, 18], stance: 0}
+        - {type: e1, owner: agent, position: [20, 22], stance: 0}
         # Inert enemy `fact` marker far east — anti-DRAW per
         # CLAUDE.md; without a persistent enemy actor the engine
         # auto-`done`s on enemy-elim before the win/fail evaluator
         # runs.
         - {type: fact, owner: enemy, position: [120, 20]}
+      # Mid-episode surprise SOUTH rush — 4× e1 at (20, 36),
+      # spawned at tick 800. Enough lead time for the model to
+      # observe the spawn (the `enemy_unit_spotted` interrupt
+      # fires), commit defenders south, and intercept before the
+      # rush reaches the fact at (20, 20). The 16-cell south-
+      # to-fact gap takes ~30 ticks at infantry speed, but the
+      # rusher bot re-targets every 8 ticks toward the agent
+      # centroid (which sits ON the fact when defenders are
+      # central) — so the rush is decisive only if the defenders
+      # never commit south.
+      scheduled_events:
+        - tick: 800
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 4}
     win_condition:
       all_of:
         - building_count_gte: {type: fact, n: 1}
@@ -291,56 +290,48 @@ levels:
     max_turns: 50
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # Same surprise-axis discrimination, larger rush. The intel /
-  # pre-built layout is identical to easy; the rush is 5× e1 from
-  # the SOUTH (one more than easy). The 4-defender screen still
-  # wins on FAVOURABLE terms — committing south so the defenders
-  # engage the rush before it reaches the fact, focus-fire on the
-  # nearest rusher to the fact, take ≤1 loss; a late commit or a
-  # wait-at-fact passive defence either burns the fact OR over-
-  # trades the defender screen (busts `own_units_gte:3`).
-  # max_turns 50 → reachable tick 4503 ≥ 4501 (same as easy).
+  # +1 controlled variable vs easy: TWO reinforcement waves on the
+  # south flank (tick 800 → 4×e1, tick 1400 → 3×e1). A late commit
+  # gets the defenders south in time for the first wave but the
+  # second wave catches them depleted; a wait-at-fact passive
+  # defence either burns the fact OR over-trades the defender
+  # screen (busts `own_units_gte:2`). The intended play commits
+  # SOUTH on the FIRST spawn and intercepts both waves on the
+  # south lane before either reaches the fact.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # INTEL said the enemy will attack from the NORTH — but be ready for
-    # anything. You start with a construction yard at (20, 20), two
-    # pillboxes already standing NORTH of the base at (20, 14) and (22,
-    # 14), and four rifle defenders lined up next to them on the NORTH
-    # lane (y=14..16). Available cash 800. A stronger surprise rush — 5
-    # rifle infantry in a tight, fast cluster — is incoming. Identify the
-    # ACTUAL attack direction from your observation, then act: destroy at
-    # least 4 enemy units AND keep ≥3 of your own units alive AND keep the
-    # construction yard standing before tick 4500. Stalling, leaving the
-    # defenders on the NORTH lane next to the pre-built pillboxes, and
-    # building extra structures without re-positioning the defenders all
-    # LOSE — the construction yard is razed and the 4-defender screen is
-    # overrun if it commits late or never.
     description: >
-      Same north-leaning pre-built defence, same $800 — but the surprise
-      rush is now five rifles in a tight cluster. Spot the actual
-      approach, peel the four-defender screen off the north strip, and
-      intercept on the real axis. Four kills, two alive, yard intact,
-      within about 50 turns.
+      Same north-leaning intel and pre-built defence, same $800 — but
+      the surprise rush now arrives in TWO waves on the live axis.
+      Spot the actual approach on the first wave, commit the defenders
+      forward, and hold the line across both waves. Four kills, two
+      alive, yard intact, within about 50 turns. A late commit or a
+      passive wait-at-fact stance loses to the second wave.
     overrides:
       actors:
-        - {type: fact, owner: agent, position: [20, 20]}
+        - {type: fact, owner: agent, position: [20, 20], health: 50}
         - {type: pbox, owner: agent, position: [20, 14]}
         - {type: pbox, owner: agent, position: [22, 14]}
-        - {type: e1, owner: agent, position: [18, 14], stance: 0}
-        - {type: e1, owner: agent, position: [20, 16], stance: 0}
-        - {type: e1, owner: agent, position: [22, 16], stance: 0}
-        - {type: e1, owner: agent, position: [24, 14], stance: 0}
-        # Stronger surprise rush — a tighter, faster cluster of
-        # rifle infantry from the SOUTH (5 e1 at y=32). The same
-        # 4-defender screen has to commit FIRST (move toward the
-        # spotted rush, not wait for it to arrive at the fact); a
-        # late commit lets the rush close to the fact and trades
-        # the screen 2-for-2 → busts `own_units_gte:3`.
-        - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 5}
+        - {type: e1, owner: agent, position: [18, 20], stance: 0}
+        - {type: e1, owner: agent, position: [22, 20], stance: 0}
+        - {type: e1, owner: agent, position: [20, 18], stance: 0}
+        - {type: e1, owner: agent, position: [20, 22], stance: 0}
         - {type: fact, owner: enemy, position: [120, 20]}
+      # TWO scheduled SOUTH waves — first at tick 800 (4×e1, the
+      # detection event), second at tick 1400 (3×e1, the follow-
+      # up). The defenders must be committed south on the FIRST
+      # spawn to engage the first wave AND still be positioned to
+      # absorb the second; a late commit lets the first wave reach
+      # the fact while the second wave catches the defenders out
+      # of position.
+      scheduled_events:
+        - tick: 800
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 4}
+        - tick: 1400
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 3}
     win_condition:
       all_of:
         - building_count_gte: {type: fact, n: 1}
@@ -355,107 +346,71 @@ levels:
     max_turns: 50
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # +1 controlled variable: TWO spawn_point groups round-robin the
-  # AGENT's base LONGITUDE per seed (WEST-staged base at x=20 OR
-  # EAST-staged base at x=40). The intel always says "the enemy
-  # will attack from the NORTH" and the pre-built defence is always
-  # on the NORTH lane of each spawn (same as easy/medium). The
-  # actual rush always arrives from the SOUTH (the surprise axis).
-  # The capability test is the same detect-and-redeploy doctrine
-  # as easy/medium — but the fact's x-position varies per seed, so
-  # a memorised "move defenders to (20,26)" opening does NOT
-  # generalise; only the doctrine ("intercept south of THIS spawn's
-  # fact, x-aligned with this spawn's base") does. An attrition cap
-  # (units_lost_lte:2) tightens the margin vs medium — a late
-  # commit or a sloppy intercept overshoots the cap and loses,
-  # even if the fact survives.
+  # +1 controlled variable vs medium: TWO spawn_point groups round-
+  # robin the AGENT base LONGITUDE per seed (WEST-staged base at
+  # x=20 OR EAST-staged base at x=40). The intel always says "the
+  # enemy will attack from the NORTH" and the pre-built defence is
+  # always on the NORTH lane of each spawn (same as easy/medium).
+  # The actual rush always arrives from the SOUTH (the surprise
+  # axis) — but on each seed, x-aligned with YOUR base's column
+  # (so the literal "flank direction" relative to the base varies
+  # by seed: WEST spawn ⇒ rush at x=20, EAST spawn ⇒ rush at
+  # x=40). A single memorised intercept cell ("move defenders to
+  # (20,26)") does NOT generalise; only the doctrine ("intercept
+  # south of THIS spawn's fact") does. An attrition cap
+  # (units_lost_lte:2) tightens the margin — a late commit
+  # overshoots the cap.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # INTEL said the enemy will attack from the NORTH — but be ready for
-    # anything. Your construction yard sits at one of two LONGITUDES (WEST
-    # at x=20 OR EAST at x=40, chosen by seed), with two pillboxes and
-    # four rifle defenders pre-positioned in the NORTH lane of your spawn
-    # (the intel direction). The actual rush arrives from the SOUTH (the
-    # surprise axis) on both seeds, x-aligned with YOUR base's column.
-    # Identify the ACTUAL attack direction from your observation, then re-
-    # position your defenders SOUTH of YOUR construction yard and
-    # intercept BEFORE the rush reaches it. Destroy at least 4 enemy units
-    # AND keep ≥2 of your own alive AND lose at most 2 defenders AND keep
-    # the construction yard standing before tick 4500. Stalling, sticking
-    # with the pre-built NORTH defence layout, and pure-building all LOSE.
     description: >
-      Pre-built north defences as before, but your yard spawns either WEST
-      (x=20) or EAST (x=40) by seed. The actual rush always comes from the
-      SOUTH, x-aligned with your yard. Spot it, re-position the defenders
-      south of YOUR yard, intercept before it lands. Four kills, two
-      alive, loss cap two, yard intact, within about 50 turns.
+      Pre-built north defences as before, but your yard spawns either
+      WEST (x=20) or EAST (x=40) by seed. The actual rush always comes
+      from the SOUTH, x-aligned with your yard, in two scheduled waves.
+      Spot it, commit the defenders south of YOUR yard, intercept
+      before it lands. Four kills, two alive, loss cap two, yard
+      intact, within about 50 turns.
     overrides:
       actors:
-        # Hard tier: the intel direction is FIXED ("rushers will come
-        # from the NORTH" — the brief, same as easy/medium) and the
-        # actual rush direction is FIXED (SOUTH — the surprise axis).
-        # The seed-driven variable is the AGENT base LONGITUDE (x
-        # coord) — two spawn_point groups round-robin a WEST-staged
-        # base (x=20) and an EAST-staged base (x=40). The capability
-        # test is the same on both spawns: identify that the actual
-        # rush comes from the SOUTH (not the announced NORTH) and
-        # re-position the defenders SOUTH of THIS spawn's fact to
-        # intercept the rush before it reaches it. A single
-        # memorised intercept cell ("move defenders to (20,26)")
-        # does NOT generalise because the fact's x-position varies
-        # per seed; the doctrine ("intercept south of THIS spawn's
-        # fact") does. An attrition cap (units_lost_lte:2) tightens
-        # the margin — a late commit overshoots the cap.
-        #
         # ── spawn_point 0 — WEST-staged base (x=20) ─────────────────
-        # Same geometry as easy/medium: fact at (20,20), pre-built
-        # defence on the NORTH lane y=14, defenders at y=14/16
-        # (stance:0 HoldFire so they don't engage passively).
         - {type: fact, owner: agent, position: [20, 20], spawn_point: 0}
         - {type: pbox, owner: agent, position: [20, 14], spawn_point: 0}
         - {type: pbox, owner: agent, position: [22, 14], spawn_point: 0}
-        - {type: e1, owner: agent, position: [18, 14], stance: 0, spawn_point: 0}
-        - {type: e1, owner: agent, position: [20, 16], stance: 0, spawn_point: 0}
-        - {type: e1, owner: agent, position: [22, 16], stance: 0, spawn_point: 0}
-        - {type: e1, owner: agent, position: [24, 14], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [18, 20], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [22, 20], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [20, 18], stance: 0, spawn_point: 0}
+        - {type: e1, owner: agent, position: [20, 22], stance: 0, spawn_point: 0}
         # ── spawn_point 1 — EAST-staged base (x=40) ─────────────────
-        # Same geometry translated east by 20 cells.
         - {type: fact, owner: agent, position: [40, 20], spawn_point: 1}
         - {type: pbox, owner: agent, position: [40, 14], spawn_point: 1}
         - {type: pbox, owner: agent, position: [42, 14], spawn_point: 1}
-        - {type: e1, owner: agent, position: [38, 14], stance: 0, spawn_point: 1}
-        - {type: e1, owner: agent, position: [40, 16], stance: 0, spawn_point: 1}
-        - {type: e1, owner: agent, position: [42, 16], stance: 0, spawn_point: 1}
-        - {type: e1, owner: agent, position: [44, 14], stance: 0, spawn_point: 1}
-        # ── Enemy rush bands ────────────────────────────────────────
-        # CLAUDE.md: enemy actors WITHOUT spawn_point ALWAYS place
-        # regardless of the agent's spawn group, so we declare BOTH a
-        # NORTH and a SOUTH band. For spawn_point 0 (NORTH base) the
-        # MATCHING band is the NORTH one (y=4) — same side as the
-        # base, opposite the pre-built defence. For spawn_point 1
-        # (SOUTH base) the MATCHING band is the SOUTH one (y=36).
-        # The `rusher` bot charges the agent CENTROID — which sits
-        # near the base on each spawn (the pre-built defenders are
-        # only 2-4 cells off so the centroid stays close to the
-        # base) — so the matching-side band has the SHORTER path
-        # and is the immediate threat; the opposite-side band has
-        # to walk across the whole map to arrive.
-        - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 5}
-        - {type: e1, owner: enemy, position: [40, 36], stance: 3, count: 5}
-        # Note: enemies don't honour spawn_point — both bands always
-        # place. The matching-side band (same latitude as the agent
-        # base) is the immediate threat and the trigger for the
-        # detect-and-redeploy decision. The opposite-side band has
-        # to walk the full map width (28+ cells) before becoming a
-        # serious threat — well outside the 4500-tick budget.
+        - {type: e1, owner: agent, position: [38, 20], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [42, 20], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [40, 18], stance: 0, spawn_point: 1}
+        - {type: e1, owner: agent, position: [40, 22], stance: 0, spawn_point: 1}
         # Inert enemy `fact` marker far east (anti-DRAW). Placed
         # off-axis (y=2) so the bands don't include it in their
-        # centroid target and it doesn't accidentally end the
-        # episode early via enemy-elim auto-done.
+        # centroid target.
         - {type: fact, owner: enemy, position: [120, 2]}
+      # TWO scheduled SOUTH waves — placed at BOTH possible base
+      # longitudes so whichever agent spawn fires, the matching
+      # rush spawn is x-aligned. The opposite-longitude spawn
+      # would normally be wasted distance (the rusher bot drives
+      # at the agent centroid, which sits on the live base) — but
+      # because enemies don't honour spawn_point, both spawns
+      # fire. The far-from-base spawn has to walk the full map
+      # width before becoming a serious threat — well outside the
+      # 4500-tick budget — so only the matching-longitude spawn
+      # is the immediate threat.
+      scheduled_events:
+        - tick: 800
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [40, 36], stance: 3, count: 4}
+        - tick: 1400
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 3}
+            - {type: e1, owner: enemy, position: [40, 36], stance: 3, count: 3}
     win_condition:
       all_of:
         - building_count_gte: {type: fact, n: 1}
