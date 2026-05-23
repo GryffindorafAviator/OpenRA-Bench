@@ -165,6 +165,7 @@ def evaluate(
     handoff_sweep: bool = False,
     handoff_k: int = 3,
     handoff_bank: str | Path | None = None,
+    repeats: int = 1,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -184,6 +185,11 @@ def evaluate(
     position replayed from a `handoff_bank` trajectory (`good` — the
     capitalize-on-advantage test). `handoff_k` is the prefix length.
     Each record carries a `passivity` stat (observe/stop-only fraction).
+
+    `repeats` runs each (cell, seed) `N` times, varying only model
+    nondeterminism (assumes temperature > 0). Records carry a `repeat`
+    index 0..N-1, so aggregation can report mean ± CI and `pass^k`
+    (all-k wins) alongside `pass@k` — the reliability metric.
     """
     from .resilience import (
         BudgetExceeded,
@@ -309,12 +315,16 @@ def evaluate(
                 continue
             for split, slist in (("public", seeds), ("held_out", held_out_seeds)):
                 for seed in slist:
-                    tasks.append((compiled, cell, split, seed))
+                    for rep in range(max(1, repeats)):
+                        tasks.append((compiled, cell, split, seed, rep))
 
     def _run_one(task: tuple) -> dict:
-        compiled, cell, split, seed = task
+        compiled, cell, split, seed, rep = task
         pb = None
-        if playback_root is not None:
+        # Only the first repeat writes a Playback — the records (the
+        # lightweight per-rep results) carry the pass^k data; saving N
+        # full per-turn dumps per cell would just bloat disk.
+        if playback_root is not None and rep == 0:
             from .playback import Playback
 
             pb = Playback(
@@ -359,6 +369,7 @@ def evaluate(
             "capability": compiled.meta.capability,
             "split": split,
             "seed": seed,
+            "repeat": rep,
             "outcome": sc.outcome,
             "composite": sc.composite,
             "perception": sc.perception,
@@ -446,7 +457,7 @@ def evaluate(
             # not abort a multi-hour sweep or lose the report — record
             # it as outcome="error" and continue. Budget is the only
             # signal that intentionally stops the whole run.
-            compiled, cell, split, seed = task
+            compiled, cell, split, seed, rep = task
             try:
                 return _run_one(task)
             except BudgetExceeded:
@@ -458,6 +469,7 @@ def evaluate(
                     "capability": compiled.meta.capability,
                     "split": split,
                     "seed": seed,
+                    "repeat": rep,
                     "outcome": "error",
                     "composite": 0.0,
                     "perception": 0.0,
@@ -688,6 +700,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--handoff-bank", default=None,
                     help="dir of Playback runs — source of winning "
                     "trajectories for the handoff-good prefix")
+    ap.add_argument("--repeats", type=int, default=1,
+                    help="run each (cell, seed) N times varying only "
+                    "model nondeterminism — enables mean +- CI and "
+                    "pass^k reliability metrics (needs temperature > 0)")
+    ap.add_argument("--temperature", type=float, default=None,
+                    help="sampling temperature for the model "
+                    "(overrides ProviderConfig.temperature). Set > 0 "
+                    "to make --repeats meaningful.")
     a = ap.parse_args(argv[1:])
 
     cfg = None
@@ -704,7 +724,7 @@ def main(argv: list[str]) -> int:
             if quant:
                 pr["quantizations"] = [quant]
             extra_body["provider"] = pr
-        cfg = ProviderConfig(
+        cfg_kw = dict(
             provider=a.provider,
             model=a.model,
             base_url=a.base_url,
@@ -713,6 +733,9 @@ def main(argv: list[str]) -> int:
             fog_mode=a.fog_mode,
             extra_body=extra_body,
         )
+        if a.temperature is not None:
+            cfg_kw["temperature"] = a.temperature
+        cfg = ProviderConfig(**cfg_kw)
 
     stats = evaluate(
         _resolve_packs(a.packs),
@@ -733,6 +756,7 @@ def main(argv: list[str]) -> int:
         handoff_sweep=a.handoff_sweep,
         handoff_k=a.handoff_k,
         handoff_bank=a.handoff_bank,
+        repeats=a.repeats,
         progress=lambda d, n, rec, c: print(
             f"[{d}/{n}] {rec['cell']}:{rec['split']}#{rec['seed']} "
             f"{rec['outcome']} comp={rec['composite']} "

@@ -1242,6 +1242,76 @@ def _play_start(prev_sess, pack, level, seed):
     )
 
 
+# ── Human-study mode ─────────────────────────────────────────────────
+# Walks a recruited player through the fixed 24-pack study subset under
+# 3 conditions (72 games, per-player counterbalanced). Every game saves
+# to the standard Playback format — apples-to-apple with model runs.
+
+def _study_progress_md(st: dict) -> str:
+    pl = st.get("playlist", [])
+    i = st.get("idx", 0)
+    if not pl:
+        return "_Enter your name and click **Begin study**._"
+    if i >= len(pl):
+        return (
+            f"**✅ Study complete** — all {len(pl)} games done. "
+            f"Thank you, `{st['player']}`!"
+        )
+    pack, level, cond = pl[i]
+    return (
+        f"**Study — game {i + 1} / {len(pl)}**  ·  player `{st['player']}`\n\n"
+        f"`{pack}` [{level}]  ·  condition: **{cond}**  \n"
+        f"_Play to game-over, then click **Next scenario ▶**._"
+    )
+
+
+def _study_render(st: dict, prev_sess):
+    """Open the study session for st's current cell and render it."""
+    if prev_sess is not None:
+        try:
+            prev_sess.close()
+        except Exception:  # noqa: BLE001
+            pass
+    empty = _play_units_df(None, [])
+    pl = st.get("playlist", [])
+    if st.get("idx", 0) >= len(pl):
+        return (None, [], [], "", None, "", "", empty, st,
+                _study_progress_md(st))
+    pack, level, cond = pl[st["idx"]]
+    try:
+        from openra_bench.human_study import open_study_session
+
+        sess = open_study_session(
+            pack, level, cond, player=st["player"], seed=1
+        )
+    except Exception as e:  # noqa: BLE001
+        return (None, [], [], "", None, f"⚠️ {e}",
+                "_study load failed_", empty, st, _study_progress_md(st))
+    img, brief, status, units = _play_render(sess, [], [])
+    return (sess, [], [], _play_objective_md(sess), img, brief, status,
+            units, st, _study_progress_md(st))
+
+
+def _study_begin(prev_sess, player):
+    import hashlib
+
+    from openra_bench.human_study import study_playlist
+
+    player = (player or "").strip() or "anon"
+    # Per-player counterbalancing — a stable seed from the name.
+    seed = int(hashlib.md5(player.encode()).hexdigest()[:8], 16)
+    st = {"player": player, "playlist": study_playlist(seed), "idx": 0}
+    return _study_render(st, prev_sess)
+
+
+def _study_next(prev_sess, st):
+    if not st or "playlist" not in st:
+        return _study_render({"player": "anon", "playlist": []}, prev_sess)
+    st = dict(st)
+    st["idx"] = st.get("idx", 0) + 1
+    return _study_render(st, prev_sess)
+
+
 def _play_click(sess, sel, queue, evt: gr.SelectData):
     """Contextual minimap click — classic RTS interaction, no mode:
 
@@ -1567,6 +1637,29 @@ def build_app() -> gr.Blocks:
                 play_sess = gr.State(None)
                 play_sel = gr.State([])
                 play_queue = gr.State([])
+                study_state = gr.State({})
+                with gr.Accordion(
+                    "📋 Human-study mode — 24-pack subset, 3 conditions",
+                    open=False,
+                ):
+                    gr.Markdown(
+                        "For the **human-baseline study**. Enter your name "
+                        "and click **Begin study** — you'll be walked "
+                        "through 72 games (24 scenarios × fog / no-fog / "
+                        "handoff-deficit), counterbalanced per player. "
+                        "Play each to game-over, then **Next scenario ▶**. "
+                        "Every game auto-saves apples-to-apple with the "
+                        "model runs."
+                    )
+                    with gr.Row():
+                        study_player = gr.Textbox(
+                            label="Your name / id", scale=2,
+                        )
+                        study_begin_btn = gr.Button("Begin study", scale=1)
+                        study_next_btn = gr.Button(
+                            "Next scenario ▶", variant="primary", scale=1,
+                        )
+                    study_progress = gr.Markdown()
                 with gr.Row():
                     play_scen = gr.Dropdown(
                         choices=_play_scenarios(), label="Scenario",
@@ -1612,6 +1705,19 @@ def build_app() -> gr.Blocks:
                         play_sess, play_sel, play_queue, play_objective,
                         play_img, play_brief, play_status, play_units,
                     ],
+                )
+                _study_outputs = [
+                    play_sess, play_sel, play_queue, play_objective,
+                    play_img, play_brief, play_status, play_units,
+                    study_state, study_progress,
+                ]
+                study_begin_btn.click(
+                    _study_begin, inputs=[play_sess, study_player],
+                    outputs=_study_outputs,
+                )
+                study_next_btn.click(
+                    _study_next, inputs=[play_sess, study_state],
+                    outputs=_study_outputs,
                 )
                 play_img.select(
                     _play_click,

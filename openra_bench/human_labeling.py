@@ -535,14 +535,19 @@ class InteractiveSession:
         record: bool = True,
         playback_root: Any = None,
         player: str = "Human",
+        fog_mode: str = "vision",
     ) -> "InteractiveSession":
-        """Compile a pack by id and open a session on it."""
+        """Compile a pack by id and open a session on it. `fog_mode`
+        selects the observation modality — `vision-clear` (or any
+        `-clear` mode) reveals the whole map (engine `reveal_map`), the
+        no-fog condition of the human-study fog-penalty pair."""
         from .scenarios import load_pack
         from .scenarios.loader import PACKS_DIR, compile_level
 
         compiled = compile_level(
             load_pack(PACKS_DIR / f"{pack_id}.yaml"), level
         )
+        compiled.fog_mode = fog_mode
         return cls(
             compiled, seed=seed, record=record,
             playback_root=playback_root, player=player,
