@@ -26,6 +26,17 @@
 # crew transfers value (cash / data / ammunition) from an
 # under-defended depot to the operator's pool. Single-use action;
 # the crew does not return.
+#
+# Map design (per-pack, NOT the shared rush-hour arena):
+# `spec-thief-chokepoint-40x20` — a compact chokepoint-arena (40x20,
+# corridor at y=10, width 4, pinch at x=20, wall thickness 4). The
+# corridor frames the depot's natural defense: there is exactly ONE
+# route to the cash-store and the depot sits at the chokepoint exit.
+# This is the canonical "infiltrator picks the target and commits"
+# map — small (vision constraint), no excess room. Each level adds a
+# persistent enemy `fact` keep-alive marker at the east corner so
+# the engine doesn't auto-`done` when the silo/proc is the only
+# enemy MustBeDestroyed building.
 
 meta:
   id: spec-thief-steal-cash
@@ -42,7 +53,17 @@ meta:
     operator's pool and is consumed in the process.
   author: engine-infiltrate-task
 
-base_map: rush-hour-arena
+base_map:
+  generator: chokepoint-arena
+  name: spec-thief-chokepoint-40x20
+  width: 40
+  height: 20
+  cordon: 2
+  pinch_x: 20
+  pinch_width: 4
+  corridor_width: 4
+  corridor_y: 10
+  title: Thief Chokepoint 40x20
 starting_cash: 0
 
 base:
@@ -60,71 +81,91 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Thief 4 cells west of an undefended enemy silo. One infiltrate
-  # call wins.
+  # Thief at the corridor mouth, enemy proc at the corridor exit.
+  # The proc is the target AND a persistent MustBeDestroyed marker
+  # (proc IS MustBeDestroyed, so no auto-done on infiltrate). A
+  # second enemy `fact` keep-alive at the far corner guarantees a
+  # persistent enemy building even if the proc footprint is
+  # consumed mid-episode.
+  # One infiltrate call wins.
   easy:
     description: >
-      Thief next door to an undefended enemy silo. One
-      infiltrate call drains some enemy cash into your wallet.
-      Win = own cash ≥400 before tick 2000.
+      Thief at the west corridor mouth, undefended enemy refinery
+      one step into the corridor. One infiltrate call drains some
+      enemy cash into your wallet. Win = own cash ≥400 before tick
+      1350.
     starting_cash: 0
     overrides:
       actors:
-        - {type: thf,  owner: agent, position: [16, 20]}
-        - {type: silo, owner: enemy, position: [20, 20]}
+        - {type: thf,  owner: agent, position: [16, 10]}
+        - {type: proc, owner: enemy, position: [20, 10]}
+        - {type: fact, owner: enemy, position: [35, 4]}
     win_condition:
       all_of:
         - {cash_gte: 400}
-        - {within_ticks: 2000}
-    fail_condition: {after_ticks: 2001}
-    max_turns: 25
+        - {within_ticks: 1350}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1351}
+        - {not: {own_units_gte: 1}}
+    max_turns: 15
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # Distractor target: a `powr` is closer than the silo. Stealing
-  # from `powr` is a no-op (only proc / silo are stealable) — the
-  # thief is wasted if the agent picks the wrong building. The
-  # correct play is to walk past the powr to the silo.
+  # Distractor target: a `powr` sits BETWEEN the thief and the silo
+  # — closer than the silo, so a greedy "nearest enemy building"
+  # policy infiltrates the powr (no-op: only proc/silo are
+  # stealable) and the thief is wasted. The correct play is to walk
+  # past the powr to the silo at the corridor exit.
   medium:
     description: >
       Two enemy buildings: a Power Plant (closer; NOT stealable)
-      and a Silo (farther; stealable). Infiltrate the SILO — the
-      Power Plant gives nothing and burns your thief. Win = own
-      cash ≥400 before tick 3000.
+      and a Silo (one step farther; stealable). Infiltrate the
+      SILO — the Power Plant gives nothing and burns your thief.
+      Win = own cash ≥400 before tick 1800.
     starting_cash: 0
     overrides:
       actors:
-        - {type: thf,  owner: agent, position: [10, 25]}
-        - {type: powr, owner: enemy, position: [16, 25]}
-        - {type: silo, owner: enemy, position: [22, 18]}
+        - {type: thf,  owner: agent, position: [16, 10]}
+        - {type: powr, owner: enemy, position: [18, 10]}
+        - {type: silo, owner: enemy, position: [20, 10]}
+        - {type: fact, owner: enemy, position: [35, 4]}
     win_condition:
       all_of:
         - {cash_gte: 400}
-        - {within_ticks: 3000}
-    fail_condition: {after_ticks: 3001}
-    max_turns: 35
+        - {within_ticks: 1800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1801}
+        - {not: {own_units_gte: 1}}
+    max_turns: 20
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # Two thieves (redundancy) + a stance:2 enemy rifleman near the
-  # silo. The agent must time the steal so the defender doesn't
-  # wipe both thieves before arrival. To make the steal genuinely
-  # load-bearing (one steal = ≤500 cash), require ≥800 — i.e. BOTH
-  # thieves must successfully infiltrate.
+  # Two thieves (redundancy) + a stance:2 enemy rifleman one cell
+  # west of the silo. Each infiltrate yields ≤500 cash, so BOTH
+  # thieves must arrive and drain to clear cash_gte:800. The
+  # defender chips the thieves on approach (≈25% hp loss per
+  # transit) but both survive a single pass; if the agent sacrifices
+  # one thief or runs out of units, the run loses on `own_units_gte`.
   hard:
     description: >
-      Defended depot: a stance:2 enemy e1 guards the silo. You have
-      two thieves AND must steal twice — each infiltrate yields
-      ≤500 cash, so both must arrive and drain. Win = own cash
-      ≥800 before tick 4000.
+      Defended depot: a stance:2 enemy rifleman guards the silo at
+      the corridor exit. You have two thieves AND must steal twice
+      — each infiltrate yields ≤500 cash, so both must arrive and
+      drain. Win = own cash ≥800 before tick 2700.
     starting_cash: 0
     overrides:
       actors:
-        - {type: thf,  owner: agent, position: [10, 22]}
-        - {type: thf,  owner: agent, position: [10, 18]}
-        - {type: silo, owner: enemy, position: [24, 20]}
-        - {type: e1,   owner: enemy, position: [22, 20], stance: 2}
+        - {type: thf,  owner: agent, position: [16, 9]}
+        - {type: thf,  owner: agent, position: [16, 11]}
+        - {type: silo, owner: enemy, position: [20, 10]}
+        - {type: e1,   owner: enemy, position: [19, 10], stance: 2}
+        - {type: fact, owner: enemy, position: [35, 4]}
     win_condition:
       all_of:
         - {cash_gte: 800}
-        - {within_ticks: 4000}
-    fail_condition: {after_ticks: 4001}
-    max_turns: 50
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
