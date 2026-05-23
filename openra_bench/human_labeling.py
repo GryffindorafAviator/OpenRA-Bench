@@ -59,6 +59,101 @@ _REGION_PREDICATES = {
 }
 
 
+def _actor_field(actor: Any, name: str, default: Any = None) -> Any:
+    if isinstance(actor, dict):
+        return actor.get(name, default)
+    return getattr(actor, name, default)
+
+
+def _scenario_harvest_points(compiled: Any) -> list[dict]:
+    """Authored neutral ore-source markers for human minimap overlays.
+
+    Rust turns `mine` actors into harvestable ore patches, but the normal
+    observation does not surface those neutral props. Mirror the engine's
+    spawn_point choice, then filter through the current fog before display
+    so Play mode does not reveal unexplored ore.
+    """
+    actors = list(getattr(compiled.scenario, "actors", []) or [])
+    mine_actors = [
+        actor for actor in actors
+        if str(
+            _actor_field(actor, "type")
+            or _actor_field(actor, "actor_type")
+            or ""
+        ).lower() in {"mine", "gmine"}
+    ]
+    out: list[dict] = []
+    for actor in mine_actors:
+        pos = _actor_field(actor, "position")
+        if not pos or len(pos) < 2:
+            continue
+        out.append({
+            "cell_x": int(pos[0]),
+            "cell_y": int(pos[1]),
+            "type": str(
+                _actor_field(actor, "type")
+                or _actor_field(actor, "actor_type")
+                or "mine"
+            ),
+            "spawn_point": _actor_field(actor, "spawn_point"),
+        })
+    return out
+
+
+def _active_spawn_point(compiled: Any, render_state: dict) -> Any:
+    """Infer the engine-selected spawn_point from observed own actors."""
+    observed = set()
+    for item in (
+        list(render_state.get("units_summary") or [])
+        + list(render_state.get("own_buildings") or [])
+    ):
+        if not isinstance(item, dict):
+            continue
+        try:
+            observed.add((int(item.get("cell_x")), int(item.get("cell_y"))))
+        except (TypeError, ValueError):
+            continue
+
+    counts: dict[Any, int] = {}
+    for actor in getattr(compiled.scenario, "actors", []) or []:
+        if str(_actor_field(actor, "owner") or "").lower() != "agent":
+            continue
+        sp = _actor_field(actor, "spawn_point")
+        if sp is None:
+            continue
+        pos = _actor_field(actor, "position")
+        if pos and len(pos) >= 2 and (int(pos[0]), int(pos[1])) in observed:
+            counts[sp] = counts.get(sp, 0) + 1
+    if not counts:
+        return None
+    return max(counts, key=counts.get)
+
+
+def _visible_harvest_points(
+    points: list[dict], render_state: dict, active_spawn_point: Any = None
+) -> list[dict]:
+    rows = [r for r in (render_state.get("minimap") or "").split("\n") if r]
+    if not rows:
+        return []
+    visible: list[dict] = []
+    for point in points:
+        sp = point.get("spawn_point")
+        if active_spawn_point is not None and sp != active_spawn_point:
+            continue
+        try:
+            cx = int(point["cell_x"])
+            cy = int(point["cell_y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            0 <= cy < len(rows)
+            and 0 <= cx < len(rows[cy])
+            and rows[cy][cx] != "#"
+        ):
+            visible.append(point)
+    return visible
+
+
 def _condition_node(cond: Any) -> dict:
     if cond is None:
         return {}
@@ -619,6 +714,7 @@ class InteractiveSession:
             _objective_regions_from_condition(compiled.win_condition)
             if compiled.objective_coords == "exact" else []
         )
+        self._harvest_points = _scenario_harvest_points(compiled)
         self._forbidden = {
             str(t).lower() for t in (compiled.forbidden_tools or [])
         }
@@ -696,6 +792,12 @@ class InteractiveSession:
         rs = self._adapter.render_state()
         if self._objective_regions:
             rs["objective_regions"] = list(self._objective_regions)
+        if self._harvest_points:
+            visible_points = _visible_harvest_points(
+                self._harvest_points, rs, _active_spawn_point(self.compiled, rs)
+            )
+            if visible_points:
+                rs["harvest_points"] = visible_points
         return rs
 
     def status(self) -> dict:

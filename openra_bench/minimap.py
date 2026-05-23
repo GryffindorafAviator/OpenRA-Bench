@@ -75,6 +75,7 @@ _OWN_BLD = (60, 130, 230)       # your buildings
 _ENEMY = (225, 60, 55)          # enemy units
 _ENEMY_BLD = (240, 160, 40)     # enemy buildings
 _OBJECTIVE = (255, 218, 70)     # objective / target region
+_ORE = (185, 150, 70)           # visible ore/resource cells
 
 
 def _draw_cell(px, w: int, h: int, cx: int, cy: int, rgb, r: int = 1) -> None:
@@ -311,6 +312,22 @@ def _draw_move_arrow(draw, fx, fy, tx, ty, cp, color):
     draw.polygon([(x1, y1), p1, p2], fill=color)
 
 
+def _draw_resource_cell(draw, cell, cp, w, h):
+    try:
+        cx = int(cell["cell_x"])
+        cy = int(cell["cell_y"])
+    except (KeyError, TypeError, ValueError):
+        return
+    if not (0 <= cx < w and 0 <= cy < h):
+        return
+    pad = max(1, cp // 8)
+    draw.rectangle(
+        [cx * cp + pad, cy * cp + pad, (cx + 1) * cp - pad,
+         (cy + 1) * cp - pad],
+        fill=_ORE,
+    )
+
+
 def render_tactical_minimap(
     render_state: dict,
     scale: int = 4,
@@ -359,6 +376,9 @@ def render_tactical_minimap(
     for i, region in enumerate(render_state.get("objective_regions") or [], 1):
         if isinstance(region, dict):
             _draw_objective_region(draw, region, cp, w, h, i)
+    for cell in render_state.get("resource_cells") or []:
+        if isinstance(cell, dict):
+            _draw_resource_cell(draw, cell, cp, w, h)
 
     # Collect every actor by cell so stacked units can be counted.
     by_cell: dict = {}
@@ -490,6 +510,7 @@ def render_tactical_minimap(
         draw.text(
             (int(cp * 0.4), ly + int(cp * 1.05)),
             "green = you   red/orange = enemy   yellow ring = objective  "
+            "brown = ore   "
             "number = units stacked   white box = selected   arrow = order",
             fill=(200, 202, 212), font=lfont,
         )
