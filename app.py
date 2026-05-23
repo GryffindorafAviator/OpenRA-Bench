@@ -1783,16 +1783,17 @@ def _playlist_status_md(sess, st: dict) -> str:
     auto-advance countdown so the player knows the next scenario is
     coming.
 
-    On game-over the Playlist tab APPENDS a plain-English explanation
-    sentence ("You ran out of time." / "Your last unit was destroyed."
-    / "You reached the objective.") so a non-gamer reading the bare
-    ``**LOSS**`` token from the Play tab status line knows WHY the
-    game ended. (B9 Playlist nit #1.)"""
-    base = _play_status_md(sess)
+    On game-over the Playlist tab COLOURS the outcome token (red for
+    LOSS, green for WIN, gray for DRAW — `OUTCOME_COLORS`) and APPENDS
+    a plain-English explanation sentence ("You ran out of time." /
+    "Your last unit was destroyed." / "You reached the objective.")
+    so a non-gamer reading the bare ``**LOSS**`` token knows WHY the
+    game ended. The chip uses inline HTML; Gradio Markdown renders it
+    natively. (B9 Playlist nits #1 + #2.)"""
     if sess is None or not getattr(sess, "done", False):
-        return base
+        return _play_status_md(sess)
     from openra_bench.playlist import (
-        AUTO_ADVANCE_WAIT_SECONDS, explain_outcome,
+        AUTO_ADVANCE_WAIT_SECONDS, explain_outcome, outcome_html,
     )
 
     status = sess.status()
@@ -1822,19 +1823,31 @@ def _playlist_status_md(sess, st: dict) -> str:
         own_units=own_units,
         has_base=has_base,
     )
+    chip = outcome_html(outcome)
+    # Build the head line by hand so the coloured chip replaces the
+    # `**OUTCOME**` markdown the Play tab status line emits — keeping
+    # the same `Turn n/m · tick t · CHIP — game over.` shape.
+    head = (
+        f"**Turn {status['turn']}/{status['max_turns']}** · "
+        f"tick {status['tick']} · {chip} — game over. {explanation}"
+    )
+    if status.get("save_path"):
+        head += (
+            f"\n\n_Run saved (standard playback format): "
+            f"`{status['save_path']}`_"
+        )
 
     pl = st.get("playlist") or []
     idx = int(st.get("idx", 0) or 0)
     n = len(pl)
-    outcome_label = outcome.upper()
     if idx + 1 >= n:
         tail = "Final scenario complete — see your **Session summary** below."
     else:
         tail = (
-            f"**Game {idx + 1} of {n}: {outcome_label}** — next scenario in "
+            f"**Game {idx + 1} of {n}: {chip}** — next scenario in "
             f"{int(AUTO_ADVANCE_WAIT_SECONDS)}s. Click **Skip wait ▶** to go now."
         )
-    return f"{base} — {explanation}\n\n{tail}"
+    return f"{head}\n\n{tail}"
 
 
 def _playlist_should_show_build(sess) -> bool:

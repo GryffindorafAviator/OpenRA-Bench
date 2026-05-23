@@ -433,3 +433,35 @@ def explain_outcome(
     if max_turns > 0 and turn >= max_turns:
         return "You ran out of time."
     return "The objective was not reached in time."
+
+
+# ── Outcome colour palette ──────────────────────────────────────────
+# B9 nit: the bare token "LOSS" / "WIN" / "DRAW" had no visual
+# contrast in the Playlist status line. Wrapping the token in a
+# short HTML span lets Gradio's Markdown render it coloured (red /
+# green / gray) without changing the underlying text — `outcome.upper()`
+# still appears letter-for-letter so screen-readers and the playback
+# summary table see the same word, and a downstream consumer that
+# strips HTML still gets a readable token.
+OUTCOME_COLORS: dict[str, str] = {
+    "win": "#2e7d32",   # green (Material green 800 — readable on white)
+    "loss": "#d2683c",  # red-orange (matches the Gradio button red)
+    "draw": "#888888",  # gray
+}
+
+
+def outcome_html(outcome: str) -> str:
+    """An HTML span wrapping the upper-cased outcome token in the
+    palette colour. Gradio Markdown renders inline HTML by default —
+    no `interactive_html` flag needed.
+
+    Plain-text fallback when `outcome` is unrecognised: returns the
+    upper-cased token unwrapped, so a downstream consumer that strips
+    HTML still gets the same word.
+    """
+    o = (outcome or "draw").lower()
+    label = o.upper()
+    color = OUTCOME_COLORS.get(o)
+    if color is None:
+        return label
+    return f"<span style='color: {color}; font-weight: bold'>{label}</span>"

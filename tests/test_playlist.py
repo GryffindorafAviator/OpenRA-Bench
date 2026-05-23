@@ -19,9 +19,11 @@ from openra_bench.playlist import (
     AUTO_ADVANCE_WAIT_SECONDS,
     JARGON_TO_PLAIN,
     NOVICE_PLAYLIST,
+    OUTCOME_COLORS,
     PLAYLIST_TOOLS,
     explain_outcome,
     needs_build_tool,
+    outcome_html,
     playlist_progress,
     playlist_progress_bar,
     playlist_should_advance,
@@ -306,6 +308,40 @@ def test_explain_outcome_draw_is_no_winner():
     assert explain_outcome("draw") == "The game ended without a winner."
     # Empty / None outcome falls through to the draw branch.
     assert explain_outcome("") == "The game ended without a winner."
+
+
+# ── Coloured outcome chip (B9 nit #2) ────────────────────────────────
+
+
+def test_outcome_html_wraps_known_outcomes_with_palette_color():
+    """`win` / `loss` / `draw` each get a coloured `<span>`; the chip
+    text is the upper-cased token so the on-screen reading is the
+    same as the legacy `**LOSS**` markdown — only the visual contrast
+    changes."""
+    for outcome in ("win", "loss", "draw"):
+        html = outcome_html(outcome)
+        assert outcome.upper() in html
+        assert "<span" in html
+        assert OUTCOME_COLORS[outcome] in html
+
+
+def test_outcome_html_unknown_outcome_falls_back_to_plain():
+    """An unrecognised outcome string returns the upper-cased token
+    without HTML — defensive for a future outcome value (e.g.
+    'aborted') we haven't pinned a colour for yet."""
+    assert outcome_html("aborted") == "ABORTED"
+    # Empty / None defaults to the draw chip (matches the rest of the
+    # helper family's None-tolerance).
+    assert "DRAW" in outcome_html("")
+
+
+def test_outcome_colors_palette_uses_distinct_hexes():
+    """Pin the palette: red-orange for loss, green for win, gray for
+    draw. A future palette nudge (e.g. theming) is fine, but the
+    distinctness invariant — three different visual chips — is the
+    UX contract."""
+    assert len({OUTCOME_COLORS["win"], OUTCOME_COLORS["loss"],
+                OUTCOME_COLORS["draw"]}) == 3
 
 
 def test_session_summary_row_shape():
