@@ -67,8 +67,8 @@ other models of comparable scale win cleanly.
 | model              | cells | W   | L   | D   | win rate | dominant loss verb |
 |--------------------|-------|-----|-----|-----|----------|--------------------|
 | Qwen/Qwen3.5-9B    | 48    | 20  | 27  | 1   | **41.7%**| MoveUnits (33×)    |
-| google/gemma-4-31B-it | 5  | 2   | 3   | 0   | **40.0%**| MoveUnits (33-34×) |
-| Qwen/Qwen3.6-Plus  | 30    | 0   | 28  | 2   | **0.0%** | **Observe (17-40×)** |
+| google/gemma-4-31B-it | **6**  | **2**  | **4**  | 0   | **33.3%**| MoveUnits (33-34×) |
+| Qwen/Qwen3.6-Plus  | **39** | **0** | **37** | 2   | **0.0%** | **Observe (17-45×)** |
 
 Two models at very different scales (9B and 31B) win 40-42% of
 cells. Plus (a much larger model) wins **zero** cells across 30
