@@ -123,10 +123,17 @@ def _resolve_packs(spec: str | None) -> list[str]:
             if line and not line.startswith("#"):
                 ids.append(line)
         return ids
-    p = Path(spec)
-    if p.is_dir():
-        return sorted(x.stem for x in p.glob("*.yaml"))
-    return [s.strip() for s in spec.split(",") if s.strip()]
+    # Comma list short-circuits the dir check (avoids `File name too long`
+    # when a long comma list is passed).
+    if "," in spec:
+        return [s.strip() for s in spec.split(",") if s.strip()]
+    # Possibly a single pack id OR a directory path. Heuristic: if it
+    # contains a `/` OR exists on disk, treat as path.
+    if "/" in spec or len(spec) > 200 or Path(spec).exists():
+        p = Path(spec)
+        if p.is_dir():
+            return sorted(x.stem for x in p.glob("*.yaml"))
+    return [spec.strip()]
 
 
 def _price_for(model: str) -> tuple[float, float]:

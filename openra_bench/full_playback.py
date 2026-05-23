@@ -315,17 +315,37 @@ def is_complete_cell(jsonl_path: str | Path) -> bool:
     p = Path(jsonl_path)
     if not p.exists() or p.stat().st_size == 0:
         return False
+    # Tail read: locate the last newline boundary so we can parse just
+    # the trailing line without loading the whole file. The terminal
+    # line carries the FULL final_obs (which on a long episode with
+    # spatial tensors can be many MB), so we walk back from EOF until
+    # we cross a newline rather than guessing a fixed window.
     try:
-        # Tail read: open, seek near end, find the last newline-bounded
-        # line. JSONL turn records are small (~few KB at most), so 64KB
-        # is plenty for the last line of even a long episode.
         with open(p, "rb") as fh:
             fh.seek(0, 2)
             size = fh.tell()
-            tail_n = min(size, 65536)
-            fh.seek(size - tail_n)
-            tail = fh.read().decode("utf-8", errors="replace")
-        last = tail.strip().splitlines()[-1] if tail.strip() else ""
+            # Walk back in 256KB chunks until we hit a newline OR start.
+            chunk = 256 * 1024
+            buf = b""
+            pos = size
+            while pos > 0:
+                step = min(chunk, pos)
+                pos -= step
+                fh.seek(pos)
+                buf = fh.read(step) + buf
+                # The last line begins right after the LAST newline in
+                # buf (excluding a trailing newline). We need TWO
+                # newlines (or start-of-file + one) to be sure we have
+                # the complete last line.
+                stripped = buf.rstrip(b"\n")
+                nl = stripped.rfind(b"\n")
+                if nl != -1:
+                    last_bytes = stripped[nl + 1:]
+                    break
+                if pos == 0:
+                    last_bytes = stripped
+                    break
+            last = last_bytes.decode("utf-8", errors="replace").strip()
         if not last:
             return False
         rec = json.loads(last)
