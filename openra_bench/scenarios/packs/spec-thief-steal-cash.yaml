@@ -1,0 +1,130 @@
+# Validate: python -m openra_bench.scenarios.validate packs/spec-thief-steal-cash.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# SPEC-THIEF-STEAL-CASH — special-ability capability cell for the
+# `Command.infiltrate` engine order using a `thf` infiltrator (thief).
+# A thief walks into an enemy `proc` or `silo` and on adjacency drains
+# a chunk of the target owner's cash to the agent's wallet; the thief
+# is consumed.
+#
+# Capability under test: "infiltrate to STEAL — convert proximity to
+# an enemy cash-store into a wallet transfer". The load-bearing win
+# predicate is `cash_gte: M` with the agent starting at 0 and no
+# other cash source available — so the M can ONLY come from the
+# infiltration steal.
+#
+# Why brute / stall / wrong-target policies LOSE:
+#   * `stall` (observe-only) — wallet stays at 0; timeout.
+#   * `wander` — thief never reaches a stealable building; timeout.
+#   * `attack_unit` on the silo — thief carries no weapon; no-op.
+#   * `infiltrate` against a non-cash building (e.g. a powr) — the
+#     thief is consumed but no cash transfers (only proc/silo are
+#     stealable in the parity model).
+# Only `Command.infiltrate([thf_id], <proc-or-silo-id>)` wins.
+#
+# Real-world anchor: opportunistic asset extraction — a small mobile
+# crew transfers value (cash / data / ammunition) from an
+# under-defended depot to the operator's pool. Single-use action;
+# the crew does not return.
+
+meta:
+  id: spec-thief-steal-cash
+  title: 'Thief Steal Cash — Drain an Enemy Depot'
+  capability: action
+  real_world_meaning: >
+    Specialist tasked with VALUE EXTRACTION rather than destruction:
+    proximity to an enemy cash-store transfers a fixed quantum to
+    the operator's wallet and consumes the asset. The decision is
+    "which depot to hit" under a single-use crew constraint.
+  robotics_analogue: >
+    A loadout-extraction drone dispatched to an under-defended
+    cache; on arrival it transfers a fixed inventory quantum to the
+    operator's pool and is consumed in the process.
+  author: engine-infiltrate-task
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  # Enemy seeded with cash — that's where the steal comes from.
+  enemy: {faction: soviet, cash: 3000}
+  # Minimal toolset — infiltrate is the load-bearing verb;
+  # move_units / attack_unit are present so the brute / wander /
+  # wrong-target policies can be expressed and observed to LOSE.
+  tools: [observe, move_units, attack_unit, infiltrate]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Thief 4 cells west of an undefended enemy silo. One infiltrate
+  # call wins.
+  easy:
+    description: >
+      Thief next door to an undefended enemy silo. One
+      infiltrate call drains some enemy cash into your wallet.
+      Win = own cash ≥400 before tick 2000.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: thf,  owner: agent, position: [16, 20]}
+        - {type: silo, owner: enemy, position: [20, 20]}
+    win_condition:
+      all_of:
+        - {cash_gte: 400}
+        - {within_ticks: 2000}
+    fail_condition: {after_ticks: 2001}
+    max_turns: 25
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Distractor target: a `powr` is closer than the silo. Stealing
+  # from `powr` is a no-op (only proc / silo are stealable) — the
+  # thief is wasted if the agent picks the wrong building. The
+  # correct play is to walk past the powr to the silo.
+  medium:
+    description: >
+      Two enemy buildings: a Power Plant (closer; NOT stealable)
+      and a Silo (farther; stealable). Infiltrate the SILO — the
+      Power Plant gives nothing and burns your thief. Win = own
+      cash ≥400 before tick 3000.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: thf,  owner: agent, position: [10, 25]}
+        - {type: powr, owner: enemy, position: [16, 25]}
+        - {type: silo, owner: enemy, position: [22, 18]}
+    win_condition:
+      all_of:
+        - {cash_gte: 400}
+        - {within_ticks: 3000}
+    fail_condition: {after_ticks: 3001}
+    max_turns: 35
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two thieves (redundancy) + a stance:2 enemy rifleman near the
+  # silo. The agent must time the steal so the defender doesn't
+  # wipe both thieves before arrival. To make the steal genuinely
+  # load-bearing (one steal = ≤500 cash), require ≥800 — i.e. BOTH
+  # thieves must successfully infiltrate.
+  hard:
+    description: >
+      Defended depot: a stance:2 enemy e1 guards the silo. You have
+      two thieves AND must steal twice — each infiltrate yields
+      ≤500 cash, so both must arrive and drain. Win = own cash
+      ≥800 before tick 4000.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: thf,  owner: agent, position: [10, 22]}
+        - {type: thf,  owner: agent, position: [10, 18]}
+        - {type: silo, owner: enemy, position: [24, 20]}
+        - {type: e1,   owner: enemy, position: [22, 20], stance: 2}
+    win_condition:
+      all_of:
+        - {cash_gte: 800}
+        - {within_ticks: 4000}
+    fail_condition: {after_ticks: 4001}
+    max_turns: 50

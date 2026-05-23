@@ -128,10 +128,66 @@ _TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
-    # NOTE: `capture_actor` is intentionally NOT exposed — the engine
-    # has no Capture order yet (belongs to the pending S8 / task #11
-    # sabotage+special-abilities work). The bench must not advertise a
-    # tool the engine can't execute (1:1 parity — see test_surrender).
+    "capture_actor": {
+        "type": "function",
+        "function": {
+            "name": "capture_actor",
+            "description": "Order engineer(s) (actor_type e6) to walk "
+            "to an enemy BUILDING and capture it — on arrival the "
+            "building's owner transfers to your player and the "
+            "engineer is consumed. Non-engineer units are rejected; "
+            "friendly / non-building targets are ignored.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}},
+                    "target_id": {"type": "integer"},
+                },
+                "required": ["unit_ids", "target_id"],
+            },
+        },
+    },
+    "c4_detonate": {
+        "type": "function",
+        "function": {
+            "name": "c4_detonate",
+            "description": "Order Tanya (actor_type tanya) to walk to "
+            "an enemy BUILDING, plant C4, and instantly destroy it. "
+            "Tanya survives the detonation. Non-tanya subjects are "
+            "rejected; friendly / non-building targets are ignored.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}},
+                    "target_id": {"type": "integer"},
+                },
+                "required": ["unit_ids", "target_id"],
+            },
+        },
+    },
+    "infiltrate": {
+        "type": "function",
+        "function": {
+            "name": "infiltrate",
+            "description": "Order a spy (actor_type spy) or thief "
+            "(actor_type thf) to walk into an enemy BUILDING. On "
+            "arrival the infiltrator is consumed and one of two "
+            "effects fires depending on the infiltrator's type: a "
+            "spy reveals every structure owned by the target's "
+            "owner (one-shot scan, survives fog); a thief drains a "
+            "chunk of the target owner's cash to your player (only "
+            "when the target is a proc or silo). Friendly / "
+            "non-building targets are ignored.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit_ids": {"type": "array", "items": {"type": "integer"}},
+                    "target_id": {"type": "integer"},
+                },
+                "required": ["unit_ids", "target_id"],
+            },
+        },
+    },
     "set_stance": {
         "type": "function",
         "function": {
@@ -407,6 +463,21 @@ def _to_commands(
                 ids = [_rid(i) for i in args["unit_ids"]]
                 cmds.append(
                     Command.enter_transport(ids, _rid(args["target_id"]))
+                )
+            elif name == "capture_actor":
+                ids = [_rid(i) for i in args["unit_ids"]]
+                cmds.append(
+                    Command.capture_actor(ids, _rid(args["target_id"]))
+                )
+            elif name == "c4_detonate":
+                ids = [_rid(i) for i in args["unit_ids"]]
+                cmds.append(
+                    Command.c4_detonate(ids, _rid(args["target_id"]))
+                )
+            elif name == "infiltrate":
+                ids = [_rid(i) for i in args["unit_ids"]]
+                cmds.append(
+                    Command.infiltrate(ids, _rid(args["target_id"]))
                 )
             elif name == "observe":
                 cmds.append(Command.observe())

@@ -1,0 +1,163 @@
+# combat-naval-shore-strike — A destroyer on water shells a shore garrison.
+#
+# Naval MVP pack: validates that
+#   (a) ships move on declared water cells,
+#   (b) ground units cannot enter those cells,
+#   (c) a `dd` destroyer's primary armament can engage a ground target
+#       standing on the shore.
+#
+# The water terrain is declared via the YAML overlay `water_rect:`
+# block, not the `map.bin` tile encoding — the engine's Rust map.bin
+# parser does not yet emit ship-passable water tiles, so naval
+# scenarios authoritatively declare their water in the scenario YAML.
+# Each cell in the rect is parsed by `oramap::parse_scenario_yaml` and
+# applied to the live terrain in `env::build_world_for_episode`.
+#
+# Discrimination (the bar):
+#   • stall (only observe): destroyers idle west; the shore garrison
+#     is never killed; after_ticks LOSS.
+#   • brute land-move: an agent that tries to move the dd onto land
+#     (toward the e1) gets stuck at the shoreline — ships cannot
+#     enter non-water cells. No kills happen → after_ticks LOSS.
+#   • intended shore-strike: explicit `attack_unit` on the e1 from
+#     the dd's water position; the destroyer's gun is in range from
+#     across the shoreline; kills the garrison → WIN.
+
+meta:
+  id: combat-naval-shore-strike
+  title: 'Naval Shore Strike — DD shells a coastal garrison'
+  capability: action
+  real_world_meaning: >
+    A destroyer on water faces a small infantry garrison on the
+    adjacent shore. The decision: target the garrison with the
+    destroyer's primary armament from across the water (the
+    destroyer cannot move onto land). A stall policy never engages;
+    a policy that tries to drive the destroyer ashore stalls at the
+    shoreline.
+  robotics_analogue: >
+    Naval gunfire support — the asset operates in a domain (water)
+    that constrains its movement and weapon employment, but its
+    weapon range crosses the domain boundary onto land.
+  benchmark_anchor:
+    - "naval-mvp"
+    - "amphibious gunfire support"
+  author: openra-bench
+
+base_map:
+  generator: naval-arena
+  width: 64
+  height: 40
+  cordon: 2
+  name: naval-arena-64x40
+starting_cash: 0
+
+base:
+  agent: {faction: allies, cash: 0}
+  enemy: {faction: soviet, cash: 0, bot_type: ''}
+  tools: [move_units, attack_unit, attack_move, stop]
+  planning: true
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+  termination: {max_ticks: 6000}
+  actors: []
+  # Water band — a 2-cell-wide channel along the western shore
+  # (x=15, x=16 span every y in the playable rect). Ships spawn IN
+  # the channel; the shore garrison stands at x=18, one cell east
+  # of the shore. The destroyer's primary armament reaches across
+  # the shoreline (range ~5 cells using the engine's fallback
+  # weapon; longer with the vendored RA `Stinger` weapon).
+  #
+  # `water_rect: [x, y, w, h]` is lifted from `base` by
+  # `ScenarioPack.compile` and re-emitted by `_scenario_to_tmp_yaml`,
+  # so the engine's `oramap::parse_scenario_yaml` sees it on the
+  # temp YAML the env loads. The engine stamps each cell as
+  # ground-impassable / ship-passable in `env::build_world_for_episode`.
+  water_rect: [15, 2, 2, 36]
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # One destroyer, one target. Bare shore-strike skill.
+  easy:
+    description: >
+      One allied destroyer (dd) starts in the western water channel
+      (x=15, y=20). A single soviet rifleman (e1) stands on the
+      shore at (x=18, y=20). The destroyer cannot move onto land,
+      but its primary armament reaches across the shoreline. Win
+      when the rifleman is killed.
+    overrides:
+      actors:
+        - {type: dd, owner: agent, position: [15, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [18, 20], stance: 0}
+        # Persistent far enemy marker — prevents engine auto-done
+        # when the rifleman falls, so the win evaluator sees the
+        # kill in the terminal frame.
+        - {type: fact, owner: enemy, position: [55, 35]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 1}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Two destroyers, three rifle infantry on the shore. The agent
+  # must concentrate fire OR split sensibly; a stall policy or one
+  # that drives ships ashore still loses.
+  medium:
+    description: >
+      Two allied destroyers in the western water channel (x=15,
+      y=18/22). Three soviet rifle infantry on the shore at x=18,
+      y=18/20/22. Kill all three before tick 2700.
+    overrides:
+      actors:
+        - {type: dd, owner: agent, position: [15, 18], stance: 2}
+        - {type: dd, owner: agent, position: [15, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [18, 18], stance: 0}
+        - {type: e1, owner: enemy, position: [18, 20], stance: 0}
+        - {type: e1, owner: enemy, position: [18, 22], stance: 0}
+        - {type: fact, owner: enemy, position: [55, 35]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 3}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two destroyers vs four rifle infantry + one rocket soldier (e3).
+  # The e3 is the priority threat — its Dragon launcher penetrates
+  # the dd's heavy armour. Focus-fire the e3 first; ignore it and
+  # an unlucky volley sinks a destroyer (busts own_units_gte:1).
+  hard:
+    description: >
+      Two destroyers in the channel (x=15, y=18/22). Soviet shore
+      garrison: four e1 rifle infantry at x=18 (y=17/19/21/23) and
+      one e3 rocket soldier (the priority threat) at x=18, y=20.
+      Kill the entire garrison (5 units) before tick 2700; keep at
+      least one destroyer alive.
+    overrides:
+      actors:
+        - {type: dd, owner: agent, position: [15, 18], stance: 2}
+        - {type: dd, owner: agent, position: [15, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [18, 17], stance: 0}
+        - {type: e1, owner: enemy, position: [18, 19], stance: 0}
+        - {type: e3, owner: enemy, position: [18, 20], stance: 0}
+        - {type: e1, owner: enemy, position: [18, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [18, 23], stance: 0}
+        - {type: fact, owner: enemy, position: [55, 35]}
+    win_condition:
+      all_of:
+        - {units_killed_gte: 5}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30

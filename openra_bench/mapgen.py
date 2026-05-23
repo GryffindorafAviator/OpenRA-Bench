@@ -69,6 +69,24 @@ def _arena(spec: dict):
     return grid, (w, h), bounds, spawns, spec.get("title", f"Arena {w}x{h}")
 
 
+@generator("naval-arena")
+def _naval_arena(spec: dict):
+    """Naval-arena: an open rectangle (like `arena`) with a documented
+    convention that the SCENARIO YAML supplies a `water_rect:` block to
+    declare the playable water band. The generator itself does NOT
+    emit map.bin water tiles for the band — the C# tile encoding for
+    "playable water that ships can traverse" is not yet plumbed in the
+    Rust engine, so the engine reads naval terrain from the scenario
+    YAML overlay (`oramap::MapDef::water_cells`).
+
+    Params: width, height, cordon, title. Identical shape to `arena`
+    so the generator returns the same grid; the only difference is a
+    distinct content-addressed id so callers can tell naval scenarios
+    apart in the generated-maps cache.
+    """
+    return _arena(spec)
+
+
 def _map_bin(grid) -> bytes:
     h = len(grid)
     w = len(grid[0])

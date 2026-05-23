@@ -67,11 +67,29 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     sched = getattr(compiled, "scheduled_events", None) or []
     if sched:
         data["scheduled_events"] = sched
+    # Resource-wave `ore_patches:` — same lifting pattern as
+    # `scheduled_events`. Each entry is `{x, y, amount, radius}` and
+    # the engine (`oramap.rs::read_ore_patches`) materialises it into
+    # a disk of ore cells on the terrain at world-build time.
+    ore = getattr(compiled, "ore_patches", None) or []
+    if ore:
+        data["ore_patches"] = ore
     # No-fog perception cells (fog_mode ends with "-clear") flip the
     # engine's `reveal_map` flag: the agent observes the whole map with
     # no fog of war — the clear half of the perception ablation grid.
     if getattr(compiled, "reveal_map", False):
         data["reveal_map"] = True
+    # Naval-MVP overlay: forward declared `water_cells:` and
+    # `water_rect:` so the Rust engine marks the corresponding
+    # terrain cells as ship-passable / ground-impassable. Without
+    # this lift the engine's terrain stays all-grass and ships have
+    # nowhere to move.
+    wc = getattr(compiled, "water_cells", None) or []
+    if wc:
+        data["water_cells"] = [list(c) for c in wc]
+    wr = getattr(compiled, "water_rect", None)
+    if wr:
+        data["water_rect"] = list(wr)
     fd = tempfile.NamedTemporaryFile(
         "w", suffix=f"_{compiled.pack_id}_{compiled.level}.yaml", delete=False
     )

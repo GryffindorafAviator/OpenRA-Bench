@@ -1,0 +1,135 @@
+# Validate: python -m openra_bench.scenarios.validate packs/spec-tanya-c4-strike.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# SPEC-TANYA-C4-STRIKE — special-ability capability cell for the new
+# `Command.c4_detonate` order (Allied hero `tanya` walks to an enemy
+# building and plants C4: the building is INSTANTLY destroyed on
+# adjacency; Tanya survives the detonation).
+#
+# Capability under test: "use Tanya's C4 to demolish a hardened enemy
+# structure" — a unique action verb that ISN'T capture/move/attack.
+# The win predicate is `enemy_buildings_destroyed_gte: 1` (the target
+# proc must be destroyed). A brute / attack-only policy LOSES because:
+#   • Tanya's pistol is anti-infantry — it would take >100 outer ticks
+#     to chew through a `proc` (90 000 HP) at her ~500 dps, which is
+#     a meaningful budget bite and exposes her to any defender;
+#   • a stall policy never moves Tanya, the proc stays alive, and the
+#     explicit `after_ticks` fail clause bites;
+#   • `Command.attack_unit` against a building works but is SLOW; the
+#     hard tier's deadline is set so only the C4 instant-destroy path
+#     wins before the clock.
+# Only `Command.c4_detonate([tanya_id], proc_id)` wins reliably across
+# the tiers.
+#
+# Real-world anchor: a sapper / demolition specialist walks up to a
+# fortified target, plants charges, exfils — the asset is gone in
+# one decisive action rather than a sustained engagement.
+
+meta:
+  id: spec-tanya-c4-strike
+  title: 'Tanya C4 Strike — Instant-Destroy an Enemy Building'
+  capability: action
+  real_world_meaning: >
+    Demolition doctrine — a specialist hero asset (Tanya commando)
+    plants C4 on an enemy STRUCTURE and instantly destroys it,
+    surviving the blast. The decision is "commit the hero to the
+    walk-up + plant", not "trade fire". A stall policy or a generic
+    attack-with-pistol policy is too slow.
+  robotics_analogue: >
+    A demolition / EOD asset dispatched to a hardened adversary
+    structure: walk to it, place the charge, exfil. The asset
+    survives; the target does not. The verb is "demolish in one
+    action", distinct from "wear down by fire" or "seize ownership".
+  author: engine-tanya-task
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Minimal toolset — c4_detonate is the load-bearing verb;
+  # move_units / attack_unit / set_stance are present so brute /
+  # wrong-tool policies can be expressed and observed to LOSE.
+  tools: [observe, move_units, attack_unit, set_stance, c4_detonate]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Tanya 6 cells west of an undefended enemy proc. The walk takes
+  # ~6 inner ticks; the agent emits one `c4_detonate` order.
+  easy:
+    description: >
+      Tanya stands next to an undefended enemy refinery. One
+      c4_detonate call walks her up and demolishes the proc.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: tanya, owner: agent, position: [16, 20]}
+        - {type: proc,  owner: enemy, position: [22, 20]}
+        # Far persistent enemy marker — prevents engine auto-done
+        # when the proc falls so the win predicate is evaluated.
+        - {type: fact,  owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {enemy_buildings_destroyed_gte: 1}
+        - {within_ticks: 1500}
+    fail_condition: {after_ticks: 1501}
+    max_turns: 20
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Two stance:0 (HoldFire) e1 defenders flank the proc — they do
+  # NOT auto-engage Tanya. The capability is still pure C4 walk-up;
+  # the defenders are scenery that a brute attack_unit policy might
+  # divert onto. A correct policy ignores them and C4s the proc.
+  medium:
+    description: >
+      Two stance:0 enemy riflemen idle next to the enemy proc; they
+      will not open fire. The agent must walk Tanya past them and
+      C4 the proc, ignoring the bait.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: tanya, owner: agent, position: [14, 20]}
+        - {type: proc,  owner: enemy, position: [22, 20]}
+        - {type: e1,    owner: enemy, position: [20, 19], stance: 0}
+        - {type: e1,    owner: enemy, position: [20, 21], stance: 0}
+        - {type: fact,  owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {enemy_buildings_destroyed_gte: 1}
+        - {within_ticks: 2000}
+    fail_condition: {after_ticks: 2001}
+    max_turns: 25
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two stance:2 e1 defenders + farther proc. The defenders WILL
+  # open fire on Tanya in range, so a naive policy that delays the
+  # C4 (e.g. attack-trade with the defenders) takes meaningful HP
+  # damage. The proc is 12 cells away on a different latitude, so
+  # the walk is longer and the deadline tightens further. The C4
+  # path still wins; attack-the-proc-with-pistol times out.
+  hard:
+    description: >
+      Defended target: two stance:2 enemy e1 cover the approach to
+      the enemy proc, which sits ~12 cells east. The agent must
+      commit Tanya to a direct C4 strike (her HP comfortably
+      absorbs the trade); a brute pistol-attack on the proc times
+      out before the clock.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: tanya, owner: agent, position: [10, 22]}
+        - {type: proc,  owner: enemy, position: [24, 18]}
+        - {type: e1,    owner: enemy, position: [20, 18], stance: 2}
+        - {type: e1,    owner: enemy, position: [22, 18], stance: 2}
+        - {type: fact,  owner: enemy, position: [120, 20]}
+    win_condition:
+      all_of:
+        - {enemy_buildings_destroyed_gte: 1}
+        - {within_ticks: 2700}
+    fail_condition: {after_ticks: 2701}
+    max_turns: 30

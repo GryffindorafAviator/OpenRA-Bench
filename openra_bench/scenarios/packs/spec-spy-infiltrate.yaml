@@ -1,0 +1,155 @@
+# Validate: python -m openra_bench.scenarios.validate packs/spec-spy-infiltrate.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# SPEC-SPY-INFILTRATE — special-ability capability cell for the
+# `Command.infiltrate` engine order using a `spy` infiltrator. A spy
+# walks into an enemy building and on adjacency triggers a one-shot
+# scan: every structure owned by the target's owner enters the agent's
+# `enemy_buildings_seen_ids` set (surviving fog), and the spy is
+# consumed.
+#
+# Capability under test: "infiltrate to OBSERVE — gain perfect
+# information of the enemy's structures without firing a shot". The
+# load-bearing win predicate is `buildings_discovered_gte: K` where K
+# strictly exceeds the count of enemy buildings the spy can see by
+# walking up to the target alone — so the load-bearing fact is the
+# scan, not the walk.
+#
+# Why brute / stall / wrong-target policies LOSE:
+#   * `stall` (observe-only) — the hidden enemy buildings stay
+#     fogged, `buildings_discovered_gte` never trips, fail_condition
+#     after_ticks bites.
+#   * `wander` (move_units toward unrelated cells) — the spy never
+#     reaches the proc, no scan, same timeout.
+#   * `attack_unit` (impossible — spy carries no Armament; the order
+#     is a no-op) — proc stays alive but unrevealed; timeout.
+#   * `move_units` to the proc cell — the spy walks adjacent (which
+#     ALSO reveals the proc by sight) but does NOT scan the rest;
+#     only the proc enters the discovered set (count = 1 < K).
+# Only `Command.infiltrate([spy_id], proc_id)` wins.
+#
+# Real-world anchor: a non-combatant operative pre-positioned at a
+# civilian-coded facility (a meter reader, an inspector, a hot-mic
+# planted at a substation) — entry triggers a one-shot intelligence
+# dump of the operator's full network, not just the visited node.
+
+meta:
+  id: spec-spy-infiltrate
+  title: 'Spy Infiltrate — One-Shot Scan of an Enemy Network'
+  capability: action
+  real_world_meaning: >
+    Specialist re-tasked from "observe-by-line-of-sight" to
+    "observe-by-infiltration" — entering a single facility reveals
+    the operator's FULL portfolio of structures, not just the
+    visited node. The spy is consumed in the process, so the
+    decision is irreversible and the operator chooses WHICH facility
+    to enter (only one chance per spy).
+  robotics_analogue: >
+    A passive sensor smuggled inside an unattended adversary node
+    that, on arrival, beacons home an inventory of every other node
+    on the operator's network. Single-use; the sensor cannot be
+    recovered.
+  author: engine-infiltrate-task
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Minimal toolset — infiltrate is the load-bearing verb.
+  # move_units / attack_unit / observe are present so brute / wander /
+  # stall policies can be expressed (and demonstrated to LOSE).
+  tools: [observe, move_units, attack_unit, infiltrate]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Spy 4 cells west of an undefended enemy proc. The proc is the
+  # SAME enemy player's network as three structures placed in fog
+  # elsewhere on the map. The spy's natural sight (~4 cells) covers
+  # just the proc once adjacent — count = 1. The infiltrate scan
+  # reveals all 4 (proc + 3 distant); the predicate requires ≥4.
+  easy:
+    description: >
+      Walk your spy into the enemy refinery (proc) to scan the
+      enemy network. The scan reveals every enemy structure on
+      the map, including ones outside your spy's line of sight.
+      Win = ≥4 enemy buildings discovered before tick 2000.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: spy,  owner: agent, position: [16, 20]}
+        - {type: proc, owner: enemy, position: [20, 20]}
+        # Three additional enemy structures placed in fog far from
+        # the spy's natural walk path. None are visible to the spy
+        # by line-of-sight alone — only the infiltrate scan reveals
+        # them.
+        - {type: powr, owner: enemy, position: [110, 90]}
+        - {type: barr, owner: enemy, position: [115, 95]}
+        - {type: silo, owner: enemy, position: [105, 100]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 4}
+        - {within_ticks: 2000}
+    fail_condition: {after_ticks: 2001}
+    max_turns: 25
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Longer walk + a slightly richer enemy network. Five hidden
+  # structures plus the entry proc → discover threshold ≥6.
+  medium:
+    description: >
+      Walk your spy several cells to reach the enemy refinery
+      (proc), then infiltrate to scan their network. Win = ≥6
+      enemy buildings discovered before tick 3000.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: spy,  owner: agent, position: [10, 25]}
+        - {type: proc, owner: enemy, position: [22, 18]}
+        - {type: powr, owner: enemy, position: [100, 80]}
+        - {type: powr, owner: enemy, position: [100, 90]}
+        - {type: barr, owner: enemy, position: [108, 85]}
+        - {type: silo, owner: enemy, position: [115, 88]}
+        - {type: fact, owner: enemy, position: [120, 100]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 6}
+        - {within_ticks: 3000}
+    fail_condition: {after_ticks: 3001}
+    max_turns: 35
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two spies (redundancy: one can die to the defender) + a stance:2
+  # enemy rifleman near the proc. The agent must NOT spam attack
+  # orders (spy carries no weapon) and must reach the proc before
+  # the defender wipes both spies before arrival.
+  hard:
+    description: >
+      Defended target: a stance:2 enemy e1 guards the proc. The
+      agent has two spies (redundancy) but must still infiltrate
+      before the defender or the clock kills both. Win = ≥7 enemy
+      buildings discovered before tick 4000.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: spy,  owner: agent, position: [10, 22]}
+        - {type: spy,  owner: agent, position: [10, 18]}
+        - {type: proc, owner: enemy, position: [24, 20]}
+        - {type: e1,   owner: enemy, position: [22, 20], stance: 2}
+        - {type: powr, owner: enemy, position: [100, 80]}
+        - {type: powr, owner: enemy, position: [100, 90]}
+        - {type: barr, owner: enemy, position: [108, 85]}
+        - {type: silo, owner: enemy, position: [115, 88]}
+        - {type: fact, owner: enemy, position: [120, 100]}
+        - {type: tent, owner: enemy, position: [110, 100]}
+    win_condition:
+      all_of:
+        - {buildings_discovered_gte: 7}
+        - {within_ticks: 4000}
+    fail_condition: {after_ticks: 4001}
+    max_turns: 50

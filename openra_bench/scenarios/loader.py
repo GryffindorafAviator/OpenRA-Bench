@@ -72,7 +72,14 @@ def discover_packs(directory: str | Path | None = None) -> list[ScenarioPack]:
     return packs
 
 
-def is_map_supported(base_map: str) -> bool:
+def is_map_supported(base_map: str | dict) -> bool:
+    # A dict `base_map` is a generator spec (see `mapgen.resolve_base_map`).
+    # We materialise it to a real id first, then resolve the resulting
+    # `.oramap` path the loader scans.
+    if isinstance(base_map, dict):
+        from ..mapgen import resolve_base_map
+
+        base_map = resolve_base_map(base_map)
     return resolve_map_path(base_map) is not None
 
 

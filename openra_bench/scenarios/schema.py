@@ -21,6 +21,12 @@ from openra_rl_training.scenario import ScenarioDefinition
 # map props since they aren't units/buildings. Extend the in-place set
 # so economy scenarios can place ore. Engine-supported only.
 _orts.VALID_ACTOR_TYPES |= {"mine", "gmine"}
+# `tanya` is the Allied hero infantry (added to the engine on the
+# wip-tanya branch). The training-side VALID_ACTOR_TYPES is sourced
+# from the historical openra_env.game_data table that pre-dates her;
+# the engine accepts her actor entry already, we just need the bench
+# validator to recognise the type.
+_orts.VALID_ACTOR_TYPES |= {"tanya"}
 from pydantic import BaseModel, Field, field_validator
 
 from .win_conditions import WinCondition
@@ -201,6 +207,22 @@ class CompiledLevel(BaseModel):
     # so it's preserved on the CompiledLevel instead of the inner
     # scenario, and re-attached at YAML-write time.
     scheduled_events: list[dict[str, Any]] = Field(default_factory=list)
+    # Resource-wave `ore_patches:` — list of `{x, y, amount, radius}`
+    # dicts the engine materialises into disks of harvestable ore at
+    # world-build time. ScenarioDefinition (training) doesn't know
+    # about this field so it's preserved on the CompiledLevel and
+    # re-attached at YAML-write time, mirroring `scheduled_events`.
+    ore_patches: list[dict[str, Any]] = Field(default_factory=list)
+    # Naval-MVP overlay: explicit `water_cells:` (list of `[x, y]`) and
+    # `water_rect:` (a single `[x, y, w, h]`) blocks declare WATER
+    # cells on top of an otherwise-grass map. The engine treats each
+    # such cell as ground-impassable and ship-passable. Same lift
+    # pattern as `scheduled_events` / `ore_patches` —
+    # `ScenarioDefinition` doesn't know about these fields so they
+    # ride on the CompiledLevel and are re-attached by
+    # `_scenario_to_tmp_yaml`.
+    water_cells: list[list[int]] = Field(default_factory=list)
+    water_rect: list[int] | None = None
 
     @property
     def reveal_map(self) -> bool:
@@ -278,6 +300,18 @@ class ScenarioPack(BaseModel):
         # ScenarioDefinition ignores the field (extra='ignore') so
         # without this step the events would be silently dropped.
         sched_events = list(merged.get("scheduled_events") or [])
+        # Resource-wave: lift `ore_patches:` for the same reason —
+        # ScenarioDefinition strips it silently. Without this lift the
+        # patches never reach the temp YAML and the engine seeds zero
+        # ore on the terrain.
+        ore_patches = list(merged.get("ore_patches") or [])
+        # Naval-MVP: lift `water_cells:` and `water_rect:` overlay
+        # blocks so `_scenario_to_tmp_yaml` can forward them to the
+        # engine. ScenarioDefinition strips them silently otherwise.
+        water_cells = [
+            list(c) for c in (merged.get("water_cells") or [])
+        ]
+        water_rect = merged.get("water_rect")
         return CompiledLevel(
             pack_id=self.meta.id,
             level=level,
@@ -293,6 +327,9 @@ class ScenarioPack(BaseModel):
             objective_coords=lvl.objective_coords,
             forbidden_tools=list(lvl.forbidden_tools or []),
             scheduled_events=sched_events,
+            ore_patches=ore_patches,
+            water_cells=water_cells,
+            water_rect=list(water_rect) if water_rect is not None else None,
         )
 
     def config_names(self) -> list[str]:

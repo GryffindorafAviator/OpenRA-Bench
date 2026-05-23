@@ -1,0 +1,122 @@
+# Validate: python -m openra_bench.scenarios.validate packs/spec-engineer-capture.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# SPEC-ENGINEER-CAPTURE — special-ability capability cell for the new
+# `Command.capture_actor` order (Allied/Soviet engineer `e6` walks to
+# an enemy building and CAPTURES it: ownership transfers to the
+# capturer's player AND the engineer is consumed).
+#
+# Capability under test: "use the engineer to seize an enemy
+# structure" — a unique action verb that ISN'T destroy/move/attack.
+# The win predicate is `has_building: proc` (the target enemy
+# refinery, once captured, surfaces in the agent's `own_buildings`).
+# A brute / attack-only policy LOSES because:
+#   • a single `e1`/`e3` can't even scratch a `proc` (90 000 HP) in
+#     the agent's budget;
+#   • the engineer carries no weapon — sending it on `attack_unit`
+#     is a no-op and the engineer just stands there;
+#   • a stall policy never moves the engineer, the proc stays enemy-
+#     owned, and the explicit `after_ticks` fail clause bites.
+# Only `Command.capture_actor([engineer_id], proc_id)` wins.
+#
+# Real-world anchor: civilian / non-combat operative re-tasked to
+# transfer an asset's ownership (an installer pre-deploys credentials
+# onto a target machine, a salvage crew claims a derelict, a
+# physical-world hijack of an unmanned facility).
+
+meta:
+  id: spec-engineer-capture
+  title: 'Engineer Capture — Seize an Enemy Building'
+  capability: action
+  real_world_meaning: >
+    Specialist re-assignment of an enemy asset's OWNERSHIP — the
+    win condition is "the target is mine now", not "the target is
+    destroyed". The only worker that can do it is the engineer
+    (e6); attacking it with anything else either no-ops or destroys
+    the asset and loses the capture window.
+  robotics_analogue: >
+    A non-combat utility robot dispatched to an unattended adversary
+    facility to flip its ownership (load fresh credentials / re-key
+    a lock / claim a derelict), consuming the agent in the process.
+  author: engine-capture-task
+
+base_map: rush-hour-arena
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, cash: 0}
+  # Minimal toolset — capture_actor is the load-bearing verb;
+  # move_units / attack_unit are present so the brute / wrong-tool
+  # policies can be expressed and observed to LOSE.
+  tools: [observe, move_units, attack_unit, capture_actor]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Engineer 4 cells west of an undefended enemy proc. The walk
+  # takes ~4 outer ticks; the agent must just emit one
+  # `capture_actor` order and idle.
+  easy:
+    description: >
+      Engineer next door to an undefended enemy refinery.
+      One capture_actor call wins.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: e6,   owner: agent, position: [16, 20]}
+        - {type: proc, owner: enemy, position: [20, 20]}
+    win_condition:
+      all_of:
+        - {has_building: proc}
+        - {within_ticks: 2000}
+    fail_condition: {after_ticks: 2001}
+    max_turns: 25
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Longer walk + a wall of trees (no defenders) between engineer
+  # and proc — pathing still solves it but the deadline tightens.
+  medium:
+    description: >
+      Engineer must traverse ~12 cells to reach the enemy proc;
+      the deadline is tighter and the engineer is on a different
+      latitude (must path around).
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: e6,   owner: agent, position: [10, 25]}
+        - {type: proc, owner: enemy, position: [22, 18]}
+    win_condition:
+      all_of:
+        - {has_building: proc}
+        - {within_ticks: 3000}
+    fail_condition: {after_ticks: 3001}
+    max_turns: 35
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two engineers (one decoy / backup) + a stance:2 enemy rifleman
+  # near the proc. The agent must NOT use attack_unit on the proc
+  # (it's invulnerable to the e6 / e1 tools at hand) and must time
+  # the capture so the defender doesn't kill both engineers before
+  # arrival.
+  hard:
+    description: >
+      Defended target: a stance:2 enemy e1 guards the proc. The
+      agent has two engineers (redundancy) but must still capture
+      before the defender or the clock wipes them.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: e6,   owner: agent, position: [10, 22]}
+        - {type: e6,   owner: agent, position: [10, 18]}
+        - {type: proc, owner: enemy, position: [24, 20]}
+        - {type: e1,   owner: enemy, position: [22, 20], stance: 2}
+    win_condition:
+      all_of:
+        - {has_building: proc}
+        - {within_ticks: 4000}
+    fail_condition: {after_ticks: 4001}
+    max_turns: 50
