@@ -646,9 +646,14 @@ def write_report(stats: dict, path: str | Path) -> None:
 
 def _resolve_packs(spec: str | None) -> list[Path]:
     if not spec:
+        # Recurse so quarantined packs in `_archive/` are surfaced —
+        # they get short-circuited into `skipped` by the quarantine
+        # check in `evaluate(...)`, but they MUST be discoverable so
+        # the audit hygiene test can confirm the default sweep
+        # excludes them.
         return [
             p
-            for p in sorted(PACKS_DIR.glob("*.yaml"))
+            for p in sorted(PACKS_DIR.rglob("*.yaml"))
             if not p.name.startswith(("_", "TEMPLATE"))
         ]
     p = Path(spec)
