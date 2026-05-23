@@ -1694,6 +1694,391 @@ def _study_next(prev_sess, st):
     return _study_render(st, prev_sess)
 
 
+# ── Playlist mode (cold-start non-gamer UX) ──────────────────────────
+# A separate, simpler tab from `Play` (sandbox/debug) and the 24-pack
+# `Study` accordion (recruited tester). The Playlist tab walks a
+# non-gamer through `NOVICE_PLAYLIST` — a curated 20-pack list whose
+# objectives are visually obvious and whose tool surface fits the
+# reduced palette (move/attack/build/end-turn). Plain-language
+# objective above the minimap, jargon-substituted everywhere, auto-
+# advance on game-over, progress bar at the top, summary table at the
+# end. The underlying engine session is the same `InteractiveSession`
+# the `Play` tab uses (and the 24-pack study uses), so a Playlist run
+# is still apples-to-apple with a model run on the same scenario.
+
+def _playlist_state(player: str = "anon") -> dict:
+    """Initial Playlist tab state — the curated 20-pack list, idx 0,
+    no completed games yet, no game-over timestamp."""
+    from openra_bench.playlist import NOVICE_PLAYLIST
+
+    return {
+        "player": (player or "").strip() or "anon",
+        "playlist": list(NOVICE_PLAYLIST),
+        "idx": 0,
+        "results": [],            # list of session_summary_row dicts
+        "done_at": None,          # wall-clock when current game ended
+        "submitted": False,       # baseline already posted
+    }
+
+
+def _playlist_progress_md(st: dict) -> str:
+    """The progress bar at the top of the Playlist tab — '1 of 20',
+    plus the text bar so a non-gamer can see at-a-glance how far
+    they've come."""
+    from openra_bench.playlist import playlist_progress_bar
+
+    pl = st.get("playlist") or []
+    total = len(pl)
+    idx = int(st.get("idx", 0) or 0)
+    if total == 0:
+        return "_Enter your name and click **Start playlist** to begin._"
+    if idx >= total:
+        return f"### ✅ Playlist complete — {total} of {total}\n\n`{'▮' * 20}  100%`"
+    bar = playlist_progress_bar(idx, total)
+    return f"### Scenario {idx + 1} of {total}  ·  player `{st.get('player', 'anon')}`\n\n`{bar}`"
+
+
+def _playlist_objective_md(sess) -> str:
+    """The plain-English 1-2 sentence objective shown above the
+    minimap. Drops jargon and the structured WIN/LOSE machine block —
+    those live behind the **Details** expand instead."""
+    if sess is None:
+        return ""
+    from openra_bench.playlist import simplify_objective
+
+    raw = (getattr(sess, "objective", "") or "").strip()
+    if not raw:
+        return ""
+    plain = simplify_objective(raw)
+    if not plain:
+        plain = simplify_objective(raw, max_chars=600)
+    return f"### 🎯 Your goal\n{_md_escape(plain)}"
+
+
+def _playlist_details_md(sess) -> str:
+    """The full briefing (jargon, win clauses, fail clauses) tucked
+    behind the **Details** expand. Same content `_play_briefing_md`
+    shows in the Play tab — an interested tester can still drill in."""
+    if sess is None:
+        return ""
+    try:
+        from openra_bench.human_labeling import HumanController
+        from openra_bench.playlist import simplify_text
+
+        brief = HumanController._briefing(sess.render_state())
+    except Exception:  # noqa: BLE001
+        brief = ""
+    plain_brief = simplify_text(brief)
+    obj = (getattr(sess, "objective", "") or "").strip()
+    plain_obj = simplify_text(obj)
+    return (
+        f"**Full objective**\n\n{plain_obj}\n\n"
+        f"**Per-turn briefing (model sees the same):**\n```\n"
+        f"{plain_brief}\n```"
+    )
+
+
+def _playlist_status_md(sess, st: dict) -> str:
+    """Status line under the minimap. After a game ends, append the
+    auto-advance countdown so the player knows the next scenario is
+    coming."""
+    base = _play_status_md(sess)
+    if sess is None or not getattr(sess, "done", False):
+        return base
+    from openra_bench.playlist import AUTO_ADVANCE_WAIT_SECONDS
+
+    pl = st.get("playlist") or []
+    idx = int(st.get("idx", 0) or 0)
+    n = len(pl)
+    outcome = (getattr(sess, "outcome", "draw") or "draw").upper()
+    if idx + 1 >= n:
+        tail = "Final scenario complete — see your **Session summary** below."
+    else:
+        tail = (
+            f"**Game {idx + 1} of {n}: {outcome}** — next scenario in "
+            f"{int(AUTO_ADVANCE_WAIT_SECONDS)}s. Click **Skip wait ▶** to go now."
+        )
+    return f"{base}\n\n{tail}"
+
+
+def _playlist_should_show_build(sess) -> bool:
+    """Hide the Build textbox unless the active pack actually exposes
+    a build verb — keeps the UI sparse for the move-and-shoot majority.
+    """
+    if sess is None:
+        return False
+    try:
+        from openra_bench.playlist import needs_build_tool
+
+        compiled = getattr(sess, "compiled", None)
+        meta = getattr(compiled, "meta", None) if compiled else None
+        # Pack-level `tools:` lives on compile_config / pack.base.
+        tools = (
+            getattr(compiled, "tools", None)
+            or getattr(getattr(compiled, "scenario", None), "tools", None)
+            or []
+        )
+        return needs_build_tool(tools or []) and not getattr(sess, "done", False)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _playlist_simplified_units_df(sess, sel):
+    """Same as `_play_units_df` but with the `type` column run through
+    the jargon dictionary so the table shows 'medium tank' instead of
+    '2tnk'. Engine-side ids are unchanged — the click-to-select path
+    still works."""
+    df = _play_units_df(sess, sel)
+    if df is None or not len(df) or "type" not in df.columns:
+        return df
+    try:
+        from openra_bench.playlist import simplify_text
+
+        df = df.copy()
+        df["type"] = df["type"].map(
+            lambda t: simplify_text(str(t)) if t is not None else t
+        )
+        return df
+    except Exception:  # noqa: BLE001
+        return df
+
+
+def _playlist_summary_df(st: dict):
+    """Session-end summary table — one row per game played so far. Used
+    in the 'Session summary' panel that appears once the playlist is
+    complete (or the player clicks 'End session')."""
+    rows = list(st.get("results") or [])
+    if not rows:
+        return pd.DataFrame(columns=[
+            "Game", "Scenario", "Level", "Outcome", "Turns", "Max Turns",
+        ])
+    return pd.DataFrame(rows)
+
+
+def _playlist_render(st: dict, prev_sess):
+    """Open a Playlist session for `st`'s current cell and render it.
+    Mirrors `_study_render` but produces the simplified Playlist
+    panel set."""
+    if prev_sess is not None:
+        try:
+            prev_sess.close()
+        except Exception:  # noqa: BLE001
+            pass
+    empty_units = _play_units_df(None, [])
+    pl = st.get("playlist") or []
+    idx = int(st.get("idx", 0) or 0)
+    if idx >= len(pl):
+        # Playlist complete — return the summary view, no session.
+        return (
+            None, [], [], "", None, "", "_session complete_",
+            empty_units, st, _playlist_progress_md(st),
+            _playlist_summary_df(st), gr.update(visible=True),
+            gr.update(visible=False),
+        )
+    pack, level = pl[idx]
+    try:
+        from openra_bench.human_labeling import InteractiveSession
+
+        sess = InteractiveSession.from_pack(
+            pack, level, seed=1, player=st.get("player", "anon"),
+        )
+    except Exception as e:  # noqa: BLE001
+        # Engine wheel missing — friendly message, never crash.
+        msg = (
+            f"⚠️ Could not start `{pack}:{level}` — `{e}`.\n\n"
+            "Tip: from the repo root, run "
+            "`cd OpenRA-Rust && PATH=$HOME/.cargo/bin:/opt/anaconda3/bin:$PATH "
+            "maturin develop --release` first to install the engine wheel."
+        )
+        return (
+            None, [], [], msg, None, "",
+            "_engine wheel not installed — see the message above_",
+            empty_units, st, _playlist_progress_md(st),
+            _playlist_summary_df(st), gr.update(visible=False),
+            gr.update(visible=False),
+        )
+    img, _brief, _status, _units = _play_render(sess, [], [], False)
+    return (
+        sess, [], [], _playlist_objective_md(sess), img,
+        _playlist_details_md(sess), _playlist_status_md(sess, st),
+        _playlist_simplified_units_df(sess, []), st,
+        _playlist_progress_md(st), _playlist_summary_df(st),
+        gr.update(visible=False),  # summary panel hidden during play
+        gr.update(visible=_playlist_should_show_build(sess)),
+    )
+
+
+def _playlist_start(prev_sess, player):
+    """The single 'Start playlist' click — set up state, open game 1."""
+    st = _playlist_state(player)
+    return _playlist_render(st, prev_sess)
+
+
+def _playlist_record_outcome(sess, st: dict) -> dict:
+    """If the current session has finished and we haven't recorded
+    its result yet, append it to `st['results']`. Returns the updated
+    state dict (may be the same object)."""
+    if sess is None:
+        return st
+    if not getattr(sess, "done", False):
+        return st
+    pl = st.get("playlist") or []
+    idx = int(st.get("idx", 0) or 0)
+    results = list(st.get("results") or [])
+    if idx >= len(pl) or idx < len(results):
+        return st  # already recorded for this idx
+    pack, level = pl[idx]
+    from openra_bench.playlist import session_summary_row
+
+    results.append(session_summary_row(
+        idx=idx, pack=pack, level=level,
+        outcome=str(getattr(sess, "outcome", "draw") or "draw"),
+        turns=int(getattr(sess, "turn", 0) or 0),
+        max_turns=int(getattr(sess, "max_turns", 0) or 0),
+    ))
+    new_st = dict(st)
+    new_st["results"] = results
+    if new_st.get("done_at") is None:
+        new_st["done_at"] = time.time()
+    return new_st
+
+
+def _playlist_click(sess, sel, queue, show_obj, evt):
+    """Wrapper around `_play_click` that swaps the unit-table output
+    for the jargon-simplified version. Matches `_play_click`'s 5-output
+    signature so it drops in to the same `pl_img.select` wiring."""
+    new_sel, new_queue, brief, _units, img = _play_click(
+        sess, sel, queue, show_obj, evt
+    )
+    return (
+        new_sel, new_queue, brief,
+        _playlist_simplified_units_df(sess, new_sel), img,
+    )
+
+
+def _playlist_clear_selection(sess, queue, show_obj):
+    sel, brief, _units, img = _play_clear_selection(sess, queue, show_obj)
+    return sel, brief, _playlist_simplified_units_df(sess, sel), img
+
+
+def _playlist_clear_queue(sess, sel, show_obj):
+    queue, brief, _units, img = _play_clear_queue(sess, sel, show_obj)
+    return queue, brief, _playlist_simplified_units_df(sess, sel), img
+
+
+def _playlist_build_item(sess, sel, queue, item, show_obj):
+    queue, item_out, brief, _units, img = _play_build_item(
+        sess, sel, queue, item, show_obj
+    )
+    return (
+        queue, item_out, brief,
+        _playlist_simplified_units_df(sess, sel), img,
+    )
+
+
+def _playlist_end_turn(sess, sel, queue, st):
+    """End-turn for Playlist mode. After advancing the engine, if the
+    game just ended, stamp `done_at` so the auto-advance countdown can
+    fire."""
+    if sess is not None and not sess.done:
+        try:
+            sess.submit_turn(list(queue))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("playlist submit_turn failed: %s", e)
+    img, _brief, _status, _units = _play_render(sess, [], [], False)
+    new_st = _playlist_record_outcome(sess, st or {})
+    return (
+        sess, [], [], img, _playlist_details_md(sess),
+        _playlist_status_md(sess, new_st),
+        _playlist_simplified_units_df(sess, []), new_st,
+        gr.update(visible=_playlist_should_show_build(sess)),
+    )
+
+
+def _playlist_advance(prev_sess, st):
+    """Move to the next pack — fired by the auto-advance Timer or the
+    manual 'Skip wait ▶' button."""
+    if not st or "playlist" not in st:
+        return _playlist_render(_playlist_state(), prev_sess)
+    new_st = dict(st)
+    new_st["idx"] = int(new_st.get("idx", 0) or 0) + 1
+    new_st["done_at"] = None
+    return _playlist_render(new_st, prev_sess)
+
+
+_PL_TICK_NOOP_OUTPUTS = 13  # length of _pl_render_outs
+
+
+def _playlist_tick(sess, st):
+    """Auto-advance Timer tick. If the current game has been over for
+    >= AUTO_ADVANCE_WAIT_SECONDS seconds, advance to the next pack;
+    otherwise return state unchanged. The Timer fires every 1s while
+    the tab is active."""
+    from openra_bench.playlist import (
+        AUTO_ADVANCE_WAIT_SECONDS,
+        playlist_should_advance,
+    )
+
+    noop = tuple(gr.skip() for _ in range(_PL_TICK_NOOP_OUTPUTS))
+    if not st or not isinstance(st, dict):
+        return noop
+    if sess is None or not getattr(sess, "done", False):
+        return noop
+    done_at = st.get("done_at")
+    if not playlist_should_advance(
+        True, done_at, time.time(), AUTO_ADVANCE_WAIT_SECONDS
+    ):
+        return noop
+    return _playlist_advance(sess, st)
+
+
+def _playlist_submit_baseline(st):
+    """Post the playlist's per-game outcomes to the bench raw-games log
+    as `agent_type=Human`. Idempotent — a second click is a no-op."""
+    if not st:
+        return "_no session to submit_", st
+    if st.get("submitted"):
+        return "_already submitted_", st
+    rows = list(st.get("results") or [])
+    if not rows:
+        return "_no completed games yet — play at least one scenario_", st
+    player = (st.get("player") or "anon").strip() or "anon"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    saved = 0
+    for r in rows:
+        outcome = str(r.get("Outcome", "DRAW")).lower()
+        # The Submit tab consumes a richer JSON blob than we have here;
+        # mirror its expected shape so the leaderboard pipeline picks
+        # the rows up identically to a model run.
+        try:
+            _save_raw_game({
+                "agent_name": player,
+                "agent_type": "Human",
+                "opponent": "Beginner",
+                "scenario": f"{r.get('Scenario')}:{r.get('Level')}",
+                "result": outcome,
+                "win": outcome == "win",
+                "kills_cost": 0,
+                "deaths_cost": 0,
+                "assets_value": 0,
+                "ticks": int(r.get("Turns", 0) or 0) * 90,
+                "timestamp": timestamp,
+                "replay_url": "",
+                "agent_url": "",
+                "hf_username": "",
+            })
+            saved += 1
+        except Exception as e:  # noqa: BLE001
+            logger.warning("playlist submit row failed: %s", e)
+    new_st = dict(st)
+    new_st["submitted"] = True
+    return (
+        f"✅ Submitted {saved} game(s) for `{player}` as **Human** baseline. "
+        f"They will appear in the leaderboard once aggregated.",
+        new_st,
+    )
+
+
 def build_app() -> gr.Blocks:
     """Build the Gradio leaderboard app."""
     initial_df = add_type_badges(load_data())
@@ -2145,6 +2530,174 @@ def build_app() -> gr.Blocks:
                     outputs=play_img,
                 )
                 app.load(fn=None, js=_PLAY_KEYBOARD_JS)
+
+            # ── Playlist Tab (cold-start non-gamer UX) ───────────────────
+            # The Play tab is a sandbox / power-user UI: 210 packs in a
+            # dropdown, full briefings, full tool palette. The Playlist
+            # tab is the COLD-START non-gamer UX: one click to start, a
+            # curated 20-pack list (no dropdown — the player never picks
+            # a pack), a 1-2 sentence plain-English objective above the
+            # minimap (no jargon), only move/attack/build/end-turn, an
+            # auto-advance countdown when a game ends, and a session
+            # summary with a 'Submit baseline' button at the end.
+            #
+            # Underneath this is the same `InteractiveSession` the Play
+            # tab uses (and the 24-pack study uses), so the playback /
+            # leaderboard format is apples-to-apple with model runs on
+            # the same scenarios.
+            with gr.Tab("Playlist"):
+                gr.Markdown(
+                    "## Beginner Playlist — 20 scenarios, ~60-90 minutes\n\n"
+                    "A curated tour of the bench, hand-picked for "
+                    "non-gamers: visible green tanks, visible red "
+                    "enemies, drive units to yellow rings or attack "
+                    "what's in front of you. **No game knowledge "
+                    "needed.** Enter your name, hit **Start**, and play "
+                    "each scenario to game-over — the next one loads "
+                    "automatically.\n\n"
+                    "**How to play.** Click your green unit to select "
+                    "it (click again to deselect; click several to "
+                    "build a group). With units selected, click empty "
+                    "ground to **move** there, or click a red enemy "
+                    "to **attack** it. **End Turn** advances time. The "
+                    "minimap shows yellow rings where you need to go."
+                )
+                pl_sess = gr.State(None)
+                pl_sel = gr.State([])
+                pl_queue = gr.State([])
+                pl_state = gr.State({})
+                # A constant 'show objectives = False' state — reused by
+                # `_play_click` / `_play_clear_*` so the Playlist tab can
+                # share Play-tab handlers without the objective-rings
+                # toggle (objectives are surfaced via the plain-English
+                # text above the minimap, not as on-map rings).
+                pl_show_obj_const = gr.State(False)
+
+                pl_progress = gr.Markdown(_playlist_progress_md({}))
+                with gr.Row():
+                    pl_player = gr.Textbox(
+                        label="Your name", placeholder="e.g. Alex",
+                        scale=3,
+                    )
+                    pl_start_btn = gr.Button(
+                        "▶ Start playlist", variant="primary", scale=1,
+                    )
+                    pl_skip_btn = gr.Button(
+                        "Skip wait ▶", scale=1, visible=True,
+                    )
+
+                pl_objective = gr.Markdown()
+                pl_status = gr.Markdown(_play_status_md(None))
+                pl_img = gr.Image(
+                    label="Minimap — click your green unit, then click "
+                    "where to send it (move) or click a red enemy (attack)",
+                    interactive=False, show_label=True,
+                )
+                pl_units = gr.Dataframe(
+                    label="Your units (▶ = selected, shown at top)",
+                    headers=_PLAY_UNIT_COLS,
+                    interactive=False, wrap=True,
+                )
+                with gr.Accordion("Details (advanced)", open=False):
+                    pl_details = gr.Markdown()
+                with gr.Row(visible=False) as pl_build_row:
+                    pl_build_item = gr.Textbox(
+                        label="Build item",
+                        placeholder="e.g. e1, pbox",
+                        scale=2,
+                    )
+                    pl_build_btn = gr.Button("Queue build", scale=1)
+                with gr.Row():
+                    pl_clearsel_btn = gr.Button(
+                        "✖ Clear selected units", scale=1,
+                    )
+                    pl_clear_btn = gr.Button(
+                        "Cancel queued orders", scale=1,
+                    )
+                    pl_end_btn = gr.Button(
+                        "End Turn ▶", variant="primary", scale=2,
+                    )
+
+                # Session-end summary panel — hidden until the playlist
+                # finishes (or `_playlist_render` toggles it).
+                with gr.Group(visible=False) as pl_summary_panel:
+                    gr.Markdown("### 📊 Session summary")
+                    pl_summary_df = gr.Dataframe(
+                        headers=["Game", "Scenario", "Level", "Outcome",
+                                 "Turns", "Max Turns"],
+                        interactive=False, wrap=True,
+                    )
+                    pl_submit_btn = gr.Button(
+                        "Submit baseline", variant="primary",
+                    )
+                    pl_submit_msg = gr.Markdown()
+
+                # Background timer — fires every 1s while the tab is
+                # active. When the current game is over and the
+                # 5-second wait has elapsed, advance to the next pack.
+                pl_timer = gr.Timer(1.0, active=True)
+
+                _pl_render_outs = [
+                    pl_sess, pl_sel, pl_queue, pl_objective, pl_img,
+                    pl_details, pl_status, pl_units, pl_state,
+                    pl_progress, pl_summary_df, pl_summary_panel,
+                    pl_build_row,
+                ]
+                pl_start_btn.click(
+                    _playlist_start, inputs=[pl_sess, pl_player],
+                    outputs=_pl_render_outs,
+                )
+                pl_skip_btn.click(
+                    _playlist_advance, inputs=[pl_sess, pl_state],
+                    outputs=_pl_render_outs,
+                )
+                pl_timer.tick(
+                    _playlist_tick, inputs=[pl_sess, pl_state],
+                    outputs=_pl_render_outs,
+                )
+
+                # Click on minimap → reuse the Play-tab handler (same
+                # selection / attack / move semantics). The Playlist tab
+                # never shows objective rings (objectives are surfaced
+                # via the plain-English text above the map).
+                pl_img.select(
+                    _playlist_click,
+                    inputs=[pl_sess, pl_sel, pl_queue, pl_show_obj_const],
+                    outputs=[pl_sel, pl_queue, pl_details, pl_units, pl_img],
+                )
+                pl_end_btn.click(
+                    _playlist_end_turn,
+                    inputs=[pl_sess, pl_sel, pl_queue, pl_state],
+                    outputs=[
+                        pl_sess, pl_sel, pl_queue, pl_img, pl_details,
+                        pl_status, pl_units, pl_state, pl_build_row,
+                    ],
+                )
+                pl_clearsel_btn.click(
+                    _playlist_clear_selection,
+                    inputs=[pl_sess, pl_queue, pl_show_obj_const],
+                    outputs=[pl_sel, pl_details, pl_units, pl_img],
+                )
+                pl_clear_btn.click(
+                    _playlist_clear_queue,
+                    inputs=[pl_sess, pl_sel, pl_show_obj_const],
+                    outputs=[pl_queue, pl_details, pl_units, pl_img],
+                )
+                pl_build_btn.click(
+                    _playlist_build_item,
+                    inputs=[
+                        pl_sess, pl_sel, pl_queue, pl_build_item,
+                        pl_show_obj_const,
+                    ],
+                    outputs=[
+                        pl_queue, pl_build_item, pl_details, pl_units,
+                        pl_img,
+                    ],
+                )
+                pl_submit_btn.click(
+                    _playlist_submit_baseline, inputs=[pl_state],
+                    outputs=[pl_submit_msg, pl_state],
+                )
 
             # ── About Tab ─────────────────────────────────────────────────
             with gr.Tab("About"):
