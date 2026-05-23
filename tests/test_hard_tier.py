@@ -1452,6 +1452,13 @@ UPGRADED = [
     "econ-tech-vs-expand-decision",  # hard: 2 agent spawn_point groups (Wave-12)
     "scout-deny-enemy-vision",  # hard: 2 agent spawn_point groups (Wave-12)
     "def-reinforce-the-breach",  # hard: 2 agent spawn_point groups (Wave-12)
+    # Custom map (econ-second-base-race-arena 112x40) tailored to
+    # the SPATIAL second-base placement skill; hard tier round-
+    # robins the agent corner NW (y=8) vs SW (y=32) per seed; the
+    # contested 2nd-proc target zone shifts to the opposite-
+    # diagonal corner (SE (88,30) for NW spawn / NE (88,8) for SW
+    # spawn) so a single memorised placement cannot generalise.
+    "econ-second-base-race",
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
