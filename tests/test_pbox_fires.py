@@ -55,7 +55,7 @@ _PREPLACED_PACK = textwrap.dedent(
     base_map: rush-hour-arena
     starting_cash: 1000
     base:
-      agent: {faction: allies}
+      agent: {faction: allies, cash: 1000}
       enemy: {faction: soviet, cash: 0}
       tools: [observe]
       spawn_mcvs: false
@@ -104,7 +104,7 @@ _BUILD_PACK = textwrap.dedent(
     base_map: rush-hour-arena
     starting_cash: 2000
     base:
-      agent: {faction: allies}
+      agent: {faction: allies, cash: 2000}
       enemy: {faction: soviet, cash: 0}
       tools: [observe, build, place_building]
       spawn_mcvs: false
