@@ -55,6 +55,23 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     # Rust scenario parser reads (default 5000 when unset).
     if compiled.starting_cash is not None:
         data["starting_cash"] = compiled.starting_cash
+    # Per-player cash plumbing footgun: `PlayerSetup.cash` defaults to
+    # `int = 0` (not Optional), so an unset `agent: {faction: ...}` in
+    # the pack serializes as `{faction: ..., cash: 0}`. With the
+    # engine's per-player-cash fix landed, that 0 silently OVERRIDES
+    # the top-level `starting_cash:` — production stalls because the
+    # agent has no money to consume. Defensive bench-side fix: if
+    # `agent.cash` / `enemy.cash` is 0 AND `starting_cash` > 0, STRIP
+    # the per-player cash field so the engine falls back to the
+    # top-level. (A pack that genuinely wants cash=0 should also set
+    # `starting_cash: 0`, in which case there's nothing to fall back
+    # to and the behavior is unchanged.)
+    _top_cash = int(data.get("starting_cash") or 0)
+    for _side in ("agent", "enemy"):
+        _block = data.get(_side)
+        if isinstance(_block, dict) and _block.get("cash", None) == 0 and _top_cash > 0:
+            _block.pop("cash", None)
+            data[_side] = _block
     # The Rust engine defaults spawn_mcvs:true → it auto-seeds MCVs at
     # the map's built-in spawn points (e.g. (124,36)), which reveal fog
     # and pollute unit counts for scenarios that never asked for them.
