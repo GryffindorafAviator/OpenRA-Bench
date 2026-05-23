@@ -74,6 +74,7 @@ _OWN = (60, 200, 90)            # your units
 _OWN_BLD = (60, 130, 230)       # your buildings
 _ENEMY = (225, 60, 55)          # enemy units
 _ENEMY_BLD = (240, 160, 40)     # enemy buildings
+_OBJECTIVE = (255, 218, 70)     # objective / target region
 
 
 def _draw_cell(px, w: int, h: int, cx: int, cy: int, rgb, r: int = 1) -> None:
@@ -257,6 +258,39 @@ def _draw_unit_shape(draw, cx, cy, cp, shape, color):
                 (cx + 1) * cp - m, (cy + 1) * cp - m, shape, color)
 
 
+def _draw_objective_region(draw, region, cp, w, h, index):
+    try:
+        cx = int(region["x"])
+        cy = int(region["y"])
+        radius = float(region.get("radius", 3))
+    except (KeyError, TypeError, ValueError):
+        return
+    if not (0 <= cx < w and 0 <= cy < h):
+        return
+
+    x0 = max(0, (cx - radius) * cp)
+    y0 = max(0, (cy - radius) * cp)
+    x1 = min(w * cp - 1, (cx + radius + 1) * cp - 1)
+    y1 = min(h * cp - 1, (cy + radius + 1) * cp - 1)
+    width = max(3, cp // 7)
+    draw.ellipse([x0, y0, x1, y1], outline=_OBJECTIVE, width=width)
+
+    mid_x, mid_y = (cx + 0.5) * cp, (cy + 0.5) * cp
+    arm = max(cp * 0.45, width * 2)
+    draw.line([(mid_x - arm, mid_y), (mid_x + arm, mid_y)],
+              fill=_OBJECTIVE, width=width)
+    draw.line([(mid_x, mid_y - arm), (mid_x, mid_y + arm)],
+              fill=_OBJECTIVE, width=width)
+
+    label = str(region.get("label") or f"OBJ {index}")
+    font = _minimap_font(max(11, int(cp * 0.7)))
+    draw.text(
+        (min(w * cp - cp * 4, max(2, x0 + cp * 0.2)), max(2, y0 - cp)),
+        label, fill=_OBJECTIVE, font=font,
+        stroke_width=max(2, cp // 12), stroke_fill=(0, 0, 0),
+    )
+
+
 def _draw_move_arrow(draw, fx, fy, tx, ty, cp, color):
     """Arrow from cell (fx,fy) centre to cell (tx,ty) centre — a unit's
     move/attack destination link."""
@@ -321,6 +355,10 @@ def render_tactical_minimap(
                     [x * cp, y * cp, (x + 1) * cp - 1, (y + 1) * cp - 1],
                     fill=_BG_EXPLORED,
                 )
+
+    for i, region in enumerate(render_state.get("objective_regions") or [], 1):
+        if isinstance(region, dict):
+            _draw_objective_region(draw, region, cp, w, h, i)
 
     # Collect every actor by cell so stacked units can be counted.
     by_cell: dict = {}
@@ -451,8 +489,8 @@ def render_tactical_minimap(
             x = int(tx + tw + cp * 0.7)
         draw.text(
             (int(cp * 0.4), ly + int(cp * 1.05)),
-            "green = you   red/orange = enemy   number = units stacked  "
-            " white box = selected   arrow = move/attack order",
+            "green = you   red/orange = enemy   yellow ring = objective  "
+            "number = units stacked   white box = selected   arrow = order",
             fill=(200, 202, 212), font=lfont,
         )
 

@@ -34,10 +34,16 @@ Bar (binding):
 from __future__ import annotations
 
 from pathlib import Path
+import importlib.util
 
 import pytest
 
 pytest.importorskip("openra_rl_training", reason="Rust env wheel not installed")
+
+ENGINE_TEST = pytest.mark.skipif(
+    importlib.util.find_spec("openra_train") is None,
+    reason="Rust env wheel not installed",
+)
 from openra_bench.scenarios import load_pack
 from openra_bench.scenarios.loader import compile_level
 from openra_bench.eval_core import run_level
@@ -267,6 +273,7 @@ def _charge(rs, C):
 
 @pytest.mark.parametrize("lv", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
+@ENGINE_TEST
 def test_intended_active_defence_wins(lv, seed):
     c = compile_level(load_pack(PACK), lv)
     res = run_level(c, _defend_fact, seed=seed)
@@ -278,6 +285,7 @@ def test_intended_active_defence_wins(lv, seed):
 
 @pytest.mark.parametrize("lv", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
+@ENGINE_TEST
 def test_stall_loses(lv, seed):
     c = compile_level(load_pack(PACK), lv)
     res = run_level(c, _stall, seed=seed)
@@ -289,6 +297,7 @@ def test_stall_loses(lv, seed):
 
 @pytest.mark.parametrize("lv", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
+@ENGINE_TEST
 def test_aggressive_charge_loses(lv, seed):
     c = compile_level(load_pack(PACK), lv)
     res = run_level(c, _charge, seed=seed)

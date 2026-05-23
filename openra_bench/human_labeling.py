@@ -47,6 +47,126 @@ TurnActions = "list[HumanAction]"
 InputSource = "Callable[[dict], list[HumanAction]] | Sequence[list[HumanAction]]"
 
 
+# ── Scenario hints for human play ───────────────────────────────────
+
+_REGION_PREDICATES = {
+    "reach_region",
+    "units_in_region_gte",
+    "units_of_type_in_region_gte",
+    "all_units_in_region",
+    "building_in_region",
+    "enemy_key_buildings_destroyed_in_region",
+}
+
+
+def _condition_node(cond: Any) -> dict:
+    if cond is None:
+        return {}
+    if isinstance(cond, dict):
+        return cond
+    return dict(getattr(cond, "__pydantic_extra__", None) or {})
+
+
+def _objective_regions_from_condition(cond: Any) -> list[dict]:
+    """Extract authored objective regions from a win-condition tree."""
+    out: list[dict] = []
+
+    def walk(node: Any) -> None:
+        data = _condition_node(node)
+        if not data:
+            return
+        for child in data.get("all_of") or []:
+            walk(child)
+        for child in data.get("any_of") or []:
+            walk(child)
+        if "not" in data:
+            walk(data["not"])
+        then = data.get("then")
+        if isinstance(then, dict):
+            for child in then.get("clauses") or []:
+                walk(child)
+        seq = data.get("waypoint_sequence")
+        if isinstance(seq, dict):
+            default_r = seq.get("radius", 6)
+            for i, point in enumerate(seq.get("points") or [], start=1):
+                if not isinstance(point, dict):
+                    continue
+                if "x" in point and "y" in point:
+                    out.append({
+                        "x": int(point["x"]),
+                        "y": int(point["y"]),
+                        "radius": float(point.get("radius", default_r)),
+                        "label": str(point.get("label") or f"W{i}"),
+                    })
+        for key in _REGION_PREDICATES:
+            v = data.get(key)
+            if not isinstance(v, dict) or "x" not in v or "y" not in v:
+                continue
+            label = v.get("label")
+            if not label:
+                if key == "units_in_region_gte":
+                    label = f">={int(v.get('n', 1))} units"
+                elif key == "units_of_type_in_region_gte":
+                    label = f">={int(v.get('n', 1))} {v.get('type')}"
+                elif key == "building_in_region":
+                    label = str(v.get("type") or "building")
+                else:
+                    label = key.replace("_", " ")
+            out.append({
+                "x": int(v["x"]),
+                "y": int(v["y"]),
+                "radius": float(v.get("radius", 3)),
+                "label": str(label),
+            })
+
+    walk(cond)
+    seen = set()
+    unique = []
+    for r in out:
+        key = (r["x"], r["y"], r["radius"], r["label"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(r)
+    return unique
+
+
+def _initial_type_by_id(scenario: Any, render_state: dict) -> dict[str, str]:
+    """Infer own unit types from authored initial placements.
+
+    Rust currently omits own-unit actor types in some observations, but
+    it preserves deterministic actor ids and initial cells. This maps the
+    initial visible units back to the scenario placements so the human UI
+    can distinguish 1tnk/2tnk/etc. after the units move.
+    """
+    expected: dict[tuple[int, int], list[str]] = {}
+    for actor in getattr(scenario, "actors", []) or []:
+        if str(getattr(actor, "owner", "")).lower() != "agent":
+            continue
+        pos = getattr(actor, "position", None)
+        if not pos or len(pos) < 2:
+            continue
+        cell = (int(pos[0]), int(pos[1]))
+        atype = str(getattr(actor, "type", "") or "").lower()
+        count = int(getattr(actor, "count", 1) or 1)
+        expected.setdefault(cell, []).extend([atype] * count)
+
+    observed: dict[tuple[int, int], list[str]] = {}
+    for unit in render_state.get("units_summary") or []:
+        if not isinstance(unit, dict) or unit.get("id") is None:
+            continue
+        cell = (int(unit.get("cell_x", 0)), int(unit.get("cell_y", 0)))
+        observed.setdefault(cell, []).append(str(unit["id"]))
+
+    out: dict[str, str] = {}
+    for cell, types in expected.items():
+        ids = sorted(observed.get(cell, []))
+        for uid, atype in zip(ids, types):
+            if atype:
+                out[uid] = atype
+    return out
+
+
 # ── Pixel ⇄ cell transforms ─────────────────────────────────────────
 
 
@@ -492,6 +612,13 @@ class InteractiveSession:
         self._env = self._pool.acquire()
         self._adapter = RustObsAdapter()
         self._adapter.observe(self._env.reset(seed=seed))
+        self._adapter.type_by_id.update(
+            _initial_type_by_id(compiled.scenario, self._adapter.render_state())
+        )
+        self._objective_regions = (
+            _objective_regions_from_condition(compiled.win_condition)
+            if compiled.objective_coords == "exact" else []
+        )
         self._forbidden = {
             str(t).lower() for t in (compiled.forbidden_tools or [])
         }
@@ -566,7 +693,10 @@ class InteractiveSession:
     def render_state(self) -> dict:
         """The current observation — the SAME render_state an LLM agent
         is shown for this scenario."""
-        return self._adapter.render_state()
+        rs = self._adapter.render_state()
+        if self._objective_regions:
+            rs["objective_regions"] = list(self._objective_regions)
+        return rs
 
     def status(self) -> dict:
         """Turn / outcome / done summary for the UI."""

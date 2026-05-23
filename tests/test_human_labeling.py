@@ -437,3 +437,20 @@ def test_interactive_session_emits_standard_playback(tmp_path):
         assert len(lines) == sess.turn
     finally:
         sess.close()
+
+
+def test_interactive_session_adds_play_hints_for_exact_objectives():
+    from openra_bench.human_labeling import InteractiveSession
+
+    sess = InteractiveSession.from_pack(
+        "action-multiunit-coordination", "easy", seed=1, record=False
+    )
+    try:
+        rs = sess.render_state()
+        types = {u.get("type") for u in rs.get("units_summary") or []}
+        assert {"1tnk", "2tnk"} <= types
+        regions = rs.get("objective_regions") or []
+        assert {r["x"] for r in regions} == {110}
+        assert {r["y"] for r in regions} == {6, 33}
+    finally:
+        sess.close()
