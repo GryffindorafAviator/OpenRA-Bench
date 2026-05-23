@@ -55,6 +55,7 @@ ACTOR_GLOSSARY: dict[str, str] = {
     "mine": "ore mine (resource node harvesters gather from)",
     "gun": "gun turret (anti-vehicle base defence)",
     "pbox": "pillbox (anti-infantry base defence)",
+    "brik": "concrete wall (inert obstacle; no weapon — channels but does not kill)",
     "tsla": "Tesla coil (powerful anti-everything defence)",
     "sam": "SAM site (anti-air defence)",
 }

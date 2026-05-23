@@ -746,19 +746,22 @@ UPGRADED = [
     # selected. MicroRTS pillbox placement / military quadrant
     # doctrine anchor.
     "build-defensive-skirt-corners",
-    # Wave-11 REASONING pack: passive-obstacle vs active-defense
-    # mitigation — one budget (3200cr) funds EITHER ~16 inert brik
-    # walls OR 4 active gun turrets. The win predicate requires a kill
-    # quota (units_killed_gte) only the gun turrets can deliver, so a
-    # walls-only spend (0 kills) and a stall both LOSE while the
-    # intended turret build WINS. Hard tier defines two agent
-    # spawn_point groups (NORTH fact y=14 / SOUTH fact y=26) round-
-    # robined by seed; the scheduled rush wave is staged at BOTH
-    # candidate latitudes (spawn_actors lists are not spawn_point-
-    # filtered) so the rusher converges on whichever fact the seed
-    # selected, and a memorised "turrets near (10,20)" plan cannot
-    # generalise. Security architecture passive-vs-active mitigation /
-    # military fortification anchor.
+    # Wave-11 REASONING pack: tier-differentiated defensive DOCTRINE
+    # — passive `brik` walls (200cr, no Armament) vs active `pbox`
+    # pillboxes (600cr, M60mg burst). The CORRECT doctrine differs
+    # per tier: easy = pure-pbox (frontal rush in the open); medium =
+    # walls+pbox CHOKE (overwhelming horde funnels through a single
+    # gap onto the pbox burst); hard = MIXED 2 pbox + 8 brik with a
+    # seed-driven fact flip. The win predicate requires `pbox` count,
+    # `brik` count (medium/hard only), AND a kill quota — so pure-
+    # walls (0 kills) and pure-pbox (no brik) both LOSE on medium/hard
+    # while still winning easy. Hard defines two agent spawn_point
+    # groups (NORTH fact y=14 / SOUTH fact y=26) round-robined by
+    # seed; the scheduled rush waves are staged at BOTH candidate
+    # latitudes so the rusher converges on whichever fact the seed
+    # selected, and a memorised "wall belt near (10,20)" plan cannot
+    # generalise. Security architecture passive-vs-active mitigation
+    # / military fortification anchor.
     "def-walls-vs-towers",
     # Wave-7 REASONING asymmetric-underdog pack — SC2 asymmetric /
     # guerrilla tactics / asymmetric warfare anchor. 2× 2tnk vs 4× e1
