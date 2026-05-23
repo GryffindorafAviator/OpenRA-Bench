@@ -52,8 +52,30 @@
 #     1-vs-1 instead of 1-vs-N; all 4 tanks survive, ≥5 e3 killed.
 #
 # Engine guardrails (per CLAUDE.md / SCENARIO_REVIEW_CHECKLIST.md):
-#   - Map: rush-hour-arena (128 × 40, playable x in [2..126],
-#     y in [2..38]). Strike force stages at x=6; enemy line at x=60.
+#   - Map: per-tier custom arena (128 × 48, cordon 2 ⇒ playable
+#     x in [2..125], y in [2..45]) generated via mapgen's `arena`
+#     generator with WATER obstacle clusters that physically
+#     reinforce the flanker-vs-frontal doctrine:
+#       * easy   — `combat-flanking-attack-easy`: ONE flank lane
+#                  (NORTH y=2..7). Middle band y=10..15 walled
+#                  across x=10..55 so a flanker MUST climb to y=2..7
+#                  via the west connector strip x=2..9. South half
+#                  y=24..45 walled across x=10..125 so south flank
+#                  is unavailable on easy.
+#       * medium — `combat-flanking-attack-medium`: TWO flank lanes
+#                  (NORTH y=2..7 + SOUTH y=40..45). Mid-bands
+#                  y=10..15 and y=25..30 walled across x=10..55 so
+#                  neither lane can be "shortened" inside the line's
+#                  Dragon range envelope.
+#       * hard   — `combat-flanking-attack-hard`: BOTH lanes open,
+#                  agent stages NORTH (y=14..17) or SOUTH (y=23..26)
+#                  per seed. Walls y=8..13 and y=27..32 across
+#                  x=10..55 close shallow shortcuts; the engagement
+#                  axis y=14..26 stays open so a brute marches into
+#                  the 10-e3 wall (LOSS), while the FAR flanks at
+#                  y=2..7 or y=40..45 are the only safe bypasses
+#                  (reached via west connector strip x=2..9).
+#     Strike force at x=6; enemy line at x=60.
 #   - Persistent far-east enemy `fact` keeps the episode alive past
 #     the moment the line is wiped, so the win/fail evaluator sees
 #     the terminal frame (no DRAW collapse on enemy-unit wipe).
@@ -152,6 +174,30 @@ levels:
       rocket soldiers at x=60. Kill three enemies, keep at least three
       tanks, within about 50 turns.
     overrides:
+      # EASY MAP — 128x48 arena (cordon 2 -> playable x in [2..125],
+      # y in [2..45]). ONE obvious flank corridor (NORTH y=2..7).
+      # Middle band y=10..15 walled across x=10..55 so a flanker
+      # climbing from the west stage at y=18..21 cannot "shortcut"
+      # close to the line; it must reach y=2..7 via the west
+      # connector strip x=2..9 (cordon-side, always clear). South
+      # half y=24..45 walled across x=10..55 so the south flank is
+      # impossible (easy tier teaches single-corridor recognition).
+      base_map:
+        generator: arena
+        name: combat-flanking-attack-easy
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Flanking-Attack — Easy (North Lane Only)'
+        obstacles:
+          # North middle wall — closes y=10..15 across x=10..55.
+          - {x: 10, y: 10, w: 46, h: 6}
+          # South wall — closes y=24..45 across x=10..125 so a south
+          # flank is unavailable on easy. (West strip x=2..9 stays
+          # clear; engagement strip x=56..125 also stays clear so
+          # the flanker can drive east on y=2..7 past the line and
+          # descend.)
+          - {x: 10, y: 24, w: 116, h: 22}
       actors:
         # STRIKE FORCE — 4 medium tanks stacked at the west edge,
         # stance:1 ReturnFire so they only engage when ordered.
@@ -168,8 +214,9 @@ levels:
         - {type: e3, owner: enemy, position: [60, 20], stance: 2}
         - {type: e3, owner: enemy, position: [60, 21], stance: 2}
         # Persistent far-east enemy fact — prevents engine auto-done
-        # on enemy unit wipe collapsing the run to DRAW.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # on enemy unit wipe collapsing the run to DRAW. Placed at
+        # y=4 inside the cleared north band so it remains placeable.
+        - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
         - {units_killed_gte: 3}
@@ -213,6 +260,24 @@ levels:
       Kill four enemies, keep at least three tanks, within about 50
       turns.
     overrides:
+      # MEDIUM MAP — 128x48 arena (cordon 2 -> playable x in [2..125],
+      # y in [2..45]). TWO flank corridors (NORTH y=2..7 + SOUTH
+      # y=40..45). Mid-bands y=10..15 and y=25..30 walled across
+      # x=10..55 so neither lane can be "shortened" by cutting
+      # close to the line (cutting at y=12 or y=28 would put the
+      # tank inside Dragon range of the e3 wall).
+      base_map:
+        generator: arena
+        name: combat-flanking-attack-medium
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Flanking-Attack — Medium (Two Flank Lanes)'
+        obstacles:
+          # North middle wall — closes y=10..15 across x=10..55.
+          - {x: 10, y: 10, w: 46, h: 6}
+          # South middle wall — closes y=25..30 across x=10..55.
+          - {x: 10, y: 25, w: 46, h: 6}
       actors:
         - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
@@ -223,14 +288,15 @@ levels:
         # e3 within Dragon range (~5) of a tank fires on that tank.
         # Frontal: lead tank at x=55..60, y=20 sits in range of
         # every e3 simultaneously ⇒ 5 rockets/turn focused on lead.
-        # Flank from y=8 or y=32 keeps all but the edge e3 out of
-        # range; only 1-2 e3 fire on the leading flanker at a time.
+        # Flank from y=2..7 (north lane) or y=40..45 (south lane)
+        # keeps all but the edge e3 out of range; only 1-2 e3 fire
+        # on the leading flanker at a time.
         - {type: e3, owner: enemy, position: [60, 18], stance: 2}
         - {type: e3, owner: enemy, position: [60, 19], stance: 2}
         - {type: e3, owner: enemy, position: [60, 20], stance: 2}
         - {type: e3, owner: enemy, position: [60, 21], stance: 2}
         - {type: e3, owner: enemy, position: [60, 22], stance: 2}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
         - {units_killed_gte: 4}
@@ -281,6 +347,34 @@ levels:
       stage in the north or south corridor depending on seed. Kill
       five enemies, keep at least three tanks, within about 50 turns.
     overrides:
+      # HARD MAP — 128x48 arena (cordon 2 -> playable y in [2..45]).
+      # BOTH flank corridors open (NORTH y=2..7 + SOUTH y=40..45),
+      # but the agent stages NORTH (y=14..17) or SOUTH (y=23..26)
+      # per seed. Walls y=8..13 and y=27..32 across x=10..55 close
+      # the shallow shortcuts that would otherwise let a tank
+      # diagonally cut close to the line at lower attrition. The
+      # engagement axis y=14..26 stays clear so a brute attack_move
+      # east still funnels into the line's kill envelope (LOSS),
+      # while the only safe bypass routes are the FAR flanks
+      # y=2..7 (north spawn) or y=40..45 (south spawn) reached via
+      # the west connector strip x=2..9 (cordon-side, always
+      # clear).
+      base_map:
+        generator: arena
+        name: combat-flanking-attack-hard
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Flanking-Attack — Hard (Spawn-Varied Flank)'
+        obstacles:
+          # North middle wall — closes y=8..13 across x=10..55. y=14
+          # stays clear so the NORTH staging corridor (y=14..17) is
+          # not isolated from the west connector x=2..9.
+          - {x: 10, y: 8,  w: 46, h: 6}
+          # South middle wall — closes y=27..32 across x=10..55. y=26
+          # stays clear so the SOUTH staging corridor (y=23..26) is
+          # not isolated from the west connector x=2..9.
+          - {x: 10, y: 27, w: 46, h: 6}
       actors:
         # spawn_point 0 — NORTH staging corridor (y=14..17). Closer
         # to the e3 line latitude so a frontal march MUST engage the
@@ -300,9 +394,9 @@ levels:
         # ⇒ every e3 in Dragon range of a tank fires on that tank.
         # Frontal from either spawn enters the kill envelope of
         # the entire 10-e3 wall (Manhattan ≤5 to all e3 from a tank
-        # on the engagement axis at x=55..62). Flank from y=8 or
-        # y=32 keeps all but the edge e3 out of range — sequenced
-        # 1-vs-1 engagement preserves the survival bar.
+        # on the engagement axis at x=55..62). Flank from y=2..7 or
+        # y=40..45 keeps all but the edge e3 out of range —
+        # sequenced 1-vs-1 engagement preserves the survival bar.
         - {type: e3, owner: enemy, position: [60, 17], stance: 2}
         - {type: e3, owner: enemy, position: [60, 18], stance: 2}
         - {type: e3, owner: enemy, position: [60, 19], stance: 2}
@@ -313,7 +407,7 @@ levels:
         - {type: e3, owner: enemy, position: [62, 19], stance: 2}
         - {type: e3, owner: enemy, position: [62, 21], stance: 2}
         - {type: e3, owner: enemy, position: [62, 22], stance: 2}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
         - {units_killed_gte: 5}
