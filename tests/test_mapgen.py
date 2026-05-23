@@ -67,3 +67,74 @@ def test_pack_with_generator_spec_compiles():
     hard = compile_level(p, "hard")
     assert hard.scenario.base_map == "scout-arena"
     assert hard.map_supported
+
+
+def test_arena_obstacles_paint_interior_water():
+    """Obstacles are WATER rectangles inside the playable area —
+    distinguishable from the cordon by their position."""
+    s = {"generator": "arena", "name": "test-obs-paint",
+         "width": 40, "height": 20, "cordon": 2,
+         "obstacles": [{"x": 10, "y": 8, "w": 4, "h": 2}]}
+    mid = materialize(s)
+    p = resolve_map_path(mid)
+    # Parse map.bin and confirm the (10,8)..(13,9) block is water but
+    # surrounding playable cells are clear.
+    blob = zipfile.ZipFile(p).read("map.bin")
+    w = int.from_bytes(blob[1:3], "little")
+    h = int.from_bytes(blob[3:5], "little")
+    tiles_off = int.from_bytes(blob[5:9], "little")
+    def cell(x, y):
+        idx = tiles_off + 3 * (x * h + y)
+        return int.from_bytes(blob[idx:idx + 2], "little")
+    assert (w, h) == (40, 20)
+    assert cell(10, 8) == 1 and cell(13, 9) == 1, "obstacle painted as water"
+    assert cell(20, 10) == 255, "interior outside obstacle stays clear"
+    assert cell(0, 0) == 1, "cordon corner still water"
+
+
+def test_bridges_arena_channel_with_gaps():
+    """Horizontal water band with explicit bridge gaps."""
+    s = {"generator": "bridges-arena", "name": "test-br-h",
+         "width": 60, "height": 30, "cordon": 2,
+         "channel_y": 14, "channel_width": 2,
+         "bridges": [{"pos": 20, "width": 3}]}
+    mid = materialize(s)
+    p = resolve_map_path(mid)
+    blob = zipfile.ZipFile(p).read("map.bin")
+    w = int.from_bytes(blob[1:3], "little")
+    h = int.from_bytes(blob[3:5], "little")
+    tiles_off = int.from_bytes(blob[5:9], "little")
+    def cell(x, y):
+        idx = tiles_off + 3 * (x * h + y)
+        return int.from_bytes(blob[idx:idx + 2], "little")
+    # Channel row 14 is water on the non-bridge cells
+    assert cell(40, 14) == 1, "off-bridge channel cell is water"
+    # Bridge gap (20..22) is clear
+    assert cell(20, 14) == 255 and cell(22, 14) == 255
+    # Row 13 (above channel) is open
+    assert cell(40, 13) == 255
+
+
+def test_chokepoint_arena_corridor_is_only_route():
+    """One narrow corridor across the wall; everywhere else along the
+    wall x-band is water."""
+    s = {"generator": "chokepoint-arena", "name": "test-chk",
+         "width": 60, "height": 30, "cordon": 2,
+         "pinch_x": 30, "pinch_width": 6, "corridor_width": 4,
+         "corridor_y": 14}
+    mid = materialize(s)
+    p = resolve_map_path(mid)
+    blob = zipfile.ZipFile(p).read("map.bin")
+    h = int.from_bytes(blob[3:5], "little")
+    tiles_off = int.from_bytes(blob[5:9], "little")
+    def cell(x, y):
+        idx = tiles_off + 3 * (x * h + y)
+        return int.from_bytes(blob[idx:idx + 2], "little")
+    # Corridor (y=12..15) clear at the pinch column
+    assert cell(30, 12) == 255 and cell(30, 15) == 255
+    # Above corridor (y=8) at the pinch is water
+    assert cell(30, 8) == 1
+    # Below corridor (y=22) at the pinch is water
+    assert cell(30, 22) == 1
+    # Open areas left/right of the wall still clear
+    assert cell(10, 14) == 255 and cell(50, 14) == 255
