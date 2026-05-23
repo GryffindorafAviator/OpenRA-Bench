@@ -190,3 +190,26 @@ a5014a5  Engine: per-player starting_cash + Rust test pinning
    above engine work lands.
 4. **Paper writeup**: PHASE5_FINDINGS.md F1 is the headline; cross-
    link into PAPER_PLAN.md §3.
+
+---
+
+## Session continuation — additional hardening landed
+
+### Defensive cash-strip in tmp-YAML serializer (commit b77e43d)
+The bench's `_scenario_to_tmp_yaml` now strips `agent.cash` /
+`enemy.cash` from the engine-bound YAML when they equal 0 AND
+`starting_cash` is non-zero. **Prevents the per-player-cash
+regression class for the 62 packs** that previously serialized
+`agent: {faction: ..., cash: 0}` and silently zeroed their
+`starting_cash`. Audited via the engine-feature smoke set: 103/103
+tests pass with no regression.
+
+### Phase 4 expansion in progress
+- `data/runs/paper-v1-engine-feature-packs/` — 60 cells Qwen3.5-9B
+- `data/runs/paper-v1-plus-medium/` — 8 cells Qwen3.6-Plus (F1 confirmed)
+- `data/runs/paper-v1-gemma-medium/` — 6 cells gemma-4-31B-it in
+  flight (slow inference)
+
+### Working tree state
+Clean — every modification is either committed to `pr13-revised`
+(bench) or `engine-feature-wave` (rust). All pushed to remotes.
