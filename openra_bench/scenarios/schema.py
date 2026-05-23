@@ -261,6 +261,22 @@ class ScenarioPack(BaseModel):
         ge=0,
         description="Pack-wide economy budget; a level may override it.",
     )
+    # Pack-wide top-level engine extras (RE-APPLIED — was reverted by an
+    # agent and the regression cost a full debug cycle). These live next
+    # to `base:` so a contributor can declare one set of `ore_patches:` /
+    # `water_cells:` / `scheduled_events:` once for the whole pack
+    # instead of restating them in every level's `overrides:`. A level
+    # may still override by restating the field inside `overrides:`
+    # (compile() falls back to the pack-level value only when the merged
+    # level value is empty). Without this declaration pydantic silently
+    # DROPS the top-level key, so `compile()` sees an empty list and the
+    # engine seeds zero ore / zero water cells / fires no events for
+    # easy + medium tiers (hard tier worked only because it re-declared
+    # the field inside its `overrides:` block).
+    ore_patches: list[dict[str, Any]] = Field(default_factory=list)
+    water_cells: list[list[int]] = Field(default_factory=list)
+    water_rect: list[int] | None = None
+    scheduled_events: list[dict[str, Any]] = Field(default_factory=list)
     levels: dict[LevelName, Level]
     # Optional named configurations. When present, the eval runs ONE
     # cell per config (pack:config_name) instead of the 3 raw levels —
@@ -299,19 +315,19 @@ class ScenarioPack(BaseModel):
         # `_scenario_to_tmp_yaml` can reattach it to the engine YAML.
         # ScenarioDefinition ignores the field (extra='ignore') so
         # without this step the events would be silently dropped.
-        sched_events = list(merged.get("scheduled_events") or [])
-        # Resource-wave: lift `ore_patches:` for the same reason —
-        # ScenarioDefinition strips it silently. Without this lift the
-        # patches never reach the temp YAML and the engine seeds zero
-        # ore on the terrain.
-        ore_patches = list(merged.get("ore_patches") or [])
-        # Naval-MVP: lift `water_cells:` and `water_rect:` overlay
-        # blocks so `_scenario_to_tmp_yaml` can forward them to the
-        # engine. ScenarioDefinition strips them silently otherwise.
+        # Lift pack-wide → level-override; fall back to pack-level when
+        # a level didn't restate the field. (Was reverted by an agent;
+        # re-applied with the same pattern that was originally tested.)
+        sched_events = list(
+            merged.get("scheduled_events") or self.scheduled_events or []
+        )
+        ore_patches = list(merged.get("ore_patches") or self.ore_patches or [])
         water_cells = [
-            list(c) for c in (merged.get("water_cells") or [])
+            list(c) for c in (merged.get("water_cells") or self.water_cells or [])
         ]
         water_rect = merged.get("water_rect")
+        if water_rect is None:
+            water_rect = self.water_rect
         return CompiledLevel(
             pack_id=self.meta.id,
             level=level,

@@ -1,218 +1,355 @@
+# ECON-MULTI-PATCH-ALLOCATION — choose WHICH ore patches to claim.
+#
+# REASONING capability — mid-game resource allocation across multiple
+# sites. The agent owns a Construction Yard + Power Plant (no home
+# refinery, no home harvester clump) and looks out at FOUR ore patches
+# scattered around the map, EACH with one pre-positioned idle Ore
+# Truck waiting beside it. A patch's harvester deposits only once a
+# refinery (`proc`) exists somewhere on the agent's side — the
+# per-tick `auto_route_idle_harvesters` engine hook installs a
+# Harvest activity on every idle owned harv the moment the owner has
+# a refinery.
+#
+# The decision is WHICH subset of patches to spend cash on building
+# refineries at: starting cash funds ONE refinery up front (1400 of
+# the 1500 budget); a SECOND refinery needs the deposits from the
+# first to clear. The win clause requires ≥ 2 refineries built AND a
+# cash bar reached inside the clock — so any single-proc opening
+# fails on the proc count, and stalling fails both clauses.
+#
+# ── Real-world / benchmark anchor ────────────────────────────────────
+#   • SC2 macro "2-base vs 3-base" decision: opening with the right
+#     number of mining bases (not too few, not too many for the
+#     cash) is the load-bearing macro choice for the first 5 minutes.
+#   • OR resource-allocation: pick a SUBSET of K candidate sites
+#     under a CAPEX cap so total throughput-over-deadline is
+#     maximised; the classic facility-location problem with a hard
+#     budget.
+#   • lmgame-Bench resource-streaming: maintain steady income across
+#     turns when raw resources are spatially scattered and the
+#     budget for processing units is finite.
+#
+# ── No-cheat bar (every losing play LOSES, the intended play WINS) ──
+#   • stall (observe-only): no procs ever built; auto-route never
+#     fires; cash stays at the 1500 starting wallet. Fails the
+#     ≥2-proc and the cash clauses. LOSES on after_ticks.
+#   • only-A (one proc dropped next to the near small patch): all
+#     four pre-staffed harvs auto-route to the lone proc and
+#     deposit (auto-route picks nearest free ore + ANY owned proc;
+#     a single proc on the map is everyone's deposit). The proc
+#     count is 1, the bar requires ≥2 — LOSES on the proc clause
+#     (even though raw cash easily passes).
+#   • only-B / only-C / only-D: same single-proc shape — proc count
+#     1 < 2 required. LOSES.
+#   • intended (build 2 procs and place each adjacent to a medium
+#     patch, e.g. B + C): two procs in time, the four pre-staffed
+#     harvs auto-route to nearest proc, ample patch supply means
+#     all four cycle multiple times, cash clears the bar.
+#     WINS.
+#   • claim-all-four (queue 4 procs serially): the engine completes
+#     the first ~3 procs in the time budget, sinking 3 × 1400 =
+#     4200 cr of cash; the 4th queued proc holds the rest of the
+#     cash buffer in the build queue. Final cash sits ~1600 — well
+#     below the cash bar — so claim-all-four LOSES on the
+#     `cash_gte` clause even though it has ≥ 2 procs. The
+#     discrimination teeth this pack plants are: stall / single-
+#     proc → LOSS on proc-count; claim-all-four → LOSS on cash;
+#     intended (2 procs at productive medium patches) → WIN on
+#     both clauses.
+#
+# ── Engine facts used (verified against installed openra_train wheel) ──
+#  1. `ore_patches:` top-level YAML — each `{x, y, amount, radius}`
+#     materialises a disk of ore on the terrain at world-build time
+#     (`oramap.rs::read_ore_patches`). Cell density `clamp(amount /
+#     cells, 1, 12)`; total extractable cr scales with `amount`.
+#  2. `auto_route_idle_harvesters` (per-tick world hook) installs a
+#     Harvest activity on any owned idle harvester whose owner owns
+#     a `proc`. Pre-positioning one harv beside each patch means
+#     placement of even ONE proc anywhere lights up all four
+#     harvs simultaneously — they auto-route to the proc that
+#     minimises round-trip.
+#  3. `place_building` does NOT enforce build-adjacency (CLAUDE.md),
+#     so a proc can be dropped at any in-bounds coord — the test is
+#     WHERE to site (or how many to site), not the build chain.
+#  4. `proc` cost 1400, `powr` cost 300 (gamerules.rs). The agent
+#     pack ships a powr already; starting cash 1500 starts ONE proc
+#     immediately and the second proc requires deposits from the
+#     first.
+#  5. ENGINE GAP — `place_building` for a NEW proc auto-spawns one
+#     fresh harvester adjacent to the cell of the FIRST owned proc,
+#     not adjacent to the new proc. So building a 2nd / 3rd / 4th
+#     proc does NOT give the agent strictly-MORE distributed
+#     harvesters per proc; the parallel-production speedup
+#     hypothesis (more procs → more parallel cycles) is bounded by
+#     this. The pack handles this by pre-positioning a separate
+#     harv at every patch so the decision is WHICH patch's
+#     deposit-chain to enable via a proc, not "where will my new
+#     auto-spawned harv land". (A future engine fix that spawns
+#     the new harv adjacent to the new proc would let this pack
+#     re-introduce a sharp "claim-all-four LOSES on timing"
+#     boundary; for now we document and accept.)
+#  6. Per-player cash plumbing — bench-wide footgun: must set
+#     `agent.cash` EXPLICITLY in `base.agent` (the engine reads
+#     `agent.cash` for the per-player wallet; the top-level
+#     `starting_cash` controls a separate parser default). Both
+#     are set to 1500 here for clarity.
+#  7. `cash_gte: N` reads `signals.cash` directly. Starting cash
+#     1500 is BELOW the bar (4500 / 5000 / 5500), so the win is
+#     reachable only via harvest deposits.
+#  8. Tick alignment (CLAUDE.md): engine advances ~90 ticks per
+#     decision turn, so `within_ticks ≤ 93 + 90·(max_turns − 1)`.
+#     `max_turns: 40` ⇒ ceiling 3603; `within_ticks 3600` and
+#     `after_ticks 3601` both fit so non-finishers LOSE (no DRAW).
+#  9. Persistent unarmed enemy `fact` at the far edge prevents
+#     `ConquestVictoryConditions` from auto-`done`-ing on enemy
+#     wipe (CLAUDE.md auto-done footgun).
+# 10. Hard tier — 2 distinct agent `spawn_point` groups (NORTH base
+#     at y=12 / SOUTH base at y=28) with the pre-staffed harvs ALSO
+#     declared per-spawn (per-owner spawn_point semantics filter
+#     agent actors when at least one declares spawn_point), so the
+#     agent's near-medium patches always sit at its OWN latitude.
+#     The ore patches themselves are NOT spawn-filtered (a single
+#     fixed map), but a memorised "always place at (40,8) and
+#     (40,32)" opening fails on the wrong-spawn seed because the
+#     four pre-staffed harvs are at different positions and the
+#     spawn-relative geometry rotates.
+
 meta:
   id: econ-multi-patch-allocation
-  title: Economy — Multi-Patch Harvester Allocation (Weber Multi-Source)
+  title: 'Multi-Patch Allocation — Pick Which Ore Patches To Commit To'
   capability: reasoning
   real_world_meaning: >
-    Multi-source resource allocation under heterogeneous transport
-    cost. The agent owns 3 harvesters and faces 3 (or 4 at hard)
-    pre-placed ore patches at varied distances from the single
-    refinery: a NEAR patch, a MID patch, and a FAR patch. Income per
-    harvester scales inversely with the round-trip travel time to the
-    refinery, so allocating a harvester to the FAR patch yields ~1000
-    cr over 4500 ticks while the NEAR patch yields ~9000 cr per
-    harvester over the same window. The naive "one harvester per
-    patch" uniform split — the textbook diversification heuristic from
-    a model with no transport-cost prior — is dominated by any
-    near-prioritising allocation. Stalling earns nothing and loses;
-    committing everything to FAR or MID also loses (travel kills
-    throughput). The capability under test is the OR Weber-multi /
-    SC2-mineral-patch insight: distance-weighted throughput, not
-    "spread parallelism", drives allocation.
+    Resource allocation across multiple candidate sites under a
+    hard capital budget. The agent has a Construction Yard and a
+    Power Plant in the west and looks out at four ore patches
+    scattered around the map, each with an idle Ore Truck waiting
+    beside it: one small near patch (depletes fast), two medium
+    patches at the medium-distance ring, and one rich patch at
+    the far east edge. Starting cash funds ONE refinery up front;
+    the second requires deposits from the first. The decision is
+    whether to commit to at least two refineries (the multi-patch
+    allocation insight), and which patches to commit them to —
+    stalling earns nothing and loses, a single-refinery opening
+    fails the proc-count clause, and the intended efficient play
+    is to commit to two medium-distance patches so parallel
+    harvest cycles deposit ample cash inside the deadline.
   robotics_analogue: >
-    Warehouse-to-supplier assignment in a multi-source supply chain
-    (Weber multi-source / facility-location): a fleet of collectors,
-    several supply nodes at heterogeneous distances from a single
-    depot, and the optimal policy assigns collectors to MINIMISE
-    weighted travel time, not to "use every source" out of false
-    diversification. Equivalently: server allocation across queueing-
-    theory stations where each station's service rate is already
-    set and the cost is the round-trip transit, so the lowest-
-    transit-cost station soaks the most capacity.
-  author: catalog-f3
+    A mining survey reports four candidate extraction sites with
+    different size and travel-cost profiles, and the day's CAPEX
+    budget covers no more than two processing depots up front.
+    The autonomous operations planner must (a) commit to building
+    more than one processing depot — running only one stalls the
+    quota — and (b) site them next to patches whose harvester
+    cycle-times stay short enough to deposit the quota before the
+    shift deadline. The capability under test is the
+    multi-site-investment decision under a small CAPEX cap, not a
+    single-site optimisation.
   benchmark_anchor:
-    - SC2LE worker / mineral patch allocation
-    - OR multi-source facility-location (Weber-multi-source)
-    - supply-chain warehouse-to-supplier assignment
-    - "queueing-theory: server allocation across patches"
+    - "OR resource-allocation"
+    - "SC2 macro 2-base vs 3-base"
+    - "lmgame-Bench resource-streaming"
+  author: openra-bench
 
-# ENGINE NOTE (verified 2026-05-19 against installed openra_train wheel,
-# post-S0/S1 harvest income — Task #14, scripted run_level seeds 1-4):
-# 1. Per-harvester yields over 4500 ticks (50 turns) on rush-hour-arena,
-#    proc at (12,18), harvs prestaged at (14,18..22):
-#       NEAR  (16,18)  — ~9000 cr/harv  (1 harv: 8000, 2: 18000, 3: 27325)
-#       MID   (40,18)  — ~2000 cr/harv  (1 harv: 2000, 2: 4000, 3: 6000)
-#       FAR   (80,18)  — ~1000 cr/harv  (1 harv: 1000, 2: 2000, 3: 3000)
-#    Yields scale linearly with harv count up to ~3 at NEAR (no
-#    contention observed); MID/FAR scale perfectly linearly because
-#    travel-time-bound, not ore-bound. The ~9x NEAR vs FAR ratio is
-#    the discrimination signal — the model must identify that distance
-#    dominates throughput, not "use every patch" diversification.
-# 2. The smoke-tested allocation outcomes at 4500 ticks (medium budget):
-#       stall                     0 cr           LOSS at any bar > 0
-#       3-to-FAR              3,000 cr           LOSS at bar > 3000
-#       3-to-MID              6,000 cr           LOSS at bar > 6000
-#       1-NEAR + 1-MID + 1-FAR (uniform)   11,000 cr   LOSS at bar ≥ 12000
-#       1-NEAR + 2-MID                     12,000 cr   LOSS at bar ≥ 13000
-#       2-NEAR + 1-FAR                     19,000 cr   WIN at bar ≤ 19000
-#       2-NEAR + 1-MID                     20,000 cr   WIN at bar ≤ 20000
-#       3-to-NEAR                         27,325 cr   WIN at bar ≤ 27000
-#    With bar = 14000, the WIN set is "any 2 or 3 harvs on the NEAR
-#    patch" (plus the trivial 3-to-NEAR); the LOSS set is "uniform
-#    split", "MID/FAR-only", and "stall" — exactly the capability
-#    asked. The uniform "one per patch" heuristic LOSES by ~3000 cr.
-# 3. The `harvest` order with an explicit target cell directs the harv
-#    to that specific patch (it does not auto-spread to other patches
-#    even after depleting; the order persists). This is the policy
-#    knob the model uses to pick a patch per harvester.
-# 4. Tick budget: engine advances ~90 ticks per decision turn. Easy
-#    and medium both use max_turns=50 → ceiling 4503 → within_ticks
-#    = 4500. Hard uses max_turns=80 → ceiling 7203 → within_ticks =
-#    7200. fail_condition.after_ticks sits at the same boundary so a
-#    non-finisher LOSES (not draws).
-# 5. The pre-placed proc + fact + harvs trigger ConquestVictoryConditions
-#    — without a persistent enemy actor the engine would auto-`done`
-#    once "all enemies dead" trivially. An unarmed e1 at (120,36)
-#    with stance:0 sits well outside the agent's harvest envelope so
-#    it can't be killed and the win/fail predicate evaluates cleanly.
-# 6. Hard tier spawn round-robin (verified seeds 1-4): seeds 1,3 pick
-#    spawn_point 1 (SOUTH base, proc at y=28); seeds 2,4 pick
-#    spawn_point 0 (NORTH base, proc at y=14). The four neutral
-#    mines place at the SAME cells across both spawns (CLAUDE.md:
-#    "spawn_point filter applies ONLY to AGENT actors"), but the
-#    NEAREST patch flips per seed — (16,14) for spawn 0 (NORTH),
-#    (16,28) for spawn 1 (SOUTH). A memorised "always send to
-#    (16,14)" policy loses on the SOUTH-base seeds (yield ~16500
-#    vs ~38000 on the matched-near patch), so the capability is
-#    "identify your nearest patch from your start, then allocate".
 base_map: rush-hour-arena
-starting_cash: 0
+starting_cash: 1500
 
 base:
-  agent:
-    faction: allies
-  enemy:
-    faction: soviet
-  tools:
-    - observe
-    - harvest
-    - move_units
-    - stop
+  # agent.cash MUST be set explicitly — the bench's PlayerSetup
+  # defaults `agent.cash: 0` and the engine reads `agent.cash` for
+  # the per-player wallet (engine fix pinned by
+  # `tests/test_per_player_starting_cash.py`). Without an explicit
+  # `cash: 1500` on the agent side the agent starts the episode
+  # broke and no proc build can ever complete.
+  agent: {faction: allies, cash: 1500}
+  enemy: {faction: soviet, cash: 0}
+  tools: [observe, build, place_building, move_units, harvest, stop]
+  spawn_mcvs: false
   planning: true
-  termination:
-    max_ticks: 40000
-  actors:
-    # Pre-placed agent base + 3 harvs centred on row y=18..22.
-    - {type: fact, owner: agent, position: [10, 22]}
-    - {type: proc, owner: agent, position: [12, 18]}
-    - {type: harv, owner: agent, position: [14, 18]}
-    - {type: harv, owner: agent, position: [14, 20]}
-    - {type: harv, owner: agent, position: [14, 22]}
-    # NEAR patch (~16 cells out — yields ~9000 cr/harv/4500t).
-    - {type: mine, owner: neutral, position: [16, 18]}
-    # MID patch (~28 cells from proc — yields ~2000 cr/harv/4500t).
-    - {type: mine, owner: neutral, position: [40, 18]}
-    # FAR patch (~68 cells from proc — yields ~1000 cr/harv/4500t).
-    - {type: mine, owner: neutral, position: [80, 18]}
-    # Inert enemy marker far from the harvest envelope keeps the
-    # episode from auto-terminating on "all enemies dead" before
-    # the win/fail predicate is evaluated.
-    - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+  termination: {max_ticks: 5000}
+  actors: []  # every level supplies its own actor list via overrides.
 
 levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Four-patch geometry on the central y=20 latitude. Bar is
+  # cash ≥ 4500 AND ≥ 2 refineries owned. Single-proc / stall
+  # openings fail on the proc-count clause; any 2-proc opening
+  # passes (claim-all-four ties intended on outcome — see engine
+  # gap #5 above). max_turns 40 ⇒ ceiling 3603.
   easy:
     description: >
-      Two patches (NEAR at (16,18), FAR at (80,18)) and 2 harvesters.
-      Sending BOTH to FAR yields only ~2000 cr — well below the 8000
-      bar; sending at least one to NEAR clears it (1 NEAR = 8000;
-      2 NEAR = 18000). Stalling earns nothing and loses. The capability
-      asked is "identify the near patch and prioritise it" — any
-      allocation that uses NEAR ≥ once wins; the FAR-only allocation
-      loses.
-    starting_cash: 0
+      You have a Construction Yard (`fact`) and a Power Plant
+      (`powr`) at your home base in the WEST. FOUR ore patches
+      are visible on the ore-cells channel, EACH with a
+      pre-positioned idle Ore Truck (`harv`) sitting next to it:
+        • Patch A near your base at (20,20) — small (≈500 ore,
+          radius 2). Drains fast.
+        • Patch B north at (40,8) — medium (≈2000, radius 3).
+        • Patch C south at (40,32) — medium (≈2000, radius 3).
+        • Patch D far east at (115,20) — rich (≈3500, radius 3),
+          but the round-trip distance from any home refinery
+          dominates throughput.
+      A harvester only deposits when a refinery (`proc`) exists
+      somewhere on your side (the auto-route hook installs a
+      Harvest activity on every idle owned harv the moment a proc
+      exists). You have $1500 — enough to START one proc (1400);
+      a second proc requires the income from the first. Win when
+      you OWN ≥ 2 refineries AND cash ≥ 4500 before tick 3600.
+      Stalling (no procs) and any single-proc opening (only-A,
+      only-D, only-B, only-C) miss the proc-count requirement.
+      The intended efficient play is to commit to the two
+      MEDIUM-distance patches B + C so two parallel harvest
+      cycles run on ample, short-round-trip patches.
+    starting_cash: 1500
     overrides:
       actors:
-        - {type: fact, owner: agent, position: [10, 22]}
-        - {type: proc, owner: agent, position: [12, 18]}
-        - {type: harv, owner: agent, position: [14, 18]}
-        - {type: harv, owner: agent, position: [14, 20]}
-        - {type: mine, owner: neutral, position: [16, 18]}
-        - {type: mine, owner: neutral, position: [80, 18]}
-        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+        # Home base — fact + powr only. No home proc, no home
+        # harv. The home proc is intentionally absent: the
+        # decision is exclusively WHERE / HOW MANY refineries to
+        # build (mine-and-grow already covers the "build any
+        # refinery at all" axis).
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        # One harvester pre-positioned next to EACH patch.
+        # auto_route_idle_harvesters routes each to the nearest
+        # owned proc the moment one exists. Patches without a
+        # sited proc have their harv idle indefinitely.
+        - {type: harv, owner: agent, position: [22, 20]}    # near A
+        - {type: harv, owner: agent, position: [38, 8]}     # near B
+        - {type: harv, owner: agent, position: [38, 32]}    # near C
+        - {type: harv, owner: agent, position: [113, 20]}   # near D
+        # Persistent far-edge enemy marker — auto-done blocker.
+        - {type: fact, owner: enemy, position: [125, 20]}
+      ore_patches:
+        - {x: 20, y: 20, amount: 500,  radius: 2}   # A — near, small
+        - {x: 40, y: 8,  amount: 2000, radius: 3}   # B — N medium
+        - {x: 40, y: 32, amount: 2000, radius: 3}   # C — S medium
+        - {x: 115, y: 20, amount: 3500, radius: 3}  # D — far rich
     win_condition:
       all_of:
-        - economy_value_gte: 8000
-        - within_ticks: 4500
-    # ceiling 93 + 90*49 = 4503 ⇒ deadline bites; non-finisher LOSES.
+        - {building_count_gte: {type: proc, n: 2}}
+        - {cash_gte: 4500}
+        - {within_ticks: 3600}
     fail_condition:
       any_of:
-        - after_ticks: 4500
-        - not: {own_units_gte: 1}
-        - not: {has_building: proc}
-    max_turns: 50
+        - {after_ticks: 3601}
+        - {not: {has_building: fact}}
+    max_turns: 40
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Same four-patch geometry as easy, TIGHTER cash bar (≥ 5000).
+  # Single-proc openings still fail on the proc-count clause; the
+  # cash bar is high enough that a 2-proc play needs both procs
+  # placed at productive patches (procs on patch A alone, where
+  # patch A drains too fast, fall short on cash even at proc
+  # count 2 — but the placement options are the same as easy).
   medium:
     description: >
-      Three patches (NEAR (16,18), MID (40,18), FAR (80,18)) and 3
-      harvesters. The naive "one harv per patch" uniform split yields
-      ~11000 cr — below the 14000 bar; allocations that prioritise
-      NEAR (2+ harvs on NEAR, or all 3) clear it cleanly. Allocating
-      ZERO harvs to NEAR (uniform 1/1/1, or any MID/FAR-only policy)
-      loses. The capability asked is the OR Weber-multi insight —
-      distance-weighted throughput, not parallelism per source.
-    starting_cash: 0
-    win_condition:
-      all_of:
-        - economy_value_gte: 14000
-        - within_ticks: 4500
-    # ceiling 93 + 90*49 = 4503 ⇒ deadline bites; non-finisher LOSES.
-    fail_condition:
-      any_of:
-        - after_ticks: 4500
-        - not: {own_units_gte: 1}
-        - not: {has_building: proc}
-    max_turns: 50
-  hard:
-    description: >
-      Four patches and 3 harvesters, with the base round-robined
-      between NORTH (y=14) and SOUTH (y=28) per seed. The neutral
-      mines stay at (16,14)/(16,28)/(40,18)/(80,18) — so the NEAREST
-      patch FLIPS per seed (NORTH spawn → (16,14); SOUTH spawn →
-      (16,28)). A memorised "always send to (16,14)" policy loses on
-      the SOUTH-base seeds (~16500 cr vs ~38000 cr on the matched-
-      near patch). Bar 22000 cr in 7200 ticks requires ≥2 harvs on
-      the spawn-matched NEAR patch; the naive uniform 1/1/1/0 split
-      across three patches yields ~16500-23000 cr (depending on
-      which patch is dropped) — too noisy to clear reliably. Stalling
-      and any FAR-only / wrong-NEAR allocation lose.
-    starting_cash: 0
+      Same four-patch geometry and pre-positioned harvesters as
+      easy (A small near, B medium N, C medium S, D rich far).
+      Tighter bar: ≥ 2 refineries owned AND cash ≥ 5000 before
+      tick 3600. Stalling and any single-proc opening fail the
+      proc-count clause; the intended play is to commit to the
+      two medium-distance patches B + C so two parallel harvest
+      cycles deposit enough cash inside the deadline.
+    starting_cash: 1500
     overrides:
       actors:
-        # spawn_point 0 — base NORTH (proc + harvs around y=14).
-        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
-        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 13], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 15], spawn_point: 0}
-        # spawn_point 1 — base SOUTH (proc + harvs around y=28).
-        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
-        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
-        - {type: harv, owner: agent, position: [14, 27], spawn_point: 1}
-        - {type: harv, owner: agent, position: [14, 28], spawn_point: 1}
-        - {type: harv, owner: agent, position: [14, 29], spawn_point: 1}
-        # Four shared patches — identical to both spawns; the NEAREST
-        # flips per seed (NORTH → (16,14); SOUTH → (16,28)).
-        - {type: mine, owner: neutral, position: [16, 14]}
-        - {type: mine, owner: neutral, position: [16, 28]}
-        - {type: mine, owner: neutral, position: [40, 18]}
-        - {type: mine, owner: neutral, position: [80, 18]}
-        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: harv, owner: agent, position: [22, 20]}
+        - {type: harv, owner: agent, position: [38, 8]}
+        - {type: harv, owner: agent, position: [38, 32]}
+        - {type: harv, owner: agent, position: [113, 20]}
+        - {type: fact, owner: enemy, position: [125, 20]}
+      ore_patches:
+        - {x: 20, y: 20, amount: 500,  radius: 2}
+        - {x: 40, y: 8,  amount: 2000, radius: 3}
+        - {x: 40, y: 32, amount: 2000, radius: 3}
+        - {x: 115, y: 20, amount: 3500, radius: 3}
     win_condition:
       all_of:
-        - economy_value_gte: 22000
-        - within_ticks: 7200
-    # ceiling 93 + 90*79 = 7203 ⇒ deadline bites; non-finisher LOSES.
+        - {building_count_gte: {type: proc, n: 2}}
+        - {cash_gte: 5000}
+        - {within_ticks: 3600}
     fail_condition:
       any_of:
-        - after_ticks: 7200
-        - not: {own_units_gte: 1}
-        - not: {has_building: proc}
-    max_turns: 80
+        - {after_ticks: 3601}
+        - {not: {has_building: fact}}
+    max_turns: 40
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 controlled axis: seed-driven agent `spawn_point` groups —
+  # NORTH base (y=12) vs SOUTH base (y=28). The pre-staffed harvs
+  # are ALSO declared per-spawn so the spawn-relative geometry
+  # rotates cleanly: NORTH-spawn the agent's harvs sit at patches
+  # at y≈4, y=12, y=20, and the shared D far patch; SOUTH-spawn
+  # the harvs sit at patches at y=20, y=28, y=36, and the shared
+  # D far patch. The ore patches themselves are not spawn-filtered
+  # (a single fixed map), but a memorised "always place procs at
+  # (40,8) and (40,32)" opening fails on the wrong-spawn seed
+  # because the harvs are differently positioned and the
+  # spawn-relative geometry rotates.
+  hard:
+    description: >
+      Your base orientation varies by seed — NORTH (y=12) or
+      SOUTH (y=28). You have a Construction Yard (`fact`) and a
+      Power Plant (`powr`) in your band. FOUR ore patches are
+      visible, each with one pre-positioned idle Ore Truck:
+        • a small near patch next to your base (depletes fast),
+        • TWO medium patches at the medium-distance ring (one
+          slightly north, one slightly south of your base
+          latitude),
+        • a rich patch at the far east edge whose round-trip
+          dominates throughput.
+      Starting cash (1500) starts ONE refinery; income from the
+      first funds the second. Win when ≥ 2 refineries owned AND
+      cash ≥ 5500 before tick 3600. Stalling and any single-proc
+      opening miss the proc-count clause; a memorised opening
+      whose placements ignore the seed-rotated harv geometry
+      misses the cash bar. The intended play is to commit to the
+      two MEDIUM patches that sit closest to YOUR spawn.
+    starting_cash: 1500
+    overrides:
+      actors:
+        # ── spawn_point 0 — NORTH base (y=12) ──────────────────
+        - {type: fact, owner: agent, position: [8, 12],   spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 10],   spawn_point: 0}
+        # Pre-staffed harvs for NORTH spawn's four patches.
+        - {type: harv, owner: agent, position: [22, 12],  spawn_point: 0}  # A_n near
+        - {type: harv, owner: agent, position: [38, 4],   spawn_point: 0}  # B_n N-medium
+        - {type: harv, owner: agent, position: [38, 20],  spawn_point: 0}  # C_n S-medium (centre row)
+        - {type: harv, owner: agent, position: [113, 20], spawn_point: 0}  # D far rich
+        # ── spawn_point 1 — SOUTH base (y=28) ──────────────────
+        - {type: fact, owner: agent, position: [8, 28],   spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 30],   spawn_point: 1}
+        - {type: harv, owner: agent, position: [22, 28],  spawn_point: 1}  # A_s near
+        - {type: harv, owner: agent, position: [38, 20],  spawn_point: 1}  # B_s N-medium (centre row)
+        - {type: harv, owner: agent, position: [38, 36],  spawn_point: 1}  # C_s S-medium
+        - {type: harv, owner: agent, position: [113, 20], spawn_point: 1}  # D far rich
+        # Persistent far-edge enemy marker — no spawn_point key
+        # so the enemy spawn filter stays inactive (CLAUDE.md
+        # per-owner spawn_point semantics): one fact for all seeds.
+        - {type: fact, owner: enemy, position: [125, 20]}
+      ore_patches:
+        # All seven latitude-rotated patches plus the shared rich
+        # patch are materialised every seed (ore_patches is not
+        # filtered by spawn_point), so the agent always sees the
+        # same map. What rotates per seed is the BASE position
+        # and the four PRE-STAFFED HARVS, which determine which
+        # patches are practically reachable for a per-turn cycle.
+        - {x: 20, y: 12,  amount: 500,  radius: 2}  # A_n near (NORTH)
+        - {x: 20, y: 28,  amount: 500,  radius: 2}  # A_s near (SOUTH)
+        - {x: 40, y: 4,   amount: 2000, radius: 3}  # B_n N-medium (NORTH)
+        - {x: 40, y: 20,  amount: 2000, radius: 3}  # shared centre — C_n / B_s
+        - {x: 40, y: 36,  amount: 2000, radius: 3}  # C_s S-medium (SOUTH)
+        - {x: 115, y: 20, amount: 3500, radius: 3}  # D far rich (shared)
+    win_condition:
+      all_of:
+        - {building_count_gte: {type: proc, n: 2}}
+        - {cash_gte: 5500}
+        - {within_ticks: 3600}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3601}
+        - {not: {has_building: fact}}
+    max_turns: 40

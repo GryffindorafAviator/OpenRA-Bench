@@ -616,6 +616,16 @@ class ModelAgent:
             )
         self.history: list[dict] = [{"role": "system", "content": sys_content}]
         self.stats = {"turns": 0, "tool_calls": 0, "empty_replies": 0}
+        # Audit-format capture (FullPlayback). When `audit_capture` is
+        # True the agent stores the per-turn briefing, the provider's
+        # literal request/response, and exposes the system prompt so
+        # the audit JSONL line for the turn carries everything.
+        # Default off — zero overhead for normal runs.
+        self.audit_capture: bool = False
+        self.last_briefing: str = ""
+        self.last_request: dict | None = None
+        self.last_response: dict | None = None
+        self.system_prompt: str = sys_content
         # Controller contract (openra_bench/controller.py): a ModelAgent
         # IS a Controller — it exposes `name`, `reset`, `act` so the
         # eval loop, the 1v1 harness, and the human-labeling harness can
@@ -768,12 +778,44 @@ class ModelAgent:
 
     def agent_fn(self, render_state: dict, Command: Any) -> list:
         self.stats["turns"] += 1
-        self.history.append(self._user_message(render_state))
+        user_msg = self._user_message(render_state)
+        if self.audit_capture:
+            # Plain-text briefing capture (image-primary turns carry a
+            # list `content`; the text part is the briefing). FullPlayback
+            # writes this as the human-readable `briefing` field so the
+            # audit JSONL records exactly what the model read.
+            c = user_msg.get("content")
+            if isinstance(c, str):
+                self.last_briefing = c
+            elif isinstance(c, list):
+                self.last_briefing = "\n".join(
+                    p.get("text", "") for p in c
+                    if isinstance(p, dict) and p.get("type") == "text"
+                )
+            # Enable provider-side audit hook for this turn (drain on
+            # return). Lazily install the list — providers without the
+            # `request_log` attr (e.g. Bedrock stub) silently skip.
+            if hasattr(self.provider, "request_log"):
+                self.provider.request_log = []
+        self.history.append(user_msg)
         self._strip_old_images(self.history)
         wire = self._window(
             self.history, getattr(self.cfg, "max_history_turns", 16)
         )
         reply = self.provider.complete(wire, self.tools)
+        if self.audit_capture and hasattr(self.provider, "request_log"):
+            log = self.provider.request_log or []
+            # One model call per turn (no internal retries here — those
+            # are surfaced as a single call with the eventual response);
+            # take the LAST entry to be safe.
+            if log:
+                self.last_request = log[-1].get("request")
+                self.last_response = log[-1].get("response")
+            else:
+                self.last_request = None
+                self.last_response = None
+            # Drain so the next turn starts clean.
+            self.provider.request_log = []
         self.history.append(
             {
                 "role": "assistant",

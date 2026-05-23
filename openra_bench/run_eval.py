@@ -166,6 +166,7 @@ def evaluate(
     handoff_k: int = 3,
     handoff_bank: str | Path | None = None,
     repeats: int = 1,
+    full_playback_root: str | Path | None = None,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -305,10 +306,18 @@ def evaluate(
                 for c in pack.configs
             ]
         else:
-            unit_iter = [
-                (compile_level(pack, lv), f"{pack.meta.id}:{lv}")
-                for lv in levels
-            ]
+            # Apply the global fog_mode (from ProviderConfig / CLI) so a
+            # single-fog run can audit cells in the `image`/`structured`/
+            # `-clear` channels (compiled.fog_mode defaults to vision
+            # without this lift, which would silently downgrade every
+            # cell to the canonical vision-fogged modality).
+            _fog = getattr(provider_cfg, "fog_mode", None) if provider_cfg else None
+            unit_iter = []
+            for lv in levels:
+                cl = compile_level(pack, lv)
+                if _fog:
+                    cl.fog_mode = _fog
+                unit_iter.append((cl, f"{pack.meta.id}:{lv}"))
         for compiled, cell in unit_iter:
             if not compiled.map_supported:
                 skipped.append(f"{cell} (map not Rust-loadable)")
@@ -333,6 +342,30 @@ def evaluate(
                 seed,
             )
             pb.run_id, pb.model = run_id, model
+        # Audit-format playback (FullPlayback): one JSONL per cell at the
+        # canonical `<pack>__<level>__seed<N>__<fog>.jsonl` path the
+        # paper-collection script consumes. Same first-repeat gating as
+        # the legacy Playback.
+        fpb = None
+        if full_playback_root is not None and rep == 0:
+            from .full_playback import FullPlayback
+
+            # Derive (pack_id, level, fog_mode) from the cell. For
+            # perception-sweep cells, the cell is `pack:level:mode`; for
+            # legacy/configured cells, fall back to compiled fields.
+            parts = cell.split(":")
+            _pack_id = compiled.pack_id
+            _level = compiled.level
+            _fog = getattr(compiled, "fog_mode", "vision") or "vision"
+            if len(parts) >= 3:
+                _fog = parts[-1]
+            fpb = FullPlayback(
+                Path(full_playback_root) / f"{run_id}__{_safe_model}",
+                pack_id=_pack_id,
+                level=_level,
+                seed=seed,
+                fog_mode=_fog,
+            )
         ctrl = factory(compiled)
         if handoff_sweep and ":handoff-" in cell:
             ctrl, _hnote = _handoff_wrap(
@@ -340,7 +373,7 @@ def evaluate(
             )
         else:
             _hnote = ""
-        res = run_level(compiled, ctrl, seed=seed, playback=pb)
+        res = run_level(compiled, ctrl, seed=seed, playback=pb, full_playback=fpb)
         hstats = getattr(ctrl, "handoff_stats", None)
         if hstats is not None:
             hstats = dict(hstats)
@@ -685,8 +718,22 @@ def main(argv: list[str]) -> int:
         "'wandb/bf16' (no fallback) — premium routing off the free pool",
     )
     ap.add_argument("--fog-mode", default="vision",
-                    choices=["vision", "structured"],
-                    help="spatial channel: PNG minimap vs text fog")
+                    choices=[
+                        "vision", "vision-clear",
+                        "structured", "structured-clear",
+                        "image", "image-clear",
+                    ],
+                    help="spatial channel: PNG minimap (vision), text fog "
+                    "(structured), or image-primary (image). `-clear` "
+                    "variants run with no fog of war.")
+    ap.add_argument(
+        "--full-playback",
+        default=None,
+        help="audit-format playback dir: one JSONL per cell at "
+        "<dir>/<pack>__<level>__seed<N>__<fog>.jsonl with full obs / "
+        "request / response / engine warnings. Used by "
+        "scripts/collect_eval_data.py for paper-grade data capture.",
+    )
     ap.add_argument("--perception-sweep", action="store_true",
                     help="run the 2x2 perception ablation: every "
                     "pack:level expanded into vision/structured x "
@@ -757,6 +804,7 @@ def main(argv: list[str]) -> int:
         handoff_k=a.handoff_k,
         handoff_bank=a.handoff_bank,
         repeats=a.repeats,
+        full_playback_root=a.full_playback,
         progress=lambda d, n, rec, c: print(
             f"[{d}/{n}] {rec['cell']}:{rec['split']}#{rec['seed']} "
             f"{rec['outcome']} comp={rec['composite']} "

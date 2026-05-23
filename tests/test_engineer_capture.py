@@ -49,7 +49,7 @@ _PACK_YAML = textwrap.dedent(
       termination: {max_ticks: 6000}
       actors:
         - {type: e6, owner: agent, position: [16, 20]}
-        - {type: proc, owner: enemy, position: [22, 20]}
+        - {type: proc, owner: enemy, position: [20, 20]}
     levels:
       easy:
         description: 'engineer walks ~6 cells east and captures the proc'
@@ -107,18 +107,18 @@ def test_engineer_captures_enemy_proc_via_command_capture_actor():
         ad.observe(env.reset(seed=1))
         render0 = ad.render_state()
 
-        # Locate the engineer (own_units) and the enemy proc (enemy_buildings or
+        # Locate the engineer (units_summary) and the enemy proc (enemy_buildings or
         # enemy actors surfaced in the snapshot).
-        own_units = render0.get("own_units", []) or []
-        e6s = [u for u in own_units if str(u.get("type", "")).lower() == "e6"]
-        assert len(e6s) == 1, f"expected exactly one e6 in own_units, got {own_units}"
+        units_summary = render0.get("units_summary", []) or []
+        e6s = [u for u in units_summary if str(u.get("type", "")).lower() == "e6"]
+        assert len(e6s) == 1, f"expected exactly one e6 in units_summary, got {units_summary}"
         engineer_id = str(e6s[0]["id"])
 
         # The enemy proc surfaces via `enemy_buildings` / actor enumeration. We
         # accept either presentation — locate it by type==proc and enemy ownership.
         enemy_buildings = (
-            render0.get("enemy_buildings")
-            or render0.get("enemies", [])
+            render0.get("enemy_buildings_summary")
+            or render0.get("enemy_summary", [])
             or []
         )
         proc_id = None
@@ -164,8 +164,8 @@ def test_engineer_captures_enemy_proc_via_command_capture_actor():
             f"to the agent within the timeout (own_buildings={own_b_final})"
         )
 
-        # Engineer must be consumed (no e6 left in own_units).
-        own_units_final = ad.render_state().get("own_units", []) or []
+        # Engineer must be consumed (no e6 left in units_summary).
+        own_units_final = ad.render_state().get("units_summary", []) or []
         live_e6 = [
             u for u in own_units_final if str(u.get("type", "")).lower() == "e6"
         ]

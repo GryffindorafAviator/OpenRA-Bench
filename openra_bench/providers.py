@@ -145,6 +145,11 @@ class OpenAICompatibleProvider(ChatProvider):
             base=cfg.retry_base_s,
             cap=cfg.retry_cap_s,
         )
+        # Audit hook: when set (a list), every successful complete()
+        # appends a dict {"request": <body>, "response": <raw>} so the
+        # FullPlayback recorder can capture the literal wire payloads.
+        # Drained by the caller after each turn. None disables capture.
+        self.request_log: list[dict] | None = None
 
     @property
     def cost_meter(self):
@@ -222,6 +227,34 @@ class OpenAICompatibleProvider(ChatProvider):
         u = reply.usage or {}
         self._cost.add(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
         self._cost.check()  # raises BudgetExceeded → evaluate finalizes
+        if self.request_log is not None:
+            # Audit capture: redact the bearer header (the body is the
+            # interesting part) and store the literal request + raw
+            # response side-by-side. FullPlayback drains after each turn.
+            try:
+                self.request_log.append(
+                    {
+                        "request": {
+                            "url": url,
+                            "body": body,
+                        },
+                        "response": {
+                            "raw": reply.raw,
+                            "text": reply.text,
+                            "tool_calls": reply.tool_calls,
+                            "reasoning": reply.reasoning,
+                            "usage": dict(reply.usage or {}),
+                            "finish_reason": (
+                                (reply.raw.get("choices") or [{}])[0]
+                                .get("finish_reason")
+                                if isinstance(reply.raw, dict)
+                                else None
+                            ),
+                        },
+                    }
+                )
+            except Exception:  # noqa: BLE001 — audit must never break a run
+                pass
         return reply
 
     def _stream_once(self, url, headers, body) -> ChatReply:

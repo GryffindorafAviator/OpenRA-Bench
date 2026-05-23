@@ -53,7 +53,11 @@ _PACK_YAML = textwrap.dedent(
     base_map: rush-hour-arena
     starting_cash: 2000
     base:
-      agent: {faction: allies}
+      # `agent.cash` must be set explicitly — per-player cash plumbing
+      # (PlayerSetup.cash) now defaults to 0 and silently overrides the
+      # pack-level `starting_cash:`. Without this line the agent starts
+      # with $0 and the build('proc') queue stalls indefinitely.
+      agent: {faction: allies, cash: 2000}
       enemy: {faction: soviet, cash: 0}
       tools: [observe, build, place_building, move_units, stop]
       spawn_mcvs: false
@@ -146,11 +150,13 @@ def test_stall_policy_yields_zero_income():
     try:
         obs = env.reset(seed=1)
         starting_cash = int(obs["economy"]["cash"])
+        last_obs = obs
         for _ in range(15):  # 15 decision turns × ~90 ticks ≈ 1350 ticks
-            _ = env.step([openra_train.Command.observe()])
-        # observation() after step
-        final_obs = env.last_observation()
-        final_cash = int(final_obs["economy"]["cash"])
+            last_obs, _r, _done, _i = env.step(
+                [openra_train.Command.observe()]
+            )
+        # env.step() returns (obs, reward, done, info) — no last_observation().
+        final_cash = int(last_obs["economy"]["cash"])
         assert final_cash <= starting_cash, (
             f"stall must not grow cash (no proc ⇒ harv idle); "
             f"start={starting_cash} final={final_cash}"
@@ -176,22 +182,26 @@ def test_intended_policy_grows_cash_via_harvest():
         starting_total = starting_cash + int(obs["economy"].get("resources", 0))
 
         # Turn 1: queue the refinery.
-        _ = env.step([openra_train.Command.build("proc")])
-        # Spin a few turns to let production complete (proc is 1400
-        # cost, build time ~ a few turns).
-        for _ in range(6):
-            _ = env.step([openra_train.Command.observe()])
+        _o, _r, _d, _i = env.step([openra_train.Command.build("proc")])
+        # Wait for production to complete, then retry place_building until
+        # it's accepted (premature place is a no-op + logs "PLACE BLOCKED").
+        placed = False
+        for _ in range(25):
+            o, _r, _d, _i = env.step(
+                [openra_train.Command.place_building("proc", 21, 20)]
+            )
+            if [b for b in (o.get("own_buildings") or [])
+                if b.get("type") == "proc"]:
+                placed = True
+                break
 
-        # Turn N: place proc adjacent to the ore patch centre (24, 20).
-        # `place_building` does not enforce build-adjacency, so we drop
-        # it directly next to the ore.
-        _ = env.step([openra_train.Command.place_building("proc", 21, 20)])
+        assert placed, "proc never landed (production stalled or place_building refused)"
 
-        # Spin out the remaining decision budget.
+        # Spin out the remaining decision budget. Harv auto-routes the
+        # moment the proc is alive; one full cycle is ~12-15 turns.
         grew = False
-        for _ in range(20):
-            _ = env.step([openra_train.Command.observe()])
-            o = env.last_observation()
+        for _ in range(30):
+            o, _r, _d, _i = env.step([openra_train.Command.observe()])
             total = int(o["economy"]["cash"]) + int(
                 o["economy"].get("resources", 0)
             )

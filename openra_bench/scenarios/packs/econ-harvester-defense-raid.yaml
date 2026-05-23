@@ -1,0 +1,442 @@
+# econ-harvester-defense-raid — keep the harv ALIVE under live raider waves.
+#
+# ACTION capability — live-economy defense under harvester harass.
+# Differs from `econ-protect-harvester-route` (which tests CONVOY
+# ESCORT across a long commute) and `mid-economy-under-fire` (which
+# rings the patch with auto-firing tanks at base-sight): THIS pack
+# tests STANCE management on the escort. The escort is pre-placed
+# at the proc on stance:0 (HoldFire) — even with PERFECT positioning,
+# a "place defenders and observe" policy LOSES because stance:0 units
+# never auto-engage, so the raider chews through the harv unopposed.
+# The load-bearing verb is `set_stance(escort, 2 or 3)` + escort
+# movement onto the harv's lane.
+#
+# DESIGN
+# ------
+# Agent has fact + powr + proc + 1× harv + ONE NEAR ore patch (mine
+# at x=25). The proc seeds the harv's auto-harvest loop (per
+# world.rs::auto_route_idle_harvesters — a scenario-placed idle harv
+# auto-routes once its owner owns a refinery), so the harv cycles
+# proc(12,20) ↔ mine(25,20) WITHOUT an explicit harvest order. Income
+# is steady AS LONG AS THE HARV LIVES.
+#
+# Threat: enemy `bot_type: raider` (openra-sim/src/scripted_bot.rs:
+# ScriptedBehavior::Raider) — its tick() picks the agent's harv
+# specifically via `harv_foes()` and issues an Attack on the nearest
+# one every 12 ticks (the raider interval). New units added to the
+# raider's roster (via scheduled_events::spawn_actors) are picked up
+# on the next own_mobile() scan, so SCHEDULED raid waves all chase
+# the harv.
+#
+# Wave schedule (scheduled_events: spawn_actors):
+#   easy:   1 wave  — 1× 2tnk at tick 600   from (40,20)
+#   medium: 2 waves — 1× 2tnk at tick 600, 1× 2tnk at tick 1500 — both at (40,20)
+#   hard:   3 waves on 2 seed-driven axes — see hard tier comment
+#
+# Escort: 2× 2tnk at base, stance:0 (HoldFire). The escort SITS at
+# the proc; even when a raider walks into its weapon range the
+# stance:0 units do not fire (verified per CLAUDE.md stance fix:
+# stance:0 never auto-engages, even when shot at, even when an enemy
+# is sitting on top of them). The agent must EITHER:
+#   (a) `set_stance(escort, 3)` — Hunt: idle escort actively advances
+#       on visible enemies (raider walks into LOS as it approaches
+#       the harv's lane, escort engages); OR
+#   (b) `set_stance(escort, 2)` AND `attack_move(escort, raider lane)`
+#       — Defend stance auto-fires on whatever enters weapon range,
+#       so move the escort east along the harv's commute axis to
+#       INTERCEPT the raid wave; OR
+#   (c) `attack_unit(escort, raider_id)` — explicit order overrides
+#       stance:0, escort closes and kills the raider.
+# Any of (a), (b), (c) clears the bar. The capability is "flip the
+# escort from passive to active" — same verb as combat-tanya-vs-rush.
+#
+# THE NO-CHEAT BAR (every lazy / stall / wrong-shape policy LOSES on
+# every level and every hard seed; the intended capability WINS):
+#
+#   • stall (only observe): escort stays stance:0 at base, never
+#     engages. Raider wave 1 reaches the harv around tick ~750
+#     (40→16 ≈ 24 cells at 2tnk speed) and kills it. unit_type_count_gte
+#     :{harv,1} fails → fail_condition fires → LOSS.
+#
+#   • defensive-but-passive (place / re-issue HoldFire on escort,
+#     observe): identical outcome — the escort is structurally
+#     incapable of engaging. Harv dies → LOSS.
+#
+#   • aggressive-but-no-escort (send escort east to the raider's
+#     spawn point at x=40, leaving harv alone on the lane between
+#     proc(12,20) and mine(25,20)): the escort marches AROUND or
+#     PAST the next raid wave, the wave reaches the undefended harv,
+#     harv dies → LOSS. (On easy with one wave the escort might
+#     catch the lone raider, but on medium/hard, the second/third
+#     wave finds the harv unprotected because the escort overshot.)
+#
+#   • intended (set_stance(escort, 2 or 3) and/or attack_move escort
+#     onto the harv's lane ~x=20..25): raider walks into the escort's
+#     fire envelope on its approach, escort kills the raid wave
+#     before contact with the harv, harv survives, auto-route loop
+#     continues, cash bar clears → WIN.
+#
+# ENGINE FACTS (CLAUDE.md):
+#   - Tick budget ~90/turn. easy max_turns=35 ⇒ ceiling 93+90·34=3153;
+#     within_ticks:3000, after_ticks:3001 both bite. medium=45 ⇒
+#     ceiling 4053; within_ticks:3900, after_ticks:3901. hard=50 ⇒
+#     ceiling 4503; within_ticks:4300, after_ticks:4301.
+#   - `auto_route_idle_harvesters` auto-installs a Harvest activity
+#     on any owned idle harv whose owner owns a proc — no explicit
+#     harvest order needed. The harvest tool is provided so the
+#     agent CAN re-issue if needed, but is not strictly required.
+#   - `bot_type: raider` issues an Attack on the nearest agent harv
+#     every 12 ticks; new bot units added mid-episode (via
+#     scheduled_events::spawn_actors) join the bot's tick loop.
+#   - stance:0 (HoldFire) per CLAUDE.md never auto-engages — the
+#     "defensive but passive" failure mode is structurally enforced
+#     by the pre-placed stance.
+#   - stance:2/3 (Defend / AttackAnything) per CLAUDE.md: stance:2
+#     auto-fires on in-range enemies but does not advance; stance:3
+#     additionally advances on visible enemies. Either is a valid
+#     intended path; the load-bearing verb is the stance flip OR
+#     an explicit attack order (which overrides stance per the
+#     CLAUDE.md stance fix).
+#   - Persistent far enemy `fact` at (120,20) — anti-DRAW per
+#     CLAUDE.md (engine auto-`done`s on enemy-elim before win/fail
+#     evaluates; the inert far marker keeps the episode alive past
+#     the raider being destroyed).
+#   - `unit_type_count_gte: {harv, 1}` in fail_condition is the
+#     hard harv-survival predicate — the moment the harv dies the
+#     fail clause fires and the LOSS is immediate.
+#   - hard tier uses TWO seed-driven SCHEDULED_EVENTS spawn AXES
+#     (raid approaches from the north vs the south of the harv's
+#     lane). The `spawn_actors` event itself doesn't honour
+#     spawn_point, so per-seed axis variation is done by giving
+#     each seed group a distinct AGENT spawn_point — the active
+#     base latitude (y=14 vs y=26) determines which raid lane is
+#     "the harv's lane". This satisfies the ≥2-distinct-seed-driven-
+#     spawn-groups hard-tier requirement (CLAUDE.md §7).
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/econ-harvester-defense-raid.yaml
+
+meta:
+  id: econ-harvester-defense-raid
+  title: 'Econ Harvester Defense — Keep the Harv Alive Under Raid Waves'
+  capability: action
+  real_world_meaning: >
+    A live extraction operation under recurring asset-targeted
+    harass. The agent owns a refinery, a single harvester running an
+    auto-harvest loop on a nearby ore patch, and a small escort
+    parked at the depot on hold-fire. The harvester's income is the
+    sole revenue stream, and a recurring raider drives at the
+    harvester specifically (not the base, not the escort). The
+    decision is to FLIP the escort from passive to active — set its
+    stance to defend / attack-anything, or order it onto the
+    harvester's lane to intercept — so the raider dies on the
+    escort's fire envelope before reaching the harvester. Stalling
+    or leaving the escort on hold-fire lets every wave through; the
+    harvester dies, income stops, the cash bar is unmet.
+  robotics_analogue: >
+    Mining-fleet protection under recurring asset-targeted attack —
+    an autonomous extraction site with an extractor robot, a
+    processing depot, and a static defense detail. If the defense
+    detail is in safe-mode (hold fire) the recurring attacker
+    destroys the extractor on the first cycle; the operator must
+    flip the detail to engage and (optionally) reposition it onto
+    the extractor's commute lane.
+  benchmark_anchor:
+    - "SC2 harvester harass defense (Lambo, Reaper drops on workers)"
+    - "convoy / extractor protection under recurring harass"
+    - "RTS stance management — flip escort from passive to active"
+    - "SOC active-vs-passive monitoring posture"
+  author: openra-bench
+
+base_map: rush-hour-arena
+starting_cash: 0  # ALL income via harv survival; bar measures live throughput.
+
+base:
+  agent: {faction: allies, cash: 0}
+  # Enemy bot is `raider` — scripted_bot.rs ScriptedBehavior::Raider
+  # targets the agent's harv specifically via harv_foes(); new
+  # actors added via scheduled_events::spawn_actors are picked up
+  # by own_mobile() on the next tick, so every raid wave chases the
+  # harv.
+  enemy: {faction: soviet, cash: 0, bot_type: raider}
+  # Toolset: harvest is provided (the harv auto-routes from t=0 once
+  # the proc exists, but the agent can re-issue if needed);
+  # set_stance is the load-bearing verb; attack_unit / attack_move
+  # are valid alternates (explicit orders override stance:0).
+  tools: [observe, harvest, move_units, attack_unit, attack_move, set_stance, stop]
+  planning: true
+  # Interrupts left disabled — per econ-protect-harvester-route, the
+  # per-turn tick rate would collapse on enemy_unit_spotted under
+  # recurring raid waves and the cash bar wouldn't be reachable.
+  interrupts: {}
+  termination: {max_ticks: 6000}
+  actors: []  # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare skill: ONE raid wave (1× 2tnk) at tick 600. Harv cycles
+  # proc(12,20)↔mine(25,20) on auto-route. Escort: 2× 2tnk at base
+  # stance:0. Stall / passive: raider reaches harv ~tick 750, harv
+  # dies, LOSS. Intended: set_stance(escort, 2 or 3) and/or
+  # attack_move escort east to ~x=20, escort engages the raider on
+  # approach, harv survives, cash accumulates from auto-harvest.
+  # Bar: cash >= 800 (~2 refines × ~400cr) before tick 3000.
+  # max_turns 35 ⇒ ceiling 93+90·34=3153 > 3001 ✓.
+  easy:
+    description: >
+      You own a Construction Yard, Power Plant, Refinery, ONE Ore
+      Truck on auto-harvest to the near patch at (25,20), and TWO
+      medium tanks (2tnk) parked at your refinery on HOLD-FIRE
+      stance. At tick 600 an enemy raider tank spawns at (40,20)
+      and drives STRAIGHT at your harvester (the raider bot targets
+      harvesters specifically). Win when cash >= 800 AND your
+      harvester is still alive AND your refinery is intact, before
+      tick 3000. Standing the escort idle (HOLD-FIRE) lets the
+      raider walk through and kill the harvester. The intended play
+      is to FLIP the escort's stance to Defend (2) or AttackAnything
+      (3), OR explicitly attack-order it onto the raider's approach
+      lane.
+    starting_cash: 0
+    overrides:
+      actors:
+        # Agent base — fact + powr seed the construction & power;
+        # proc seeds the harv auto-harvest loop.
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [10, 18]}
+        - {type: proc, owner: agent, position: [12, 20]}
+        # Single harv — pre-placed adjacent to proc. With proc on the
+        # field, world.rs::auto_route_idle_harvesters installs a
+        # Harvest activity on the next tick; harv cycles proc<->mine.
+        - {type: harv, owner: agent, position: [14, 20]}
+        # Escort: 2× 2tnk at the proc on stance:0 (HoldFire). The
+        # capability under test is "flip the escort active" — stance:0
+        # never auto-engages, so a "place defenders and observe"
+        # policy LOSES.
+        - {type: 2tnk, owner: agent, position: [13, 18], stance: 0}
+        - {type: 2tnk, owner: agent, position: [13, 22], stance: 0}
+        # Near ore patch — the harv's auto-route target.
+        - {type: mine, owner: neutral, position: [25, 20]}
+        # Persistent far enemy fact — anti-DRAW (engine auto-done
+        # mitigation; without this the run collapses to DRAW the
+        # instant the raid wave is destroyed, before the cash bar
+        # evaluates).
+        - {type: fact, owner: enemy, position: [120, 20]}
+      scheduled_events:
+        # Single raid wave at tick 600 — one 2tnk spawned east of
+        # the patch. Under bot_type:raider the new tank joins the
+        # raider's own_mobile() roster on the next tick and beelines
+        # toward the harv via harv_foes().
+        - tick: 600
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [40, 20]}
+    win_condition:
+      # Ordered `then:` enforces "harv must SURVIVE past the raid
+      # window and THEN keep refining to the bar" — clause 1
+      # (after_ticks: 1700) latches only past wave 1's typical
+      # kill-window (raider spawns tick 600, reaches harv ~tick 900,
+      # kills undefended harv by ~tick 1500). A stall run loses its
+      # harv around tick ~1500 so by the time clause 1 latches the
+      # `unit_type_count_gte:{harv,1}` clause has already failed →
+      # fail_condition fires first. The intended escort engagement
+      # kills the raider, harv keeps cycling, cash crosses 1200
+      # well after tick 1700, all_of latches → WIN.
+      all_of:
+        - then:
+            id: econ-harvester-defense-raid-easy
+            clauses:
+              - {after_ticks: 1700}
+              - {cash_gte: 1200}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: proc}
+        - {within_ticks: 3000}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3001}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: proc}}
+    max_turns: 35
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # +1 controlled variable: TWO raid waves (tick 600, tick 1500) and
+  # a tighter bar (cash >= 1600 ≈ 4 refines). A one-time "kill the
+  # first raider" play has to ALSO survive the second wave — the
+  # escort must be RETURNED to a covering position (or kept on
+  # AttackAnything stance:3) so the late wave dies on approach too.
+  # max_turns 45 ⇒ ceiling 4053 > 3901 ✓.
+  medium:
+    description: >
+      Same setup as easy — fact + powr + proc + 1× harv on auto-
+      harvest to the near patch at (25,20), 2× 2tnk escort at the
+      refinery on HOLD-FIRE — but TWO raider waves arrive: one at
+      tick 600 and a second at tick 1500. Both spawn at (40,20) and
+      drive at your harvester. Win when cash >= 1600 AND your
+      harvester is alive AND your refinery is intact, before tick
+      3900. Stalling, leaving the escort on hold-fire, and chasing
+      the first raider far enough east to miss the second wave all
+      LOSE. The intended play is to flip the escort active (stance
+      Defend or AttackAnything) and position it on the harvester's
+      lane so BOTH waves die on approach.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [10, 18]}
+        - {type: proc, owner: agent, position: [12, 20]}
+        - {type: harv, owner: agent, position: [14, 20]}
+        - {type: 2tnk, owner: agent, position: [13, 18], stance: 0}
+        - {type: 2tnk, owner: agent, position: [13, 22], stance: 0}
+        - {type: mine, owner: neutral, position: [25, 20]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+      scheduled_events:
+        - tick: 600
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [40, 20]}
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [40, 20]}
+    win_condition:
+      # `then:` forces cash bar to be reached AFTER tick 2700 —
+      # past the second raid wave's kill-window (wave 2 spawns at
+      # tick 1500, reaches harv ~tick 1800, kills undefended harv
+      # by ~tick 2400). Aggressive-no-escort (drive escort east
+      # past patch) lets wave 1 chip the harv heavily AND wave 2
+      # finish it; the harv dies before clause 1 latches → fail
+      # clause unit_type_count_gte:{harv,1} fires → LOSS even
+      # though enough cash may have accumulated by ~tick 2200.
+      all_of:
+        - then:
+            id: econ-harvester-defense-raid-medium
+            clauses:
+              - {after_ticks: 2700}
+              - {cash_gte: 2200}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: proc}
+        - {within_ticks: 3900}
+    fail_condition:
+      any_of:
+        - {after_ticks: 3901}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: proc}}
+    max_turns: 45
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # +1 axis vs medium: TWO seed-driven AGENT spawn_point groups —
+  # base latitude NORTH y=14 vs SOUTH y=26, round-robined per seed.
+  # Each group has its own fact/powr/proc/harv/escort/mine on its
+  # own y-band. The agent's load-bearing decision is the same
+  # (flip + position escort) but the LATITUDE varies per seed, so
+  # a memorised y=20 opening fails on both hard seed groups.
+  #
+  # Hard tier ≥2-spawn-groups requirement (CLAUDE.md §7): satisfied
+  # via two AGENT spawn_point groups (spawn_point: 0 / 1) — every
+  # agent actor is duplicated across both groups; the active group
+  # is round-robined by seed.
+  #
+  # Three raid waves (ticks 600, 1500, 2400) spawn ON A CENTRAL
+  # AXIS at y=20 (between the two possible latitudes — like
+  # econ-protect-harvester-route's hard tier). The raider bot
+  # targets the agent's on-latitude harv, so each raider must
+  # detour to y=14 or y=26 (a 5-6 cell extra leg) on top of its
+  # west-bound traversal. The detour gives the escort time to
+  # intercept the raider on the agent's own y-band. The escort
+  # MUST be moved onto the agent's latitude — a memorised "send
+  # escort east on y=20" opening drops them onto a lane the raider
+  # only briefly crosses, while the harv on y=14/26 is unprotected
+  # for the rest of the raider's approach.
+  # max_turns 50 ⇒ ceiling 4503 > 4301 ✓.
+  hard:
+    description: >
+      Tougher version: your base latitude varies per seed — NORTH
+      base (y=14) OR SOUTH base (y=26). Each base has its own fact,
+      powr, proc, harvester on auto-harvest to its OWN near patch
+      (mine at (25,14) for NORTH; mine at (25,26) for SOUTH), and
+      2× 2tnk escort at the refinery on HOLD-FIRE. THREE raider
+      heavy tanks arrive at ticks 600, 1500, and 2400 from the
+      central east corridor at (40,20); each one detours north or
+      south to your harvester's latitude. Win when cash >= 2800
+      AND your harvester is alive AND your refinery is intact,
+      before tick 4300. Stalling, leaving escort on hold-fire,
+      chasing past the lane, and memorising the wrong latitude all
+      LOSE. Flip the escort to Defend / AttackAnything (or attack-
+      order it onto your harvester's lane) so all three waves die
+      on approach.
+    starting_cash: 0
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base (y=14). CLAUDE.md: agent actors
+        # must be duplicated across both spawn_point groups (the
+        # filter drops any group-untagged actor on either side).
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
+        # Escort placed on open ground east of the proc so attack_move
+        # has a clear east lane (no powr or building footprint to
+        # path around).
+        - {type: 2tnk, owner: agent, position: [15, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [15, 15], stance: 0, spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=26). Symmetric.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [15, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [15, 27], stance: 0, spawn_point: 1}
+        # Two ore patches — one per latitude. Mines are neutral, so
+        # the spawn_point filter (agent-side) does not affect them;
+        # both place every seed. The active harv only uses ITS OWN
+        # patch (auto-route picks the nearest ore the owner can
+        # reach, which on each seed is the on-latitude one).
+        - {type: mine, owner: neutral, position: [25, 14]}
+        - {type: mine, owner: neutral, position: [25, 26]}
+        # Persistent far enemy fact — anti-DRAW.
+        - {type: fact, owner: enemy, position: [120, 20]}
+      scheduled_events:
+        # Three raid waves spawn on a CENTRAL corridor at y=20 (per
+        # econ-protect-harvester-route's hard idiom). Each raider is
+        # bot-controlled and detours 6 cells north/south to reach the
+        # on-latitude harv — the detour gives the escort time to
+        # intercept on the agent's own y-band. The escort MUST land
+        # on the agent's latitude; memorising the y=20 corridor
+        # leaves the harv unprotected for the bulk of the raider's
+        # approach lane.
+        - tick: 600
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [40, 20]}
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [40, 20]}
+        - tick: 2400
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [40, 20]}
+    win_condition:
+      # `then:` forces cash bar AFTER tick 3500 — past wave 3
+      # (spawns tick 2400, reaches harv ~tick 2700, kills
+      # undefended harv by ~tick 3300). Stall / passive / off-axis
+      # all lose their harv before tick 3500 → unit_type_count_gte
+      # fail clause fires → LOSS. Intended (escort on harv's
+      # latitude) kills each wave on approach; harv cycles
+      # uninterrupted through all three waves and accumulates
+      # cash past tick 3500.
+      all_of:
+        - then:
+            id: econ-harvester-defense-raid-hard
+            clauses:
+              - {after_ticks: 3500}
+              - {cash_gte: 2800}
+        - {unit_type_count_gte: {type: harv, n: 1}}
+        - {has_building: proc}
+        - {within_ticks: 4300}
+    fail_condition:
+      any_of:
+        - {after_ticks: 4301}
+        - {not: {unit_type_count_gte: {type: harv, n: 1}}}
+        - {not: {has_building: proc}}
+    max_turns: 50

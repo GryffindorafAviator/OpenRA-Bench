@@ -49,7 +49,7 @@ _PACK_YAML = textwrap.dedent(
       termination: {max_ticks: 6000}
       actors:
         - {type: tanya, owner: agent, position: [16, 20]}
-        - {type: proc, owner: enemy, position: [22, 20]}
+        - {type: proc, owner: enemy, position: [20, 20]}
     levels:
       easy:
         description: 'tanya walks ~6 cells east and C4s the proc'
@@ -106,16 +106,16 @@ def test_tanya_c4_destroys_enemy_proc_via_command_c4_detonate():
         ad.observe(env.reset(seed=1))
         render0 = ad.render_state()
 
-        own_units = render0.get("own_units", []) or []
-        tanyas = [u for u in own_units if str(u.get("type", "")).lower() == "tanya"]
+        units_summary = render0.get("units_summary", []) or []
+        tanyas = [u for u in units_summary if str(u.get("type", "")).lower() == "tanya"]
         assert len(tanyas) == 1, (
-            f"expected exactly one tanya in own_units, got {own_units}"
+            f"expected exactly one tanya in units_summary, got {units_summary}"
         )
         tanya_id = str(tanyas[0]["id"])
 
         enemy_buildings = (
-            render0.get("enemy_buildings")
-            or render0.get("enemies", [])
+            render0.get("enemy_buildings_summary")
+            or render0.get("enemy_summary", [])
             or []
         )
         proc_id = None
@@ -148,8 +148,8 @@ def test_tanya_c4_destroys_enemy_proc_via_command_c4_detonate():
             ad.observe(obs)
             rs = ad.render_state()
             enemy_b = (
-                rs.get("enemy_buildings")
-                or rs.get("enemies", [])
+                rs.get("enemy_buildings_summary")
+                or rs.get("enemy_summary", [])
                 or []
             )
             still_proc = any(
@@ -169,13 +169,13 @@ def test_tanya_c4_destroys_enemy_proc_via_command_c4_detonate():
         )
 
         # Tanya survives the detonation.
-        own_units_final = ad.render_state().get("own_units", []) or []
+        own_units_final = ad.render_state().get("units_summary", []) or []
         live_tanya = [
             u for u in own_units_final if str(u.get("type", "")).lower() == "tanya"
         ]
         assert live_tanya, (
             "tanya should survive the C4 detonation; she is missing from "
-            "own_units after the blast"
+            "units_summary after the blast"
         )
     finally:
         pool.release(env)

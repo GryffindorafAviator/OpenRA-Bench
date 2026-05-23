@@ -162,7 +162,7 @@ def test_thief_steals_cash_via_infiltrate():
         )
         assert silo_id is not None, "enemy silo must be visible to thief at start"
 
-        cash_before = int(ad.render_state().get("economy", {}).get("cash", 0))
+        cash_before = int(ad.render_state().get("cash", 0))
 
         obs, _r, done, _i = env.step(
             [env.Command.infiltrate([str(thf_id)], str(silo_id))]
@@ -179,7 +179,7 @@ def test_thief_steals_cash_via_infiltrate():
             str(u.get("type", "")).lower() == "thf" for u in own_after
         ), f"thief must have been consumed ({own_after})"
 
-        cash_after = int(ad.render_state().get("economy", {}).get("cash", 0))
+        cash_after = int(ad.render_state().get("cash", 0))
         assert cash_after > cash_before, (
             f"thief infiltration must increase agent cash "
             f"(before={cash_before}, after={cash_after})"

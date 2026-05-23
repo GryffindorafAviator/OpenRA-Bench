@@ -230,6 +230,7 @@ def run_level(
     agent_fn: "AgentFn | Controller" = scripted_explore_agent,
     seed: int = 0,
     playback=None,
+    full_playback=None,
 ) -> EpisodeResult:
     """Run one scenario-pack level, scoring against its declarative
     win/fail conditions (checked every turn). Outcome maps to the
@@ -272,6 +273,15 @@ def run_level(
         # model actually saw (same vendored _minimap_v2, accumulating).
         _pb_explored: set = set()
         _pb_terrain = None
+        # Audit-capture wiring: when a FullPlayback is attached, surface
+        # the underlying ModelAgent (if any) and flip on `audit_capture`
+        # so per-turn briefing / wire request+response are stashed for
+        # the audit JSONL.
+        _audit_agent = (
+            introspection_source(controller) if full_playback is not None else None
+        )
+        if _audit_agent is not None and hasattr(_audit_agent, "audit_capture"):
+            _audit_agent.audit_capture = True
         # Interrupt-driven mode (step 4): if the scenario enabled any
         # interrupt signals, advance with step_until_event so the agent
         # is re-prompted (debriefed) the moment an event fires
@@ -356,6 +366,57 @@ def run_level(
                     interrupt=interrupt,
                     goal=turn_goal(compiled.win_condition, ctx),
                 )
+            if full_playback is not None:
+                # Mirror the same PNG (when the legacy playback rendered
+                # one). Otherwise render on-demand for the audit format.
+                _fp_png = locals().get("_png") if playback is not None else None
+                if _fp_png is None:
+                    try:
+                        from .minimap import terrain_png_for
+                        if _pb_terrain is None:
+                            _pb_terrain = terrain_png_for(
+                                compiled.scenario.base_map
+                            )
+                        from .prompt_v2 import minimap_b64 as _v2_mm
+                        _fp_png = _v2_mm(
+                            rs, _pb_terrain, _pb_explored,
+                            constant_colors=compiled.level in ("easy", "medium"),
+                        )
+                        if _fp_png is None:
+                            from .agent import _render_minimap_b64
+                            _fp_png = _render_minimap_b64(rs, _pb_terrain)
+                    except Exception:  # noqa: BLE001 — audit never breaks a run
+                        _fp_png = None
+                try:
+                    full_playback.record_turn(
+                        turn=turns,
+                        tick=adapter.signals.game_tick,
+                        obs=rs,
+                        briefing=getattr(_audit_agent, "last_briefing", "")
+                        if _audit_agent is not None
+                        else "",
+                        system_prompt=getattr(_audit_agent, "system_prompt", "")
+                        if _audit_agent is not None
+                        else "",
+                        model_request=getattr(_audit_agent, "last_request", None)
+                        if _audit_agent is not None
+                        else None,
+                        model_response=getattr(_audit_agent, "last_response", None)
+                        if _audit_agent is not None
+                        else None,
+                        commands_issued=cmds,
+                        engine_warnings=(
+                            info.get("warnings", [])
+                            if isinstance(info, dict)
+                            else []
+                        ),
+                        signals=adapter.signals,
+                        minimap_png_b64=_fp_png,
+                        done=bool(done),
+                        interrupt=interrupt,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             trace.append(
                 {
                     "turn": turns,
@@ -454,8 +515,43 @@ def run_level(
                     },
                 }
             )
+        if full_playback is not None:
+            try:
+                full_playback.finalize(
+                    outcome=outcome,
+                    final_obs=final_rs,
+                    manifest_extra={
+                        "scenario": result.scenario,
+                        "pack_id": compiled.pack_id,
+                        "level": compiled.level,
+                        "capability": compiled.meta.capability,
+                        "seed": seed,
+                        "outcome": outcome,
+                        "turns": turns,
+                        "max_turns": compiled.max_turns,
+                        "actions_issued": issued,
+                        "actions_warned": warned,
+                        "agent_stats": getattr(
+                            introspection_source(controller), "stats", None
+                        ),
+                        "objective_progress": result.objective_progress,
+                        "reward_vector": result.reward_vector,
+                    },
+                )
+            except Exception:  # noqa: BLE001 — never break a run on I/O
+                pass
         return result
     finally:
+        # Abort the audit recorder if the loop crashed before finalize —
+        # leaves a `.partial` on disk for forensics; the resume scanner
+        # correctly sees no `.jsonl` and retries the cell.
+        try:
+            if full_playback is not None and Path(
+                full_playback.jsonl_path
+            ).exists() is False:
+                full_playback.abort()
+        except Exception:  # noqa: BLE001
+            pass
         pool.release(env)
         pool.shutdown()
         Path(tmp_path).unlink(missing_ok=True)

@@ -1,0 +1,383 @@
+# ECON-CONTESTED-EXPANSION — second refinery for the second harvester.
+#
+# REASONING capability — mid-game expansion under threat. The agent
+# owns a working mini-base (fact + powr + proc + harv) plus ONE small
+# home ore patch whose single-harvester throughput is below the cash
+# bar. A SECOND, RICHER ore patch sits midway between the agent and
+# the enemy, patrolled by hostile infantry; the agent observes both
+# patches on the `ore_cells` channel. The intended play is to BUILD A
+# SECOND `proc` and `place_building` it — anywhere, but the contested
+# patch is the obviously-tempting site — because the engine ships the
+# new refinery with a FREE second harvester (`order_place_building`
+# calls `spawn_unit("harv")` synchronously at line 1779 of world.rs).
+# The two-harv throughput on the home patch is what crosses the bar;
+# the contested patch is the visible "richer alternative" that lures
+# a naive `send the home harv there` policy into the patrol's fire.
+#
+# THE NO-CHEAT BAR
+# ----------------
+# Every lazy / brute / wrong-shape policy must LOSE on every level
+# and every hard seed (1-4); the intended capability play must WIN.
+#
+#   • stall (only observe): single home harv cycles the home patch
+#     and accumulates cash. The home-patch throughput ceiling +
+#     starting cash is 5630cr by tick 4000 (verified by scripted-
+#     policy probe, seed 1, 45 turns). Bars are 5800 / 6200 / 6500;
+#     stall LOSES on the after_ticks fail clause on every tier.
+#
+#   • only-home (observe + queue silos at home but never build a 2nd
+#     proc): same income ceiling as stall — silos don't add throughput.
+#     LOSES.
+#
+#   • send-harv-undefended (`harvest(harv, 60, 20)` — send the home
+#     harv to the contested patch without a refinery there and
+#     without an escort): the harv has to traverse ~45 cells one way
+#     and the engine's `find_refinery` returns the (lowest-id) home
+#     proc as the deposit point, so the round-trip is ~90 cells per
+#     bale. Effective throughput is LOWER than the original home
+#     cycle, AND the patrol e1 platoon engages the harv on contact.
+#     Stall-equivalent LOSS in best case, harv-death LOSS otherwise.
+#
+#   • intended (`build('proc')` + `place_building('proc', x, y)`):
+#     the engine spawns a free 2nd `harv` adjacent to the OLD proc
+#     (engine quirk #1 below — the spawn site is the lowest-id
+#     production building, not the new building); the 2nd harv pairs
+#     with the original on the home patch, doubling throughput; the
+#     bar latches at cash >= 6500 by tick ~3600. WIN.
+#
+# ENGINE FACTS USED (verified against the installed openra_train wheel)
+# ---------------------------------------------------------------------
+#  1. `place_building('proc', x, y)` AUTO-SPAWNS a free `harv` via
+#     `World::spawn_unit("harv", owner)` at world.rs:1779. The spawn
+#     site is `find_spawn_location` which sorts production buildings
+#     by `(!is_primary, id)` — so without an explicit `set_primary`
+#     the NEW proc is NOT preferred; the auto-spawn harv lands at the
+#     OLD proc. (This is an engine gap vs the SC2-style "free
+#     worker at the new expansion" idiom — see ENGINE GAPS below.
+#     The pack's no-cheat bar holds anyway because the doubled-harv
+#     home throughput is enough to clear the cash bar while the
+#     single-harv stall ceiling is not.)
+#  2. `find_refinery` returns the lowest-id `proc` (world.rs:5006);
+#     both harvs deposit to the OLD proc regardless of the new
+#     proc's location. So neither harv exploits the contested patch
+#     in the intended path — the doubled-throughput cycle is on the
+#     HOME patch. The contested patch is a visible decoy in the
+#     ore_cells channel; sending the lone harv there is a LOSS.
+#  3. `proc` requires `powr` AND `fact` (gamerules.rs). Both are
+#     pre-placed for the agent at every tier.
+#  4. `proc` footprint is 3×4. The contested patch is radius 4
+#     (49 cells) so a footprint-overlapping placement still leaves
+#     non-blockaded ore — but as noted in (1)/(2) above, the
+#     placement coordinate doesn't change throughput, only the
+#     building count predicate.
+#  5. Per-player cash plumbing: bench `agent: {cash: 2000}` is honored
+#     (per `tests/test_per_player_starting_cash.py`); without this
+#     line the bench's `PlayerSetup` defaults `agent.cash: 0`, the
+#     proc build queue stalls at 0 progress, and every policy LOSSes
+#     trivially — masking the real capability. Top-level
+#     `starting_cash: 2000` is the back-compat fallback.
+#  6. `cash_gte: N` reads `economy.cash` (post-deposit drain). Bars
+#     are tuned ABOVE the single-harv home-patch ceiling (~5630
+#     by tick 4000) and BELOW the two-harv ceiling (~6250-6600 by
+#     tick ~3500-3800).
+#  7. Tick alignment (CLAUDE.md): engine advances ~90 ticks per
+#     decision turn, so `within_ticks ≤ 93 + 90·(max_turns − 1)`.
+#     `max_turns: 45` ⇒ ceiling 93 + 90·44 = 4053; `within_ticks
+#     4000`, `after_ticks 4001` both bite as a real LOSS (no draw).
+#  8. Persistent unarmed enemy `fact` at the far east edge prevents
+#     the engine's `ConquestVictoryConditions` from auto-`done`-ing
+#     on enemy-elimination before the win/fail evaluates (CLAUDE.md
+#     auto-done footgun). On the hard tier the sentinel is
+#     duplicated across both agent spawn_point groups.
+#  9. `bot_type: patrol` (openra-sim/src/scripted_bot.rs ::
+#     ScriptedBehavior::Patrol) makes each enemy unit oscillate
+#     around its own spawn cell and engage intruders in weapon range.
+#     The patrol e1 platoon is positioned NEAR the contested patch
+#     so the send-harv-undefended path leads the harv directly into
+#     their fire envelope.
+# 10. Hard tier ≥2-spawn-groups requirement (CLAUDE.md §7): two
+#     agent `spawn_point` groups round-robined by seed — NORTH base
+#     at y=14 (spawn_point 0) vs SOUTH base at y=26 (spawn_point 1).
+#     The home patch, contested patch, patrol platoon, and
+#     persistent enemy sentinel are duplicated across both groups
+#     (ore_patches don't honour spawn_point, and the persistent
+#     sentinel mirrors the agent's latitude per spawn group). A
+#     memorised y=20 opening fails on both hard seed groups.
+#
+# ENGINE GAPS (for follow-up; do not block this pack)
+# ---------------------------------------------------
+#  G1. `place_building('proc')` auto-spawn site. Per task design the
+#      free harv should spawn "adjacent to the new proc" (the SC2
+#      free-worker idiom). The engine instead spawns it at the
+#      LOWEST-id proc via `find_spawn_location`'s `(!is_primary, id)`
+#      sort. A scenario can not work around this from YAML — the
+#      auto-spawn happens synchronously in `order_place_building`
+#      before any `set_primary` order can run. Fix: `spawn_unit`
+#      should accept an optional preferred-location argument and
+#      `order_place_building` should pass the new building's
+#      footprint. Until fixed, the pack's intended capability is
+#      "build a 2nd proc to get a 2nd harv at the OLD base" — the
+#      contested-expansion framing is narrative.
+#  G2. `find_refinery` always returns the lowest-id proc, so harvs
+#      cannot be split across multiple refineries by position. Fix:
+#      nearest-refinery selection, or a per-harv refinery binding.
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/econ-contested-expansion.yaml
+
+meta:
+  id: econ-contested-expansion
+  title: 'Econ Contested Expansion — Second Refinery for the Second Harvester'
+  capability: reasoning
+  real_world_meaning: >
+    Mid-game expansion under threat. The agent owns a working
+    mini-base (Construction Yard, Power Plant, Refinery, one
+    harvester) and a small home ore patch whose single-harvester
+    steady-state income survives the clock but never clears the
+    cash bar. A second, richer ore patch sits midway between the
+    agent and an enemy patrol that already loiters at the site.
+    The capability under test is to recognise that single-harv home
+    throughput is below the bar, to commit the 1400-credit
+    refinery spend (which ships with a free second harvester via
+    the engine's place_building hook), and to NOT take the bait of
+    sending the lone home harvester unescorted into the patrolled
+    contested site. Stalling, fortifying at home, or sending the
+    home harvester to the contested patch without a refinery there
+    all LOSE.
+  robotics_analogue: >
+    Provision a second processor to unblock the asset queue. An
+    autonomous extraction operation is running an undersized loop
+    at its home deposit; a richer deposit a long traverse away is
+    patrolled by a hostile platform. The operator's lever is the
+    processor budget — a second processor commission ships with a
+    co-deployed extractor, doubling cycle-rate at the home site.
+    Detouring the existing extractor to the patrolled site without
+    a local processor stalls the cycle (long return trip) and
+    risks loss to the patrol. Stalling at the single-extractor
+    rate never clears the day's revenue target.
+  benchmark_anchor:
+    - "SC2 contested expansion (take a 2nd resource under harass)"
+    - "facility-siting under adversarial contention"
+    - "lmgame-Bench expand-vs-defend tradeoff"
+    - "RTS second-refinery idiom (free-worker on-build)"
+  author: openra-bench
+
+base_map: rush-hour-arena
+# Top-level starting_cash is the back-compat fallback. Per-player
+# `agent: {cash: 2000}` is what the engine actually honors (see
+# `tests/test_per_player_starting_cash.py`); without it the agent
+# starts at 0cr and every policy LOSSes trivially.
+starting_cash: 2000
+
+base:
+  # Per-player cash IS load-bearing — must set agent.cash explicitly,
+  # else the bench PlayerSetup default of 0cr applies and the proc
+  # build queue stalls. Enemy cash stays 0 (the patrol bot does not
+  # build / spend).
+  agent: {faction: allies, cash: 2000}
+  # Patrol bot oscillates each enemy unit around its own spawn cell
+  # and engages intruders in range — the threat at the contested
+  # patch that makes send-harv-undefended a real LOSS.
+  enemy: {faction: soviet, cash: 0, bot_type: patrol}
+  # Toolset: build / place_building are the load-bearing verbs (the
+  # 2nd proc); move_units / harvest / set_stance / attack_move /
+  # attack_unit / sell are auxiliary (re-routing, optional escort
+  # moves, sell-and-rebuild paths); observe / stop are stall / cancel.
+  tools: [observe, build, place_building, move_units, harvest, set_stance, attack_move, attack_unit, sell, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare reasoning cell: home patch (radius 3, amount 3000) at
+  # (25, 20) + contested patch (radius 4, amount 12000) at (60, 20)
+  # patrolled by 2× e1 north/south of the patch. Bar cash >= 5800,
+  # within_ticks 4000. max_turns 45 ⇒ ceiling 93+90·44=4053 > 4001 ✓.
+  # Scripted-policy probe (seed 1):
+  #   stall                → cash=5630, LOSS (single-harv ceiling)
+  #   send-harv-undefended → cash=5630, LOSS (harv detoured; same ceiling)
+  #   intended (2nd proc)  → cash=6600, WIN  (doubled throughput)
+  easy:
+    description: >
+      You own a Construction Yard ('fact'), Power Plant ('powr'), Ore
+      Refinery ('proc'), and one Ore Truck ('harv') on the WEST side
+      of the map. Your home Ore Truck is auto-harvesting a SMALL home
+      ore patch at (25, 20). A second, RICHER ore patch is visible on
+      the ore_cells channel at the CONTESTED CENTRE (60, 20) — but
+      two enemy patrol infantry oscillate around it and will engage
+      any unprotected unit that enters their fire envelope. You have
+      $2000. Build a SECOND Ore Refinery ('proc', cost 1400) and
+      place it on the map — the engine ships the new refinery with a
+      FREE second Ore Truck, and the doubled harvester throughput is
+      what clears the cash bar. Win = cash >= 5800 before tick 4000.
+      Stalling, fortifying at home, and sending your home harvester
+      to the contested patch without a refinery there all LOSE.
+    starting_cash: 2000
+    overrides:
+      actors:
+        # AGENT base — west side, y=20 lane.
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [10, 18]}
+        - {type: proc, owner: agent, position: [12, 20]}
+        # Home harv adjacent to proc — auto-routes via
+        # world.rs::auto_route_idle_harvesters the moment the proc
+        # is owned.
+        - {type: harv, owner: agent, position: [15, 20]}
+        # Patrol — 2 e1 (rifle infantry) flanking the contested
+        # patch (north + south). bot_type:patrol oscillates them
+        # around their spawn and engages intruders within range; e1
+        # is weak vs buildings (the cell is not a "destroy 2nd proc"
+        # test, it is a "do not send the harv unescorted" test).
+        - {type: e1, owner: enemy, position: [60, 14]}
+        - {type: e1, owner: enemy, position: [60, 26]}
+        # Persistent far-edge enemy sentinel — anti-DRAW per CLAUDE.md.
+        - {type: fact, owner: enemy, position: [120, 20]}
+      ore_patches:
+        # Home patch — small (radius 3, amount 3000). Single-harv
+        # steady-state throughput by tick 4000 + starting cash =
+        # 5630cr ceiling (verified). Below the 5800 bar ⇒ stall LOSS.
+        - {x: 25, y: 20, amount: 3000, radius: 3}
+        # Contested patch — rich (radius 4, amount 12000, 49 cells
+        # × 12/cell = 588 ore ≈ 5100cr if any harvester actually
+        # cycled it; in this engine no harv reaches it on the
+        # intended path because find_refinery returns the lowest-id
+        # proc — the contested patch is visible-on-map decoy that
+        # lures the lazy send-harv-undefended play into the patrol.
+        - {x: 60, y: 20, amount: 12000, radius: 4}
+    win_condition:
+      all_of:
+        - has_building: proc
+        - building_count_gte: {type: proc, n: 2}
+        - cash_gte: 5800
+        - within_ticks: 4000
+    fail_condition:
+      any_of:
+        - after_ticks: 4001
+        - not: {has_building: fact}
+    max_turns: 45
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Same geometry as easy, tighter bar (cash >= 6200). The doubled-
+  # throughput intended path still clears (~6250 by tick ~3800);
+  # single-harv stall ceiling unchanged at 5630.
+  medium:
+    description: >
+      Same geometry as easy (small home patch at (25, 20) + rich
+      contested patch at (60, 20) patrolled by two enemy infantry).
+      Tighter bar: cash >= 6200 before tick 4000. Stall, only-home,
+      and send-harv-undefended all LOSE on the single-harvester home
+      throughput ceiling (~5630cr); the intended play (build + place
+      a 2nd Ore Refinery to receive the free 2nd Ore Truck) doubles
+      home-patch throughput to clear the bar.
+    starting_cash: 2000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: powr, owner: agent, position: [10, 18]}
+        - {type: proc, owner: agent, position: [12, 20]}
+        - {type: harv, owner: agent, position: [15, 20]}
+        - {type: e1, owner: enemy, position: [60, 14]}
+        - {type: e1, owner: enemy, position: [60, 26]}
+        - {type: fact, owner: enemy, position: [120, 20]}
+      ore_patches:
+        - {x: 25, y: 20, amount: 3000, radius: 3}
+        - {x: 60, y: 20, amount: 12000, radius: 4}
+    win_condition:
+      all_of:
+        - has_building: proc
+        - building_count_gte: {type: proc, n: 2}
+        - cash_gte: 6200
+        - within_ticks: 4000
+    fail_condition:
+      any_of:
+        - after_ticks: 4001
+        - not: {has_building: fact}
+    max_turns: 45
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two distinct seed-driven spawn groups via `spawn_point` (CLAUDE.md
+  # ≥2 hard-tier requirement). The AGENT base latitude is round-
+  # robined NORTH (y=14, spawn_point 0) vs SOUTH (y=26, spawn_point
+  # 1) by seed. Each spawn group ships its OWN home patch, contested
+  # patch, patrol platoon, and persistent enemy sentinel on the
+  # matching latitude.
+  #
+  # `ore_patches:` is top-level and does NOT honour `spawn_point`
+  # (CLAUDE.md), so all four patches (home N + contested N + home S
+  # + contested S) materialise on every seed. Only the patch on the
+  # agent's active latitude is within the home harv's reach; the
+  # off-latitude patches are harmless flavour.
+  #
+  # `e1` enemy patrol units and the persistent sentinel are
+  # duplicated per spawn_point group — without per-group enemy
+  # actors the spawn_point filter rule (per-owner) would drop them
+  # on the inactive side. With spawn_point on both agent and enemy
+  # sides, only the matching latitude's enemies + sentinel place.
+  #
+  # Bar cash >= 6500. Intended (2nd proc, any placement) reaches
+  # ~6600 by tick ~3600 on every seed; stall caps at 5500-5630
+  # depending on auto-route timing for the spawn latitude. A
+  # memorised "drop the 2nd proc at (58, 20)" opening still works
+  # (placement coordinate is not load-bearing for the win — what
+  # matters is that the build + place sequence completes — but the
+  # SPATIAL VARIATION in the home / contested / patrol positions is
+  # what makes "always send harv to (60, 20)" wrong: on the wrong
+  # latitude the harvest order points at a no-ore cell, and the
+  # patrol platoon is on a different y-band so an escort sent at
+  # (60, 20) attacks empty space).
+  hard:
+    description: >
+      Your west-side mini-base spawns in the NORTH (y=14) or SOUTH
+      (y=26) half of the map depending on the seed. You own a
+      Construction Yard, a Power Plant, an Ore Refinery, and one
+      Ore Truck auto-harvesting YOUR latitude's small home ore patch
+      (at (25, 14) for NORTH; (25, 26) for SOUTH). A richer ore
+      patch sits midway across the map on YOUR latitude at (60, 14)
+      or (60, 26), patrolled by two enemy infantry. Win = cash >=
+      6500 before tick 4000. Build a SECOND Ore Refinery — the
+      engine ships it with a free second Ore Truck and the doubled
+      home-patch throughput clears the bar. Stalling, fortifying at
+      home, sending your home harvester unescorted toward the
+      contested patch, and memorising the wrong latitude (y=20)
+      all LOSE.
+    starting_cash: 2000
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH base (y=14). Agent base + enemy
+        # patrol + persistent sentinel on the north latitude.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: harv, owner: agent, position: [15, 14], spawn_point: 0}
+        - {type: e1, owner: enemy, position: [60, 11], spawn_point: 0}
+        - {type: e1, owner: enemy, position: [60, 17], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [120, 14], spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=26). Symmetric.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [15, 26], spawn_point: 1}
+        - {type: e1, owner: enemy, position: [60, 23], spawn_point: 1}
+        - {type: e1, owner: enemy, position: [60, 29], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [120, 26], spawn_point: 1}
+      ore_patches:
+        # Both latitudes' patches materialise every seed; only the
+        # one on the agent's active latitude is reachable.
+        - {x: 25, y: 14, amount: 3000, radius: 3}
+        - {x: 60, y: 14, amount: 12000, radius: 4}
+        - {x: 25, y: 26, amount: 3000, radius: 3}
+        - {x: 60, y: 26, amount: 12000, radius: 4}
+    win_condition:
+      all_of:
+        - has_building: proc
+        - building_count_gte: {type: proc, n: 2}
+        - cash_gte: 6500
+        - within_ticks: 4000
+    fail_condition:
+      any_of:
+        - after_ticks: 4001
+        - not: {has_building: fact}
+    max_turns: 45
