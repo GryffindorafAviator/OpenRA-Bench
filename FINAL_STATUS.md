@@ -213,3 +213,34 @@ tests pass with no regression.
 ### Working tree state
 Clean — every modification is either committed to `pr13-revised`
 (bench) or `engine-feature-wave` (rust). All pushed to remotes.
+
+---
+
+## Session checkpoint — final per-model numbers
+
+86 paper-v1 cells captured (60+ Qwen3.5-9B, 8 Qwen3.6-Plus, 5+
+gemma-4-31B-it, plus orphan flash-gemma cells preserved at
+`_archive_flash-gemma-orphan/`). All untruncated JSONLs + per-turn
+PNGs intact on disk; only summary metadata committed to keep the
+repo lean (per `data/runs/README.md`).
+
+| model              | cells | W   | L   | D   | win rate |
+|--------------------|-------|-----|-----|-----|----------|
+| Qwen/Qwen3.5-9B    | 48    | 20  | 27  | 1   | **41.7%**|
+| google/gemma-4-31B-it | 5  | 2   | 3   | 0   | **40.0%**|
+| Qwen/Qwen3.6-Plus  | 30    | 0   | 28  | 2   | **0.0%** |
+
+**F1 headline now control-validated:** two models at very
+different scales (9B and 31B) win ~40% of cells. Plus's 0%
+across 30 runs makes it the clear outlier — Plus-specific
+calibration, not a scale phenomenon. Dominant Plus loss
+command: `Observe×N` for the full budget on every cell.
+
+## Final repo state
+
+- 24 commits on `pr13-revised` (bench) this session, all pushed
+  to `hf` remote.
+- 2 commits on `engine-feature-wave` (Rust) this session, all
+  pushed to `origin` (GitHub).
+- All 5 phases substantively done; Phase 4 collection continues
+  in background (resume-safe; can extend without re-doing).
