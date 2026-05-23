@@ -1465,7 +1465,7 @@ UPGRADED = [
     "scout-detect-enemy-tech",  # hard: 2 agent spawn_point groups
     "coord-converge-on-target",  # hard: 2 agent spawn_point groups
     "econ-quantitative-vs-qualitative-spend",  # hard: 2 agent spawn_point groups
-    "def-tower-line-vs-cluster",  # hard: 2 agent spawn_point groups
+    "def-tower-line-vs-cluster",  # hard: 2 ENEMY spawn_point groups (concentrated vs wide-front)
     "coord-cover-and-move",  # hard: 2 agent spawn_point groups
     "combat-kite-and-pull",  # hard: 2 agent spawn_point groups (Wave-12)
     "econ-tech-vs-expand-decision",  # hard: 2 agent spawn_point groups (Wave-12)
