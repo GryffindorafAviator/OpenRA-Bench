@@ -393,6 +393,22 @@ UPGRADED = [
     # and a memorised "always defend at y=N" opening cannot
     # generalise.
     "econ-contention-with-enemy",
+    # Wave-12 REASONING pack — mid-game expansion under genuine
+    # geographic contention on a CORRIDOR map (SC2 contested expansion
+    # / convoy security / facility siting under adversarial contention
+    # anchor). Two water walls frame a single horizontal corridor
+    # at (y=15..24, x=46..81) — the only passable band linking the
+    # agent's west lobe to the central contested patch / enemy's east
+    # lobe. The intended capability is to escort the starter tanks
+    # into the corridor + place a 2nd refinery AT the patch so the
+    # engine's auto-spawned free harv (Wave-9 fix: spawns at the new
+    # proc and binds by path) mines the rich patch and clears the
+    # cash bar. Hard tier defines two agent spawn_point groups (NW
+    # base y=8 / SW base y=32) round-robined by seed; the corridor /
+    # patch / patrol / sentinel are duplicated under each group, so
+    # a memorised tank-rally opening cannot generalise across the
+    # NORTH vs SOUTH base latitudes.
+    "econ-contested-expansion",
     # Wave-6 perception pack — military intelligence reconnaissance
     # (recon-and-extract) / SC2 scout-and-return for info / drone
     # surveillance with return-to-base / intel ops: gather then withdraw.
