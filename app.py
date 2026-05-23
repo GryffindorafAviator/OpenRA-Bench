@@ -2731,6 +2731,24 @@ def build_app() -> gr.Blocks:
                 # Background timer — fires every 1s while the tab is
                 # active. When the current game is over and the
                 # 5-second wait has elapsed, advance to the next pack.
+                #
+                # B9 Playlist nit #4: `gr.Timer` (Gradio ≥4.43, ≥5.0,
+                # ≥6.x) does NOT support pause-on-tab-blur — its only
+                # constructor knobs are `value` (interval seconds) and
+                # `active: bool` (a global on/off). When the user
+                # switches away from the Playlist tab the timer keeps
+                # firing every 1s, paying a small handler cost (the
+                # `_playlist_tick` handler short-circuits via
+                # `gr.skip()` when `sess is None or not sess.done`,
+                # so no engine work is done — but the round-trip to
+                # the server still happens).
+                #
+                # If a future Gradio release adds a `pause_on_blur`
+                # parameter (or a `visibilitychange`-driven event), the
+                # cleanest wiring is to pass it here AND drop the
+                # short-circuit in `_playlist_tick`. Until then the
+                # tick handler's gr.skip() noop is the documented
+                # mitigation.
                 pl_timer = gr.Timer(1.0, active=True)
 
                 _pl_render_outs = [
