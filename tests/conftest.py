@@ -14,6 +14,10 @@ _ENGINE_TOKENS = (
     "run_handoff(",
     "open_study_session(",
     "import openra_train",
+    # Helper in tests/test_perception_ablation.py that boots a real
+    # Rust env pool — the test bodies don't carry the explicit tokens
+    # above, only this helper-call signature, so detect it directly.
+    "_render_state(",
 )
 
 
