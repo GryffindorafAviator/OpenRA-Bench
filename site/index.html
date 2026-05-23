@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenRA-Bench Mission Player</title>
+<style>
+:root{--bg:#0f1115;--card:#161922;--border:#2a2f3a;--text:#e6e6e6;--muted:#9aa3b2;
+--accent:#7497db;--green:#5fae7a;--purple:#9b8cce;--orange:#d2683c;--red:#e05252}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+button{cursor:pointer;font:inherit;border:none;border-radius:6px;padding:8px 16px}
+input,select{font:inherit;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 12px}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{opacity:.9}
+.btn-secondary{background:var(--border);color:var(--text)}.btn-secondary:hover{background:#3a4050}
+.btn-sm{padding:4px 10px;font-size:13px}
+
+/* Header */
+header{padding:16px 24px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+header h1{font-size:20px;white-space:nowrap}
+header .progress{color:var(--muted);font-size:13px;margin-left:auto}
+
+/* Selection screen */
+#selection{padding:24px;max-width:1200px;margin:0 auto}
+.filters{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.filters input{flex:1;min-width:200px}
+.queue-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+.queue-controls label{font-size:12px;color:var(--muted)}
+.queue-controls input{width:54px;font-size:13px;padding:4px 8px}
+.cap-btn{padding:4px 12px;border-radius:16px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text);transition:.2s}
+.cap-btn.active{color:#fff}
+.cap-btn[data-cap="perception"].active{background:var(--accent)}
+.cap-btn[data-cap="reasoning"].active{background:var(--purple)}
+.cap-btn[data-cap="action"].active{background:var(--green)}
+.cap-btn[data-cap="adversarial"].active{background:var(--orange)}
+.scenario-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.scenario-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;cursor:pointer;transition:.15s}
+.scenario-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.scenario-card .title{font-weight:600;font-size:16px;margin-bottom:4px}
+.scenario-card .meta{font-size:12px;color:var(--muted)}
+.scenario-card .summary{font-size:13px;color:#c3cad6;margin-top:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;color:#fff;margin-right:6px}
+.badge-perception{background:var(--accent)}.badge-reasoning{background:var(--purple)}
+.badge-action{background:var(--green)}.badge-adversarial{background:var(--orange)}
+.status-badge{font-size:11px;padding:2px 8px;border-radius:10px;float:right}
+.status-not_started{background:var(--border);color:var(--muted)}
+.status-in_progress{background:#4a3800;color:#ffc107}
+.status-annotated{background:#1a3a1a;color:var(--green)}
+.status-complete{background:#1a2a4a;color:var(--accent)}
+.count-bar{text-align:center;color:var(--muted);font-size:13px;margin-bottom:16px}
+
+/* Mission page */
+#mission{display:none;padding:24px;max-width:1500px;margin:0 auto}
+.mission-nav{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.mission-header{margin-bottom:16px}
+.mission-header h2{font-size:22px}
+.mission-header .sid{color:var(--muted);font-size:12px;font-family:monospace}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.panel h3{font-size:15px;margin-bottom:8px;color:var(--accent)}
+.tabs{display:flex;gap:0;margin-bottom:12px}
+.tab{padding:6px 14px;font-size:13px;background:transparent;color:var(--muted);border:1px solid var(--border);cursor:pointer}
+.tab:first-child{border-radius:6px 0 0 6px}.tab:last-child{border-radius:0 6px 6px 0}
+.tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.obj-text{white-space:pre-wrap;font-size:14px;line-height:1.6}
+.diff-tabs{margin-bottom:12px}
+
+@media(max-width:600px){.scenario-grid{grid-template-columns:1fr}.filters{flex-direction:column}}
+
+/* Game play panel */
+.game-panel{border:2px solid var(--accent);border-radius:10px;overflow:hidden}
+.game-panel.inactive{border-color:var(--border)}
+.game-header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:rgba(116,151,219,.1);flex-wrap:wrap}
+.game-header.inactive{background:var(--card)}
+.game-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.game-body{padding:16px}
+.game-objective{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#c3cad6;line-height:1.45}
+.game-objective b{color:var(--accent)}
+.game-status{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:12px}
+.game-stat{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 12px;text-align:center}
+.game-stat .label{font-size:11px;color:var(--muted);text-transform:uppercase}
+.game-stat .value{font-size:18px;font-weight:600}
+.game-stat .value.win{color:var(--green)}.game-stat .value.loss{color:var(--red)}
+.game-layout{display:grid;grid-template-columns:minmax(620px,2fr) minmax(320px,1fr);gap:16px;align-items:start}
+.game-map-col{min-width:0}
+.game-side-col{min-width:0}
+.game-minimap{position:relative;background:#0a0c10;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px;cursor:crosshair}
+.game-minimap img,.game-minimap canvas{display:block;width:100%;height:auto;image-rendering:pixelated;user-select:none;-webkit-user-drag:none}
+.game-minimap .placeholder{display:flex;align-items:center;justify-content:center;min-height:320px;color:var(--muted);font-size:14px}
+.game-help{font-size:12px;color:var(--muted);margin:-4px 0 10px}
+.game-legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:8px 0 12px}
+.game-legend span{display:inline-flex;align-items:center;gap:4px}
+.legend-mark{display:inline-block;width:12px;height:12px;border:1px solid rgba(0,0,0,.65);background:#45d86a;flex:0 0 auto}
+.legend-mark.circle{border-radius:50%}
+.legend-mark.diamond{transform:rotate(45deg);width:10px;height:10px}
+.legend-mark.triangle{clip-path:polygon(50% 0,100% 100%,0 100%)}
+.legend-mark.tridown{clip-path:polygon(0 0,100% 0,50% 100%);background:#ffcd75}
+.legend-mark.building{background:#7497db}
+.legend-mark.enemy{background:#e05252}
+.legend-mark.enemy-building{background:#d2683c}
+.legend-mark.ore{background:#c99a39;border-radius:50%}
+.legend-mark.selected{box-shadow:0 0 0 2px #fff}
+.legend-mark.arrow{width:18px;height:3px;background:#ffe45c;border:none;position:relative}
+.legend-mark.arrow:after{content:"";position:absolute;right:-1px;top:-4px;border-left:7px solid #ffe45c;border-top:5px solid transparent;border-bottom:5px solid transparent}
+.game-coords{position:absolute;right:8px;top:8px;background:rgba(15,17,21,.78);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font:12px ui-monospace,monospace;color:var(--muted);pointer-events:none}
+.game-units{font-size:13px;max-height:180px;overflow-y:auto}
+.game-units table{width:100%;border-collapse:collapse}
+.game-units th{text-align:left;padding:4px 8px;font-size:11px;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)}
+.game-units td{padding:4px 8px;border-bottom:1px solid var(--border)}
+.game-units tr.selected{background:rgba(116,151,219,.15)}
+.game-units tr:hover{background:rgba(255,255,255,.05);cursor:pointer}
+.game-log{font-size:12px;color:var(--muted);max-height:120px;overflow-y:auto;margin-top:8px;font-family:monospace;padding:8px;background:var(--bg);border-radius:6px}
+.server-config{display:flex;gap:8px;align-items:center;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--border);font-size:13px}
+.server-config input{font-size:13px;padding:4px 8px;width:200px}
+.server-config .dot{width:8px;height:8px;border-radius:50%;background:var(--red)}
+.server-config .dot.connected{background:var(--green)}
+.btn-play{background:var(--green);color:#fff;font-weight:600}.btn-play:hover{opacity:.9}
+.btn-play:disabled{opacity:.4;cursor:not-allowed}
+.btn-stop{background:var(--red);color:#fff}.btn-stop:hover{opacity:.9}
+.btn-endturn{background:var(--accent);color:#fff;font-weight:600;padding:8px 24px}.btn-endturn:hover{opacity:.9}
+.btn-endturn:disabled{opacity:.4;cursor:not-allowed}
+@media(max-width:900px){.game-layout{grid-template-columns:1fr}.game-minimap .placeholder{min-height:240px}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>OpenRA-Bench Missions</h1>
+  <button class="btn-secondary btn-sm" onclick="showSelection()" id="back-btn" style="display:none">All Missions</button>
+  <span class="progress" id="hdr-progress"></span>
+</header>
+
+<main id="selection">
+  <div class="filters">
+    <input type="text" id="search" placeholder="Search scenarios..." oninput="renderCards()">
+    <div id="cap-filters"></div>
+  </div>
+  <div class="queue-controls">
+    <label>Annotator</label>
+    <input type="number" id="queue-annotator" min="0" value="0" onchange="saveQueueConfig()">
+    <label>of</label>
+    <input type="number" id="queue-total" min="1" value="5" onchange="saveQueueConfig()">
+    <label>Round</label>
+    <input type="number" id="queue-round" min="1" value="1" onchange="saveQueueConfig()">
+    <button class="btn-primary btn-sm" onclick="startHumanEvalQueue()">Start Assigned 20</button>
+    <button class="btn-secondary btn-sm" onclick="resetHumanEvalQueue()">Rebuild Queue</button>
+  </div>
+  <div class="count-bar" id="count-bar"></div>
+  <div class="scenario-grid" id="grid"></div>
+</main>
+
+<section id="mission">
+  <div class="mission-nav">
+    <button class="btn-secondary btn-sm" onclick="showSelection()">Back</button>
+    <button class="btn-secondary btn-sm" onclick="navScenario(-1)">Prev</button>
+    <button class="btn-primary btn-sm" onclick="navScenario(1)">Next Mission</button>
+  </div>
+
+  <div class="mission-header">
+    <h2 id="m-title"></h2>
+    <div><span class="sid" id="m-id"></span> <span id="m-badges"></span> <span id="m-status-badge"></span></div>
+  </div>
+
+  <!-- Objective panel -->
+  <div class="panel">
+    <h3>Objective</h3>
+    <div class="tabs" id="lang-tabs">
+      <button class="tab active" onclick="setLang('en')">English</button>
+      <button class="tab" onclick="setLang('zh')">Chinese</button>
+    </div>
+    <div class="diff-tabs" id="diff-tabs"></div>
+    <div class="obj-text" id="m-objective"></div>
+  </div>
+
+  <!-- Annotator hints -->
+  <div class="panel">
+    <h3>Annotator Hints</h3>
+    <div id="m-hints" style="font-size:14px"></div>
+  </div>
+
+
+  <!-- Game play panel -->
+  <div class="panel game-panel inactive" id="game-panel">
+    <h3 style="padding:12px 16px 0;margin:0">Engine Play</h3>
+    <div class="server-config" id="server-config">
+      <span class="dot" id="server-dot"></span>
+      <label>Server:</label>
+      <input type="text" id="server-url" value="http://localhost:8765" placeholder="http://localhost:8765">
+      <button class="btn-secondary btn-sm" onclick="checkServer()">Connect</button>
+      <span id="server-status" style="color:var(--muted)">Not connected</span>
+    </div>
+    <div class="game-header inactive" id="game-header">
+      <h3 style="margin:0">Play</h3>
+      <div class="game-controls">
+        <select id="game-level" style="padding:4px 8px;font-size:13px" onchange="gameLevelChanged()">
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+        <label style="font-size:13px">Seed:</label>
+        <input type="number" id="game-seed" value="1" min="1" max="99" style="width:50px;padding:4px;font-size:13px">
+        <button class="btn-play btn-sm" id="game-start-btn" onclick="gameStart()" disabled>Start</button>
+        <button class="btn-stop btn-sm" id="game-stop-btn" onclick="gameStop()" style="display:none">Stop</button>
+      </div>
+    </div>
+    <div class="game-body" id="game-body" style="display:none">
+      <div class="game-objective" id="game-objective"></div>
+      <div class="game-status" id="game-stats"></div>
+      <div class="game-layout">
+        <div class="game-map-col">
+          <div class="game-help">Click a friendly marker to select that stack, then click ground to move or an enemy marker to attack. You can also click a visible enemy row on the right to queue an attack.</div>
+          <div class="game-minimap" id="game-minimap" onclick="gameMinimapClick(event)" onmousemove="gameMinimapMove(event)" onmouseleave="gameMinimapLeave()">
+            <div class="placeholder" id="game-minimap-ph">Start a game to see the minimap</div>
+            <img id="game-minimap-img" style="display:none" draggable="false">
+            <div class="game-coords" id="game-coords" style="display:none"></div>
+          </div>
+          <div class="game-legend" id="game-legend">
+            <span><i class="legend-mark"></i> unit</span>
+            <span><i class="legend-mark enemy"></i> enemy</span>
+            <span><i class="legend-mark selected"></i> selected</span>
+            <span><i class="legend-mark arrow"></i> queued order</span>
+            <span><b>number</b> stacked units</span>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <button class="btn-secondary btn-sm" onclick="gameSelectAll()">Select All</button>
+            <button class="btn-secondary btn-sm" onclick="gameClearSelection()">Clear Selection</button>
+            <button class="btn-secondary btn-sm" onclick="gameClearQueue()">Cancel Orders</button>
+            <button class="btn-endturn" id="game-endturn-btn" onclick="gameEndTurn()" disabled>End Turn</button>
+          </div>
+        </div>
+        <div class="game-side-col">
+          <div class="game-units" id="game-units"></div>
+          <div class="game-log" id="game-log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+const CAPS=["perception","reasoning","action","adversarial"];
+
+let scenarios=[], filtered=[], currentIdx=-1, currentLang="en", currentDiff="easy";
+let activeCaps=new Set(CAPS);
+let progress={}, humanEvalQueue=[], queueConfig={annotator:0,total:5,round:1};
+const QUEUE_ROUNDS=5, QUEUE_ROUND_SIZE=20;
+
+// ── Data loading ──
+async function loadData(){
+  try{
+    const r=await fetch("public/scenarios.json");
+    scenarios=await r.json();
+  }catch(e){scenarios=[];}
+  loadProgress();
+  ensureHumanEvalQueue();
+  renderCapFilters();
+  renderCards();
+  updateHeaderProgress();
+  // Check URL hash
+  if(location.hash.startsWith("#mission/")){
+    const id=location.hash.slice(9);
+    const idx=scenarios.findIndex(s=>s.scenarioId===id);
+    if(idx>=0)openMission(idx);
+  }
+}
+
+// ── Progress persistence (localStorage) ──
+function loadProgress(){
+  try{
+    progress=JSON.parse(localStorage.getItem("openra-progress")||"{}");
+  }catch(e){progress={};}
+}
+function getStatus(id){return progress[id]||"not_started";}
+function setMissionStatus(s, opts={}){
+  if(currentIdx<0)return;
+  const id=scenarios[currentIdx].scenarioId;
+  progress[id]=s;
+  localStorage.setItem("openra-progress",JSON.stringify(progress));
+  updateHeaderProgress();
+  updateQueueProgressText();
+  if(opts.render!==false){renderMission();renderCards();}
+}
+
+// ── Header progress ──
+function updateHeaderProgress(){
+  const total=scenarios.length;
+  const done=Object.values(progress).filter(s=>s==="complete"||s==="annotated").length;
+  document.getElementById("hdr-progress").textContent=`${done}/${total} completed`;
+}
+
+// ── Selection screen ──
+function renderCapFilters(){
+  const el=document.getElementById("cap-filters");
+  el.innerHTML=CAPS.map(c=>`<button class="cap-btn ${activeCaps.has(c)?'active':''}" data-cap="${c}" onclick="toggleCap('${c}')">${c}</button>`).join("");
+}
+function toggleCap(c){
+  if(activeCaps.has(c))activeCaps.delete(c);else activeCaps.add(c);
+  renderCapFilters();renderCards();
+}
+function renderCards(){
+  const q=(document.getElementById("search").value||"").toLowerCase();
+  filtered=scenarios.filter(s=>{
+    if(!activeCaps.has(s.capability))return false;
+    if(q&&!s.scenarioId.toLowerCase().includes(q)&&!s.title.toLowerCase().includes(q)&&
+       !(s.humanReadable.summary.en||"").toLowerCase().includes(q))return false;
+    return true;
+  });
+  document.getElementById("count-bar").textContent=`Showing ${filtered.length} of ${scenarios.length} scenarios${humanEvalQueueText()}`;
+  const grid=document.getElementById("grid");
+  grid.innerHTML=filtered.map((s,i)=>{
+    const st=getStatus(s.scenarioId);
+    const stLabel=st.replace("_"," ");
+    return `<div class="scenario-card" onclick="openMissionFiltered(${i})">
+      <div><span class="badge badge-${s.capability}">${s.capabilityLabel.en}</span>
+      <span class="status-badge status-${st}">${stLabel}</span></div>
+      <div class="title">${i+1}. ${esc(s.title)}</div>
+      <div class="meta">#${scenarioOrdinal(s.scenarioId)} &middot; ${s.scenarioId} &middot; ${s.map.baseMap}</div>
+      <div class="summary">${esc(s.humanReadable.summary.en)}</div>
+    </div>`;
+  }).join("");
+}
+function openMissionFiltered(fi){
+  const s=filtered[fi];
+  const idx=scenarios.indexOf(s);
+  openMission(idx);
+}
+
+function humanEvalQueueText(){
+  if(!humanEvalQueue.length)return "";
+  const done=humanEvalQueue.filter(id=>progress[id]==="complete"||progress[id]==="annotated").length;
+  const capacity=queueConfig.total*QUEUE_ROUNDS*QUEUE_ROUND_SIZE;
+  const coverage=capacity>=scenarios.length?"covers all":"needs more rounds";
+  return ` | Assigned queue: ${done}/${humanEvalQueue.length} (annotator ${queueConfig.annotator}/${queueConfig.total}, round ${queueConfig.round}/${QUEUE_ROUNDS}, ${coverage})`;
+}
+function updateQueueProgressText(){
+  const bar=document.getElementById("count-bar");
+  if(bar&&document.getElementById("selection").style.display!=="none")renderCards();
+}
+function uniqueScenarioIds(){
+  return [...new Set(scenarios.map(s=>s.scenarioId).filter(Boolean))];
+}
+function scenarioOrdinal(id){
+  return uniqueScenarioIds().indexOf(id);
+}
+function readQueueConfig(){
+  try{queueConfig={...queueConfig,...JSON.parse(localStorage.getItem("openra-human-eval-config")||"{}")} }catch(e){}
+  const a=document.getElementById("queue-annotator");
+  const t=document.getElementById("queue-total");
+  const r=document.getElementById("queue-round");
+  queueConfig.total=Math.max(1,parseInt(queueConfig.total)||5);
+  queueConfig.annotator=Math.max(0,Math.min(queueConfig.total-1,parseInt(queueConfig.annotator)||0));
+  queueConfig.round=Math.max(1,parseInt(queueConfig.round)||1);
+  queueConfig.round=Math.min(queueConfig.round,QUEUE_ROUNDS);
+  if(a)a.value=queueConfig.annotator;
+  if(t)t.value=queueConfig.total;
+  if(r){r.value=queueConfig.round;r.max=QUEUE_ROUNDS;}
+}
+function saveQueueConfig(){
+  const total=Math.max(1,parseInt(document.getElementById("queue-total").value)||5);
+  const annotator=Math.max(0,Math.min(total-1,parseInt(document.getElementById("queue-annotator").value)||0));
+  queueConfig={annotator,total,round:Math.max(1,parseInt(document.getElementById("queue-round").value)||1)};
+  queueConfig.round=Math.min(queueConfig.round,QUEUE_ROUNDS);
+  localStorage.setItem("openra-human-eval-config",JSON.stringify(queueConfig));
+  readQueueConfig();
+  buildHumanEvalQueue();
+  renderCards();
+}
+function assignedRoundScenarioIds(annotator,total,round){
+  const ids=uniqueScenarioIds();
+  if(!ids.length)return [];
+  const startSlot=(round-1)*QUEUE_ROUND_SIZE*total+annotator;
+  const out=[];
+  for(let k=0;k<QUEUE_ROUND_SIZE;k++){
+    const slot=startSlot+k*total;
+    out.push(ids[slot%ids.length]);
+  }
+  return out;
+}
+function buildHumanEvalQueue(){
+  readQueueConfig();
+  humanEvalQueue=assignedRoundScenarioIds(queueConfig.annotator,queueConfig.total,queueConfig.round);
+  localStorage.setItem("openra-human-eval-queue",JSON.stringify(humanEvalQueue));
+}
+function ensureHumanEvalQueue(){
+  readQueueConfig();
+  try{humanEvalQueue=JSON.parse(localStorage.getItem("openra-human-eval-queue")||"[]");}
+  catch(e){humanEvalQueue=[];}
+  const expected=assignedRoundScenarioIds(queueConfig.annotator,queueConfig.total,queueConfig.round);
+  const same=humanEvalQueue.length===expected.length&&humanEvalQueue.every((id,i)=>id===expected[i]);
+  if(!same)buildHumanEvalQueue();
+}
+function startHumanEvalQueue(){
+  buildHumanEvalQueue();
+  if(!humanEvalQueue.length){alert("No scenarios assigned for this annotator/round.");return;}
+  const next=humanEvalQueue.find(id=>progress[id]!=="complete"&&progress[id]!=="annotated")||humanEvalQueue[0];
+  const idx=scenarios.findIndex(s=>s.scenarioId===next);
+  if(idx>=0)openMission(idx);
+}
+function resetHumanEvalQueue(){
+  buildHumanEvalQueue();
+  renderCards();
+  alert("Assigned queue rebuilt. Across annotators and rounds, scenarios are covered globally before repeats fill the 100-task quota.");
+}
+function advanceHumanEvalQueueAfterCompletion(doneId){
+  const pos=humanEvalQueue.indexOf(doneId);
+  if(pos<0)return;
+  let next=null;
+  for(let step=1;step<=humanEvalQueue.length;step++){
+    const id=humanEvalQueue[(pos+step)%humanEvalQueue.length];
+    if(progress[id]!=="complete"&&progress[id]!=="annotated"){next=id;break;}
+  }
+  if(!next){gameLog("Human eval queue complete.");return;}
+  const idx=scenarios.findIndex(s=>s.scenarioId===next);
+  if(idx<0)return;
+  gameLog("Next queued mission: "+next);
+  setTimeout(()=>openMission(idx),900);
+}
+function gameResetForMissionSwitch(){
+  if(gameSession&&gameServerUrl){
+    fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"}).catch(()=>{});
+  }
+  gameSession=null; gameState=null;
+  gameSelected.clear(); gameQueue=[];
+  const body=document.getElementById("game-body");
+  if(body)body.style.display="none";
+  const start=document.getElementById("game-start-btn");
+  const stop=document.getElementById("game-stop-btn");
+  const end=document.getElementById("game-endturn-btn");
+  if(start){start.style.display="";start.disabled=!gameServerOk;}
+  if(stop)stop.style.display="none";
+  if(end)end.disabled=true;
+}
+
+// ── Mission page ──
+function showSelection(){
+  document.getElementById("selection").style.display="";
+  document.getElementById("mission").style.display="none";
+  document.getElementById("back-btn").style.display="none";
+  location.hash="";
+  renderCards();
+}
+function openMission(idx){
+  console.log("openMission called with idx="+idx+" scenarios.length="+scenarios.length);
+  if(idx<0||idx>=scenarios.length){console.log("idx out of range, returning");return;}
+  if(currentIdx!==idx)gameResetForMissionSwitch();
+  currentIdx=idx;
+  if(getStatus(scenarios[idx].scenarioId)==="not_started"){
+    progress[scenarios[idx].scenarioId]="in_progress";
+    localStorage.setItem("openra-progress",JSON.stringify(progress));
+  }
+  document.getElementById("selection").style.display="none";
+  document.getElementById("mission").style.display="block";
+  document.getElementById("back-btn").style.display="";
+  location.hash="mission/"+scenarios[idx].scenarioId;
+  renderMission();
+  updateHeaderProgress();
+}
+function renderMission(){
+  const s=scenarios[currentIdx];
+  if(!s){document.getElementById("mission").innerHTML='<p style="padding:24px;color:var(--red)">Error: scenario not found at index '+currentIdx+'</p>';return;}
+  try{ _renderMissionInner(s); }catch(e){ document.getElementById("mission").innerHTML='<p style="padding:24px;color:var(--red)">Render error: '+e.message+'</p>'; console.error(e); }
+}
+function _renderMissionInner(s){
+  document.getElementById("m-title").textContent="#"+(currentIdx+1)+" "+s.title;
+  document.getElementById("m-id").textContent="#"+scenarioOrdinal(s.scenarioId)+" · "+s.scenarioId;
+  const st=getStatus(s.scenarioId);
+  document.getElementById("m-badges").innerHTML=
+    `<span class="badge badge-${s.capability}">${s.capabilityLabel[currentLang]||s.capability}</span>`;
+  document.getElementById("m-status-badge").innerHTML=
+    `<span class="status-badge status-${st}">${st.replace("_"," ")}</span>`;
+  renderDiffTabs();
+  renderObjective();
+  renderHints();
+}
+function setLang(l){
+  currentLang=l;
+  document.querySelectorAll("#lang-tabs .tab").forEach(t=>t.classList.toggle("active",t.textContent.toLowerCase().startsWith(l==="en"?"e":"c")));
+  renderObjective();renderHints();
+}
+function setDiff(d){
+  currentDiff=d;
+  const gameLevel=document.getElementById("game-level");
+  if(gameLevel)gameLevel.value=d;
+  document.querySelectorAll("#diff-tabs .tab").forEach(t=>t.classList.toggle("active",t.dataset.diff===d));
+  renderObjective();
+}
+function gameLevelChanged(){
+  const gameLevel=document.getElementById("game-level");
+  if(gameLevel&&gameLevel.value!==currentDiff)setDiff(gameLevel.value);
+}
+function renderDiffTabs(){
+  const s=scenarios[currentIdx];
+  const diffs=Object.keys(s.levels);
+  document.getElementById("diff-tabs").innerHTML=diffs.map(d=>
+    `<button class="tab ${d===currentDiff?'active':''}" data-diff="${d}" onclick="setDiff('${d}')">${d}</button>`
+  ).join("");
+}
+function renderObjective(){
+  const s=scenarios[currentIdx];
+  const lv=s.levels[currentDiff];
+  if(!lv||lv.error){
+    document.getElementById("m-objective").textContent=lv?lv.error:"Level not available";
+    return;
+  }
+  document.getElementById("m-objective").textContent=lv.objective[currentLang]||lv.objective.en||"";
+}
+function renderHints(){
+  const s=scenarios[currentIdx];
+  const hints=s.humanReadable.annotatorHints[currentLang]||s.humanReadable.annotatorHints.en||[];
+  document.getElementById("m-hints").innerHTML=hints.map(h=>`<div>&bull; ${esc(h)}</div>`).join("");
+}
+
+// ── Navigation ──
+function navScenario(delta){
+  const next=currentIdx+delta;
+  if(next<0){alert("This is the first scenario.");return;}
+  if(next>=scenarios.length){alert("This is the last scenario. All missions reviewed!");return;}
+  openMission(next);
+}
+
+function esc(s){const d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
+
+// ── Game engine integration ──
+let gameSession=null, gameServerUrl="", gameServerOk=false;
+let gameSelected=new Set(), gameQueue=[], gameState=null;
+
+async function checkServer(){
+  const url=document.getElementById("server-url").value.replace(/\/$/,"");
+  const dot=document.getElementById("server-dot");
+  const status=document.getElementById("server-status");
+  const btn=document.getElementById("game-start-btn");
+  try{
+    const r=await fetch(url+"/api/health",{signal:AbortSignal.timeout(3000)});
+    if(r.ok){
+      gameServerUrl=url; gameServerOk=true;
+      dot.classList.add("connected");
+      status.textContent="Connected";status.style.color="var(--green)";
+      btn.disabled=false;
+      document.getElementById("game-panel").classList.remove("inactive");
+      document.getElementById("game-header").classList.remove("inactive");
+    }else throw new Error(r.statusText);
+  }catch(e){
+    gameServerOk=false;
+    dot.classList.remove("connected");
+    status.textContent="Failed: "+e.message;status.style.color="var(--red)";
+    btn.disabled=true;
+  }
+}
+
+async function gameStart(){
+  if(!gameServerOk||currentIdx<0)return;
+  const s=scenarios[currentIdx];
+  const level=document.getElementById("game-level").value;
+  if(level!==currentDiff)setDiff(level);
+  const seed=parseInt(document.getElementById("game-seed").value)||1;
+  gameLog("Starting "+s.scenarioId+" / "+level+" / seed "+seed+"...");
+  try{
+    const r=await fetch(gameServerUrl+"/api/game/start",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({pack_id:s.scenarioId,level,seed})
+    });
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
+    gameState=await r.json();
+    gameSession=gameState.session_id;
+    gameSelected.clear(); gameQueue=[];
+    document.getElementById("game-body").style.display="";
+    document.getElementById("game-start-btn").style.display="none";
+    document.getElementById("game-stop-btn").style.display="";
+    document.getElementById("game-endturn-btn").disabled=false;
+    document.getElementById("game-panel").classList.remove("inactive");
+    document.getElementById("game-header").classList.remove("inactive");
+    gameRender();
+    gameLog("Game started. Turn 0/"+gameState.max_turns+". "+gameState.objective);
+  }catch(e){
+    gameLog("ERROR: "+e.message);
+  }
+}
+
+async function gameStop(){
+  if(!gameSession)return;
+  try{
+    await fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"});
+  }catch(e){}
+  gameSession=null; gameState=null;
+  gameSelected.clear(); gameQueue=[];
+  document.getElementById("game-body").style.display="none";
+  document.getElementById("game-start-btn").style.display="";
+  document.getElementById("game-stop-btn").style.display="none";
+  document.getElementById("game-start-btn").disabled=!gameServerOk;
+  gameLog("Game stopped.");
+}
+
+async function gameEndTurn(){
+  if(!gameSession||!gameState||gameState.done)return;
+  document.getElementById("game-endturn-btn").disabled=true;
+  const actions=gameQueue.length?gameQueue:[{mode:"observe"}];
+  try{
+    const r=await fetch(gameServerUrl+"/api/game/step",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({session_id:gameSession,actions})
+    });
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
+    gameState=await r.json();
+    gameSelected.clear(); gameQueue=[];
+    gameRender();
+    if(gameState.done){
+      gameLog("GAME OVER — "+gameState.outcome.toUpperCase()+" at turn "+gameState.turn);
+      const completedId=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
+      setMissionStatus("complete",{render:false});
+      if(gameState.save_path)gameLog("Playback saved: "+gameState.save_path);
+      gameLog("Mission marked complete locally.");
+      renderMission();
+      if(completedId)advanceHumanEvalQueueAfterCompletion(completedId);
+      document.getElementById("game-endturn-btn").disabled=true;
+    }else{
+      gameLog("Turn "+gameState.turn+"/"+gameState.max_turns+
+        " | Explored: "+gameState.explored_percent+"%"+
+        " | Kills: "+gameState.units_killed+" | Lost: "+gameState.units_lost);
+      document.getElementById("game-endturn-btn").disabled=false;
+    }
+  }catch(e){
+    gameLog("ERROR: "+e.message);
+    document.getElementById("game-endturn-btn").disabled=false;
+  }
+}
+
+function gameMapRows(){
+  const ascii=gameState&&gameState.minimap_ascii||"";
+  return ascii.split("\n").filter(r=>r.length>0);
+}
+
+function gameMapSize(){
+  const rows=gameMapRows();
+  if(!rows.length)return null;
+  return {w:Math.max(...rows.map(r=>r.length)),h:rows.length,rows};
+}
+
+function gameEventToCell(e){
+  const size=gameMapSize();
+  if(!size)return null;
+  const canvas=document.getElementById("game-minimap-canvas");
+  const img=document.getElementById("game-minimap-img");
+  const surface=canvas&&canvas.style.display!=="none"?canvas:img;
+  if(!surface||surface.style.display==="none")return null;
+  const rect=surface.getBoundingClientRect();
+  if(rect.width<=0||rect.height<=0)return null;
+  const nx=Math.max(0,Math.min(0.9999,(e.clientX-rect.left)/rect.width));
+  const ny=Math.max(0,Math.min(0.9999,(e.clientY-rect.top)/rect.height));
+  return {cx:Math.floor(nx*size.w),cy:Math.floor(ny*size.h),...size};
+}
+
+function gameNearestStack(items,cx,cy,radius){
+  let best=Infinity;
+  for(const u of items){
+    const dx=u.cell_x-cx, dy=u.cell_y-cy;
+    const d=dx*dx+dy*dy;
+    if(d<best)best=d;
+  }
+  if(best>radius*radius)return [];
+  return items.filter(u=>{
+    const dx=u.cell_x-cx, dy=u.cell_y-cy;
+    const d=dx*dx+dy*dy;
+    return Math.abs(d-best)<0.01;
+  });
+}
+
+function gameMinimapMove(e){
+  const p=gameEventToCell(e);
+  const el=document.getElementById("game-coords");
+  if(!p||!el){gameMinimapLeave();return;}
+  el.style.display="";
+  el.textContent=`${p.cx},${p.cy}`;
+}
+
+function gameMinimapLeave(){
+  const el=document.getElementById("game-coords");
+  if(el)el.style.display="none";
+}
+
+function gameMinimapClick(e){
+  if(!gameState||gameState.done)return;
+  const p=gameEventToCell(e);
+  if(!p)return;
+  const ownHere=gameNearestStack(gameState.units,p.cx,p.cy,2.6);
+  const enemyHere=gameNearestStack(gameState.enemies,p.cx,p.cy,3.8);
+  if(ownHere.length>0){
+    const allSelected=ownHere.every(u=>gameSelected.has(u.id));
+    ownHere.forEach(u=>{
+      if(allSelected)gameSelected.delete(u.id);
+      else gameSelected.add(u.id);
+    });
+    gameLog((allSelected?"Deselected ":"Selected ")+ownHere.length+" unit(s) at ("+ownHere[0].cell_x+","+ownHere[0].cell_y+").");
+  }else if(gameSelected.size>0&&enemyHere.length>0){
+    gameQueueAttack(enemyHere[0]);
+  }else if(gameSelected.size>0){
+    const n=gameSelected.size;
+    gameQueueOrder({mode:"move",unit_ids:[...gameSelected],target_x:p.cx,target_y:p.cy});
+    gameSelected.clear();
+    gameLog("Queued MOVE to ("+p.cx+","+p.cy+") with "+n+" unit(s). Selection cleared so another unit can receive a different order this turn.");
+  }else{
+    gameLog("No unit selected. Click a friendly marker or use Select All first.");
+  }
+  gameRender();
+}
+
+function gameSelectAll(){
+  if(!gameState)return;
+  gameState.units.forEach(u=>gameSelected.add(u.id));
+  gameLog("Selected all "+gameSelected.size+" visible unit(s).");
+  gameRender();
+}
+
+function gameClearSelection(){
+  gameSelected.clear();
+  gameLog("Selection cleared.");
+  gameRender();
+}
+
+function gameClearQueue(){
+  gameQueue=[];
+  gameLog("Queued orders cancelled.");
+  gameRender();
+}
+
+function gameQueueOrder(order){
+  const ids=new Set((order.unit_ids||[]).map(String));
+  if(!ids.size)return;
+  const next=[];
+  for(const existing of gameQueue){
+    const remaining=(existing.unit_ids||[]).filter(id=>!ids.has(String(id)));
+    if(remaining.length)next.push({...existing,unit_ids:remaining});
+  }
+  next.push(order);
+  gameQueue=next;
+}
+
+function gameQueueAttack(target){
+  if(!target||!gameSelected.size)return;
+  const n=gameSelected.size;
+  gameQueueOrder({mode:"attack",unit_ids:[...gameSelected],target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
+  gameSelected.clear();
+  gameLog("Queued ATTACK on "+target.id+" at ("+target.cell_x+","+target.cell_y+") with "+n+" unit(s). Selection cleared so another unit can receive a different order this turn.");
+}
+
+function gameAttackEnemy(enemyId){
+  if(!gameState)return;
+  const target=(gameState.enemies||[]).find(e=>e.id===enemyId);
+  if(!target)return;
+  if(!gameSelected.size){
+    gameLog("Select friendly units first, then click the enemy row again.");
+    return;
+  }
+  gameQueueAttack(target);
+  gameSelected.clear();
+  gameRender();
+}
+
+function gameRender(){
+  if(!gameState)return;
+  // Stats bar
+  const obj=document.getElementById("game-objective");
+  if(obj)obj.innerHTML="<b>Engine objective ("+esc(document.getElementById("game-level").value)+"):</b> "+esc(gameState.objective||"");
+  const stats=document.getElementById("game-stats");
+  const oc=gameState.outcome==="win"?"win":gameState.outcome==="loss"?"loss":"";
+  stats.innerHTML=`
+    <div class="game-stat"><div class="label">Turn</div><div class="value">${gameState.turn}/${gameState.max_turns}</div></div>
+    <div class="game-stat"><div class="label">Outcome</div><div class="value ${oc}">${gameState.done?gameState.outcome.toUpperCase():"Playing"}</div></div>
+    <div class="game-stat"><div class="label">Explored</div><div class="value">${gameState.explored_percent}%</div></div>
+    <div class="game-stat"><div class="label">Kills</div><div class="value">${gameState.units_killed}</div></div>
+    <div class="game-stat"><div class="label">Lost</div><div class="value">${gameState.units_lost}</div></div>
+    <div class="game-stat"><div class="label">Cash</div><div class="value">${gameState.cash}</div></div>
+  `;
+  const img=document.getElementById("game-minimap-img");
+  const ph=document.getElementById("game-minimap-ph");
+  const canvas=document.getElementById("game-minimap-canvas");
+  if(gameState.minimap_ascii){
+    gameRenderAsciiMinimap(gameState.minimap_ascii);
+    img.style.display="none"; ph.style.display="none";
+  }else if(gameState.minimap_b64){
+    if(canvas)canvas.style.display="none";
+    img.src="data:image/png;base64,"+gameState.minimap_b64;
+    img.style.display="block"; ph.style.display="none";
+  }else{
+    if(canvas)canvas.style.display="none";
+    img.style.display="none"; ph.style.display="flex";
+    ph.textContent="No minimap available";
+  }
+  gameRenderLegend();
+  gameRenderUnits();
+}
+
+function gameRenderAsciiMinimap(ascii){
+  const rows=ascii.split("\n").filter(r=>r.length>0);
+  if(!rows.length)return;
+  const mh=rows.length, mw=Math.max(...rows.map(r=>r.length));
+  const scale=12;
+  let canvas=document.getElementById("game-minimap-canvas");
+  if(!canvas){
+    canvas=document.createElement("canvas");
+    canvas.id="game-minimap-canvas";
+    document.getElementById("game-minimap").insertBefore(canvas,document.getElementById("game-minimap-ph"));
+  }
+  canvas.width=mw*scale; canvas.height=mh*scale;
+  canvas.style.display="block";
+  const ctx=canvas.getContext("2d");
+  ctx.imageSmoothingEnabled=false;
+  const colors={"#":"#333943",".":"#4b525e","~":"#28506b","^":"#2a3a1a","@":"#5fae7a",
+    "E":"#e05252","B":"#d2683c","b":"#7497db","T":"#9b8cce","*":"#ffcd75"," ":"#0a0c10"};
+  for(let y=0;y<mh;y++){
+    for(let x=0;x<mw;x++){
+      const ch=x<rows[y].length?rows[y][x]:" ";
+      ctx.fillStyle=colors[ch]||"#1a1d24";
+      ctx.fillRect(x*scale,y*scale,scale,scale);
+    }
+  }
+  ctx.strokeStyle="rgba(255,255,255,.16)";
+  ctx.lineWidth=1;
+  for(let x=0;x<=mw;x+=10){ctx.beginPath();ctx.moveTo(x*scale+.5,0);ctx.lineTo(x*scale+.5,mh*scale);ctx.stroke();}
+  for(let y=0;y<=mh;y+=10){ctx.beginPath();ctx.moveTo(0,y*scale+.5);ctx.lineTo(mw*scale,y*scale+.5);ctx.stroke();}
+
+  gameDrawAxes(ctx,mw,mh,scale);
+
+  for(const a of gameQueue){
+    const units=(gameState.units||[]).filter(u=>a.unit_ids.includes(u.id));
+    if(!units.length||a.target_x==null||a.target_y==null)continue;
+    const sx=units.reduce((m,u)=>m+u.cell_x,0)/units.length;
+    const sy=units.reduce((m,u)=>m+u.cell_y,0)/units.length;
+    gameDrawArrow(ctx,sx,sy,a.target_x,a.target_y,scale,a.mode==="attack"?"#ff8a4c":"#ffe45c");
+  }
+
+  gameDrawStacks(ctx,gameState.enemies||[],scale,"enemy");
+  gameDrawStacks(ctx,gameState.own_buildings||[],scale,"own-building");
+  gameDrawStacks(ctx,gameState.units||[],scale,"own");
+}
+
+function gameDrawAxes(ctx,mw,mh,scale){
+  ctx.save();
+  ctx.font="bold 10px ui-monospace,monospace";
+  ctx.textBaseline="top";
+  ctx.lineWidth=3;
+  const stroke="rgba(0,0,0,.85)";
+  const fill="#f3f6ff";
+  for(let x=0;x<mw;x+=10){
+    const px=x*scale+2;
+    ctx.textAlign="left";
+    ctx.strokeStyle=stroke;ctx.fillStyle=fill;
+    ctx.strokeText(String(x),px,2);
+    ctx.fillText(String(x),px,2);
+  }
+  for(let y=0;y<mh;y+=10){
+    const py=y*scale+2;
+    ctx.textAlign="left";
+    ctx.strokeStyle=stroke;ctx.fillStyle=fill;
+    ctx.strokeText(String(y),2,py);
+    ctx.fillText(String(y),2,py);
+  }
+  ctx.textAlign="right";
+  ctx.strokeText("x",mw*scale-4,2);
+  ctx.fillText("x",mw*scale-4,2);
+  ctx.textAlign="left";
+  ctx.strokeText("y",2,mh*scale-13);
+  ctx.fillText("y",2,mh*scale-13);
+  ctx.restore();
+}
+
+function gameTypeKey(type){return String(type||"?").toLowerCase();}
+function gameTypeLabel(type){
+  const t=gameTypeKey(type);
+  const names={"1tnk":"light tank","2tnk":"medium tank","3tnk":"heavy tank","4tnk":"mammoth tank",
+    "harv":"harvester","proc":"refinery","fact":"construction yard","powr":"power plant","weap":"war factory",
+    "barr":"barracks","silo":"silo","e1":"rifle infantry","e3":"rocket soldier","jeep":"ranger","mcv":"MCV"};
+  return names[t]?names[t]+" ("+t+")":t;
+}
+function gameShapeFor(type,isBuilding){
+  const t=gameTypeKey(type);
+  if(isBuilding)return "building";
+  if(t.startsWith("harv"))return "tridown";
+  if(t.startsWith("e")&&/^e\d+$/.test(t))return "circle";
+  if(t==="2tnk")return "diamond";
+  if(t==="3tnk"||t==="4tnk")return "triangle";
+  return "square";
+}
+function gameColorFor(side,isBuilding,type){
+  if(side==="enemy")return isBuilding?"#d2683c":"#e05252";
+  if(isBuilding)return "#7497db";
+  if(gameTypeKey(type).startsWith("harv"))return "#ffcd75";
+  return "#45d86a";
+}
+function gameDrawMarker(ctx,x,y,r,shape){
+  if(shape==="circle"){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);return;}
+  if(shape==="diamond"){ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y);ctx.lineTo(x,y+r);ctx.lineTo(x-r,y);ctx.closePath();return;}
+  if(shape==="triangle"||shape==="tridown"){
+    ctx.beginPath();
+    if(shape==="triangle"){ctx.moveTo(x,y-r);ctx.lineTo(x+r,y+r);ctx.lineTo(x-r,y+r);}
+    else{ctx.moveTo(x-r,y-r);ctx.lineTo(x+r,y-r);ctx.lineTo(x,y+r);}
+    ctx.closePath();return;
+  }
+  ctx.beginPath();ctx.rect(x-r,y-r,r*2,r*2);
+}
+function gameDrawStacks(ctx,items,scale,side){
+  const groups=new Map();
+  for(const u of items||[]){
+    const key=u.cell_x+","+u.cell_y;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(u);
+  }
+  for(const group of groups.values()){
+    const u=group[0];
+    const x=(u.cell_x+.5)*scale, y=(u.cell_y+.5)*scale;
+    const isOwn=side==="own";
+    const isBuilding=side==="own-building"||!!u.is_building;
+    const selected=isOwn&&group.some(g=>gameSelected.has(g.id));
+    const shape=gameShapeFor(u.type,isBuilding);
+    ctx.save();
+    ctx.fillStyle=gameColorFor(side,isBuilding,u.type);
+    ctx.strokeStyle=selected?"#fff":"rgba(0,0,0,.65)";
+    ctx.lineWidth=selected?3:1.5;
+    const r=selected?6:5;
+    gameDrawMarker(ctx,x,y,isBuilding?7:r,shape);
+    ctx.fill();ctx.stroke();
+    if(group.length>1){
+      ctx.fillStyle="#fff";
+      ctx.strokeStyle="rgba(0,0,0,.8)";
+      ctx.lineWidth=3;
+      ctx.font="bold 10px ui-monospace,monospace";
+      ctx.textAlign="center";ctx.textBaseline="middle";
+      ctx.strokeText(String(group.length),x,y);
+      ctx.fillText(String(group.length),x,y);
+    }
+    ctx.restore();
+  }
+}
+
+function gameDrawArrow(ctx,sx,sy,tx,ty,scale,color){
+  const x1=(sx+.5)*scale, y1=(sy+.5)*scale;
+  const x2=(tx+.5)*scale, y2=(ty+.5)*scale;
+  const ang=Math.atan2(y2-y1,x2-x1);
+  ctx.save();
+  ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x2,y2);
+  ctx.lineTo(x2-Math.cos(ang-.55)*9,y2-Math.sin(ang-.55)*9);
+  ctx.lineTo(x2-Math.cos(ang+.55)*9,y2-Math.sin(ang+.55)*9);
+  ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.arc(x2,y2,7,0,Math.PI*2);ctx.stroke();
+  ctx.restore();
+}
+
+function gameLegendEntry(cls,label){
+  return `<span><i class="legend-mark ${cls}"></i> ${esc(label)}</span>`;
+}
+function gameRenderLegend(){
+  const el=document.getElementById("game-legend");
+  if(!el||!gameState)return;
+  const entries=[];
+  const seen=new Set();
+  function add(cls,label,key){
+    const k=key||cls+":"+label;
+    if(seen.has(k))return;
+    seen.add(k);entries.push(gameLegendEntry(cls,label));
+  }
+  for(const u of gameState.units||[]){
+    const t=gameTypeKey(u.type);
+    add(gameShapeFor(t,false),gameTypeLabel(t),"own:"+t);
+  }
+  for(const b of gameState.own_buildings||[]){
+    const t=gameTypeKey(b.type);
+    add("building",gameTypeLabel(t),"own-building:"+t);
+  }
+  const hasEnemy=(gameState.enemies||[]).some(e=>!e.is_building);
+  const hasEnemyBuilding=(gameState.enemies||[]).some(e=>e.is_building);
+  if(hasEnemy)add("enemy","enemy unit","enemy");
+  if(hasEnemyBuilding)add("enemy-building","enemy building","enemy-building");
+  if((gameState.harvesters||0)>0&&!seen.has("own:harv"))add("tridown","harvester (harv)","harv");
+  if((gameState.resource_capacity||0)>0)add("ore","ore / stored resources","resources");
+  add("selected","selected");
+  add("arrow","queued order");
+  entries.push("<span><b>number</b> stacked units</span>");
+  el.innerHTML=entries.join("");
+}
+
+function gameRenderUnits(){
+  if(!gameState)return;
+  const el=document.getElementById("game-units");
+  let html='<table><tr><th></th><th>ID</th><th>Type</th><th>Pos</th><th>HP</th><th>Activity</th></tr>';
+  for(const u of gameState.units){
+    const sel=gameSelected.has(u.id);
+    html+=`<tr class="${sel?'selected':''}" onclick="gameToggleUnit('${u.id}')">
+      <td>${sel?"▶":""}</td><td>${u.id}</td><td>${u.type}</td>
+      <td>(${u.cell_x},${u.cell_y})</td><td>${u.hp}</td><td>${u.activity||"idle"}</td></tr>`;
+  }
+  if((gameState.own_buildings||[]).length){
+    html+='<tr><th colspan="6" style="color:var(--accent);padding-top:8px">Own Buildings</th></tr>';
+    for(const b of gameState.own_buildings){
+      html+=`<tr><td>■</td><td>${b.id}</td><td>${b.type}</td>
+        <td>(${b.cell_x},${b.cell_y})</td><td>${b.hp}</td><td>building</td></tr>`;
+    }
+  }
+  if(gameState.enemies.length){
+    html+='<tr><th colspan="6" style="color:var(--red);padding-top:8px">Visible Enemies</th></tr>';
+    for(const e of gameState.enemies){
+      html+=`<tr style="color:var(--red)" onclick="gameAttackEnemy('${e.id}')"><td>◆</td><td>${e.id}</td><td>${e.type}</td>
+        <td>(${e.cell_x},${e.cell_y})</td><td>${e.hp}</td><td>click to attack</td></tr>`;
+    }
+  }
+  html+='</table>';
+  if(gameQueue.length){
+    html+='<div style="margin-top:8px;font-size:12px;color:var(--accent)">Queued: '+
+      gameQueue.map(a=>a.mode+'('+((a.target_x!=null)?a.target_x+','+a.target_y:'')+')'
+      ).join(', ')+'</div>';
+  }
+  el.innerHTML=html;
+}
+
+function gameToggleUnit(uid){
+  if(gameSelected.has(uid))gameSelected.delete(uid);
+  else gameSelected.add(uid);
+  gameRenderUnits();
+}
+
+function gameLog(msg){
+  const el=document.getElementById("game-log");
+  const time=new Date().toLocaleTimeString();
+  el.innerHTML+=`<div>[${time}] ${esc(msg)}</div>`;
+  el.scrollTop=el.scrollHeight;
+}
+
+loadData();
+</script>
+</body>
+</html>

@@ -1,0 +1,427 @@
+# ECON-CONTESTED-EXPANSION — second refinery on the CONTESTED PATCH,
+# behind a single-corridor approach.
+#
+# REASONING capability — mid-game expansion under genuine geographic
+# contention. The agent owns a small mini-base in one corner (fact +
+# powr + proc + harv + 2 starter Light Tanks). A rich ore patch sits
+# in the centre of the map. Two parallel WATER WALLS frame a
+# horizontal corridor (y=15..24) at x=46..81 — the only passable
+# band linking the agent's western lobe to the central patch and the
+# enemy's eastern lobe. Enemy patrol infantry loiter at the patch.
+#
+# The capability under test is GEOGRAPHIC: read the tactical position
+# of the contested patch (single approach lane through the corridor,
+# enemy patrol already on-site, our two starter tanks idle), commit
+# the 1400-credit 2nd refinery, PLACE IT AT THE PATCH so the engine
+# auto-spawns the free harv ON the patch (Wave-9 engine fix —
+# `place_building('proc')` now spawns the new harv at the new proc's
+# footprint and binds it to the closest refinery by path distance —
+# see CLAUDE.md), and ESCORT WITH THE STARTER TANKS so the patrol
+# doesn't murder the harv on its first bale. Stalling, ignoring the
+# patrol, and planting the proc at home all LOSE.
+#
+# THE NO-CHEAT BAR
+# ----------------
+# Every lazy / brute / wrong-shape policy must LOSE on every level
+# and every hard seed (1-4); the intended capability play must WIN.
+#
+#   • stall (only observe) — single home harv cycles the tiny home
+#     patch. Home patch amount 3000 caps lifetime income; the harv
+#     income ceiling + starting cash is below the cash bar on every
+#     tier. LOSES on the timeout fail clause.
+#
+#   • home-proc (build a 2nd proc and place it AT HOME) — the engine
+#     spawns the new harv at the new (home-side) proc; both harvs
+#     now compete for the same exhausted home patch. The extra harv
+#     adds essentially no net throughput once the home patch is dry.
+#     LOSES on income.
+#
+#   • patch-no-escort (place 2nd proc at the contested patch WITHOUT
+#     moving the tanks) — the auto-spawned harv lands on the patch in
+#     range of the patrol e1; the patrol's burst shreds the unarmed
+#     harv in a few ticks. Harv dies, 2nd proc generates ~0 income,
+#     cash bar unmet. LOSES.
+#
+#   • intended (escort: `attack_move` the starter tanks to the patch
+#     first, then `build('proc')` + `place_building('proc', 66, 20)`):
+#     tanks clear the patrol in the corridor, the auto-spawned harv
+#     mines the rich contested patch and deposits at the new (closer)
+#     proc, the rich-patch throughput dominates the cash bar before
+#     the deadline. WINS.
+#
+# ENGINE FACTS USED (verified against the installed openra_train wheel)
+# ---------------------------------------------------------------------
+#  1. `place_building('proc', x, y)` AUTO-SPAWNS a free `harv` AT
+#     the new proc's footprint and binds it to the CLOSEST refinery
+#     by A* PATH DISTANCE (engine fix pinned by
+#     `OpenRA-Rust/openra-sim/tests/test_proc_auto_spawn_at_new_proc.rs`
+#     + `tests/test_proc_auto_spawn_python.py`; the older
+#     `find_refinery → lowest-id proc` footgun is gone). A 2nd proc
+#     placed AT the contested patch therefore produces real
+#     throughput FROM that patch — the new harv mines (66, 20) and
+#     deposits at the new (closer) proc, not back at the old home
+#     proc.
+#  2. `proc` requires `powr` AND `fact` (gamerules.rs); both
+#     pre-placed for the agent every tier.
+#  3. `proc` footprint is 3×4. The contested patch radius is 4 (49
+#     cells) — a placement at (66, 20) overlaps part of the patch
+#     but the surrounding ore cells stay mineable by the auto-harv.
+#  4. `harv` is UNARMED. The patrol `e1` carries a rifle burst. A
+#     lone harv vs two patrol e1 dies in a handful of ticks unless
+#     escorted by the starter tanks.
+#  5. `bot_type: patrol` (openra-sim/src/scripted_bot.rs ::
+#     ScriptedBehavior::Patrol) oscillates each enemy unit around
+#     its spawn cell with PATROL_RADIUS=8 and sets the bot units'
+#     stance to 2 (Defend) so they auto-fire on intruders in range
+#     without leaving the corridor. The patrol is pre-placed AT the
+#     contested patch so the no-escort path is a real LOSS.
+#  6. Bench actor default stance is 3 (AttackAnything) — every actor
+#     this pack places gets stance:3 unless overridden. Left at the
+#     default the agent's starter tanks AUTO-HUNT the persistent
+#     enemy `fact` sentinel across the map; the engine's
+#     `termination.enemy_units_killed` flag then auto-ends the
+#     episode the moment the sentinel falls, collapsing the run to
+#     DRAW. Mitigation: agent tanks are set to stance:2 (Defend) —
+#     they auto-fire on the patrol when in range (the corridor
+#     fight is still real) but do not roam toward the sentinel.
+#     The enemy sentinel itself is pinned at stance:0 (HoldFire,
+#     never auto-fires; it is purely the MustBeDestroyed marker).
+#  7. Per-player cash plumbing: `agent: {cash: 2000}` is honored
+#     (per `tests/test_per_player_starting_cash.py`); without it the
+#     proc build queue stalls at 0 progress and every policy LOSSes
+#     trivially. Top-level `starting_cash` is the back-compat
+#     fallback.
+#  8. `cash_gte: N` reads `economy.cash` (post-deposit drain). Bars
+#     are tuned ABOVE the home-only ceiling and BELOW the
+#     two-patch-extraction ceiling.
+#  9. Tick alignment (CLAUDE.md): engine advances ~90 ticks per
+#     decision turn, so `within_ticks ≤ 93 + 90·(max_turns − 1)`.
+#     `max_turns: 45` ⇒ ceiling 93 + 90·44 = 4053; `within_ticks
+#     4000`, `after_ticks 4001` both bite as a real LOSS (no draw).
+# 10. Persistent unarmed enemy `fact` at the far east edge prevents
+#     the engine's `ConquestVictoryConditions` from auto-`done`-ing
+#     on enemy-elimination before the win/fail evaluates (CLAUDE.md
+#     auto-done footgun). On the hard tier the sentinel is
+#     duplicated across both spawn_point groups.
+# 11. Map geometry — the CORRIDOR (mapgen `obstacles`): two water
+#     rectangles paint a north wall (x=46..81, y=4..14) and a south
+#     wall (x=46..81, y=25..35) into the otherwise-open 128×40
+#     arena, leaving a y=15..24 horizontal CORRIDOR as the only
+#     passable band between the agent's west lobe and the patch /
+#     enemy's east lobe. This is the geographic-contention
+#     substrate the patrol exploits: there is exactly ONE approach
+#     band, the agent and enemy converge into it from opposite
+#     sides, and the patrol is pre-staged inside it. A flank-around
+#     play does not exist — `harv` (and the tanks) cannot cross
+#     water.
+# 12. Hard tier ≥2-spawn-groups requirement (CLAUDE.md §7): two
+#     agent spawn groups round-robined by seed — the AGENT'S BASE
+#     latitude flips between NORTH (y=8, spawn_point 0) and SOUTH
+#     (y=32, spawn_point 1). Both routes funnel through the SAME
+#     central corridor (y=15..24) so the geographic-contention task
+#     is invariant but the per-turn move plan differs (a memorised
+#     start position fails on the wrong half).
+#
+# Validate (no model / no network):
+#   python3 -m openra_bench.scenarios.validate \
+#     openra_bench/scenarios/packs/econ-contested-expansion.yaml
+
+meta:
+  id: econ-contested-expansion
+  title: 'Econ Contested Expansion — Second Refinery on the Contested Patch'
+  capability: reasoning
+  real_world_meaning: >
+    Mid-game expansion under genuine geographic contention. The
+    agent owns a working mini-base in one corner of the map and a
+    pair of starter tanks. A richer ore patch sits midway across
+    the map, framed by terrain (water walls) that funnel both sides
+    into a single approach corridor. Enemy patrol infantry already
+    loiter on the patch. The capability under test is to read the
+    tactical position (single approach lane, contested by light
+    infantry that will murder an unarmed harvester), commit the
+    1400-credit refinery, place it ON the patch (so the engine's
+    free auto-harvester spawns on-site and mines the rich patch
+    via the closest-by-path refinery), and escort with the starter
+    tanks so the patrol doesn't deny the expansion. Stalling,
+    planting the 2nd refinery at home, and committing the
+    refinery without escorting all LOSE.
+  robotics_analogue: >
+    Commit a forward processor to a contested deposit, with
+    convoy security. An autonomous extraction operation is mining
+    a small home deposit at sub-quota throughput; a richer deposit
+    sits across a contested corridor, patrolled by hostile
+    platforms. The forward processor commission ships with a
+    co-deployed extractor on-site, but the extractor is unarmed
+    and the patrol will destroy it within seconds unless the
+    operator dispatches the available defensive platforms ahead of
+    the commission. Stalling at the home throughput rate never
+    clears the daily revenue target; commissioning the processor
+    at home doubles processors but doesn't add a new deposit;
+    commissioning the processor on the contested deposit without
+    convoy security loses the extractor on first contact.
+  benchmark_anchor:
+    - "SC2 contested expansion (take a 2nd resource under harass)"
+    - "facility-siting under adversarial contention"
+    - "convoy security: forward asset commission + escort"
+    - "RTS second-refinery idiom (free-worker on-build, at the new proc)"
+  author: openra-bench
+
+# Custom corridor map. Two water walls flank a y=15..24 corridor at
+# x=46..81, with the contested patch in the middle of the corridor.
+# Both the agent (west lobe) and the enemy (east lobe) must enter the
+# corridor to reach the patch — the geometric substrate of the
+# contention task. `name:` gives a stable readable id (the same spec
+# always resolves to the same .oramap byte-for-byte; see mapgen.py).
+base_map:
+  generator: arena
+  name: econ-contested-corridor-128x40
+  width: 128
+  height: 40
+  cordon: 4
+  title: Econ Contested Corridor 128x40
+  obstacles:
+    # North wall — closes top half across the centre, x=46..81 y=4..14.
+    - {x: 46, y: 4,  w: 36, h: 11}
+    # South wall — closes bottom half across the centre, x=46..81 y=25..35.
+    - {x: 46, y: 25, w: 36, h: 11}
+
+# Top-level starting_cash is the back-compat fallback. Per-player
+# `agent: {cash: 2000}` is what the engine actually honors.
+starting_cash: 2000
+
+base:
+  # Per-player cash IS load-bearing — must set agent.cash explicitly,
+  # else the bench PlayerSetup default of 0cr applies and the proc
+  # build queue stalls. Enemy cash stays 0 (the patrol bot does not
+  # build / spend).
+  agent: {faction: allies, cash: 2000}
+  # Patrol bot oscillates each enemy unit around its spawn cell and
+  # engages intruders in range — the threat at the contested patch
+  # that makes patch-no-escort a real LOSS.
+  enemy: {faction: soviet, cash: 0, bot_type: patrol}
+  # Toolset:
+  #   build + place_building   — load-bearing (the 2nd proc).
+  #   attack_move + move_units — escort the starter tanks into the
+  #                              corridor.
+  #   attack_unit + set_stance + stop — combat micro fallbacks.
+  #   harvest                  — re-routing the home harv if desired.
+  #   sell                     — sell-and-rebuild path if the
+  #                              learner wants it.
+  #   observe                  — stall.
+  tools: [observe, build, place_building, move_units, attack_move, attack_unit, set_stance, harvest, sell, stop]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []   # every level supplies its own actor list via overrides.
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Bare reasoning cell: small home patch (radius 3, amount 3000) at
+  # (15, 30) in the SW lobe + rich contested patch (radius 4, amount
+  # 18000) at (66, 20) in the corridor. Two patrol e1 at the patch.
+  # Two starter agent tanks (1tnk) for escort.
+  #
+  # Win bar cash >= 5800 before tick 4000. max_turns 45 ⇒ ceiling
+  # 93 + 90·44 = 4053 > 4001 ✓.
+  easy:
+    description: >
+      You own a Construction Yard ('fact'), Power Plant ('powr'), Ore
+      Refinery ('proc'), one Ore Truck ('harv'), and two Light Tanks
+      ('1tnk') in the SW corner of the map. Your harvester is
+      auto-cycling a SMALL home ore patch at (15, 30). A RICHER ore
+      patch is visible on the ore_cells channel at the centre of the
+      map (66, 20), inside a horizontal corridor framed by water
+      walls — the only passable band between your lobe and the
+      patch. Two enemy patrol infantry already loiter on the patch
+      and will murder any unprotected unit. You have $2000. Build a
+      SECOND Ore Refinery ('proc', cost 1400) and PLACE IT AT THE
+      CONTESTED PATCH (66, 20) — the engine ships the new refinery
+      with a FREE second Ore Truck spawned on-site that mines the
+      rich patch. ESCORT with your two Light Tanks (attack_move into
+      the corridor) so the patrol doesn't kill the new harvester.
+      Win = cash >= 5800 before tick 4000. Stalling, building the
+      refinery at home, and committing without escorting all LOSE.
+    starting_cash: 2000
+    overrides:
+      actors:
+        # AGENT base — SW lobe.
+        - {type: fact, owner: agent, position: [10, 30]}
+        - {type: powr, owner: agent, position: [10, 28]}
+        - {type: proc, owner: agent, position: [13, 30]}
+        - {type: harv, owner: agent, position: [16, 30]}
+        # Two escort tanks (1tnk = Light Tank). EXPLICIT stance:2
+        # (Defend) — the bench's default actor stance is 3
+        # (AttackAnything); left at the default these tanks
+        # auto-hunt the persistent enemy `fact` sentinel across the
+        # map and the engine's `termination.enemy_units_killed`
+        # auto-ends the episode → DRAW. stance:2 keeps the tanks
+        # idle until the model orders them, and lets them auto-fire
+        # on the patrol e1 when in range.
+        - {type: 1tnk, owner: agent, position: [18, 32], stance: 2}
+        - {type: 1tnk, owner: agent, position: [20, 32], stance: 2}
+        # Patrol — 3× e3 (rocket infantry, anti-armor) on the
+        # contested patch. e3 has the load-bearing anti-vehicle
+        # weapon (M16RPG, decent damage vs the harv's armored
+        # chassis). 2× e1 rifle infantry deal ~0.4% / turn to the
+        # harv (60000 HP, mining outpaces death) so the no-escort
+        # path was a free win. e3 burst kills an unescorted harv
+        # in ~8-10 turns, before the cash bar can be reached on
+        # the contested patch alone.
+        # `bot_type:patrol` re-sets these to stance:2 at init and
+        # oscillates them around their spawn cell with
+        # PATROL_RADIUS=8 (they stay on / near the patch).
+        - {type: e3, owner: enemy, position: [64, 20]}
+        - {type: e3, owner: enemy, position: [68, 20]}
+        - {type: e3, owner: enemy, position: [66, 18]}
+        # Persistent far-east enemy sentinel — anti-DRAW per CLAUDE.md.
+        # stance:0 (HoldFire) so it is purely the MustBeDestroyed
+        # marker; it never auto-engages and never tries to chase.
+        - {type: fact, owner: enemy, position: [118, 10], stance: 0}
+      ore_patches:
+        # Home patch — small (radius 3, amount 3000). Single-harv
+        # lifetime cap is below the cash bar.
+        - {x: 15, y: 30, amount: 3000, radius: 3}
+        # Contested patch — rich (radius 4, amount 30000). The 2nd
+        # auto-harv mines this and deposits at the new (closer)
+        # proc when the 2nd proc is placed on-site. The rich amount
+        # is what makes the intended (escort) play CLEAR the cash
+        # bar with margin; the e3 patrol caps the no-escort path
+        # before it reaches the bar.
+        - {x: 66, y: 20, amount: 30000, radius: 4}
+    win_condition:
+      all_of:
+        - has_building: proc
+        - building_count_gte: {type: proc, n: 2}
+        - cash_gte: 5800
+        - within_ticks: 4000
+    fail_condition:
+      any_of:
+        - after_ticks: 4001
+        - not: {has_building: fact}
+    max_turns: 45
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Same geometry as easy, tighter bar (cash >= 6500) AND a third
+  # patrol e1 staged at the WEST entry of the corridor (45, 19) so
+  # the escort tanks must drive through fire to reach the patch.
+  medium:
+    description: >
+      Same corridor geometry as easy (small home patch at (15, 30) in
+      your SW lobe + rich contested patch at (66, 20) inside the
+      central corridor) but with THREE enemy patrol infantry: two on
+      the patch and one staged at the WEST entry of the corridor
+      (45, 19) so your escort tanks must shoot their way in. Tighter
+      bar: cash >= 6500 before tick 4000. Stall, only-home, and
+      patch-no-escort all LOSE.
+    starting_cash: 2000
+    overrides:
+      actors:
+        - {type: fact, owner: agent, position: [10, 30]}
+        - {type: powr, owner: agent, position: [10, 28]}
+        - {type: proc, owner: agent, position: [13, 30]}
+        - {type: harv, owner: agent, position: [16, 30]}
+        - {type: 1tnk, owner: agent, position: [18, 32], stance: 2}
+        - {type: 1tnk, owner: agent, position: [20, 32], stance: 2}
+        - {type: e3, owner: enemy, position: [64, 20]}
+        - {type: e3, owner: enemy, position: [68, 20]}
+        - {type: e3, owner: enemy, position: [66, 18]}
+        # West corridor entry: a 4th e3 forces the escort to engage
+        # en route.
+        - {type: e3, owner: enemy, position: [45, 19]}
+        - {type: fact, owner: enemy, position: [118, 10], stance: 0}
+      ore_patches:
+        - {x: 15, y: 30, amount: 3000, radius: 3}
+        - {x: 66, y: 20, amount: 30000, radius: 4}
+    win_condition:
+      all_of:
+        - has_building: proc
+        - building_count_gte: {type: proc, n: 2}
+        - cash_gte: 6500
+        - within_ticks: 4000
+    fail_condition:
+      any_of:
+        - after_ticks: 4001
+        - not: {has_building: fact}
+    max_turns: 45
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two distinct seed-driven spawn groups via `spawn_point` (CLAUDE.md
+  # ≥2 hard-tier requirement). The AGENT base flips between NORTH
+  # corner (NW, y=8, spawn_point 0) and SOUTH corner (SW, y=32,
+  # spawn_point 1). The corridor and contested patch are unchanged
+  # (always the central y=15..24 band at (66, 20)) — the
+  # geographic-contention task is the same, but the approach path
+  # differs (a memorised "drive tanks from (18, 32)" opening dies
+  # on the NW seed because there are no units there).
+  #
+  # `ore_patches:` is top-level and does NOT honour spawn_point
+  # (CLAUDE.md), so all three patches materialise every seed; only
+  # the home patch on the agent's active latitude is in reach.
+  #
+  # Bar cash >= 6500. Intended (2nd proc at the patch + escort with
+  # the active spawn's tanks) WINS every seed; stall / home-proc /
+  # patch-no-escort all LOSE on the same bar.
+  hard:
+    description: >
+      Your mini-base spawns in the NORTH-WEST (y=8) or SOUTH-WEST
+      (y=32) corner of the map depending on the seed. The contested
+      patch (66, 20) is always in the central corridor framed by
+      water walls. You have a Construction Yard, Power Plant, Ore
+      Refinery, one Ore Truck on a small home patch (at (15, 8) for
+      NORTH; (15, 32) for SOUTH), and two Light Tanks. Two enemy
+      patrol infantry guard the patch and one stages at the WEST
+      entry. Win = cash >= 6500 before tick 4000. Build a SECOND
+      Ore Refinery, PLACE IT AT THE PATCH (66, 20), and ESCORT
+      with your tanks. Stall, home-proc, patch-no-escort, and
+      memorising-the-wrong-latitude all LOSE.
+    starting_cash: 2000
+    overrides:
+      actors:
+        # spawn_point 0 — NORTH-WEST base (y=8). The corridor lies
+        # SOUTH of this base, so the tanks must drive south + east
+        # into the corridor entry.
+        - {type: fact, owner: agent, position: [10, 8],  spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 6],  spawn_point: 0}
+        - {type: proc, owner: agent, position: [13, 8],  spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 8],  spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [18, 10], stance: 2, spawn_point: 0}
+        - {type: 1tnk, owner: agent, position: [20, 10], stance: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH-WEST base (y=32). Mirror.
+        - {type: fact, owner: agent, position: [10, 32], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 34], spawn_point: 1}
+        - {type: proc, owner: agent, position: [13, 32], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 32], spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [18, 30], stance: 2, spawn_point: 1}
+        - {type: 1tnk, owner: agent, position: [20, 30], stance: 2, spawn_point: 1}
+        # ENEMY patrol + sentinel — duplicated per spawn group
+        # (per-owner spawn_point filter rule, CLAUDE.md). Same
+        # positions both groups so the contested patch / corridor /
+        # sentinel are in the same place for either seed.
+        - {type: e3, owner: enemy, position: [64, 20], spawn_point: 0}
+        - {type: e3, owner: enemy, position: [68, 20], spawn_point: 0}
+        - {type: e3, owner: enemy, position: [66, 18], spawn_point: 0}
+        - {type: e3, owner: enemy, position: [45, 19], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [118, 10], stance: 0, spawn_point: 0}
+        - {type: e3, owner: enemy, position: [64, 20], spawn_point: 1}
+        - {type: e3, owner: enemy, position: [68, 20], spawn_point: 1}
+        - {type: e3, owner: enemy, position: [66, 18], spawn_point: 1}
+        - {type: e3, owner: enemy, position: [45, 19], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [118, 10], stance: 0, spawn_point: 1}
+      ore_patches:
+        # Two home patches (one per spawn latitude). Only the one
+        # under the active base's harv is reachable; the other is
+        # in the off-latitude corner.
+        - {x: 15, y: 8,  amount: 3000, radius: 3}
+        - {x: 15, y: 32, amount: 3000, radius: 3}
+        - {x: 66, y: 20, amount: 30000, radius: 4}
+    win_condition:
+      all_of:
+        - has_building: proc
+        - building_count_gte: {type: proc, n: 2}
+        - cash_gte: 6500
+        - within_ticks: 4000
+    fail_condition:
+      any_of:
+        - after_ticks: 4001
+        - not: {has_building: fact}
+    max_turns: 45

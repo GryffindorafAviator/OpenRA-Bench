@@ -153,13 +153,13 @@ meta:
 # can map-resolve before per-level overrides materialise the actual
 # generator-spec arena .oramap (same pattern as the other mfb-* packs
 # and mcv-deploy-third-base).
-base_map: rush-hour-arena
+base_map: mfb-two-base-simultaneous-arena
 
 # 2 procs × 1400 = 2800. Exactly enough; a third proc would not fit.
 starting_cash: 2800
 
 base:
-  agent: {faction: allies}
+  agent: {faction: allies, cash: 2800}
   enemy: {faction: soviet, cash: 0, bot_type: ''}
   # build + place_building for the two procs; observe for the turn-1
   # snapshot; stop is kept on so an idle test policy can no-op safely.
@@ -184,20 +184,28 @@ levels:
   # bases" — no concurrency pressure yet.
   # 2701 ≤ 93 + 90·31 = 2883 ✓
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # You hold TWO pre-built Construction Yards: a WEST base at (15,20)
+    # (with a power plant powr at (18,20)) and an EAST base at (85,20)
+    # (with a power plant at (88,20)). Both bases already have the
+    # Building production queue enabled and the `proc` (Refinery, cost
+    # 1400) buildable from the player's shared queue thanks to the pre-
+    # placed powr. Your starting cash is 2800 — exactly two Refineries'
+    # worth. WIN when you have a `proc` placed inside the WEST region
+    # (centred at (15,20), radius 8) AND a `proc` placed inside the EAST
+    # region (centred at (85,20), radius 8), with both your construction
+    # yards still alive, before tick 2700. Stalling (only observe) never
+    # builds anything; building only one Refinery leaves the other region
+    # uncovered. Both LOSE.
     description: >
-      You hold TWO pre-built Construction Yards: a WEST base at
-      (15,20) (with a power plant powr at (18,20)) and an EAST base
-      at (85,20) (with a power plant at (88,20)). Both bases already
-      have the Building production queue enabled and the `proc`
-      (Refinery, cost 1400) buildable from the player's shared queue
-      thanks to the pre-placed powr. Your starting cash is 2800 —
-      exactly two Refineries' worth. WIN when you have a `proc`
-      placed inside the WEST region (centred at (15,20), radius 8)
-      AND a `proc` placed inside the EAST region (centred at (85,20),
-      radius 8), with both your construction yards still alive,
-      before tick 2700. Stalling (only observe) never builds
-      anything; building only one Refinery leaves the other region
-      uncovered. Both LOSE.
+      Two pre-built yards: WEST at (15,20) and EAST at (85,20), each with
+      a power plant. $2800 — exactly two refineries' worth. Build a
+      refinery inside each region (radius 8 around (15,20) and (85,20)).
+      Both yards alive, within about 30 turns. Stalling or doing one base
+      only loses.
     overrides:
       base_map:
         generator: arena
@@ -247,16 +255,24 @@ levels:
   # deadline.
   # 1851 ≤ 93 + 90·22 = 2073 ✓
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Same TWO bases (WEST fact at (15,20) + powr at (18,20); EAST fact at
+    # (85,20) + powr at (88,20)) and the same starting cash 2800 — but on
+    # a TIGHT clock. WIN when there is a `proc` inside the WEST region
+    # (15,20,r8) AND a `proc` inside the EAST region (85,20,r8), with both
+    # construction yards alive, before tick 1850. Concurrency is
+    # mandatory: issue the next `build proc` on the very same turn you
+    # place the previous one (keep the shared production queue saturated).
+    # Stall, serialize-with-idle- observes, and one-base-only all LOSE on
+    # the deadline.
     description: >
-      Same TWO bases (WEST fact at (15,20) + powr at (18,20); EAST
-      fact at (85,20) + powr at (88,20)) and the same starting cash
-      2800 — but on a TIGHT clock. WIN when there is a `proc`
-      inside the WEST region (15,20,r8) AND a `proc` inside the EAST
-      region (85,20,r8), with both construction yards alive, before
-      tick 1850. Concurrency is mandatory: issue the next `build proc`
-      on the very same turn you place the previous one (keep the
-      shared production queue saturated). Stall, serialize-with-idle-
-      observes, and one-base-only all LOSE on the deadline.
+      Same two yards at (15,20) and (85,20) with the same $2800, but the
+      clock is tight at about 21 turns. Issue the next build the moment
+      you place the previous one — keep the shared queue saturated. Both
+      refineries placed inside their discs, both yards alive.
     overrides:
       base_map:
         generator: arena
@@ -305,18 +321,25 @@ levels:
   # listed only once.
   # 1851 ≤ 93 + 90·22 = 2073 ✓
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Same two-base concurrent ramp on the same tight clock, but the BASE
+    # LATITUDE varies per seed. Each seed ships both your pre-built
+    # construction yards at EITHER the NORTH band (y=12) OR the SOUTH band
+    # (y=28); both candidate target regions move with the bases. Read your
+    # starting fact positions and place each Refinery within radius 8 of
+    # the matching latitude. WIN when there is a `proc` inside the WEST
+    # region AND a `proc` inside the EAST region (BOTH at WHICHEVER
+    # latitude your bases spawned at — north OR south), with both
+    # construction yards alive, before tick 1850. Stalling, serializing
+    # with idle observe gaps, and one-base-only all LOSE.
     description: >
-      Same two-base concurrent ramp on the same tight clock, but
-      the BASE LATITUDE varies per seed. Each seed ships both your
-      pre-built construction yards at EITHER the NORTH band (y=12)
-      OR the SOUTH band (y=28); both candidate target regions move
-      with the bases. Read your starting fact positions and place
-      each Refinery within radius 8 of the matching latitude. WIN
-      when there is a `proc` inside the WEST region AND a `proc`
-      inside the EAST region (BOTH at WHICHEVER latitude your bases
-      spawned at — north OR south), with both construction yards
-      alive, before tick 1850. Stalling, serializing with idle
-      observe gaps, and one-base-only all LOSE.
+      Same concurrent build, but both yards spawn at the NORTH (y=12) or
+      SOUTH (y=28) band by seed. Read the actual yard positions; place
+      each refinery within radius 8 of the matching latitude. Within about
+      21 turns. Memorised cells fail on the flip.
     objective_coords: relative
     overrides:
       base_map:

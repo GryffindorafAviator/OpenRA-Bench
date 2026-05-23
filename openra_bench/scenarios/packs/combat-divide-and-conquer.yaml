@@ -58,10 +58,38 @@
 #     on hard (cap allows 1 attrition).
 #
 # Engine guardrails (per CLAUDE.md / SCENARIO_REVIEW_CHECKLIST.md):
-#   - Map: rush-hour-arena (128 × 40 cells, playable x in [2..126],
-#     y in [2..38]). Strike force stages at x=6; enemy clusters at
-#     x=60; agent owns a `fact` HQ at the deep-west rear (x=4, y=20)
-#     so `has_building:fact` in the WIN predicate enforces base
+#   - Map: per-tier custom arena (128 × 48, cordon 2 ⇒ playable
+#     x in [2..125], y in [2..45]) generated via mapgen's `arena`
+#     generator with WATER obstacle clusters that physically
+#     reinforce the divide-and-conquer doctrine:
+#       * easy   — `combat-divide-and-conquer-easy`: ONE flank lane
+#                  (NORTH y=2..7). Middle band y=10..14 walled
+#                  across x=10..55 so the agent cannot diagonally
+#                  cut between the two clusters at y=20 (the both-
+#                  bear midpoint). South half y=26..45 walled
+#                  across x=10..125 so the agent must defeat both
+#                  clusters from the NORTH lane.
+#       * medium — `combat-divide-and-conquer-medium`: TWO flank
+#                  lanes (NORTH y=2..7 + SOUTH y=40..45). Mid-bands
+#                  y=10..14 and y=26..30 walled across x=10..55 so
+#                  shallow shortcuts (y=12 / y=28) that put the
+#                  agent inside both clusters' Dragon range are
+#                  geometrically impossible.
+#       * hard   — `combat-divide-and-conquer-hard`: agent stages
+#                  NORTH (y=10..13) or SOUTH (y=27..30) per seed.
+#                  A single wall band y=18..22 across x=10..50
+#                  closes the engagement-axis midpoint approach
+#                  (the both-clusters-bear lane). Spawn-0 north
+#                  drives east on y=10..13, engages cluster A (at
+#                  y=14..16) in isolation, then pivots south
+#                  through the open east column (x=51..125) to
+#                  engage cluster B. Spawn-1 mirror. A naive
+#                  brute attack_move on y=20 routes around the
+#                  wall and enters the dual-cluster fire envelope
+#                  at x=51..60 — LOSS.
+#     Strike force stages at x=6; enemy clusters at x=60; agent
+#     owns a `fact` HQ at the deep-west rear (x=4, y=20) so
+#     `has_building:fact` in the WIN predicate enforces base
 #     survival AND keeps the episode alive past the moment both
 #     clusters are wiped (no DRAW collapse via engine auto-`done`
 #     on enemy elimination — the agent base persists).
@@ -142,19 +170,49 @@ levels:
   # inert-easy-teeth convention — the divide-vs-converge delta lives
   # on medium and hard).
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # You command 4 medium tanks (2tnk) staging at the west edge
+    # (x=6, y=18..21). Two enemy clusters sit at x=60: a NORTH
+    # cluster at y=15 (2× e3 anti-tank rocketeers, range ~5) and
+    # a SOUTH cluster at y=25 (same). The clusters are 10 cells
+    # apart — engaging on the y=20 midpoint puts you in range of
+    # both at once. The winning play is divide-and-conquer: flank
+    # one cluster (e.g. via y=5 or y=35), eliminate it, then pivot
+    # to the other. Your construction yard (fact) sits at the deep
+    # rear (4,20); it must survive. Win when 4 enemies are killed,
+    # at least 3 of your tanks remain, your fact still stands, and
+    # the deadline (tick 4500) has not passed.
     description: >
-      You command 4 medium tanks (2tnk) staging at the west edge
-      (x=6, y=18..21). Two enemy clusters sit at x=60: a NORTH
-      cluster at y=15 (2× e3 anti-tank rocketeers, range ~5) and
-      a SOUTH cluster at y=25 (same). The clusters are 10 cells
-      apart — engaging on the y=20 midpoint puts you in range of
-      both at once. The winning play is divide-and-conquer: flank
-      one cluster (e.g. via y=5 or y=35), eliminate it, then pivot
-      to the other. Your construction yard (fact) sits at the deep
-      rear (4,20); it must survive. Win when 4 enemies are killed,
-      at least 3 of your tanks remain, your fact still stands, and
-      the deadline (tick 4500) has not passed.
+      Four tanks at the west edge. Two enemy rocket-infantry clusters
+      sit at x=60, ten cells apart at y=15 and y=25. Kill four
+      enemies, keep at least three tanks and your construction yard,
+      within about 50 turns.
     overrides:
+      # EASY MAP — 128x48 arena (cordon 2 -> playable y in [2..45]).
+      # ONE flank lane (NORTH y=2..7). Middle band y=10..13 walled
+      # across x=10..55 so the agent cannot diagonally cut between
+      # the two clusters at y=20 close to the line. South half
+      # y=28..45 walled across x=10..125 so the agent must defeat
+      # both clusters via the NORTH flank lane only (easy tier
+      # teaches single-corridor recognition); cluster B at y=24..26
+      # stays in the open band y=14..27.
+      base_map:
+        generator: arena
+        name: combat-divide-and-conquer-easy
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Divide-and-Conquer — Easy (North Flank Only)'
+        obstacles:
+          # North middle wall — closes y=10..13 across x=10..55.
+          - {x: 10, y: 10, w: 46, h: 4}
+          # South wall — closes y=28..45 across x=10..125 (south
+          # flank lane unavailable on easy; cluster B at y=24..26
+          # remains in the open band).
+          - {x: 10, y: 28, w: 116, h: 18}
       actors:
         # STRIKE FORCE — 4 medium tanks at the west edge, stance:1
         # ReturnFire so they only engage when ordered.
@@ -172,17 +230,16 @@ levels:
         # so it auto-fires and chases on any in-range agent.
         - {type: e3, owner: enemy, position: [60, 14], stance: 3}
         - {type: e3, owner: enemy, position: [60, 16], stance: 3}
-        # CLUSTER B — SOUTH at (60,25), 2× e3.
+        # CLUSTER B — SOUTH at (60,25), 2× e3. (Reachable on easy
+        # only by routing east via the NORTH flank lane y=2..7,
+        # then south down the open east column x=56..125.)
         - {type: e3, owner: enemy, position: [60, 24], stance: 3}
         - {type: e3, owner: enemy, position: [60, 26], stance: 3}
-        # Persistent far-east enemy `fact` sentinel — out of every
-        # flank route, keeps the episode alive past full cluster
-        # elimination so within_ticks / own-survival predicates
-        # evaluate on the terminal frame (no DRAW collapse via
-        # engine auto-`done` when the last MustBeDestroyed enemy
-        # unit falls). This is the standard combat-pack sentinel
-        # pattern (see combat-pincer-coordination, combat-flanking-
-        # attack).
+        # Persistent far-east enemy `fact` sentinel at (120,4) —
+        # inside the cleared north band on every tier; keeps the
+        # episode alive past full cluster elimination so
+        # within_ticks / own-survival predicates evaluate on the
+        # terminal frame (no DRAW collapse via engine auto-`done`).
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
@@ -206,20 +263,48 @@ levels:
   # one cluster at a time in clean 1-vs-1-cluster geometry, preserving
   # all 4 tanks.
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # You command 4 medium tanks (2tnk) staging at the west edge
+    # (x=6, y=18..21). Two HEAVY enemy clusters sit at x=60: a NORTH
+    # cluster at y=15 (3× e3 anti-tank rocketeers + 1× 1tnk light
+    # tank) and a SOUTH cluster at y=25 (same). The clusters are
+    # 10 cells apart — engaging on the y=20 midpoint puts you inside
+    # weapon range of BOTH clusters at once (8 enemies firing on the
+    # lead). The winning play is divide-and-conquer: flank well
+    # NORTH (e.g. y=5) so only Cluster A is in range, eliminate it,
+    # then pivot SOUTH (e.g. y=35) and engage Cluster B in isolation.
+    # Your construction yard (fact) at (4,20) must survive. Win when
+    # 8 enemies are killed, at least 3 of your tanks remain, your
+    # fact still stands, and the deadline (tick 4500) has not passed.
     description: >
-      You command 4 medium tanks (2tnk) staging at the west edge
-      (x=6, y=18..21). Two HEAVY enemy clusters sit at x=60: a NORTH
-      cluster at y=15 (3× e3 anti-tank rocketeers + 1× 1tnk light
-      tank) and a SOUTH cluster at y=25 (same). The clusters are
-      10 cells apart — engaging on the y=20 midpoint puts you inside
-      weapon range of BOTH clusters at once (8 enemies firing on the
-      lead). The winning play is divide-and-conquer: flank well
-      NORTH (e.g. y=5) so only Cluster A is in range, eliminate it,
-      then pivot SOUTH (e.g. y=35) and engage Cluster B in isolation.
-      Your construction yard (fact) at (4,20) must survive. Win when
-      8 enemies are killed, at least 3 of your tanks remain, your
-      fact still stands, and the deadline (tick 4500) has not passed.
+      Heavier clusters at y=15 and y=25 (rocket soldiers plus a light
+      tank each, eight enemies total). Kill all eight, keep at least
+      three tanks and your construction yard, within about 50 turns.
     overrides:
+      # MEDIUM MAP — 128x48 arena (cordon 2 -> playable y in [2..45]).
+      # TWO flank lanes (NORTH y=2..7 + SOUTH y=40..45). Mid-bands
+      # y=10..13 and y=27..30 walled across x=10..55 so shallow
+      # shortcuts (y=12 / y=28) that put the agent inside both
+      # clusters' Dragon range envelope are geometrically impossible.
+      # The far flanks at y=2..7 / y=40..45 (reached via the west
+      # connector strip x=2..9, always clear) become the only routes
+      # that engage one cluster while keeping the other out of range.
+      base_map:
+        generator: arena
+        name: combat-divide-and-conquer-medium
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Divide-and-Conquer — Medium (Two Flank Lanes)'
+        obstacles:
+          # North middle wall — closes y=10..13 across x=10..55.
+          - {x: 10, y: 10, w: 46, h: 4}
+          # South middle wall — closes y=27..30 across x=10..55
+          # (cluster B at y=24..26 stays clear).
+          - {x: 10, y: 27, w: 46, h: 4}
       actors:
         - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
@@ -239,7 +324,8 @@ levels:
         - {type: e3, owner: enemy, position: [60, 25], stance: 3}
         - {type: e3, owner: enemy, position: [60, 26], stance: 3}
         - {type: 1tnk, owner: enemy, position: [60, 25], stance: 3}
-        # Persistent far-east enemy sentinel — see easy note.
+        # Persistent far-east enemy sentinel at (120,4) — inside the
+        # cleared north band on every tier.
         - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
@@ -269,21 +355,52 @@ levels:
   # The survival cap also tightens to own_units_gte:3 (only 1 tank
   # may be lost across the whole campaign on hard).
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # You command 4 medium tanks (2tnk) staging at ONE of two west-
+    # edge corridors (NORTH y=10..13 or SOUTH y=27..30, chosen by
+    # seed). Two HEAVY enemy clusters sit at x=60: a NORTH cluster
+    # at y=15 (3× e3 anti-tank rocketeers + 1× 1tnk) and a SOUTH
+    # cluster at y=25 (same). The clusters are 10 cells apart —
+    # engaging on the y=20 midpoint puts you inside weapon range of
+    # BOTH clusters at once (8 enemies firing on the lead). The
+    # winning play is divide-and-conquer: flank well NORTH (y=5) or
+    # SOUTH (y=35) so only ONE cluster is in range, eliminate it,
+    # then pivot to the OTHER side and engage the second cluster
+    # in isolation. Your construction yard (fact) at (4,20) must
+    # survive. Win when 8 enemies are killed, at least 3 of your
+    # tanks remain, your fact still stands, before tick 4500.
     description: >
-      You command 4 medium tanks (2tnk) staging at ONE of two west-
-      edge corridors (NORTH y=10..13 or SOUTH y=27..30, chosen by
-      seed). Two HEAVY enemy clusters sit at x=60: a NORTH cluster
-      at y=15 (3× e3 anti-tank rocketeers + 1× 1tnk) and a SOUTH
-      cluster at y=25 (same). The clusters are 10 cells apart —
-      engaging on the y=20 midpoint puts you inside weapon range of
-      BOTH clusters at once (8 enemies firing on the lead). The
-      winning play is divide-and-conquer: flank well NORTH (y=5) or
-      SOUTH (y=35) so only ONE cluster is in range, eliminate it,
-      then pivot to the OTHER side and engage the second cluster
-      in isolation. Your construction yard (fact) at (4,20) must
-      survive. Win when 8 enemies are killed, at least 3 of your
-      tanks remain, your fact still stands, before tick 4500.
+      Same heavy clusters as medium, but your tanks stage in the north
+      or south corridor depending on seed. Kill all eight enemies, keep
+      at least three tanks and your construction yard, within about
+      50 turns.
     overrides:
+      # HARD MAP — 128x48 arena (cordon 2 -> playable y in [2..45]).
+      # A single wall band y=18..22 across x=10..50 closes the
+      # engagement-axis midpoint approach (the both-clusters-bear
+      # lane). Spawn 0 staging y=10..13 and spawn 1 staging y=27..30
+      # are clear; the west connector x=2..9 is always clear so the
+      # agent base fact at (4,20) stays reachable from either spawn
+      # group. The east column x=51..125 stays open so the agent can
+      # pivot from cluster A latitude to cluster B latitude through
+      # the open east half once one cluster is cleared.
+      base_map:
+        generator: arena
+        name: combat-divide-and-conquer-hard
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Divide-and-Conquer — Hard (Spawn-Varied)'
+        obstacles:
+          # Mid-axis wall — closes y=18..22 across x=10..50 (the
+          # midpoint engagement axis). x=51..125 stays clear so a
+          # north-spawn tank that engages cluster A at (60,14..16)
+          # can pivot south to cluster B at (60,24..26) through the
+          # open east column.
+          - {x: 10, y: 18, w: 41, h: 5}
       actors:
         # spawn_point 0 — NORTH staging corridor y=10..13. Closer
         # to Cluster A (y=15) so a naive flanker engages A first.

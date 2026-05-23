@@ -1,0 +1,249 @@
+# spec-nuke-strike — load-bearing nuclear-strike superweapon.
+#
+# What the pack measures: spatial commit + correct verb. The agent
+# owns one nuclear silo (`mslo`) and a stationary spotter; the enemy
+# is a tight cluster of ore silos elsewhere on the map. Only path to
+# victory is to read the obs, locate the cluster centroid, wait the
+# 100-tick charge, then `FireSuperweapon { kind: "mslo", target_cell:
+# (cx, cy) }`. The win predicate counts destroyed enemy buildings
+# (`enemy_buildings_destroyed_gte: N`) — every other policy (stall,
+# blind-fire at the silo's own cell, fire-at-wrong-cell) LOSES via
+# `after_ticks` because no buildings fall in time.
+#
+# Per-scenario tailored map: `spec-nuke-strike-arena` (160×60).
+# The shared `rush-hour-arena` (128×40) is too cramped for "read the
+# obs and pick a target cell" — the cluster ends up at a tightly
+# memorisable location near the silo. A 160×60 arena gives the
+# cluster room to live in a non-trivial corner (medium) and to
+# spawn-vary across NE / SW corners (hard) — the model must
+# genuinely read the observation, not pattern-match on a single
+# cell.
+#
+# Discrimination (the four script-policy bar):
+#   • stall (only observe): missile charges but never fires; no
+#     building destroyed → after_ticks LOSS.
+#   • blind-fire (fires at a fixed empty cell, e.g. the silo's own
+#     position): zero enemy buildings destroyed → after_ticks LOSS.
+#   • brute (move/attack with the spotter jeep): not exposed in
+#     `tools:`, so the bench filters it out for the LLM; the jeep is
+#     `stance:0` HoldFire so it never auto-engages either.
+#   • intended nuke-strike: wait the ~100-tick charge, take the
+#     enemy_summary centroid, then `FireSuperweapon { kind: "mslo",
+#     target_cell: (cx, cy) }` — the silo cluster dies in one shot
+#     and the spotter (positioned outside the R=4 Chebyshev blast
+#     radius) survives to provide the within-6-cells vision the
+#     bench's destruction-detection uses → WIN.
+#
+# Engine constants used:
+#   • Superweapon charge: 100 ticks (`SuperweaponKind::charge_ticks`).
+#     At ~90 ticks per decision turn the silo is ready from turn 2.
+#   • Nuke radius: 4 cells CHEBYSHEV distance, base 500_000 damage
+#     with linear falloff to ~100_000 at the edge (`detonate_nuke`).
+#     Ore silos (HP 30_000) one-shot at every cell within the radius.
+#   • Destruction-detection radius: 6 cells Chebyshev from any LIVE
+#     agent UNIT to the destroyed building's last cell
+#     (`rust_adapter.py::observe`, the `_VIS = 6` gate). The spotter
+#     `jeep` is placed within 6 cells of every silo and OUTSIDE the
+#     4-cell nuke blast so it survives the strike and the bench
+#     credits the destruction.
+#
+# Engine guardrails:
+#   • Spotter jeep is `stance:0` HoldFire so it never auto-fires;
+#     `tools:` only exposes `observe` + `fire_superweapon` so the
+#     model cannot manually order it to attack.
+#   • Far persistent enemy `fact` outside the nuke radius (≥5 cells
+#     from the target cell) keeps the engine running after the silo
+#     cluster falls, so the win/fail evaluator sees the terminal
+#     frame.
+#   • `after_ticks: 1801` < tick reachable inside `max_turns: 22`
+#     (≈ 93 + 90·21 = 1983); a stall play hits the deadline and
+#     LOSES rather than drawing.
+#
+# Known engine gap: `detonate_nuke` does NOT credit
+# `kills_per_player` — `units_killed` stays 0 even when a nuke
+# clears a cluster of infantry. This pack uses
+# `enemy_buildings_destroyed_gte` instead (which the bench computes
+# adapter-side from disappeared-but-recently-seen building ids).
+# Flag for future engine work: extend `detonate_nuke` to bump
+# `kills_per_player[owner]` for every actor it removes (mirroring
+# the data-driven attack path at world.rs:4237), so a future nuke
+# pack can use `units_killed_gte` over infantry too.
+
+meta:
+  id: spec-nuke-strike
+  title: 'Nuclear Strike — Fire the mslo on the Enemy Cluster'
+  capability: action
+  real_world_meaning: >
+    The agent owns a nuclear missile silo and must commit a single
+    high-damage strike to the correct target cell. The capability
+    under test is SPATIAL COMMIT × CORRECT VERB — read the observed
+    enemy cluster, take its centroid, wait the recharge window, and
+    fire the superweapon at that cell. Every non-fire policy (stall,
+    blind-fire at an empty cell) loses.
+  robotics_analogue: >
+    Discrete high-stakes one-shot actuation under a charge constraint
+    — a directed-energy / EMP weapon with a long recharge cycle aimed
+    at a transient cluster (riot-control AoE deployment, missile
+    intercept with a single available interceptor). The operator must
+    wait for the system to arm, identify the correct target volume,
+    then commit irreversibly; a mis-aimed shot wastes the entire
+    charge window and the threat persists.
+  benchmark_anchor:
+    - "RA1 / RA2 Nuclear Missile silo"
+    - "TA / SC2 nuke launch sequence"
+    - "real-world: discrete one-shot high-stakes actuation under recharge"
+  author: openra-bench
+
+# Tailored 160×60 arena: large enough that the cluster can live in a
+# non-trivial corner (medium) and spawn-vary across NE / SW corners
+# (hard) instead of pattern-matching a fixed cell next to the silo.
+# The shared `rush-hour-arena` (128×40) is too cramped for that.
+base_map:
+  generator: arena
+  name: spec-nuke-strike-arena
+  width: 160
+  height: 60
+  cordon: 4
+  title: Nuke Strike Arena 160x60
+
+starting_cash: 0
+
+base:
+  agent: {faction: soviet, cash: 0}
+  enemy: {faction: allies, cash: 0, bot_type: ''}
+  # Only the two verbs the test cares about. No `move_units` /
+  # `attack_unit` — the spotter jeep is unorderable (no movement /
+  # combat verb available), so the only way to score is the nuke.
+  tools: [observe, fire_superweapon]
+  planning: true
+  interrupts:
+    enemy_unit_spotted: true
+  termination: {max_ticks: 4000}
+  actors: []
+
+levels:
+  # ── EASY ──────────────────────────────────────────────────────────
+  # One cluster at a fixed non-trivial cell (80, 30) — far enough
+  # from the silo (10, 10) that the model cannot trivially aim at
+  # the silo's own coordinates. Spotter jeep at (80, 24) provides
+  # the within-6-cells vision the bench's destruction-detection
+  # needs; positioned 6 cells north of the cluster so the nuke blast
+  # (R=4 Chebyshev) does not consume it.
+  easy:
+    description: >
+      Your silo at (10,10) charges in about 100 ticks. A cluster of
+      five enemy ore silos sits across the map; a friendly jeep
+      already has eyes on it. Read the observation, fire the nuke at
+      the cluster centroid, take out all five silos in one shot.
+    overrides:
+      actors:
+        # Agent silo — fixed, far west.
+        - {type: mslo, owner: agent, position: [10, 10]}
+        # Stationary spotter — HoldFire, no movement verb exposed.
+        - {type: jeep, owner: agent, position: [80, 24], stance: 0}
+        # Five-silo cluster — tight row, kill-bar 5.
+        - {type: silo, owner: enemy, position: [78, 30]}
+        - {type: silo, owner: enemy, position: [79, 30]}
+        - {type: silo, owner: enemy, position: [80, 30]}
+        - {type: silo, owner: enemy, position: [81, 30]}
+        - {type: silo, owner: enemy, position: [82, 30]}
+        # Far persistent enemy `fact` — outside the nuke radius
+        # (Chebyshev 8 from (80,30)) so the cluster strike does NOT
+        # auto-`done` the world. Position chosen so the all-enemies
+        # centroid still falls inside the silo cluster.
+        - {type: fact, owner: enemy, position: [80, 38]}
+    win_condition:
+      all_of:
+        - {enemy_buildings_destroyed_gte: 5}
+        - {within_ticks: 1800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1801}
+    max_turns: 22
+
+  # ── MEDIUM ────────────────────────────────────────────────────────
+  # Cluster moved to a DIFFERENT corner (south-east, (130, 43)) and
+  # densified to 6 silos in a 5×1 + 1 shape — same capability, but
+  # a model that memorised the easy cluster cell now loses. The
+  # spotter is co-located with the cluster (jeep at (130, 49)),
+  # outside the blast radius.
+  medium:
+    description: >
+      Your silo at (10,10) charges in about 100 ticks. The cluster
+      is now in the south-east corner of the map; six enemy ore
+      silos, your jeep is in eyeshot. Find the centroid, fire the
+      nuke, take out all six.
+    overrides:
+      actors:
+        - {type: mslo, owner: agent, position: [10, 10]}
+        - {type: jeep, owner: agent, position: [130, 49], stance: 0}
+        # Six-silo cluster — 5-in-a-row + 1 below.
+        - {type: silo, owner: enemy, position: [128, 43]}
+        - {type: silo, owner: enemy, position: [129, 43]}
+        - {type: silo, owner: enemy, position: [130, 43]}
+        - {type: silo, owner: enemy, position: [131, 43]}
+        - {type: silo, owner: enemy, position: [132, 43]}
+        - {type: silo, owner: enemy, position: [130, 44]}
+        # Far persistent enemy fact — south of the cluster, outside
+        # the nuke radius. Centroid of all enemies still lands on
+        # the cluster.
+        - {type: fact, owner: enemy, position: [130, 51]}
+    win_condition:
+      all_of:
+        - {enemy_buildings_destroyed_gte: 6}
+        - {within_ticks: 1800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1801}
+    max_turns: 22
+
+  # ── HARD ──────────────────────────────────────────────────────────
+  # Same load-bearing capability, but the dense 6-silo cluster
+  # round-robins across two seed-driven `spawn_point` groups: the
+  # NE corner (around (140, 12)) and the SW corner (around (20, 48)).
+  # The silo stays at a fixed (10, 10) across both groups (duplicated
+  # per the persistent-base idiom in CLAUDE.md). A blind-fire policy
+  # using a hard-coded cell wins zero seeds — the model must read
+  # the live observation to pick the cell.
+  hard:
+    description: >
+      Same charge-and-fire capability, but the dense cluster of six
+      ore silos spawns in the NE OR SW corner by seed. Your silo is
+      fixed at (10,10) so either target is in range, and a jeep
+      spotter ships in with the cluster. Read the observation, pick
+      the centroid, fire the nuke.
+    overrides:
+      actors:
+        # Silo — fixed across spawn groups (duplicate-persistent
+        # idiom: every actor needed every seed declares the same
+        # cell on every `spawn_point` group).
+        - {type: mslo, owner: agent, position: [10, 10], spawn_point: 0}
+        - {type: mslo, owner: agent, position: [10, 10], spawn_point: 1}
+        # NE arrangement (spawn_point 0) — cluster around (140, 12),
+        # spotter at (140, 17), fact above the cluster at (140, 5).
+        - {type: jeep, owner: agent, position: [140, 17], stance: 0, spawn_point: 0}
+        - {type: silo, owner: enemy, position: [138, 12], spawn_point: 0}
+        - {type: silo, owner: enemy, position: [139, 12], spawn_point: 0}
+        - {type: silo, owner: enemy, position: [140, 12], spawn_point: 0}
+        - {type: silo, owner: enemy, position: [141, 12], spawn_point: 0}
+        - {type: silo, owner: enemy, position: [142, 12], spawn_point: 0}
+        - {type: silo, owner: enemy, position: [140, 11], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [140, 5], spawn_point: 0}
+        # SW arrangement (spawn_point 1) — cluster around (20, 48),
+        # spotter at (20, 43), fact below the cluster at (20, 54).
+        - {type: jeep, owner: agent, position: [20, 43], stance: 0, spawn_point: 1}
+        - {type: silo, owner: enemy, position: [18, 48], spawn_point: 1}
+        - {type: silo, owner: enemy, position: [19, 48], spawn_point: 1}
+        - {type: silo, owner: enemy, position: [20, 48], spawn_point: 1}
+        - {type: silo, owner: enemy, position: [21, 48], spawn_point: 1}
+        - {type: silo, owner: enemy, position: [22, 48], spawn_point: 1}
+        - {type: silo, owner: enemy, position: [20, 49], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [20, 54], spawn_point: 1}
+    win_condition:
+      all_of:
+        - {enemy_buildings_destroyed_gte: 6}
+        - {within_ticks: 1800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1801}
+    max_turns: 22

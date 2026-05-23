@@ -21,8 +21,14 @@ from pathlib import Path
 
 def load_episode(ep_dir: str | Path) -> dict:
     """Reassemble one ``seed<N>`` episode folder. Tolerant of a still-
-    running episode (missing files become empty)."""
-    d = Path(ep_dir)
+    running episode (missing files become empty).
+
+    Accepts EITHER a legacy seed dir OR a FullPlayback audit JSONL file;
+    a path ending in `.jsonl` dispatches to `load_audit_jsonl`."""
+    p = Path(ep_dir)
+    if p.is_file() and p.suffix == ".jsonl":
+        return load_audit_jsonl(p)
+    d = p
     manifest = _read_json(d / "manifest.json", {})
     messages = _read_json(d / "messages.json", [])
     turns = []
@@ -40,10 +46,115 @@ def load_episode(ep_dir: str | Path) -> dict:
 
 
 def find_episodes(root: str | Path) -> list[Path]:
-    """All ``.../seed<N>`` episode dirs under a playback root."""
-    return sorted(
-        p.parent for p in Path(root).glob("**/manifest.json")
-    ) or sorted(Path(root).glob("**/seed*"))
+    """All episode targets under a playback root.
+
+    Returns a mix of two shapes the viewer transparently handles:
+      * Legacy `.../seed<N>/` dirs (manifest.json + turns.jsonl + …)
+      * Audit-format `.../<stem>.jsonl` files written by FullPlayback —
+        the loader detects a `.jsonl` path and translates it on the fly.
+    """
+    root = Path(root)
+    legacy = sorted(
+        p.parent for p in root.glob("**/manifest.json")
+    ) or sorted(root.glob("**/seed*"))
+    # Audit-format cells: `<root>/<run_dir>/<pack>__<level>__seedN__fog.jsonl`.
+    # Skip the `.partial` half-runs and any sidecar files (start with `_`).
+    audit = sorted(
+        p for p in root.glob("**/*.jsonl")
+        if not p.name.startswith("_")
+        and "__seed" in p.name
+        and not p.name.endswith(".partial")
+    )
+    return legacy + audit
+
+
+def load_audit_jsonl(jsonl_path: str | Path) -> dict:
+    """Translate a FullPlayback audit JSONL into the same `{dir, manifest,
+    turns, messages}` dict shape `load_episode` returns, so the same
+    viewer code (`render_streamlit` / downstream loaders) can consume
+    either format transparently.
+
+    - `manifest` is reconstructed from the terminal record's
+      `terminal.manifest` block (+ a few top-level fields), preserving
+      compatibility with viewers that expect `outcome`, `model`, etc.
+    - `turns` mirror the legacy per-turn shape (`turn`, `tick`,
+      `commands`, `signals`, `goal`, `minimap_png` path).
+    - `messages` is synthesized from the system_prompt + each turn's
+      briefing/response, so the viewer's transcript pane still works.
+    """
+    p = Path(jsonl_path)
+    recs: list[dict] = []
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            recs.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    if not recs:
+        return {"dir": str(p.parent), "manifest": {}, "turns": [], "messages": []}
+    term_block = (recs[-1].get("terminal") or {}) if recs else {}
+    manifest: dict = dict(term_block.get("manifest") or {})
+    # Surface the audit-only totals at the manifest level so the viewer's
+    # "outcome / wall / tokens" header line has them.
+    manifest.setdefault("outcome", term_block.get("outcome", "?"))
+    manifest.setdefault("wall_clock_seconds", term_block.get("wall_clock_seconds"))
+    manifest["total_tokens_in"] = term_block.get("total_tokens_in", 0)
+    manifest["total_tokens_out"] = term_block.get("total_tokens_out", 0)
+    turns = []
+    messages: list[dict] = []
+    # System prompt lives on the first turn only.
+    sysp = recs[0].get("system_prompt")
+    if sysp:
+        messages.append({"role": "system", "content": sysp})
+    for r in recs:
+        # Turn record — translate to legacy keys the viewer recognises.
+        png_rel = r.get("minimap_png")
+        png_abs = str(p.parent / png_rel) if png_rel else None
+        sig = r.get("signals") or {}
+        turns.append(
+            {
+                "turn": r.get("turn"),
+                "tick": r.get("tick"),
+                "interrupt": r.get("interrupt"),
+                "commands": r.get("commands_issued") or [],
+                "ascii_minimap": (r.get("obs") or {}).get("minimap", ""),
+                "signals": sig,
+                "units": (r.get("obs") or {}).get("units_summary", []),
+                "enemies": (r.get("obs") or {}).get("enemy_summary", []),
+                "goal": {},  # not captured by FullPlayback
+                "minimap_png": png_abs,
+            }
+        )
+        if r.get("briefing"):
+            messages.append({"role": "user", "content": r["briefing"]})
+        resp = r.get("model_response") or {}
+        if resp.get("text") or resp.get("tool_calls"):
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": resp.get("text") or "",
+                    "tool_calls": [
+                        {
+                            "id": f"c{i}",
+                            "type": "function",
+                            "function": {
+                                "name": (tc or {}).get("name", ""),
+                                "arguments": (tc or {}).get("arguments", {}),
+                            },
+                        }
+                        for i, tc in enumerate(resp.get("tool_calls") or [])
+                    ],
+                    "reasoning": resp.get("reasoning", ""),
+                }
+            )
+    return {
+        "dir": str(p.parent),
+        "manifest": manifest,
+        "turns": turns,
+        "messages": messages,
+    }
 
 
 def _read_json(p: Path, default):

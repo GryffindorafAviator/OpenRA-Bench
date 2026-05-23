@@ -3,7 +3,7 @@
 Saves, per scenario episode, everything needed to *replay what
 happened*: the full model⇄env message transcript (system / user /
 assistant, including the minimap image as a data-URL), a per-turn
-record (tick, commands issued, signal snapshot, ASCII minimap), and a
+record (tick, commands issued, signal snapshot, units, enemies, and goal progress), and a
 manifest with scenario meta + outcome + score. Written under a
 dedicated folder so people can inspect every run.
 
@@ -45,7 +45,11 @@ class Playback:
     """Per-episode recorder. Create one per (scenario, seed)."""
 
     def __init__(self, root: str | Path, cell: str, seed: int):
-        self.dir = Path(root) / cell.replace("/", "_") / f"seed{seed}"
+        safe_cell = "".join(
+            ch if ch not in '<>:"/\\|?*' and ord(ch) >= 32 else "_"
+            for ch in str(cell)
+        )
+        self.dir = Path(root) / safe_cell / f"seed{seed}"
         self.dir.mkdir(parents=True, exist_ok=True)
         self._turns_fh = open(self.dir / "turns.jsonl", "w")
         self._n = 0
@@ -67,6 +71,8 @@ class Playback:
         self._n += 1
         if minimap_png_b64:
             try:
+                if "," in minimap_png_b64 and minimap_png_b64.lstrip().startswith("data:"):
+                    minimap_png_b64 = minimap_png_b64.split(",", 1)[1]
                 (self.dir / f"minimap_turn{turn:03d}.png").write_bytes(
                     base64.b64decode(minimap_png_b64)
                 )
@@ -77,7 +83,6 @@ class Playback:
             "tick": getattr(signals, "game_tick", None),
             "interrupt": interrupt,
             "commands": [repr(c) for c in cmds],
-            "ascii_minimap": render_state.get("minimap", ""),
             "signals": _jsonable(
                 {
                     "cash": getattr(signals, "cash", 0),

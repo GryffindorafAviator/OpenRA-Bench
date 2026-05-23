@@ -1,0 +1,285 @@
+# def-bridge-chokepoint — chokepoint defense at narrow bridges.
+#
+# Map: bridges-arena generator (real water terrain — bridges are the only
+# passable corridors). Tailored per tier:
+#   easy   = 1 bridge in the centre
+#   medium = 3 evenly-spaced bridges (~x=30/62/94)
+#   hard   = same 3-bridge layout as medium with more attackers and a
+#            tighter tick budget
+# The water band (y=18..21) is rendered as real impassable terrain by the
+# mapgen — NO `water_cells:` overlay needed.
+#
+# Design: medium + hard each place ONE proc directly behind each bridge
+# as a per-bridge target. An undefended bridge = its proc falls = LOSS
+# (the win predicate requires ALL procs alive). Easy uses the single
+# fact target because there's only one bridge.
+#
+# Why "only-centre" loses on multi-bridge tiers: defender cluster sits
+# south of the centre bridge. Outer-bridge attackers (stance:3, hunt the
+# nearest visible enemy) cross at their own bridge — A* can't path
+# across water elsewhere — and as they head SE/SW toward the visible
+# centre defenders they pass within weapon range of their own proc.
+# Stance:3 fires on the nearest enemy, including buildings, so the
+# uncontested outer proc falls = LOSS.
+#
+# Scripted-policy bar (all 4 seeds × 3 tiers):
+#   stall (observe only)        : LOSS  (attackers cross, fact/proc falls)
+#   only-centre attack_move     : medium/hard LOSS  (outer procs fall),
+#                                 easy LOSS / WIN depending on stance flip
+#   intended (set_stance + per-
+#     bridge attack_move)       : WIN
+meta:
+  id: def-bridge-chokepoint
+  title: Bridge Chokepoint — defend every crossing before they reach you
+  capability: action
+  real_world_meaning: Geographic chokepoint defense. A barrier (water) channels every attacker through a small number of crossings
+    (bridges). The defender must (a) flip the engagement stance so units fire, AND (b) distribute forces across every crossing
+    — concentrating on one bridge leaves the others wide open and their assets fall.
+  robotics_analogue: Perimeter defense around a facility with a moat and discrete gates. Guards posted on standby must be
+    told to engage AND stationed at EACH gate — an undefended gate is a free corridor for the intruder to reach the nearest
+    asset.
+  benchmark_anchor:
+  - ERQA spatial commit (read terrain → assign defenders to chokepoints)
+  - MicroRTS chokepoint defense
+  - 'military doctrine: defense at obstacle-channelized terrain'
+  author: openra-bench
+base_map: rush-hour-arena
+starting_cash: 1000
+base:
+  agent:
+    faction: allies
+    cash: 1000
+  enemy:
+    faction: soviet
+    cash: 0
+  tools:
+  - observe
+  - move_units
+  - attack_unit
+  - attack_move
+  - stop
+  - set_stance
+  spawn_mcvs: false
+  planning: true
+  termination:
+    max_ticks: 6000
+  actors: []
+levels:
+  easy:
+    description: A water band cuts the map east-to-west with a single bridge at the centre (x=62-65). Six riflemen attack from
+      the north. Your defenders guard your base on HoldFire (stance 0) — they will NOT engage unless you flip stance and move
+      them to the bridge. Win = kill ≥4 attackers AND keep your fact alive, before turn 30.
+    starting_cash: 1000
+    overrides:
+      base_map:
+        generator: bridges-arena
+        name: def-bridge-chokepoint-easy-arena
+        width: 128
+        height: 40
+        cordon: 2
+        axis: horizontal
+        channel_y: 18
+        channel_width: 4
+        bridges:
+        - {pos: 62, width: 4}
+      actors:
+      - &id001
+        type: fact
+        owner: agent
+        position: [10, 33]
+      - &id002
+        type: powr
+        owner: agent
+        position: [10, 35]
+      # Defender cluster — south of the channel near the centre bridge.
+      # All stance:0 (HoldFire) so the model must flip stance to engage.
+      - {type: e1, owner: agent, position: [60, 30], stance: 0}
+      - {type: e1, owner: agent, position: [61, 30], stance: 0}
+      - {type: e1, owner: agent, position: [62, 30], stance: 0}
+      - {type: e1, owner: agent, position: [63, 30], stance: 0}
+      - {type: e1, owner: agent, position: [64, 30], stance: 0}
+      - {type: e1, owner: agent, position: [65, 30], stance: 0}
+      # Attackers — north of the channel, aligned with the centre bridge.
+      - {type: e1, owner: enemy, position: [60, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [61, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [62, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [63, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [64, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [65, 4], stance: 3}
+      # Far-corner enemy fact: keeps the world alive (defeats engine
+      # auto-done on enemy-elimination) and gives the LOSS path room to
+      # bite.
+      - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+      - units_killed_gte: 4
+      - has_building: fact
+      - within_ticks: 2700
+    fail_condition:
+      any_of:
+      - after_ticks: 2701
+      - not:
+          has_building: fact
+    max_turns: 35
+  medium:
+    description: Three bridges (x=30, x=62, x=94) cross the water. Each bridge has a refinery (proc) directly behind it that
+      the attackers will destroy if unopposed. Six riflemen attack through EACH bridge. Defenders are on HoldFire (stance 0)
+      at the centre; you must split the force, flip stance, and intercept at ALL THREE bridges. Win = kill ≥8 attackers AND
+      keep ALL THREE procs alive, before turn 40.
+    starting_cash: 1000
+    overrides:
+      base_map:
+        generator: bridges-arena
+        name: def-bridge-chokepoint-medium-arena
+        width: 128
+        height: 40
+        cordon: 2
+        axis: horizontal
+        channel_y: 18
+        channel_width: 4
+        bridges:
+        - {pos: 30, width: 4}
+        - {pos: 62, width: 4}
+        - {pos: 94, width: 4}
+      actors:
+      - *id001
+      - *id002
+      # Per-bridge targets: one proc directly behind each bridge.
+      - {type: proc, owner: agent, position: [30, 26]}
+      - {type: proc, owner: agent, position: [62, 26]}
+      - {type: proc, owner: agent, position: [94, 26]}
+      # Defender cluster — south of the centre bridge. 12 e1 stance:0.
+      - {type: e1, owner: agent, position: [58, 30], stance: 0}
+      - {type: e1, owner: agent, position: [59, 30], stance: 0}
+      - {type: e1, owner: agent, position: [60, 30], stance: 0}
+      - {type: e1, owner: agent, position: [61, 30], stance: 0}
+      - {type: e1, owner: agent, position: [62, 30], stance: 0}
+      - {type: e1, owner: agent, position: [63, 30], stance: 0}
+      - {type: e1, owner: agent, position: [64, 30], stance: 0}
+      - {type: e1, owner: agent, position: [65, 30], stance: 0}
+      - {type: e1, owner: agent, position: [60, 31], stance: 0}
+      - {type: e1, owner: agent, position: [61, 31], stance: 0}
+      - {type: e1, owner: agent, position: [62, 31], stance: 0}
+      - {type: e1, owner: agent, position: [63, 31], stance: 0}
+      # Attackers — three groups of 6 e1 each, aligned with the bridges.
+      - {type: e1, owner: enemy, position: [28, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [29, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [30, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [31, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [32, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [33, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [60, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [61, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [62, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [63, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [64, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [65, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [92, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [93, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [94, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [95, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [96, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [97, 4], stance: 3}
+      - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+      - units_killed_gte: 8
+      - has_building: fact
+      - within_ticks: 3150
+      - building_count_gte:
+          type: proc
+          n: 3
+    fail_condition:
+      any_of:
+      - after_ticks: 3151
+      - not:
+          has_building: fact
+      - not:
+          building_count_gte:
+            type: proc
+            n: 3
+    max_turns: 40
+  hard:
+    description: Three bridges (x=30, x=62, x=94) cross the water. Each bridge has a refinery (proc) directly behind it that
+      the attackers will destroy if unopposed. Seven riflemen attack through EACH bridge (21 total). Defenders are on HoldFire
+      (stance 0) at the centre. You must split into thirds, flip stance, and intercept at all three bridges before the budget
+      bites. Win = kill ≥12 attackers AND keep ALL THREE procs alive, before turn 40.
+    starting_cash: 1000
+    overrides:
+      base_map:
+        generator: bridges-arena
+        name: def-bridge-chokepoint-hard-arena
+        width: 128
+        height: 40
+        cordon: 2
+        axis: horizontal
+        channel_y: 18
+        channel_width: 4
+        bridges:
+        - {pos: 30, width: 4}
+        - {pos: 62, width: 4}
+        - {pos: 94, width: 4}
+      actors:
+      - *id001
+      - *id002
+      # Per-bridge targets: one proc directly behind each bridge.
+      - {type: proc, owner: agent, position: [30, 26]}
+      - {type: proc, owner: agent, position: [62, 26]}
+      - {type: proc, owner: agent, position: [94, 26]}
+      # Defender cluster — 15 e1 stance:0 (5 per bridge after split).
+      - {type: e1, owner: agent, position: [58, 30], stance: 0}
+      - {type: e1, owner: agent, position: [59, 30], stance: 0}
+      - {type: e1, owner: agent, position: [60, 30], stance: 0}
+      - {type: e1, owner: agent, position: [61, 30], stance: 0}
+      - {type: e1, owner: agent, position: [62, 30], stance: 0}
+      - {type: e1, owner: agent, position: [63, 30], stance: 0}
+      - {type: e1, owner: agent, position: [64, 30], stance: 0}
+      - {type: e1, owner: agent, position: [65, 30], stance: 0}
+      - {type: e1, owner: agent, position: [58, 31], stance: 0}
+      - {type: e1, owner: agent, position: [59, 31], stance: 0}
+      - {type: e1, owner: agent, position: [60, 31], stance: 0}
+      - {type: e1, owner: agent, position: [61, 31], stance: 0}
+      - {type: e1, owner: agent, position: [62, 31], stance: 0}
+      - {type: e1, owner: agent, position: [63, 31], stance: 0}
+      - {type: e1, owner: agent, position: [64, 31], stance: 0}
+      # Attackers — three groups of 7 e1 each, aligned with the bridges.
+      - {type: e1, owner: enemy, position: [27, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [28, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [29, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [30, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [31, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [32, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [33, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [59, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [60, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [61, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [62, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [63, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [64, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [65, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [91, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [92, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [93, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [94, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [95, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [96, 4], stance: 3}
+      - {type: e1, owner: enemy, position: [97, 4], stance: 3}
+      - {type: fact, owner: enemy, position: [120, 4]}
+    win_condition:
+      all_of:
+      - units_killed_gte: 12
+      - has_building: fact
+      - within_ticks: 3600
+      - building_count_gte:
+          type: proc
+          n: 3
+    fail_condition:
+      any_of:
+      - after_ticks: 3601
+      - not:
+          has_building: fact
+      - not:
+          building_count_gte:
+            type: proc
+            n: 3
+    max_turns: 45

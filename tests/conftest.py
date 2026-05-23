@@ -8,7 +8,17 @@ import pytest
 
 
 _ENGINE_SKIP = pytest.mark.skip(reason="Rust env wheel not installed")
-_ENGINE_TOKENS = ("run_level(", "RustEnvPool(")
+_ENGINE_TOKENS = (
+    "run_level(",
+    "RustEnvPool(",
+    "run_handoff(",
+    "open_study_session(",
+    "import openra_train",
+    # Helper in tests/test_perception_ablation.py that boots a real
+    # Rust env pool — the test bodies don't carry the explicit tokens
+    # above, only this helper-call signature, so detect it directly.
+    "_render_state(",
+)
 
 
 def pytest_collection_modifyitems(config, items):

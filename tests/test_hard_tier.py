@@ -28,7 +28,8 @@ UPGRADED = [
     "adversarial-duel",
     # adversarial-skirmish/-siege consolidated into adversarial-duel
     # (quarantined) — see SCENARIO_QUALITY.md de-dup.
-    "artofwar-decoy-sacrifice",
+    # artofwar-decoy-sacrifice archived (moved to _archive/, status:
+    # quarantine); the sister art-of-war packs cover the idiom.
     "artofwar-indirect-approach",
     "artofwar-lure-the-tiger",
     "artofwar-sequenced-citadel",
@@ -393,6 +394,22 @@ UPGRADED = [
     # and a memorised "always defend at y=N" opening cannot
     # generalise.
     "econ-contention-with-enemy",
+    # Wave-12 REASONING pack — mid-game expansion under genuine
+    # geographic contention on a CORRIDOR map (SC2 contested expansion
+    # / convoy security / facility siting under adversarial contention
+    # anchor). Two water walls frame a single horizontal corridor
+    # at (y=15..24, x=46..81) — the only passable band linking the
+    # agent's west lobe to the central contested patch / enemy's east
+    # lobe. The intended capability is to escort the starter tanks
+    # into the corridor + place a 2nd refinery AT the patch so the
+    # engine's auto-spawned free harv (Wave-9 fix: spawns at the new
+    # proc and binds by path) mines the rich patch and clears the
+    # cash bar. Hard tier defines two agent spawn_point groups (NW
+    # base y=8 / SW base y=32) round-robined by seed; the corridor /
+    # patch / patrol / sentinel are duplicated under each group, so
+    # a memorised tank-rally opening cannot generalise across the
+    # NORTH vs SOUTH base latitudes.
+    "econ-contested-expansion",
     # Wave-6 perception pack — military intelligence reconnaissance
     # (recon-and-extract) / SC2 scout-and-return for info / drone
     # surveillance with return-to-base / intel ops: gather then withdraw.
@@ -730,19 +747,22 @@ UPGRADED = [
     # selected. MicroRTS pillbox placement / military quadrant
     # doctrine anchor.
     "build-defensive-skirt-corners",
-    # Wave-11 REASONING pack: passive-obstacle vs active-defense
-    # mitigation — one budget (3200cr) funds EITHER ~16 inert brik
-    # walls OR 4 active gun turrets. The win predicate requires a kill
-    # quota (units_killed_gte) only the gun turrets can deliver, so a
-    # walls-only spend (0 kills) and a stall both LOSE while the
-    # intended turret build WINS. Hard tier defines two agent
-    # spawn_point groups (NORTH fact y=14 / SOUTH fact y=26) round-
-    # robined by seed; the scheduled rush wave is staged at BOTH
-    # candidate latitudes (spawn_actors lists are not spawn_point-
-    # filtered) so the rusher converges on whichever fact the seed
-    # selected, and a memorised "turrets near (10,20)" plan cannot
-    # generalise. Security architecture passive-vs-active mitigation /
-    # military fortification anchor.
+    # Wave-11 REASONING pack: tier-differentiated defensive DOCTRINE
+    # — passive `brik` walls (200cr, no Armament) vs active `pbox`
+    # pillboxes (600cr, M60mg burst). The CORRECT doctrine differs
+    # per tier: easy = pure-pbox (frontal rush in the open); medium =
+    # walls+pbox CHOKE (overwhelming horde funnels through a single
+    # gap onto the pbox burst); hard = MIXED 2 pbox + 8 brik with a
+    # seed-driven fact flip. The win predicate requires `pbox` count,
+    # `brik` count (medium/hard only), AND a kill quota — so pure-
+    # walls (0 kills) and pure-pbox (no brik) both LOSE on medium/hard
+    # while still winning easy. Hard defines two agent spawn_point
+    # groups (NORTH fact y=14 / SOUTH fact y=26) round-robined by
+    # seed; the scheduled rush waves are staged at BOTH candidate
+    # latitudes so the rusher converges on whichever fact the seed
+    # selected, and a memorised "wall belt near (10,20)" plan cannot
+    # generalise. Security architecture passive-vs-active mitigation
+    # / military fortification anchor.
     "def-walls-vs-towers",
     # Wave-7 REASONING asymmetric-underdog pack — SC2 asymmetric /
     # guerrilla tactics / asymmetric warfare anchor. 2× 2tnk vs 4× e1
@@ -1446,12 +1466,26 @@ UPGRADED = [
     "scout-detect-enemy-tech",  # hard: 2 agent spawn_point groups
     "coord-converge-on-target",  # hard: 2 agent spawn_point groups
     "econ-quantitative-vs-qualitative-spend",  # hard: 2 agent spawn_point groups
-    "def-tower-line-vs-cluster",  # hard: 2 agent spawn_point groups
+    "def-tower-line-vs-cluster",  # hard: 2 ENEMY spawn_point groups (concentrated vs wide-front)
     "coord-cover-and-move",  # hard: 2 agent spawn_point groups
     "combat-kite-and-pull",  # hard: 2 agent spawn_point groups (Wave-12)
     "econ-tech-vs-expand-decision",  # hard: 2 agent spawn_point groups (Wave-12)
     "scout-deny-enemy-vision",  # hard: 2 agent spawn_point groups (Wave-12)
     "def-reinforce-the-breach",  # hard: 2 agent spawn_point groups (Wave-12)
+    # Custom map (econ-second-base-race-arena 112x40) tailored to
+    # the SPATIAL second-base placement skill; hard tier round-
+    # robins the agent corner NW (y=8) vs SW (y=32) per seed; the
+    # contested 2nd-proc target zone shifts to the opposite-
+    # diagonal corner (SE (88,30) for NW spawn / NE (88,8) for SW
+    # spawn) so a single memorised placement cannot generalise.
+    "econ-second-base-race",
+    # Hard-tier seed-driven spawn variation packs (verified ≥2 distinct
+    # spawn_point groups in the YAML overrides; one line each).
+    "combat-tanya-vs-rush",  # hard: 2 enemy spawn_point groups (rush flank flips)
+    "spec-nuke-strike",  # hard: 2 enemy/agent spawn_point groups (NE/SW silo cluster)
+    "combat-heli-flank",  # hard: 2 agent spawn_point groups (north/south heli staging)
+    "econ-harvester-defense-raid",  # hard: 2 agent spawn_point groups (north/south base)
+    "econ-mine-and-grow",  # hard: 2 agent spawn_point groups (north/south base)
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
@@ -1533,6 +1567,36 @@ NOT_APPLICABLE = {
     "destroying the fact and converting the recovery test into a "
     "fact-defence test. Spawn variation would compete with the "
     "recovery-discipline signal for attribution.",
+    # Hard tiers without a seed-varied spawn axis — each pack tightens a
+    # different controlled variable (extra defender, tighter clock, more
+    # difficult terrain) on a fixed map geometry. Adding spawn_point
+    # variation would dilute the single-axis attribution.
+    "def-bridge-chokepoint": "hard adds a third bridge + a third "
+    "attacker squad (21 attackers vs 14) and three procs to defend; the "
+    "controlled variable is the multi-bridge split-and-flip-stance "
+    "discipline. Adding spawn variation would dilute the bridge-split "
+    "signal.",
+    "spec-spy-infiltrate": "hard adds a south-flank stance:2 defender "
+    "and three cover clusters that force the spy onto a single safe "
+    "corridor; controlled variable is the cover-vs-defender threading "
+    "decision. Spawn variation would dilute the corridor-reading signal.",
+    "spec-thief-steal-cash": "hard adds a stance:2 defender at the silo "
+    "AND requires TWO thief steals (cash bar 800 vs 400); controlled "
+    "variable is the redundancy + survival-under-fire discipline on a "
+    "fixed corridor map.",
+    "spec-tanya-c4-strike": "hard adds two stance:2 e1 defenders "
+    "covering the proc; controlled variable is the survive-the-trade "
+    "decision (Tanya's HP absorbs the trade) on a fixed geometry. Spawn "
+    "variation would dilute the commit-direct-strike signal.",
+    "spec-engineer-capture": "hard introduces two staggered water-"
+    "obstacle clusters that force a serpentine route + a stance:2 "
+    "south-of-proc defender + redundant 2nd engineer; the controlled "
+    "variable is the serpentine pathing discipline on a tailored "
+    "obstacle map (geometry IS the discriminator).",
+    "combat-naval-shore-strike": "hard adds an e3 (rocket soldier) "
+    "to the shore garrison and tightens the kill bar; controlled "
+    "variable is the priority-target focus on a fixed naval-channel "
+    "geometry. Spawn variation would dilute the priority-target signal.",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss

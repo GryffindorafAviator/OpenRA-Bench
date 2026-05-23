@@ -1,131 +1,91 @@
-# def-walls-vs-towers — Active Defense Beats Passive Walls
+# def-walls-vs-towers — Walls vs Towers (tier-differentiated doctrine)
 #
-# REASONING focus: PASSIVE-OBSTACLE vs ACTIVE-DEFENSE mitigation. The
-# agent has ONE budget and must choose how to spend it against an
-# incoming rush:
-#   • PASSIVE  — brik concrete walls (200cr each, HP 40000, NO weapon):
-#     an inert barrier. Walls slow an attacker down and channel it, but
-#     they fire nothing — they produce ZERO kill output. A walled-off
-#     base merely delays the rush; the wall neutralises nothing.
-#   • ACTIVE   — gun turrets (800cr each, TurretGun armament, anti-
-#     ground fire): a tower that actually KILLS the attacking band.
-#     Active defence destroys the threat instead of merely delaying it.
+# REASONING focus: the agent must choose between PASSIVE OBSTACLE (brik
+# concrete walls — 200cr, HP 40000, NO Armament) and ACTIVE TURRET (pbox
+# pillbox — 600cr, M60mg burst — anti-infantry direct fire). The correct
+# answer DIFFERS PER TIER, so a single memorised "always build towers"
+# (or "always build walls") fails one of the tiers. Each tier's geometry
+# and predicate make exactly one doctrine correct.
 #
-# The budget funds EITHER ~16 walls OR ~4 gun turrets — never both. The
-# win predicate makes the choice load-bearing: it requires a KILL quota
-# (`units_killed_gte`) that ONLY the active gun turrets can deliver. A
-# walls-only spend produces 0 kills → fails the kill clause and the
-# episode times out → LOSS. A stall spends nothing → the rush razes the
-# fact → LOSS. Only the intended gun turrets satisfy count + kill +
-# fact-alive.
+#   EASY    — frontal rush in the open. Walls kill nothing and the rush
+#             walks around a thin barrier. ACTIVE pbox cluster wraps the
+#             fact and shreds the wave. Win requires pbox count + kills.
+#
+#   MEDIUM  — a numerically overwhelming horde funnels at the fact on
+#             one lane. The win predicate REQUIRES a wall belt PLUS a
+#             pbox at the choke: a wall barrier funnels the horde to a
+#             single-cell pass where a single pbox serially shreds the
+#             queue. Pure-walls (0 kills) and pure-pbox (no brik) both
+#             FAIL the predicate.
+#
+#   HARD    — mixed approach: a HEAVY infantry horde on the agent's
+#             current lane AND a separate probe on the opposite lane.
+#             The agent must allocate budget across BOTH postures:
+#             wall+pbox choke for the horde, flanking pbox for the
+#             probe. Predicate requires pbox count, brik count, AND a
+#             kill quota. The fact also flips between two seed-driven
+#             y-positions (hard-tier contract), so the build cannot be
+#             memorised by coord.
 #
 # Real-world anchor:
-#   • security architecture — passive vs active mitigation: an air-gap
-#     / firewall ACL / network segmentation slows and channels an
-#     intruder but neutralises nothing; an IPS / active-response EDR
-#     actually terminates the malicious process. A pure-segmentation
-#     posture with no active response only delays a breach.
-#   • military fortification — a ditch, a wall, an obstacle belt
-#     CHANNELS and DELAYS an assault, but a fortification plan that
-#     omits the covering FIRES (gun emplacements, pillboxes) the
-#     obstacle is supposed to funnel the enemy INTO is a dead fort:
-#     doctrine pairs every obstacle with interlocking fires.
+#   • Doctrine selection — the SAME budget buys different defensive
+#     postures (open-arc covering fires vs channelised killbox); only
+#     the right posture for THIS geometry wins. A general who always
+#     builds towers loses on the horde lane; a general who always
+#     builds walls loses on the open arc.
 #
-# Discrimination (four-script bar — scripted, no model needed):
-#   • stall (observe-only): spends nothing; the rush wave razes the
-#     fact → fact-alive fail clause fires → LOSS (`after_ticks` is a
-#     backstop so a staller that somehow keeps the fact also times out
-#     — no draw degeneracy).
-#   • walls-only (16 brik strung across the attack lane): the wall
-#     channels and delays the rush but kills NOTHING — the
-#     `units_killed_gte` clause is never satisfied (0 kills) so the
-#     win never latches and the episode runs out the clock → LOSS via
-#     `after_ticks`. A real reachable LOSS, not a draw.
-#   • pure-army (only e1, no defensive buildings): FAILS the gun count
-#     clause; a thin home-trained rifle screen cannot out-trade the
-#     heavier rush band either → fact often falls → LOSS.
-#   • intended TOWERS (4 gun turrets wrapping the fact): TurretGun fire
-#     shreds the rush — count + kill + fact-alive + within_ticks all
-#     satisfied → WIN.
-#
-# Why the spec works (engine combat sheet, per CLAUDE.md):
-#   • brik = concrete wall (^Wall base in the RA ruleset; cost 200cr;
-#     HP 40000; 1×1 footprint; NO Armament ⇒ inert, fires nothing;
-#     buildable in the Defense queue). Verified to place via build +
-#     place_building and to deal zero damage (walls-only kills = 0).
-#   • gun = gun turret (^Defense base; cost 800cr; Armament Weapon
-#     TurretGun, damage 6000; classify_defense ⇒ GroundTurret so the
-#     engine's auto-target loop fires it at the nearest in-range
-#     hostile). Defense queue. Verified: an agent-built gun cluster
-#     kills the whole rush wave with no pre-placed help.
-#   • Budget is exactly 3200cr ⇒ 16 brik (16×200) OR 4 gun (4×800).
-#     The two options are mutually exclusive — there is no cash to do
-#     both, so the agent must commit to ACTIVE defence.
-#   • NO pre-placed agent combat units — the pre-placed base is only
-#     fact + tent + 2×powr. If defenders were pre-placed they would
-#     rack up the kills for free and a walls-only spend would pass the
-#     kill clause off them; the discrimination requires the agent's
-#     OWN built defences to be the sole source of kill output.
-#   • The rush arrives as a `scheduled_events: spawn_actors` wave at a
-#     fixed tick (per level), AFTER the agent has had time to build 4
-#     gun turrets serially (~tick 1980 for the 4th). This makes the
-#     race fair: the intended build comfortably completes before the
-#     wave, while a staller / walls-only spend still cannot satisfy
-#     the kill quota.
-#   • `units_killed_gte:K` is the load-bearing clause: walls produce 0
-#     kills, gun turrets produce many. This is the predicate that
-#     makes ACTIVE defence (not passive obstruction) the only winning
-#     play.
-#   • `building_count_gte:{fact,1}` (PRESENT-TENSE) is the fact-alive
-#     check — `has_building` is a one-shot ever-seen set that stays
-#     true after the fact is razed (documented CLAUDE.md footgun).
-#   • `after_ticks: BUDGET+1` fail clause is reachable within max_turns
-#     (no interrupts ⇒ exactly 90 ticks/step ⇒ max tick =
-#     93+90·(N-1)); a non-finisher (stall, walls-only) hits it and
-#     LOSES rather than draws.
-#   • A persistent unarmed enemy `fact` at (120,20) keeps the episode
-#     alive past full rush elimination so the win/fail evaluator sees
-#     the terminal frame (no DRAW collapse on enemy-wipe auto-done).
-#   • The `rusher` bot relentlessly charges the agent's centroid (the
-#     fact) — so the scheduled wave converges on the protected asset
-#     whatever defence is built in front of it.
+# Engine facts (per CLAUDE.md):
+#   • pbox = pillbox; cost 600; HP 40000; Allied; prereq tent. The
+#     engine now assigns M60mg (damage 1000, burst 5, reload 30, range 4)
+#     to garrison-only defenses with no explicit Armament (pinned by
+#     tests/test_pbox_fires.py). A built pbox shoots — kills count
+#     toward `units_killed_gte`.
+#   • brik = concrete wall; cost 200; HP 40000; NO Armament — inert
+#     obstacle that channels and delays a charge but produces zero
+#     kill output.
+#   • The rusher bot relentlessly charges the agent centroid (the fact)
+#     so the scheduled wave converges on the protected asset whatever
+#     defence is built in front of it. A wall in the path FORCES the
+#     rusher to detour, channelising it through whatever gap is left.
+#   • place_building works at any in-bounds cell (no adjacency check),
+#     so the wall/pbox cluster can be assembled anywhere reachable.
+#   • Each pack step ≈ 90 ticks. max_turns=60 ⇒ max reachable tick
+#     93+90·59 = 5403; deadlines (within_ticks 5400, after_ticks 5401)
+#     sit safely below ⇒ a non-finisher reaches a real LOSS rather
+#     than draws.
+#   • An unarmed enemy `fact` marker at the far east keeps the episode
+#     alive past full wave elimination (engine auto-`done` mitigation).
+#   • Hard tier defines TWO agent spawn_point groups (north y=14 /
+#     south y=26) so the fact and the whole defence cluster flip by
+#     seed, satisfying the hard-tier contract.
 
 meta:
   id: def-walls-vs-towers
-  title: 'Defense Doctrine — Active Towers Beat Passive Walls'
+  title: 'Defense Doctrine — Walls vs Towers per Tier'
   capability: reasoning
   real_world_meaning: >
-    One budget, one incoming rush, two ways to spend it. PASSIVE walls
-    (brik — 200cr, no weapon) are an inert barrier: they slow and
-    channel an attacker but kill nothing, so a walled-off base only
-    delays the rush. ACTIVE towers (gun turrets — 800cr, anti-ground
-    fire) actually destroy the attacking band. The budget funds EITHER
-    ~16 walls OR ~4 turrets, never both. The win predicate requires a
-    KILL quota only the turrets can deliver, so spending the budget on
-    inert walls — however many — LOSES, and building the active
-    turrets WINS.
+    Defensive doctrine selection: the same budget buys different
+    postures. An open frontal arc needs ACTIVE covering fires (pbox
+    pillboxes). A numerically overwhelming horde on one lane needs
+    PASSIVE channelisation (a brik wall barrier) plus a single pbox
+    at the choke to shred the queue. A mixed two-lane attack forces
+    a TRADEOFF: choke one lane, cover the other. A memorised
+    "always-towers" or "always-walls" play fails the tier where its
+    posture is wrong.
   robotics_analogue: >
-    Security architecture, passive vs active mitigation: network
-    segmentation, an air-gap, or a firewall ACL slows and channels an
-    intruder but neutralises nothing; an IPS or active-response EDR
-    actually terminates the malicious process. A posture built only on
-    passive obstruction merely delays a breach — defence in depth must
-    pair every obstacle with an active responder. Likewise military
-    fortification doctrine: an obstacle belt (ditch, wall, wire) only
-    DELAYS and CHANNELS an assault; it is dead weight unless paired
-    with the covering FIRES the obstacle funnels the enemy into.
+    Defensive doctrine: an open arc demands covering fires; a single
+    overwhelming axis demands channelisation (obstacle belt + fires
+    at the choke); a mixed threat demands force allocation across
+    postures. The same budget produces wildly different outcomes
+    depending on which doctrine matches the geometry — a general who
+    always builds towers loses the horde lane and one who always
+    builds walls loses the open arc.
   benchmark_anchor:
     - 'security architecture'
     - 'passive vs active mitigation'
     - 'military fortification'
   author: openra-bench
 
-# rush-hour-arena (128×40, playable x in [2..126], y in [2..38]). Agent
-# base on the west (fact at (10,20) + tent + 2×powr, NO pre-placed
-# combat units); the rush wave is injected mid-east via a scheduled
-# spawn_actors event and the rusher bot charges the agent centroid (the
-# fact). The agent must spend its one budget on ACTIVE gun turrets that
-# kill the rush — not on inert brik walls that only delay it.
 base_map: rush-hour-arena
 
 base:
@@ -140,63 +100,63 @@ base:
     - attack_move
     - stop
   planning: true
-  # No interrupts — the passive-vs-active choice is a STATIC up-front
-  # decision (the threat axis is known: the rusher always charges the
-  # fact). Disabling interrupts also makes the tick budget
-  # deterministic (exactly 90 ticks/step ⇒ max_turns is a hard tick
-  # budget the `after_ticks` fail clause reliably bites in).
+  # Static posture decision: the threat axis is known up-front (the
+  # rusher always charges the fact). Disabling interrupts also makes
+  # the tick budget deterministic (exactly 90 ticks/step ⇒ max_turns
+  # is a hard tick budget the `after_ticks` fail clause bites in).
   interrupts: {}
   termination:
     max_ticks: 12000
   actors: []   # every level supplies its own actor list via overrides.
 
 levels:
-  # ── EASY ── the bare passive-vs-active choice. Budget 3200cr = 16
-  # brik (passive) OR 4 gun turrets (active). The rush wave (8×e1) is
-  # injected at tick 1800 — after the intended 4-gun build completes
-  # (~tick 1980 for the 4th, comfortably within reach; the first 3
-  # are up by ~1530 so the wave is engaged immediately). Win requires
-  # 4 gun built AND ≥4 kills AND the fact alive. A walls-only spend
-  # kills 0 → fails the kill clause → the win never latches → LOSS via
-  # `after_ticks`. Stall loses (fact razed). max_turns 60 ⇒ reachable
-  # tick 93+90·59 = 5403; deadline 5400.
+  # ── EASY ── frontal rush in the open. Budget 2400cr = 4 pbox
+  # (4×600) OR 12 brik (12×200). The rush wave is 8×e1 on the lane,
+  # injected at tick 1800 (after the intended 4-pbox build completes).
+  # Win requires 4 pbox built AND ≥4 kills AND the fact alive. A
+  # walls-only spend kills 0 → fails the kill clause → LOSS via
+  # after_ticks. Pure-army and stall LOSE for the same reason.
   easy:
     description: >
-      A rusher band of 8 rifle infantry will charge your construction
-      yard (fact, at (10,20)). You have ONE budget of 3200cr — enough
-      for EITHER ~16 concrete walls (brik, 200cr, no weapon — an inert
-      barrier) OR 4 gun turrets (gun, 800cr each — active anti-ground
-      towers that KILL). Build 4 gun turrets wrapping the fact so their
-      fire shreds the rush. Win requires 4 gun turrets built, at least
-      4 enemy units killed, and the fact still standing before tick
-      5400. Walls only delay the rush — they kill nothing, so a
-      walls-only spend FAILS the kill bar. Stall and pure-army also
-      LOSE.
-    starting_cash: 3200
+      Eight riflemen charge your yard from the east. Your $2400 buys
+      either four active pillboxes or twelve inert concrete walls. Walls
+      don't shoot — kills come from the pillboxes. Build four pillboxes
+      wrapping the yard so their fire shreds the rush. Yard intact, four
+      kills, within about 60 turns.
+    starting_cash: 2400
     overrides:
+      # 112×48 OPEN arena — frontal-rush geometry with NO walls. The
+      # taller canvas (playable y=2..45) keeps the y=20 fact lane
+      # well clear of the impassable cordon, and lets the SW corner
+      # non-combatant park at y=42 — a more distant non-combatant
+      # cell than rush-hour's 36 and well outside any pbox arc.
+      base_map:
+        generator: arena
+        name: def-walls-vs-towers-easy-arena
+        width: 112
+        height: 48
+        cordon: 2
+        title: def-walls-vs-towers easy open-front 112x48
       actors:
         # Pre-placed agent base — fact + tent + 2×powr. NO combat
-        # units near the base: the agent's built defences must be the
-        # sole source of kill output, or a walls-only spend would pass
-        # the kill clause off pre-placed defenders. Two powr cover the
-        # 4-gun power draw (4×-40 = -160; 2×powr = +200).
+        # units near the base; pre-placed defenders would rack up
+        # kills for free and let a walls-only spend pass the kill
+        # clause off them. Two powr cover the 4-pbox power draw
+        # (4×-20=-80; 2×powr=+200).
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: tent, owner: agent, position: [6,  18]}
         - {type: powr, owner: agent, position: [6,  22]}
         - {type: powr, owner: agent, position: [6,  16]}
         # ONE non-combatant agent e1 parked in the far SW corner,
-        # nowhere near the y=20 rush lane or the fact. It exists only
-        # so `units_summary` is non-empty (hard-tier env-reset check);
-        # it never reaches combat, contributes ZERO kills, and so does
-        # not let a walls-only / stall play pass the kill clause.
-        - {type: e1,   owner: agent, position: [3, 36], stance: 2}
+        # well clear of the y=20 rush lane (zero kill contribution;
+        # exists only so `units_summary` is non-empty for the
+        # hard-tier env-reset check).
+        - {type: e1,   owner: agent, position: [3, 42], stance: 2}
         # Unarmed high-HP marker (anti-DRAW): keeps the episode alive
         # past full rush elimination so the win/fail check fires.
-        - {type: fact, owner: enemy, position: [120, 20]}
-      # Scheduled rush wave — injected at tick 1800, mid-east on the
-      # y=20 lane. The rusher bot charges the agent centroid (the
-      # fact). 8×e1 overwhelms a passive wall / pure-army defence but
-      # a cluster of 4 active gun turrets shreds it.
+        # x=108 inside the 112-wide playable area (was x=120 on the
+        # rush-hour 128-wide canvas).
+        - {type: fact, owner: enemy, position: [108, 20]}
       scheduled_events:
         - tick: 1800
           type: spawn_actors
@@ -204,7 +164,7 @@ levels:
             - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 8}
     win_condition:
       all_of:
-        - {building_count_gte: {type: gun, n: 4}}
+        - {building_count_gte: {type: pbox, n: 4}}
         - {units_killed_gte: 4}
         - {building_count_gte: {type: fact, n: 1}}
         - {within_ticks: 5400}
@@ -214,46 +174,81 @@ levels:
         - {not: {building_count_gte: {type: fact, n: 1}}}
     max_turns: 60
 
-  # ── MEDIUM ── +1 axis: heavier rush (8×e1 + 2×e3 rocket soldiers)
-  # AND a higher kill bar (6). Same budget (3200cr = 16 brik OR 4
-  # gun). The heavier band means a walls-only spend channels for
-  # longer but still kills nothing, and pure-army is out-traded
-  # harder; only the active gun cluster produces enough kill output to
-  # clear the bar AND keep the fact. max_turns 60 ⇒ reachable tick
-  # 5403; deadline 5400.
+  # ── MEDIUM ── numerically overwhelming horde. The walls+pbox CHOKE
+  # is the correct doctrine. Budget 2400cr funds (1 pbox + 9 brik) =
+  # 600 + 1800 = 2400 with cash to spare for any extra wall.
+  #
+  # Predicate doctrine — REQUIRE both wall belt AND pbox AND kills:
+  #   building_count_gte:{pbox,1} ⇒ at least one active turret at
+  #     the choke (kills come from here).
+  #   building_count_gte:{brik,6} ⇒ a genuine wall belt (not 1-2
+  #     incidental walls); the channelisation must be real.
+  #   units_killed_gte:10 ⇒ the choke + pbox must actually kill
+  #     half the horde; a single pbox at the choke serially kills
+  #     queued e1 fast enough to clear this bar.
+  #
+  # This makes pure-pbox (no brik clause met → fail) and pure-walls
+  # (0 kills → fail) both LOSE; only the wall+pbox combo wins.
   medium:
     description: >
-      A heavier rush — 8 rifle infantry + 2 rocket soldiers — will
-      charge your construction yard (fact, at (10,20)). One budget of
-      3200cr: EITHER ~16 inert concrete walls (brik) OR 4 active gun
-      turrets (gun). Build 4 gun turrets wrapping the fact. Win
-      requires 4 gun turrets built, at least 6 enemy units killed, and
-      the fact still standing before tick 5400. Walls kill nothing
-      (they only delay) so a walls-only spend FAILS the kill bar;
-      stall and pure-army also LOSE.
-    starting_cash: 3200
+      A massive horde — sixteen riflemen plus four rocket soldiers —
+      funnels at your yard from the east on a single lane. Your $2400
+      buys either ~12 inert walls or 4 active pillboxes. Neither alone
+      satisfies the doctrine here: pure walls kill nothing, pure
+      pillboxes leave the horde un-channelised. Build a wall belt that
+      channels the horde to a tight pass, with a pillbox at the choke
+      to shred the queue. Yard intact, ten kills, within about 60 turns.
+    starting_cash: 2400
     overrides:
+      # 112×48 chokepoint-arena — the LONG E-W approach corridor the
+      # inventory recommends for the WORKS_BUT_BETTER defense bucket.
+      # `pinch_x: 60` puts a vertical impassable wall at x=55..65 with
+      # a 5-cell-wide horizontal corridor at y=18..22 (`corridor_y:
+      # 20`, `corridor_width: 5`). The corridor is the ONLY westward
+      # passage; the horde funnels through it toward the fact at
+      # (10,20). The map geometry now physically REINFORCES the
+      # walls-plus-pbox doctrine the predicate enforces — the brik
+      # belt that channels the horde now ALSO buttresses the natural
+      # corridor mouth, while a pure-pbox spend still fails the brik
+      # count clause and a pure-walls spend still fails the kill
+      # clause.
+      base_map:
+        generator: chokepoint-arena
+        name: def-walls-vs-towers-medium-arena
+        width: 112
+        height: 48
+        cordon: 2
+        pinch_x: 60
+        pinch_width: 10
+        corridor_y: 20
+        corridor_width: 5
+        title: def-walls-vs-towers medium chokepoint-corridor 112x48
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: tent, owner: agent, position: [6,  18]}
         - {type: powr, owner: agent, position: [6,  22]}
         - {type: powr, owner: agent, position: [6,  16]}
-        # Non-combatant SW-corner e1 (see easy) — non-empty
-        # units_summary, zero kill contribution.
-        - {type: e1,   owner: agent, position: [3, 36], stance: 2}
-        # Anti-DRAW marker.
-        - {type: fact, owner: enemy, position: [120, 20]}
-      # Heavier rush wave: 8×e1 + 2×e3, all on the y=20 lane.
+        # Non-combatant SW corner — y=42 outside the corridor band,
+        # west of the wall column (x=3, well clear of x=55..65 wall).
+        - {type: e1,   owner: agent, position: [3, 42], stance: 2}
+        # Anti-DRAW marker east of the wall on the corridor lane
+        # (y=20 is passable east of the wall for x=66..109).
+        - {type: fact, owner: enemy, position: [108, 20]}
+      # Overwhelming horde — 16 e1 + 4 e3, staged east of the wall on
+      # the corridor lane (y=20). The rusher concentrates on the
+      # agent fact at (10,20), so the column funnels through the
+      # corridor mouth (y=18..22 at x=55..65) on its way west.
       scheduled_events:
         - tick: 1800
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 8}
-            - {type: e3, owner: enemy, position: [62, 20], stance: 3, count: 2}
+            - {type: e1, owner: enemy, position: [70, 20], stance: 3, count: 16}
+            - {type: e3, owner: enemy, position: [72, 20], stance: 3, count: 4}
     win_condition:
       all_of:
-        - {building_count_gte: {type: gun, n: 4}}
-        - {units_killed_gte: 6}
+        - {building_count_gte: {type: pbox, n: 1}}
+        - {building_count_gte: {type: brik, n: 6}}
+        - {units_killed_gte: 10}
         - {building_count_gte: {type: fact, n: 1}}
         - {within_ticks: 5400}
     fail_condition:
@@ -262,69 +257,89 @@ levels:
         - {not: {building_count_gte: {type: fact, n: 1}}}
     max_turns: 60
 
-  # ── HARD ── +1 axis: TWO seed-driven agent spawn_point groups so the
-  # fact (and therefore the turret cluster) FLIPS between NORTH y=14
-  # and SOUTH y=26 per seed. The win predicate is the same (count +
-  # kill + fact-alive + within_ticks) but the model must READ the
-  # fact's latitude from observation and place the turrets relative to
-  # it — a memorised "build turrets near (10,20)" plan does not work
-  # because the fact never sits at y=20 on hard. The scheduled wave is
-  # injected at BOTH candidate latitudes (the spawn_actors list is not
-  # spawn_point-filtered); the rusher charges the agent centroid so it
-  # converges on whichever fact is present this seed. Kill bar 6
-  # (the on-latitude wave is 7 units — bar 6 leaves a one-unit margin
-  # so a slightly imperfect turret cluster still clears it, while a
-  # walls-only spend at 0 kills is nowhere near).
-  # max_turns 60 ⇒ reachable tick 5403; deadline 5400.
+  # ── HARD ── MIXED approach + seed-driven fact flip. The fact sits
+  # at y=14 (NORTH) for some seeds and y=26 (SOUTH) for others — the
+  # build cannot be memorised by coord. On EVERY seed two simultaneous
+  # waves arrive: a HEAVY horde (10×e1 + 2×e3) on each lane. The rusher
+  # converges on the agent centroid (the active fact's lane); the
+  # off-lane wave still pours toward the centroid and a flanking pbox
+  # is required to interdict it. Predicate requires pbox count + brik
+  # count + a kill quota — solving only one lane fails the kill quota.
+  # Budget 3000cr = 2 pbox (1200) + 9 brik (1800) — the minimum
+  # walls-plus-towers spend that satisfies both lanes.
   hard:
     description: >
-      The construction yard (fact) flips between NORTH (y=14) and SOUTH
-      (y=26) by seed; the turret cluster must follow. One budget of
-      3200cr: EITHER ~16 inert concrete walls (brik) OR 4 active gun
-      turrets (gun). Build 4 gun turrets wrapping the CURRENT fact
-      (either (10,14) or (10,26) — read it from the observation). Win
-      requires 4 gun turrets built, at least 6 enemy units killed, and
-      the fact still standing before tick 5400. A walls-only spend
-      kills nothing; stall and pure-army also LOSE.
-    starting_cash: 3200
+      Your yard spawns NORTH (y=14) or SOUTH (y=26) by seed. TWO waves
+      arrive — a heavy horde on your yard's lane and another on the
+      opposite lane. Your $3000 buys a tradeoff: channel the horde with
+      a wall belt + pillbox at the choke AND post a flanking pillbox on
+      the opposite lane. Yard intact, ten kills, within about 60 turns.
+    starting_cash: 3000
     overrides:
+      # 112×48 OPEN arena — NO walls; the hard tier intentionally
+      # uses an open canvas so a single-axis chokepoint cannot trap
+      # one of the two waves while leaving the other untouched. Both
+      # NORTH (y=14) and SOUTH (y=26) base latitudes sit safely
+      # inside the playable y=2..45 frame, and the 16-cell margin
+      # between each base and the impassable cordon leaves room for
+      # the wall belt + pbox tradeoff on either lane without bumping
+      # into the map edge.
+      base_map:
+        generator: arena
+        name: def-walls-vs-towers-hard-arena
+        width: 112
+        height: 48
+        cordon: 2
+        title: def-walls-vs-towers hard two-lane 112x48
       actors:
-        # spawn_point 0 — NORTH base. Fact at (10,14); tent/powr WEST.
-        # The non-combatant corner e1 parks in the far SW corner,
-        # well clear of the y=14 rush lane (zero kill contribution).
+        # spawn_point 0 — NORTH base. Fact at (10,14).
         - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
         - {type: tent, owner: agent, position: [6,  12], spawn_point: 0}
         - {type: powr, owner: agent, position: [6,  10], spawn_point: 0}
         - {type: powr, owner: agent, position: [6,  16], spawn_point: 0}
-        - {type: e1,   owner: agent, position: [3, 36], stance: 2, spawn_point: 0}
-        # spawn_point 1 — SOUTH base (mirror across y=20). The
-        # non-combatant corner e1 parks in the far NW corner, well
-        # clear of the y=26 rush lane.
+        - {type: e1,   owner: agent, position: [3, 42], stance: 2, spawn_point: 0}
+        # spawn_point 1 — SOUTH base (mirror).
         - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
         - {type: tent, owner: agent, position: [6,  24], spawn_point: 1}
         - {type: powr, owner: agent, position: [6,  28], spawn_point: 1}
         - {type: powr, owner: agent, position: [6,  22], spawn_point: 1}
         - {type: e1,   owner: agent, position: [3,  4], stance: 2, spawn_point: 1}
-        # Anti-DRAW marker on the symmetry axis.
-        - {type: fact, owner: enemy, position: [120, 20]}
-      # The scheduled wave is staged at BOTH candidate latitudes (y=14
-      # AND y=26) — the spawn_actors list is not spawn_point-filtered,
-      # so both bands always inject. The rusher charges the agent
-      # centroid so the band whose latitude matches the active fact
-      # converges on it; the on-latitude band alone is heavy enough to
-      # overwhelm a passive / mis-placed defence.
+        # Anti-DRAW marker on the symmetry axis (x=108 inside the
+        # 112-wide playable area).
+        - {type: fact, owner: enemy, position: [108, 20]}
+      # Two simultaneous waves on BOTH lanes (the spawn_actors list is
+      # not spawn_point-filtered, so both lanes always spawn). The
+      # rusher converges on the agent centroid (the active fact's
+      # lane); the off-lane wave is a LIGHT probe (4×e1) that a single
+      # flanking pbox at the active-lane choke can mop up as it walks
+      # past, while the heavy on-lane horde is shredded by the wall
+      # belt + pbox choke. Heavy ON the active lane forces the wall
+      # belt; light probe OFF the active lane is the "flank" budget
+      # tradeoff the predicate enforces.
       scheduled_events:
         - tick: 1800
           type: spawn_actors
           actors:
-            - {type: e1, owner: enemy, position: [60, 14], stance: 3, count: 6}
-            - {type: e3, owner: enemy, position: [62, 14], stance: 3, count: 1}
-            - {type: e1, owner: enemy, position: [60, 26], stance: 3, count: 6}
-            - {type: e3, owner: enemy, position: [62, 26], stance: 3, count: 1}
+            # NORTH-lane wave — HEAVY horde (12 attackers) plus a
+            # LIGHT probe (4 e1). On a NORTH-base seed the heavy
+            # horde is on-lane (channeled by the wall belt); on a
+            # SOUTH-base seed the heavy north wave is off-lane and
+            # detours through y=20 to reach the south fact, walking
+            # past the choke on its way down.
+            - {type: e1, owner: enemy, position: [60, 14], stance: 3, count: 10}
+            - {type: e3, owner: enemy, position: [62, 14], stance: 3, count: 2}
+            # SOUTH-lane wave — symmetric. Both waves always spawn;
+            # whichever wave matches the active fact's latitude is
+            # the "on-lane" horde the wall belt channels, the other
+            # is the "off-lane" wave a 2nd pbox + the wall belt
+            # together kill as they detour past.
+            - {type: e1, owner: enemy, position: [60, 26], stance: 3, count: 10}
+            - {type: e3, owner: enemy, position: [62, 26], stance: 3, count: 2}
     win_condition:
       all_of:
-        - {building_count_gte: {type: gun, n: 4}}
-        - {units_killed_gte: 6}
+        - {building_count_gte: {type: pbox, n: 2}}
+        - {building_count_gte: {type: brik, n: 6}}
+        - {units_killed_gte: 10}
         - {building_count_gte: {type: fact, n: 1}}
         - {within_ticks: 5400}
     fail_condition:

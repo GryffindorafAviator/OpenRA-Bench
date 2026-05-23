@@ -12,12 +12,13 @@
 #
 # Win idiom (the load-bearing chain):
 #   then:
-#     - {buildings_discovered_gte: 1}    # FIRST — scout finds the
-#                                        # enemy outpost on the
-#                                        # approach axis (outposts are
-#                                        # OUTSIDE pbox/base vision; a
-#                                        # scout MUST move on medium/
-#                                        # hard).
+#     - {buildings_discovered_gte: 1}    # FIRST — scout sees the
+#                                        # enemy outpost in the
+#                                        # actual approach corridor
+#                                        # (outposts are OUTSIDE
+#                                        # pbox / base vision; only
+#                                        # a forward jeep can reach
+#                                        # them).
 #     - {building_count_gte: {type: pbox, n: 3}}  # THEN — commit 3
 #                                        # pillboxes (defensive
 #                                        # posture).
@@ -34,16 +35,15 @@
 # `own_buildings` list each frame and bites correctly when the fact
 # is destroyed.)
 #
-# Pre-fortify-N-without-scout fails: clause 1 of the then-chain never
-# latches because the pbox vision radius (~6) cannot reach the enemy
-# outpost (placed 10+ cells away from the base on the approach axis).
-# Pre-fortify-N-with-scout (memorised NORTH on hard) fails on the
-# SOUTH-spawn seeds: the defenses sit silent on the wrong axis, the
-# south-band rushers walk straight to the south-spawn fact,
-# units_killed never reaches K, and the fact is razed → double LOSS
-# path (chain clause 3 + the fact-loss fail clause). Stall LOSES on
-# the deadline (or earlier on the fact-loss fail clause when the rush
-# closes the home fact).
+# Pre-fortify-LANE-without-observe fails: clause 1 of the then-chain
+# never latches (or latches accidentally on the lane the scout
+# happens to see while the pbox sit on the wrong axis). On the SEED-
+# varied hard tier a memorised "always defend NORTH" wins half the
+# seeds and loses the other half — the south-funnelled rushers walk
+# straight to the central fact, units_killed never reaches K, and the
+# fact is razed → double LOSS path (chain clause 3 + the fact-loss
+# fail clause). Stall LOSES on the deadline (or earlier on the
+# fact-loss fail clause when the rush closes the home fact).
 #
 # Real-world / benchmark anchors:
 #   - PlanBench replanning: model must update its plan based on
@@ -71,27 +71,51 @@
 #     offensive (raze the construction yard) rather than defensive
 #     (fortify the lane).
 #
+# Topology — a CUSTOM 112×40 lane arena (`base_map: generator: arena`,
+# obstacles paint the lane separator walls in 88 cells of the map
+# width):
+#   - WEST sliver (x ≤ 19) is open ground — the AGENT base sits at
+#     (10, 20) with the defenders centrally positioned. The west
+#     sliver is the ONLY connector between the three corridors, so
+#     a defender at the lane mouth fires only on its own lane's
+#     rush (a pbox planted at the wrong-lane mouth is geometrically
+#     out of range of the right-lane attackers as they diagonal
+#     into the west sliver toward the central base).
+#   - The 88-cell middle band (20 ≤ x ≤ 107) is split by horizontal
+#     water walls into 2 or 3 parallel attack corridors. The walls
+#     funnel the enemy rush into a single corridor that the scout
+#     reveals; a wrong-lane pbox triple sits in the open west
+#     sliver but at the WRONG y (≥10 cells off the rush's path) so
+#     it never fires on the funnelled rush.
+#   - The enemy spawn (and its forward outpost) sits DEEP in the
+#     corridor (x ≥ 90), well outside any pbox the agent could
+#     place at the corridor mouth; only a SCOUT (jeep) at the
+#     corridor mouth can register the outpost and latch the first
+#     then-clause.
+#
 # ENGINE FACTS (per CLAUDE.md / SCENARIO_QUALITY.md):
 #   - `pbox` costs 600cr; needs tent (which needs powr). Pre-place
 #     fact + proc + powr + tent so the pbox queue is hot from turn 1.
 #     Starting cash 2400 = 3 × 600 + ~600 buffer.
 #   - Enemy actors with NO spawn_point ALWAYS place regardless of the
-#     agent's spawn group (CLAUDE.md). So on hard we declare BOTH a
-#     NORTH band and a SOUTH band; the seed-driven agent spawn picks
-#     which band is the "near" (immediate) one. Each band has its
-#     own outpost building so scouting either side reveals exactly
-#     one outpost.
+#     agent's spawn group (CLAUDE.md). On HARD we use the Wave-9
+#     enemy-side `spawn_point:` axis to VARY THE ATTACK LANE per
+#     seed: spawn_point 0 = NORTH corridor, spawn_point 1 = SOUTH
+#     corridor. The persistent far-corner enemy `fact` marker is
+#     duplicated across BOTH enemy spawn groups at identical coords
+#     (CLAUDE.md: persistent per-seed enemy markers MUST be in every
+#     enemy spawn group).
 #   - `then:` is the happened-before composite: clauses latch IN
 #     ORDER, so a pre-fortify-no-scout play that places 3 pbox first
 #     and then idles cannot satisfy clause 1 (scout) after the fact
-#     UNLESS a scout actually drives close enough to see the
-#     outpost — which is the load-bearing capability.
+#     UNLESS a scout actually sees the outpost — which is the load-
+#     bearing capability.
 #   - `building_count_gte:{pbox, 3}` (NOT building_in_region) — the
 #     scout latch already enforces axis awareness via clause 1; we
-#     don't double-encode the region. Placement is purely about the
-#     agent committing to defense after intel; lane choice is enforced
-#     by the units_killed clause (3 pbox on the wrong axis sit silent,
-#     the rushers walk past, kills don't accrue, fact dies).
+#     don't double-encode the region. Lane choice is enforced by the
+#     units_killed clause (3 pbox on the wrong axis sit silent in the
+#     open west ground, the funnelled rushers walk past, kills don't
+#     accrue, fact dies).
 #   - Inert enemy `fact` marker far east — anti-DRAW per CLAUDE.md;
 #     without a persistent enemy actor the engine auto-`done`s on
 #     enemy-elim before the win/fail evaluator runs.
@@ -100,6 +124,10 @@
 #     itself, in case the scout missed the outpost).
 #   - `enemy_building_spotted` interrupt — re-decide the instant the
 #     outpost is discovered (the FIRST clause latches).
+#   - Scout jeeps run `stance:0` HoldFire so they don't pull the
+#     incoming rush onto themselves before the discovery latch fires
+#     and so they don't auto-engage the outpost (a 1v3+ jeep
+#     engagement dies before the model can read the obs).
 #   - Tick budget: max_turns 66 → reachable tick 93 + 90·65 = 5943 ≥
 #     5402 (deadline 5400 + 1 = 5401), so a non-finisher is a real
 #     reachable timeout LOSS, never a draw.
@@ -136,26 +164,44 @@ meta:
     - 'intel-driven defense'
   author: openra-bench
 
-# rush-hour-arena (128×40, playable x∈[2..126], y∈[2..38]). Agent
-# base at (20, 20) on easy/medium. The fact + proc + powr + tent let
-# the pbox queue fire from turn 1. Two jeep scouts at the base — the
-# agent must drive them to confirm the enemy outpost's lane before
-# committing pillboxes (medium/hard; on easy the jeeps are pre-staged
-# forward and passively see the outpost from turn 1).
-base_map: rush-hour-arena
+# Custom 112×40 lane arena. The middle band (x=20..107) is split by
+# horizontal water walls into parallel attack corridors (2 on easy
+# and hard, 3 on medium); the WEST sliver (x ≤ 19) is OPEN and
+# connects the corridors so the agent's central base at (10, 20)
+# can react to either corridor with a pbox line at the corridor
+# MOUTH (x≈20..22, on the y of the revealed lane). A pbox planted
+# at the WRONG corridor mouth is geometrically out of range of the
+# rush as it diagonals through the west sliver to the central
+# base — wrong-lane defenses are silent dead weight. Per-level
+# `overrides.base_map:` re-stamps the obstacle list to match the
+# level's lane count.
+base_map:
+  generator: arena
+  name: def-position-revealed-direction-arena
+  width: 112
+  height: 40
+  cordon: 2
+  # Two-lane default (used by easy/hard). Per-level overrides
+  # re-stamp.
+  obstacles:
+    - {x: 20, y: 11, w: 88, h: 18}  # mid wall block sealing the
+                                    # MID corridor (only N and S
+                                    # corridors remain).
+  title: 'Def Position Revealed-Direction Arena 112x40'
 
 # Pack-wide budget — funds the intended 3-pbox triple (3 × 600 =
 # 1800cr) with a small buffer (~600cr) for replacement defenders or
 # an extra pbox if the agent wants. Spamming pbox on the wrong axis
 # burns the same budget without satisfying the kill clause (wrong-axis
-# pbox sit silent, the rushers walk past).
+# pbox sit silent in the open west ground, the funnelled rushers walk
+# past).
 starting_cash: 2400
 
 base:
   agent:
     faction: allies
   # Concentrated charge at the agent centroid every ~8 ticks — the
-  # canonical rush-defense opponent. The bot's SPAWN POSITION is the
+  # canonical rush-defense opponent. The bot's spawn LANE is the
   # hidden information the model must discover by scouting.
   enemy:
     faction: soviet
@@ -180,76 +226,103 @@ base:
   termination:
     max_ticks: 12000
   actors:
-    # Base-pack defaults; each level overrides with the spawn-specific
-    # layout. (Anti-empty-actors sanity for the loader.)
-    - {type: fact, owner: agent, position: [20, 20]}
+    # Base-pack defaults; each level overrides with the lane-
+    # specific layout. (Anti-empty-actors sanity for the loader.)
+    - {type: fact, owner: agent, position: [28, 20]}
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # The bare scout-then-fortify chain. Axis is NORTH; the brief
-  # explicitly tells the model the chain (scout → fortify → engage)
-  # and the threat axis. The two jeeps are pre-positioned FORWARD
-  # (y=8) so a single passive observe on turn 1 already has line-of-
-  # sight to the enemy outpost (a `tent` at (20, 2), within jeep
-  # vision range of ~7). The first then-clause latches immediately;
-  # the agent only needs to build 3 pbox and engage the incoming
-  # light rush (3 e1) — a 3-kill bar matched by the screen + pbox.
+  # 1-of-2 lanes: the wall block at y=11..28 (x=40..107) seals the
+  # MID corridor, leaving NORTH (y=2..10) and SOUTH (y=29..37) as
+  # the only two east-west paths. The actual rush comes from NORTH
+  # (fixed); the scout jeep is pre-positioned FORWARD-NORTH at
+  # (54, 5) so a single passive observe on turn 1 already has line-
+  # of-sight to the enemy outpost (a `tent` at (60, 5), distance 6
+  # — inside jeep sight ~7). The first then-clause latches
+  # immediately; the agent only needs to build 3 pbox at the NORTH
+  # lane mouth (38, 8) and let the on-axis pbox triple + central
+  # defenders rack up ≥3 kills on the incoming light rush (3 e1).
+  # The MID-pbox-no-observe lazy play LOSES because the MID
+  # corridor is sealed — wrong-axis pbox sit silent and the rush
+  # bypasses them to the central fact.
   # max_turns 66 → reachable tick 5943 ≥ 5401.
   easy:
     description: >
-      A light enemy rush is incoming from the NORTH (your scouts can
-      already see the enemy outpost up the lane). The discipline
-      under test is the scout-then-fortify chain: confirm the threat
-      with intel, then commit defenses, then engage. You start with
-      a construction yard, refinery, power plant, and barracks at
-      (20, 20), four rifle defenders, and TWO scout jeeps pre-
-      positioned NORTH at (20, 8)/(22, 8) — already in line of
-      sight of the enemy outpost. Build at least THREE pillboxes
-      (pbox), then destroy ≥3 of the incoming rifle infantry. Keep
-      the construction yard standing and ≥1 of your own units
-      alive. Win before tick 5400. Stalling loses on the clock;
-      pure-build-no-fight loses on the kill bar; pure-fight-no-
-      build loses when the rush overruns the defenders.
+      A light rush is coming from one of two corridors (north or south)
+      — your forward jeep scout already has eyes on the enemy outpost.
+      Confirm the intel by scouting, then build three pillboxes at the
+      revealed lane mouth (around x=22, on the y of the revealed
+      lane) and engage. Three kills, yard alive, one unit alive,
+      within about 60 turns. Stall, build-only, or fight-only all
+      lose.
     overrides:
+      base_map:
+        generator: arena
+        name: def-position-revealed-direction-arena-2lane
+        width: 112
+        height: 40
+        cordon: 2
+        # 2-lane: single wall block sealing the MID corridor;
+        # NORTH (y=2..10) and SOUTH (y=29..37) are the only
+        # corridors. Wall spans x=20..107 (the middle band) so the
+        # west SLIVER x=2..19 is the only connector between the
+        # corridors; a pbox at the wrong-lane mouth is out of
+        # range of the right-lane rush as it diagonals through
+        # the west sliver to the central base.
+        obstacles:
+          - {x: 20, y: 11, w: 88, h: 18}
+        title: 'Def Position Revealed-Direction Arena 112x40 (2-lane)'
       actors:
         # Agent base — fact + proc + powr + tent so the pbox queue
-        # (needs powr + tent) is hot from turn 1. The tent is also
-        # the source of the four pre-placed rifle defenders.
-        - {type: fact, owner: agent, position: [20, 20]}
-        - {type: proc, owner: agent, position: [16, 20]}
-        - {type: powr, owner: agent, position: [20, 24]}
-        - {type: tent, owner: agent, position: [16, 24]}
-        # Two scout jeeps pre-positioned FORWARD-NORTH at y=8 —
-        # already within vision range of the enemy outpost at (20, 2)
-        # (distance 6, inside jeep sight ~7). A single observe on
-        # turn 1 latches `buildings_discovered_gte:1` — easy teaches
-        # the chain without requiring scout MOVEMENT.
-        - {type: jeep, owner: agent, position: [20, 8], stance: 1}
-        - {type: jeep, owner: agent, position: [22, 8], stance: 1}
-        # Four starter defenders SOUTH of the base (away from the
-        # NORTH lane mouth) — they survive a light push so
-        # own_units_gte:1 holds; positioning them away from the lane
-        # avoids auto-fire chasing the rush past the pbox line.
-        - {type: e1, owner: agent, position: [22, 24], stance: 2}
-        - {type: e1, owner: agent, position: [24, 24], stance: 2}
-        - {type: e1, owner: agent, position: [22, 26], stance: 2}
-        - {type: e1, owner: agent, position: [24, 26], stance: 2}
-        # Enemy forward outpost (NORTH): a `tent` at (20, 2) —
-        # placed at the playable edge so it is OUT of canonical pbox
-        # vision (a pbox at y=14 is 12 cells from (20,2), well past
-        # any pbox sight range). The forward jeeps at y=8 sit 6
-        # cells away and see it from turn 1 (jeep sight ~7).
-        - {type: tent, owner: enemy, position: [20, 2]}
-        # Light NORTH rusher push — 3 e1 at (20, 4). The rusher bot
-        # charges the agent centroid (~y=22 with the southern
-        # defenders), walking south through (20, 14) where the pbox
-        # line intercepts.
-        - {type: e1, owner: enemy, position: [20, 4], stance: 3, count: 3}
-        # Inert enemy `fact` marker far east — anti-DRAW per
-        # CLAUDE.md; without a persistent enemy actor the engine
-        # auto-`done`s on enemy-elim before the win/fail evaluator
-        # runs.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # (needs powr + tent) is hot from turn 1. Centred in the
+        # OPEN west sliver so the defender can react to EITHER
+        # corridor (NOT pre-committed inside one corridor).
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [6, 20]}
+        - {type: powr, owner: agent, position: [10, 24]}
+        - {type: tent, owner: agent, position: [6, 24]}
+        # Four starter defenders central around the base — they
+        # sit in the open west sliver, NOT inside any corridor,
+        # so they can be moved into either lane mouth on the
+        # agent's order (the scout-then-fortify chain is the
+        # model's job).
+        - {type: e1, owner: agent, position: [12, 18], stance: 2}
+        - {type: e1, owner: agent, position: [14, 18], stance: 2}
+        - {type: e1, owner: agent, position: [12, 22], stance: 2}
+        - {type: e1, owner: agent, position: [14, 22], stance: 2}
+        # Forward scout jeep at the NORTH corridor mouth — sits
+        # at (54, 5) with passive vision of the outpost at
+        # (60, 5) (distance 6, inside jeep sight ~7). Stance:0
+        # HoldFire so it doesn't pull the rush onto itself before
+        # the discovery latch fires. Easy teaches the chain
+        # without requiring scout MOVEMENT.
+        - {type: jeep, owner: agent, position: [54, 5], stance: 0}
+        # Enemy forward outpost (NORTH corridor): a `tent` at
+        # (60, 5) — deep enough in the corridor that it is OUT of
+        # any base/pbox vision the agent could plant at the
+        # corridor mouth (a pbox at x=22 would be 38 cells away,
+        # well past pbox sight ~6). The forward jeep at (54, 5)
+        # sits 6 cells away and sees it from turn 1.
+        - {type: tent, owner: enemy, position: [60, 5]}
+        # Light NORTH rush — 4 e1 at the east corridor mouth
+        # (100, 5). The rusher bot charges the agent centroid
+        # (~10, 20); the y=11..28 wall blocks the direct path so
+        # the rush is FUNNELLED west along the NORTH corridor
+        # until it can exit at x=19 and diagonal southwest to
+        # the base. The pbox line planted at the NORTH lane mouth
+        # (x≈22, y≈8) intercepts the funnelled wave; the MID-
+        # pbox-no-observe lazy play places its triple at
+        # (x≈22, y≈20) where the N-corridor rush passes ≥10
+        # cells away (out of pbox range 4) — the central
+        # 4-defender screen alone is the only thing fighting the
+        # 4 e1, the kill bar AND/OR fact-alive clause bite → LOSS.
+        - {type: e1, owner: enemy, position: [100, 5], stance: 3, count: 4}
+        # Inert enemy `fact` marker far east in the SOUTH corridor
+        # — anti-DRAW per CLAUDE.md; without a persistent enemy
+        # actor the engine auto-`done`s on enemy-elim before the
+        # win/fail evaluator runs. Placed in the OTHER (south)
+        # corridor so it doesn't accidentally join the rush.
+        - {type: fact, owner: enemy, position: [108, 36]}
     win_condition:
       all_of:
         - then:
@@ -260,77 +333,77 @@ levels:
               - {units_killed_gte: 3}
         - building_count_gte: {type: fact, n: 1}
         - own_units_gte: 1
-        - within_ticks: 5400
+        - within_ticks: 3600
     fail_condition:
       any_of:
-        - after_ticks: 5401
+        - after_ticks: 3601
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {own_units_gte: 1}
     max_turns: 66
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 controlled variable: the AXIS IS FOGGED. Jeeps now start AT
-  # the base (20, 20), NOT forward — the outpost at (20, 2) is 18
-  # cells away, well outside passive vision (~7). A no-scout play
-  # cannot latch the first then-clause. The intended play is
-  # `move_units([jeep1, jeep2], 20, 8)` to enter outpost sight, THEN
-  # build 3 pbox NORTH, THEN engage.
-  # A pair of forward delayer e1 at y=10 absorbs the first wave so
-  # the pbox triple has time to come online (without them, even an
-  # intended-scout play loses because the rush razes the fact before
-  # 3 pbox finish building).
+  # +1 controlled variable: 1-of-3 lanes. The wall block is split
+  # into TWO thin walls (y=11..13 and y=27..29) leaving THREE
+  # corridors: NORTH (y=2..10), MID (y=14..26), SOUTH (y=30..37).
+  # The actual rush comes from MID (fixed); the scout jeep is pre-
+  # positioned FORWARD-MID at (54, 20) with passive vision of the
+  # MID outpost (a `tent` at (60, 20), distance 6 — inside jeep
+  # sight ~7). The first then-clause latches immediately on a
+  # passive observe; the agent must STILL infer that the relevant
+  # lane is MID (not NORTH or SOUTH) and plant the 3-pbox triple at
+  # the MID lane mouth (x≈38, y≈20). A model that builds at the
+  # wrong corridor mouth (y≈8 or y≈32) satisfies clauses 1+2 but
+  # the wrong-corridor pbox triple sits silent while the MID rush
+  # exits at x=39 and engages the central base defenders alone — the
+  # 3-kill bar is not always met without the on-axis pbox.
   # max_turns 66 → reachable tick 5943 ≥ 5401.
   medium:
     description: >
-      A rush is incoming, but the threat axis is NOT given — you
-      must SCOUT to find it. You start with a construction yard,
-      refinery, power plant, and barracks at (20, 20), four rifle
-      defenders, and TWO scout jeeps at the base. The enemy has a
-      forward outpost on the approach axis; drive a jeep north (or
-      whichever lane your observation suggests) to register at least
-      ONE enemy building, THEN build at least THREE pillboxes (pbox),
-      THEN destroy ≥3 of the incoming rifle infantry. Keep the
-      construction yard standing and ≥1 of your own units alive.
-      Win before tick 5400. Skipping the scout phase fails the
-      then-chain at clause 1; pre-fortifying without scouting wastes
-      the budget on the wrong-axis intuition; stalling loses on the
-      clock.
+      A rush is incoming from one of three corridors (north, middle, or
+      south). Your forward jeep is already at a vantage that sees ONE
+      of the lanes — observe which lane shows the enemy outpost and
+      build three pillboxes at THAT lane's mouth in front of your
+      base. Three kills, yard alive, one unit alive, within about 60
+      turns. Pillboxes on the wrong corridor sit silent.
     overrides:
+      base_map:
+        generator: arena
+        name: def-position-revealed-direction-arena-3lane
+        width: 112
+        height: 40
+        cordon: 2
+        # 3-lane: two thin walls split the middle band (x=20..107)
+        # into NORTH, MID, SOUTH corridors. The west sliver
+        # x=2..19 is fully open (connects all three corridors).
+        obstacles:
+          - {x: 20, y: 11, w: 88, h: 3}   # N/MID separator
+          - {x: 20, y: 27, w: 88, h: 3}   # MID/S separator
+        title: 'Def Position Revealed-Direction Arena 112x40 (3-lane)'
       actors:
-        - {type: fact, owner: agent, position: [20, 20]}
-        - {type: proc, owner: agent, position: [16, 20]}
-        - {type: powr, owner: agent, position: [20, 24]}
-        - {type: tent, owner: agent, position: [16, 24]}
-        # Jeeps AT the base — must drive to scout. Distance from
-        # (24, 20) to outpost (20, 2) is √(16+324)≈18, far out of
-        # jeep vision (~7).
-        - {type: jeep, owner: agent, position: [24, 20], stance: 1}
-        - {type: jeep, owner: agent, position: [26, 20], stance: 1}
-        - {type: e1, owner: agent, position: [22, 24], stance: 2}
-        - {type: e1, owner: agent, position: [24, 24], stance: 2}
-        - {type: e1, owner: agent, position: [22, 26], stance: 2}
-        - {type: e1, owner: agent, position: [24, 26], stance: 2}
-        # Forward delayer pair NORTH of the base — stationed ahead of
-        # the pbox line so they soak the first wave while the pbox
-        # triple comes online (the rush from y=4 reaches y=14 before
-        # the 1st pbox is up; without absorbers, the wave punches
-        # through and razes the fact before clause 3 can latch).
-        - {type: e1, owner: agent, position: [20, 10], stance: 2}
-        - {type: e1, owner: agent, position: [22, 10], stance: 2}
-        # Enemy outpost (NORTH) at the playable edge (y=2) — well
-        # outside pbox vision (pbox at y=14 is 12 cells away). Scout
-        # MUST drive a jeep north to enter outpost sight range.
-        # Placing pbox WITHOUT scouting cannot retroactively satisfy
-        # clause 1 of the then-chain.
-        - {type: tent, owner: enemy, position: [20, 2]}
-        # NORTH rush — 3 e1 (matched to easy because the medium +1
-        # controlled variable is the SCOUT requirement (outpost no
-        # longer visible from starting jeep position), NOT raw
-        # defensive load — a heavier push would force the medium to
-        # discriminate on a SECOND axis (absorption) and break the
-        # clean tier attribution).
-        - {type: e1, owner: enemy, position: [20, 4], stance: 3, count: 3}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: agent, position: [10, 20]}
+        - {type: proc, owner: agent, position: [6, 20]}
+        - {type: powr, owner: agent, position: [10, 24]}
+        - {type: tent, owner: agent, position: [6, 24]}
+        - {type: e1, owner: agent, position: [12, 18], stance: 2}
+        - {type: e1, owner: agent, position: [14, 18], stance: 2}
+        - {type: e1, owner: agent, position: [12, 22], stance: 2}
+        - {type: e1, owner: agent, position: [14, 22], stance: 2}
+        # Forward scout jeep at the MID corridor — vantage point
+        # at (54, 20) with passive vision of the MID outpost at
+        # (60, 20). Stance:0 HoldFire.
+        - {type: jeep, owner: agent, position: [54, 20], stance: 0}
+        # Enemy outpost in the MID corridor — deep enough that
+        # only the forward scout sees it (a pbox at x=22, y=20 is
+        # 38 cells from the outpost, well past pbox sight).
+        - {type: tent, owner: enemy, position: [60, 20]}
+        # MID rush — 4 e1 at the east MID corridor mouth (100, 20)
+        # walks west along the MID corridor (the walls at y=11..13
+        # and y=27..29 funnel the path), exits at x=19, and
+        # engages the central base. The pbox line at the MID mouth
+        # (x≈22, y≈20) intercepts.
+        - {type: e1, owner: enemy, position: [100, 20], stance: 3, count: 4}
+        # Inert enemy `fact` marker far east in the SOUTH corridor.
+        - {type: fact, owner: enemy, position: [108, 36]}
     win_condition:
       all_of:
         - then:
@@ -341,103 +414,128 @@ levels:
               - {units_killed_gte: 3}
         - building_count_gte: {type: fact, n: 1}
         - own_units_gte: 1
-        - within_ticks: 5400
+        - within_ticks: 3600
     fail_condition:
       any_of:
-        - after_ticks: 5401
+        - after_ticks: 3601
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {own_units_gte: 1}
     max_turns: 66
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # +1 controlled variable: TWO agent spawn_point groups round-robin
-  # the AGENT BASE LATITUDE per seed (NORTH-staged base centred at
-  # (20, 16) vs SOUTH-staged base centred at (20, 24)). Enemy actors
-  # don't honour spawn_point (CLAUDE.md) so BOTH a north outpost
-  # (20, 4) and a south outpost (20, 36) always place; the MATCHING-
-  # side band is the immediate threat on each spawn (the rusher bot
-  # charges the agent centroid, which sits near each base's
-  # latitude, so the closer band has the shorter walk). The capability
-  # test is the same scout-then-fortify chain — but the agent must
-  # FIRST identify its OWN base latitude from observation (the
-  # threat is on the SIDE FACING the base's own latitude) and THEN
-  # commit defenses on that side. A memorised "always defend NORTH"
-  # opening cannot generalise: on the SOUTH spawn the north scout
-  # never reaches the south outpost (clause 1 never latches), the
-  # south-band rushers walk straight past the wrong-axis pbox line,
-  # and the south-spawn fact dies → double LOSS path.
-  # The rush is 4 e1 + 1 e3 per band (the e3 is the discriminator —
-  # rocket splash + AT damage means the base defenders alone cannot
-  # hold the matching lane, so the on-axis pbox triple is load-
-  # bearing; the agent base is staged farther from each rush band
-  # (14 cells instead of 10) to give the intended play time to land
-  # the 3 pbox before the rush arrives).
-  # max_turns 66 → reachable tick 5943 ≥ 5401.
+  # +1 controlled variable: SEED-VARIED BASE LATITUDE via agent-
+  # side `spawn_point:` (CLAUDE.md pre-Wave-9 idiom). Two agent
+  # spawn groups: spawn_point 0 = NORTH base at (10, 14); spawn_
+  # point 1 = SOUTH base at (10, 26). The wall geometry is the
+  # SAME as easy (single wall block at y=11..28 sealing the MID
+  # corridor; only NORTH y=2..10 and SOUTH y=29..37 corridors
+  # remain). Enemy actors don't declare spawn_point (CLAUDE.md:
+  # the per-owner filter is per OWNER, so enemy actors always
+  # place regardless of agent spawn), so BOTH a NORTH rush band
+  # AND a SOUTH rush band are always on the map — but each band
+  # rushes the SHORTEST path to the agent centroid, so the
+  # "near" band is whichever matches the agent's spawn latitude
+  # (the other has to walk the full map width / wraps around the
+  # wall block, well beyond the 3600-tick budget).
+  #
+  # The "scout reveals direction" load-bearing capability: the
+  # model must IDENTIFY its OWN base latitude (fact y=14 ⇒
+  # threat from NORTH, fact y=26 ⇒ threat from SOUTH) and commit
+  # the pbox triple to THAT corridor mouth. A memorised "always
+  # defend NORTH" opening WINS on the NORTH-base seeds and LOSES
+  # on the SOUTH-base seeds — the wrong-axis pbox at (22, 8) is
+  # too far from the south rush's path to fire, the south band
+  # walks straight to the south-spawn fact, the kill bar is
+  # missed AND the fact is razed → double LOSS path.
+  #
+  # Faster attacker timing: the rush is 4 e1 + 1 e3 per band
+  # (the e3 adds rocket splash so the central defender screen
+  # alone cannot hold) AND the spawn is moved WEST to
+  # (88, lane_y) so the wave reaches the lane mouth ~12 cells
+  # sooner than easy.
+  # max_turns 66 → tick budget reachable ≥ 3601 deadline (4218
+  # observed empirically at 64 ticks/turn under interrupts).
   hard:
     description: >
-      A rush is incoming, but the threat axis is NOT given AND your
-      base could be in the NORTH half (fact at y=16) OR the SOUTH
-      half (fact at y=24) — chosen by seed. Identify your base's
-      latitude from observation; scout the lane FACING your base
-      (if your base is north of centre, the threat approaches from
-      the north edge; if south of centre, from the south edge), then
-      build at least THREE pillboxes (pbox) on that lane (between
-      your base and the threat — roughly y≈10 if your base is at
-      y=16, y≈30 if your base is at y=24), THEN destroy ≥3 of the
-      incoming rifle infantry. Keep the construction yard standing
-      and ≥1 of your own units alive. Win before tick 5400. A
-      memorised "always defend NORTH" opening loses on the SOUTH-
-      base seeds (rushers walk past your wrong-axis pbox line and
-      raze the fact); a no-scout commit fails the chain at clause 1.
+      Same scout-then-fortify chain, but your base spawns NORTH
+      (y=14) or SOUTH (y=26) by seed and the threat comes from the
+      corridor on that side. Identify your latitude from your fact,
+      scout that corridor, plant three pillboxes at THAT corridor's
+      mouth (around x=22, y≈8 if your base is north of centre, y≈32
+      if south), then kill three. Yard alive, one unit alive,
+      within about 40 turns. Always-defend-north loses every
+      south-seed run.
     overrides:
+      base_map:
+        generator: arena
+        name: def-position-revealed-direction-arena-2lane
+        width: 112
+        height: 40
+        cordon: 2
+        obstacles:
+          - {x: 20, y: 11, w: 88, h: 18}
+        title: 'Def Position Revealed-Direction Arena 112x40 (2-lane)'
       actors:
-        # ── NORTH spawn (spawn_point 0) — base centred at (20, 16).
-        # Threat: from the north band at y=2 (north outpost at y=4).
-        # Base-to-rush distance = 14 cells, gives the intended scout-
-        # then-fortify play time to land 3 pbox at y≈10 (between base
-        # at y=16 and band at y=2) before the rush arrives. Correct
-        # defense lane: pbox at y≈10. The defender ring + the 4
-        # starter e1 sit SOUTH of fact (y=18..20, away from the lane
-        # mouth) so they survive the first wave and satisfy
-        # own_units_gte:1.
-        - {type: fact, owner: agent, position: [20, 16], spawn_point: 0}
-        - {type: proc, owner: agent, position: [16, 16], spawn_point: 0}
-        - {type: powr, owner: agent, position: [20, 20], spawn_point: 0}
-        - {type: tent, owner: agent, position: [16, 20], spawn_point: 0}
-        - {type: jeep, owner: agent, position: [24, 16], stance: 1, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [26, 16], stance: 1, spawn_point: 0}
-        - {type: e1, owner: agent, position: [22, 20], stance: 2, spawn_point: 0}
-        - {type: e1, owner: agent, position: [24, 20], stance: 2, spawn_point: 0}
-        - {type: e1, owner: agent, position: [22, 18], stance: 2, spawn_point: 0}
-        - {type: e1, owner: agent, position: [24, 18], stance: 2, spawn_point: 0}
-        # ── SOUTH spawn (spawn_point 1) — base centred at (20, 24).
-        # Mirror of the NORTH spawn (fact 8 cells south of map mid),
-        # threat from the south band at y=38 (south outpost at y=36).
-        # Correct defense lane: pbox at y≈30.
-        - {type: fact, owner: agent, position: [20, 24], spawn_point: 1}
-        - {type: proc, owner: agent, position: [16, 24], spawn_point: 1}
-        - {type: powr, owner: agent, position: [20, 20], spawn_point: 1}
-        - {type: tent, owner: agent, position: [16, 20], spawn_point: 1}
-        - {type: jeep, owner: agent, position: [24, 24], stance: 1, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [26, 24], stance: 1, spawn_point: 1}
-        - {type: e1, owner: agent, position: [22, 20], stance: 2, spawn_point: 1}
-        - {type: e1, owner: agent, position: [24, 20], stance: 2, spawn_point: 1}
-        - {type: e1, owner: agent, position: [22, 22], stance: 2, spawn_point: 1}
-        - {type: e1, owner: agent, position: [24, 22], stance: 2, spawn_point: 1}
-        # Enemy outposts and rush bands — enemy actors don't honour
-        # spawn_point (CLAUDE.md), so BOTH north and south bands
-        # always place. Each spawn faces the MATCHING side as the
-        # near (immediate) threat — the opposite-side rush has the
-        # full map width to walk and is well outside the 5400-tick
-        # budget for arrival.
-        - {type: tent, owner: enemy, position: [20, 4]}
-        - {type: e1, owner: enemy, position: [20, 2], stance: 3, count: 4}
-        - {type: e3, owner: enemy, position: [22, 2], stance: 3, count: 1}
-        - {type: tent, owner: enemy, position: [20, 36]}
-        - {type: e1, owner: enemy, position: [20, 38], stance: 3, count: 4}
-        - {type: e3, owner: enemy, position: [22, 38], stance: 3, count: 1}
-        # Inert enemy `fact` marker far east — anti-DRAW.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # ── AGENT spawn_point 0 — NORTH base centred at (10, 14).
+        # No starter defender SCREEN (removing the central screen
+        # is what makes units_killed_gte:3 load-bearing for the
+        # pbox triple — a wrong-axis play with NO defenders to
+        # fall back on misses the kill bar and the fact dies on
+        # the wrong spawn). A single token defender colocated
+        # with the base satisfies the hard-tier spawn-variation
+        # contract (test_curated_hard_still_compiles_and_runs
+        # asserts units_summary differs across seeds) without
+        # reintroducing the "defenders kill the rush alone"
+        # exploit.
+        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [6, 14], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 18], spawn_point: 0}
+        - {type: tent, owner: agent, position: [6, 18], spawn_point: 0}
+        - {type: e1, owner: agent, position: [12, 14], stance: 2, spawn_point: 0}
+        # Two forward scout jeeps — one per corridor mouth. The
+        # north scout sees the north rush; the south scout sees
+        # the south rush. The model reads which corridor shows
+        # activity to confirm the axis (which on hard MUST
+        # match its own base latitude — the OTHER corridor's
+        # rush is too far away to arrive inside the budget).
+        - {type: jeep, owner: agent, position: [54, 5],  stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [54, 35], stance: 0, spawn_point: 0}
+        # ── AGENT spawn_point 1 — SOUTH base centred at (10, 26).
+        # Mirror of NORTH spawn (fact 6 cells south of map mid).
+        # Correct defense lane: pbox at y≈32. Single token
+        # defender at the base for the spawn-variation contract.
+        - {type: fact, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [6, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 22], spawn_point: 1}
+        - {type: tent, owner: agent, position: [6, 22], spawn_point: 1}
+        - {type: e1, owner: agent, position: [12, 26], stance: 2, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [54, 5],  stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [54, 35], stance: 0, spawn_point: 1}
+        # Enemy bands and outposts — declared with matching
+        # enemy-side spawn_point so the rush LANE correlates 1:1
+        # with the agent base latitude (CLAUDE.md: the per-owner
+        # spawn filter activates per OWNER independently, both
+        # owners read the SAME spawn_idx from the env RNG, so
+        # spawn_point 0 on both sides ⇒ NORTH base + NORTH rush;
+        # spawn_point 1 on both sides ⇒ SOUTH base + SOUTH rush).
+        # This single-band-per-seed encoding closes the "always-
+        # NORTH baits the south rush onto pbox" exploit: on
+        # SOUTH-base seeds there is NO north rush, so NORTH pbox
+        # at (22, 8) has nothing to fire on and the kill bar is
+        # NOT met (LOSS by clock + fact-loss).
+        - {type: tent, owner: enemy, position: [60, 5], spawn_point: 0}
+        - {type: e1, owner: enemy, position: [88, 5], stance: 3, count: 4, spawn_point: 0}
+        - {type: e3, owner: enemy, position: [90, 5], stance: 3, count: 1, spawn_point: 0}
+        - {type: tent, owner: enemy, position: [60, 35], spawn_point: 1}
+        - {type: e1, owner: enemy, position: [88, 35], stance: 3, count: 4, spawn_point: 1}
+        - {type: e3, owner: enemy, position: [90, 35], stance: 3, count: 1, spawn_point: 1}
+        # Inert enemy `fact` marker far east — anti-DRAW per
+        # CLAUDE.md. Duplicated across BOTH enemy spawn groups
+        # (CLAUDE.md: persistent per-seed enemy markers MUST be
+        # in every enemy spawn group). One in each opposite
+        # corridor so it never lands on top of the active rush.
+        - {type: fact, owner: enemy, position: [108, 36], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [108, 5], spawn_point: 1}
     win_condition:
       all_of:
         - then:
@@ -448,10 +546,10 @@ levels:
               - {units_killed_gte: 3}
         - building_count_gte: {type: fact, n: 1}
         - own_units_gte: 1
-        - within_ticks: 5400
+        - within_ticks: 3600
     fail_condition:
       any_of:
-        - after_ticks: 5401
+        - after_ticks: 3601
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {own_units_gte: 1}
     max_turns: 66

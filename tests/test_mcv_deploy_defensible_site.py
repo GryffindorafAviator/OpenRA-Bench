@@ -66,11 +66,16 @@ PACK = PACKS_DIR / "mcv-deploy-defensible-site.yaml"
 LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
 
-# Spec coordinates: the SAFE deploy region is the SW corner; the
-# EXPOSED candidate is the central cell (mid-map). The win predicate
-# only accepts the SAFE region (radius 5 of SAFE_XY).
-SAFE_XY = (8, 34)
-EXPOSED_XY = (40, 20)
+# Spec coordinates (chokepoint-arena 112×40): the DEFENSIBLE deploy
+# region is in the WEST lobe BEHIND the chokepoint wall. The
+# INDEFENSIBLE candidate is in the open EAST lobe with no terrain
+# protection. The win predicate accepts the DEFENSIBLE SW pocket
+# everywhere; hard ALSO accepts the NW pocket so the agent can pick
+# whichever defensible cell is closer to its (per-seed) start
+# latitude.
+SAFE_XY = (15, 30)         # SW pocket — accepted on every tier
+SAFE_NW_XY = (15, 10)      # NW pocket — accepted on hard only
+EXPOSED_XY = (95, 30)      # open EAST lobe — never accepted
 
 
 # ── scripted policies ────────────────────────────────────────────────
@@ -177,11 +182,36 @@ def _make_site_policy(target_xy: tuple[int, int]):
     return policy
 
 
-def make_intended_safe():
-    """Intended capability: drive MCV to the SAFE SW corner, deploy
-    there, complete the bring-up chain. Wins every level + every
-    seed."""
-    return _make_site_policy(SAFE_XY)
+def make_intended_safe(target_xy: tuple[int, int] = SAFE_XY):
+    """Intended capability: drive MCV to a DEFENSIBLE pocket (SW by
+    default; on hard the caller passes the per-spawn closer pocket),
+    deploy there, complete the bring-up chain. Wins every level +
+    every seed when `target_xy` is a valid DEFENSIBLE pocket."""
+    return _make_site_policy(target_xy)
+
+
+def make_intended_safe_dynamic():
+    """Hard-tier intended policy: read the MCV's starting LATITUDE
+    on the first call and pick the closer DEFENSIBLE pocket — NW
+    (15,10) if the MCV spawned in the upper half, SW (15,30) if it
+    spawned in the lower half. Then run the standard
+    drive→deploy→bring-up chain. The win predicate accepts either
+    pocket on hard, so this policy wins on either spawn_point group."""
+    chosen: dict = {}
+
+    def policy(rs, C):
+        if "delegate" not in chosen:
+            _, pos = _mcv_pos_id(rs)
+            if pos is None:
+                # MCV not yet visible — wait one tick (don't lock the
+                # target on a None reading).
+                return [C.observe()]
+            chosen["delegate"] = _make_site_policy(
+                SAFE_NW_XY if pos[1] < 20 else SAFE_XY
+            )
+        return chosen["delegate"](rs, C)
+
+    return policy
 
 
 def make_deploy_exposed():
@@ -269,37 +299,53 @@ def test_hard_has_two_spawn_point_groups():
         if a.owner == "agent" and a.spawn_point is not None
     }
     assert groups == {0, 1}, groups
-    # In-bounds check (rush-hour-arena playable y ≈ 2..38, x ≈ 2..126):
+    # In-bounds check (chokepoint-arena 112×40, cordon 2 → playable
+    # x∈[2,109], y∈[2,37]):
     for a in c.scenario.actors:
         x, y = a.position
-        assert 2 <= x <= 126 and 2 <= y <= 38, (a.type, a.position)
+        assert 2 <= x <= 109 and 2 <= y <= 37, (a.type, a.position)
 
 
 def test_win_predicate_requires_safe_region_anchor():
-    """The spatial check (`building_in_region` of the SAFE cell) is
-    in every level's win — site choice is structurally load-bearing,
-    not just timing."""
+    """The spatial check (`building_in_region` of the DEFENSIBLE cell)
+    is in every level's win — site choice is structurally load-bearing,
+    not just timing. On easy/medium the win pins a single SW pocket;
+    on hard the win permits EITHER the SW or NW DEFENSIBLE pocket
+    (the agent must pick the one closer to its per-seed start
+    latitude) via an `any_of` of two `building_in_region` clauses."""
     for lvl in LEVELS:
         c = compile_level(load_pack(PACK), lvl)
         w = c.win_condition.model_dump(exclude_none=True)
-        regions = [
-            clause["building_in_region"]
-            for clause in w.get("all_of", []) or []
-            if "building_in_region" in clause
-        ]
+        # Collect every building_in_region clause anywhere under the
+        # top-level all_of (including inside an any_of subnode).
+        regions: list[dict] = []
+        for clause in w.get("all_of", []) or []:
+            if "building_in_region" in clause:
+                regions.append(clause["building_in_region"])
+            elif "any_of" in clause:
+                for sub in clause["any_of"]:
+                    if "building_in_region" in sub:
+                        regions.append(sub["building_in_region"])
         assert regions, f"{lvl}: no building_in_region in win"
-        r = regions[0]
-        assert (int(r["x"]), int(r["y"])) == SAFE_XY, (lvl, r)
-        assert str(r.get("type")).lower() == "fact"
+        accepted = {(int(r["x"]), int(r["y"])) for r in regions}
+        if lvl == "hard":
+            assert accepted == {SAFE_XY, SAFE_NW_XY}, (lvl, accepted)
+        else:
+            assert accepted == {SAFE_XY}, (lvl, accepted)
+        for r in regions:
+            assert str(r.get("type")).lower() == "fact"
 
 
 def test_mis_sited_fail_clause_present_every_level():
     """Recalibration teeth: every level's fail_condition carries the
     region-keyed mis-sited-deploy clause — `all_of[after_ticks,
-    has_building:fact, not building_in_region:SAFE]`. This converts a
-    fact deployed outside the SAFE region into a deterministic LOSS
-    (the engine balance fixes let an exposed fact survive the
-    rushers, so without this clause the wrong-region run drew)."""
+    has_building:fact, not building_in_region:DEFENSIBLE]`. This
+    converts a fact deployed outside the DEFENSIBLE region into a
+    deterministic LOSS (the engine balance fixes let an exposed fact
+    survive the rushers, so without this clause the wrong-region run
+    drew). On easy/medium the negated region is the single SW pocket;
+    on hard it's a `not: {any_of: [SW, NW]}` so a fact in either
+    DEFENSIBLE pocket survives the clause."""
     for lvl in LEVELS:
         c = compile_level(load_pack(PACK), lvl)
         fc = c.fail_condition.model_dump(exclude_none=True)
@@ -309,21 +355,30 @@ def test_mis_sited_fail_clause_present_every_level():
             if not inner:
                 continue
             has_fact = any("has_building" in cc for cc in inner)
-            neg_region = any(
-                "not" in cc
-                and isinstance(cc["not"], dict)
-                and "building_in_region" in cc["not"]
-                for cc in inner
-            )
-            if has_fact and neg_region:
+            # The negated subnode may be a `building_in_region` leaf
+            # (easy/medium) OR an `any_of` over two `building_in_region`
+            # leaves (hard).
+            negated_regions: list[dict] = []
+            for cc in inner:
+                if "not" in cc and isinstance(cc["not"], dict):
+                    inner_neg = cc["not"]
+                    if "building_in_region" in inner_neg:
+                        negated_regions.append(inner_neg["building_in_region"])
+                    elif "any_of" in inner_neg:
+                        for sub in inner_neg["any_of"]:
+                            if "building_in_region" in sub:
+                                negated_regions.append(
+                                    sub["building_in_region"]
+                                )
+            if has_fact and negated_regions:
                 found = True
-                # the negated region must be the SAFE anchor
-                for cc in inner:
-                    if "not" in cc and "building_in_region" in cc["not"]:
-                        reg = cc["not"]["building_in_region"]
-                        assert (int(reg["x"]), int(reg["y"])) == SAFE_XY, (
-                            lvl, reg
-                        )
+                anchors = {
+                    (int(r["x"]), int(r["y"])) for r in negated_regions
+                }
+                if lvl == "hard":
+                    assert anchors == {SAFE_XY, SAFE_NW_XY}, (lvl, anchors)
+                else:
+                    assert anchors == {SAFE_XY}, (lvl, anchors)
         assert found, f"{lvl}: missing region-keyed mis-sited fail clause"
 
 
@@ -334,7 +389,16 @@ def test_mis_sited_fail_clause_present_every_level():
 def test_intended_deploy_safe_wins_every_level_and_seed(level):
     c = compile_level(load_pack(PACK), level)
     for seed in SEEDS:
-        r = run_level(c, make_intended_safe(), seed=seed)
+        # Hard rotates the MCV's starting latitude across two
+        # spawn_point groups, and the win predicate accepts either
+        # DEFENSIBLE pocket — the intended policy picks the closer
+        # one based on the MCV's actual spawn cell.
+        policy = (
+            make_intended_safe_dynamic()
+            if level == "hard"
+            else make_intended_safe()
+        )
+        r = run_level(c, policy, seed=seed)
         assert r.outcome == "win", (
             f"{level} seed{seed}: intended deploy-safe must WIN; "
             f"got {r.outcome} (tick={r.signals.game_tick}, "

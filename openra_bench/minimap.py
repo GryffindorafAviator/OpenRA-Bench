@@ -335,6 +335,7 @@ def render_tactical_minimap(
     legend: bool = True,
     selected=None,
     arrows=None,
+    unit_labels=None,
 ):
     """A legible tactical minimap as a PIL RGB image:
 
@@ -346,7 +347,13 @@ def render_tactical_minimap(
       strip beneath the map.
 
     `scale` multiplies the 6px base cell. Returns None if Pillow is
-    missing or there is nothing to draw."""
+    missing or there is nothing to draw.
+
+    `unit_labels` (id-str → handle, e.g. `{"1004": "tank-1"}`) drives
+    the image-primary perception channel: every actor is tagged with
+    its legible handle so the model can identify and command units
+    from the picture alone (the text briefing carries no positions).
+    When set, the per-cell count badge is replaced by the labels."""
     try:
         from PIL import Image, ImageDraw
     except Exception:  # noqa: BLE001
@@ -399,7 +406,9 @@ def render_tactical_minimap(
             is_b = force_building or bool(it.get("is_building"))
             atype = (it.get("actor_type") or it.get("type") or "?")
             shape = _unit_shape(atype, is_b)
-            by_cell.setdefault((cx, cy), []).append((side, shape))
+            by_cell.setdefault((cx, cy), []).append(
+                (side, shape, it.get("id"))
+            )
             if side == "own" and atype != "?":
                 own_types.setdefault(str(atype).lower(), shape)
 
@@ -420,11 +429,14 @@ def render_tactical_minimap(
     badge_font = _minimap_font(max(9, int(cp * 0.62)))
     for (cx, cy), occ in by_cell.items():
         # Dominant occupant decides the shape; prefer a building.
-        side, shape = next(
+        side, shape, _aid = next(
             (o for o in occ if _is_bld(o[1])), occ[0]
         )
         _draw_unit_shape(draw, cx, cy, cp, shape, _color(side, shape))
-        if len(occ) > 1:
+        # The count badge and per-unit labels are mutually exclusive —
+        # `unit_labels` (image-primary) names each occupant individually,
+        # which already disambiguates a stack.
+        if len(occ) > 1 and not unit_labels:
             tx, ty = (cx + 1) * cp - cp * 0.42, cy * cp + 1
             draw.text(
                 (tx, ty), str(len(occ)), fill=(255, 255, 255),
@@ -484,6 +496,65 @@ def render_tactical_minimap(
                     stroke_width=3, stroke_fill=(0, 0, 0),
                 )
 
+    # Per-unit ID labels — the image-primary channel. Each actor's
+    # legible handle (`tank-1`, `enemy-2`) is placed near its marker
+    # with greedy collision avoidance (labels nudge clear of one
+    # another into free space) and a leader line when a label drifts
+    # off its cell — so the model can identify every unit from the
+    # picture alone. Drawn last so nothing occludes the text.
+    if unit_labels:
+        lab_font = _minimap_font(max(15, int(cp * 0.95)))
+        img_w, img_h = w * cp, h * cp
+        # One entry per actor id — an actor can appear in both the unit
+        # and building lists; dedup so its label is drawn once.
+        seen: set = set()
+        actors = []  # (cx, cy, label, side)
+        for (cx, cy), occ in by_cell.items():
+            for side, _shape, aid in occ:
+                key = str(aid)
+                if aid is None or key in seen or key not in unit_labels:
+                    continue
+                seen.add(key)
+                actors.append((cx, cy, unit_labels[key], side))
+        placed: list = []  # occupied label rects (x0, y0, x1, y1)
+
+        def _free(x0, y0, x1, y1):
+            return all(
+                x1 < r[0] or x0 > r[2] or y1 < r[1] or y0 > r[3]
+                for r in placed
+            )
+
+        for cx, cy, lab, side in sorted(actors, key=lambda a: (a[1], a[0])):
+            try:
+                bb = draw.textbbox((0, 0), lab, font=lab_font, stroke_width=3)
+                tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            except Exception:  # noqa: BLE001
+                tw, th = len(lab) * 9, 16
+            mx, my = cx * cp + cp // 2, cy * cp + cp // 2
+            lx = min(max(0, mx + 4), img_w - tw - 1)
+            ly = my - cp - th
+            step = th + 3
+            for _ in range(60):  # nudge upward into free space
+                cand = min(max(1, ly), img_h - th - 1)
+                if _free(lx, cand, lx + tw, cand + th):
+                    ly = cand
+                    break
+                ly -= step
+            else:
+                ly = min(max(1, my + cp), img_h - th - 1)
+            placed.append((lx, ly, lx + tw, ly + th))
+            # Leader line when the label sits away from its marker.
+            if abs(lx + tw // 2 - mx) > cp or abs(ly + th // 2 - my) > cp:
+                draw.line(
+                    [(mx, my), (lx + 2, ly + th // 2)],
+                    fill=(165, 167, 178), width=1,
+                )
+            col = (175, 255, 175) if side == "own" else (255, 190, 172)
+            draw.text(
+                (lx, ly), lab, fill=col, font=lab_font,
+                stroke_width=3, stroke_fill=(0, 0, 0),
+            )
+
     # Legend strip — the unit TYPES actually present, each with its
     # own shape, so the player can read 1tnk vs 2tnk vs e3 etc.
     if legend:
@@ -507,11 +578,17 @@ def render_tactical_minimap(
             except Exception:  # noqa: BLE001
                 tw = len(tname) * cp * 0.5
             x = int(tx + tw + cp * 0.7)
+        help_txt = (
+            "green = you   red/orange = enemy   yellow ring = objective   "
+            "brown = ore   label = unit id (pass it to your tools)   "
+            "scout the dark area to reveal more"
+            if unit_labels else
+            "green = you   red/orange = enemy   yellow ring = objective   "
+            "brown = ore   number = units stacked   white box = selected   "
+            "arrow = order"
+        )
         draw.text(
-            (int(cp * 0.4), ly + int(cp * 1.05)),
-            "green = you   red/orange = enemy   yellow ring = objective  "
-            "brown = ore   "
-            "number = units stacked   white box = selected   arrow = order",
+            (int(cp * 0.4), ly + int(cp * 1.05)), help_txt,
             fill=(200, 202, 212), font=lfont,
         )
 

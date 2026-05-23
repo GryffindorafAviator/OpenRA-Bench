@@ -7,12 +7,104 @@
 # explores the nearest fog patch, sees nothing, and never connects that
 # the target building must therefore be in the OTHER unexplored region.
 # The win requires discovering the actual target BUILDING (not map
-# coverage), and there is always a nearer-but-empty/decoy fog pocket plus
-# a farther pocket that genuinely contains the target. Passing means the
+# coverage), and the agent must commit sustained scouting along a
+# specific bearing chosen from MULTIPLE fog pockets. Passing means the
 # model spatially reasoned about WHERE the unexplored mass is relative to
 # WHERE the target must be — not just that fog exists, and not by
 # stalling or charging blindly. The clock is reachable: failing to
 # discover the target before it runs out is a real LOSS, not a draw.
+#
+# Map design (per-tier custom arenas, mapgen 'arena' generator) —
+# replaces the generic rush-hour-arena to give each tier the EXACT zone
+# geometry the capability requires:
+#
+#   * easy  — perception-target-fog-easy   112×40 cordon 2, 1 mpspawn
+#             TWO candidate zones on the east edge: a NEAR-east zone
+#             at (60, 6) (decoy units only) and a FAR-east zone at
+#             (102, 8) (the real target `fact`). The bare skill: read
+#             "the target is somewhere east; the near zone holds no
+#             building" and commit a sustained eastward push past the
+#             near pocket to the far one. Stall or a one-cell nudge
+#             never reaches the far zone; a commit to the NEAR zone
+#             alone gives no building discovery → LOSS.
+#
+#   * medium — perception-target-fog-medium 112×40 cordon 2, 1 mpspawn
+#             THREE candidate zones spanning the playable area:
+#             NE (60, 6), SE (60, 33), and FAR-EAST (105, 20). The
+#             target lives in FAR-EAST; the NE and SE pockets are
+#             decoys (enemy units only, no building). A blind charge
+#             toward NE or SE alone never reaches the FAR-EAST mid-
+#             latitude pocket within budget; a wrong fixed-zone
+#             commit loses. Only a sustained eastward push past or
+#             around both side pockets reveals the building.
+#
+#   * hard   — perception-target-fog-hard   112×40 cordon 2, 1 mpspawn
+#             FOUR candidate zones with SEED-ROTATED target placement
+#             (enemy-side spawn_point 0..3, the Wave-9 per-owner
+#             filter — see CLAUDE.md). The four corner zones are
+#             NE (60, 6), SE (60, 33), FAR-NE (105, 8), and FAR-SE
+#             (105, 32). Each seed places the real target `fact` in
+#             ONE of these zones; the other three carry only decoy
+#             units. A memorised "always commit zone X" loses on ≥3
+#             of 4 seeds (CLAUDE.md hard-tier contract: must win on
+#             every seed 1..4). Only a scout-then-commit policy —
+#             fan jeeps to ALL four corner candidates so collectively
+#             they cover every zone — wins all seeds. A unit-loss
+#             cap of ≤1 punishes blind chases that engage decoys.
+#
+# Engine guardrails (CLAUDE.md):
+#   * Hidden targets and decoys are placed `stance:0` HoldFire so a
+#     scout brushing the fog pocket does NOT trigger an auto-
+#     engagement that would self-deliver the target for free.
+#     Discovery must come from the agent's deliberate movement into
+#     line-of-sight of the pocket.
+#   * Each per-tier custom map declares EXACTLY ONE mpspawn at the
+#     agent base (`spawns: [[6, 5]]`). Without this the `arena`
+#     generator emits 4 default corner mpspawns and the engine
+#     round-robins them by seed, OFFSETTING every pre-placed scenario
+#     actor relative to the chosen mpspawn — the agent base would
+#     drift south/east on some seeds and our authored zone coords
+#     would no longer match the documented geometry. One mpspawn ⇒
+#     `spawn_idx=0 from 1 available` every seed ⇒ no actor offset.
+#   * Custom arena widths stay ≤112 with cordon 2, so every actor
+#     coord is inside the playable bounds (x ∈ [2..109], y ∈ [2..37]).
+#     The previous version used x=110/116 which silently dropped
+#     actors on a 128-wide map.
+#   * Enemy-side `spawn_point` filter activates the moment ANY enemy
+#     declares spawn_point: enemy actors WITHOUT spawn_point are then
+#     filtered out. The persistent decoy clusters in hard tier are
+#     therefore duplicated across all four enemy spawn_point groups
+#     at identical coords, mirroring the `adv-rps-counter-pick`
+#     worked example. The far target `fact` lives at the SEED-
+#     ROTATED position only — it IS the target, and which corner it
+#     occupies is the seed-axis variable.
+#   * Hard tier uses the Wave-9 enemy-side seed axis exclusively (no
+#     agent spawn_point), per the `adv-rps-counter-pick` idiom: agent
+#     base is identical across all seeds, the seed-axis varies WHICH
+#     fog pocket contains the target. `distinct_enemy_spawn_points`
+#     round-robins seeds 1..4 across enemy groups 1,2,3,0 — so
+#     seed=1 → target in SE (sp=1), seed=2 → FAR-NE (sp=2), seed=3
+#     → FAR-SE (sp=3), seed=4 → NE (sp=0).
+#
+# Why brute / stall / wrong-zone policies LOSE:
+#   * stall (only observe)              → LOSS on every tier/seed.
+#     No movement, no discovery, clock expires.
+#   * commit-to-NE-zone (fixed) → easy: LOSS (target is FAR-EAST,
+#     not NE); medium: LOSS (target is FAR-EAST); hard: LOSS on 3
+#     of 4 seeds (target in SE/FAR-NE/FAR-SE on seeds 1/2/3, only
+#     seed 4 has target in NE).
+#   * commit-to-FAR-NE-zone (fixed) → easy: WIN (target near (102,8)
+#     reveals from path through (105,8)); medium: LOSS (target is
+#     FAR-EAST mid-latitude (105,20), >10 cells off the FAR-NE
+#     bearing); hard: LOSS on 2 of 4 seeds. NB: easy is intentionally
+#     "fog points east" — committing east WINS, because reading the
+#     direction is the easy-tier capability.
+#   * scout-then-commit (fan jeeps to all 4 corner candidates) → WIN
+#     on every tier, every seed. Jeeps move ~5 cells/turn; the
+#     longest jeep route (corner-to-corner, ~110 cells) completes
+#     in ~22 turns, well inside the 30-turn hard budget. As soon as
+#     ANY scout's sight (5c) overlaps the target's cell, the
+#     building enters `enemy_buildings_seen_ids` and the win fires.
 
 meta:
   id: perception-target-vs-fog
@@ -35,26 +127,44 @@ base:
   termination: {max_ticks: 10000}
   actors:
     # Scouts spawn top-left (x<25, y<10).
-    - {type: jeep, owner: agent, position: [6, 5], count: 3}
-    - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
+    - {type: jeep, owner: agent, stance: 0, position: [6, 5], count: 3}
+    - {type: 1tnk, owner: agent, stance: 0, position: [8, 8], count: 2}
 
 levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # 112×40, ONE mpspawn at the agent base. Two candidate fog zones
+  # on the east half: NEAR-east at (60, 6) (decoy units only, no
+  # building) and FAR-east at (102, 8) (the real target `fact`).
+  # Playable rectangle: x∈[2..109], y∈[2..37]. Decoys and target
+  # are stance:0 so they don't auto-engage approaching scouts.
   easy:
     description: >
-      One target building, one unexplored region — far east, roughly on
-      the spawn latitude. The near area is already open (no decoy fog).
-      The bare skill: read "the fog is east, therefore the target is
-      east" and commit a sustained eastward push. Idling, a one-cell
-      nudge, or dithering on the nearest frontier runs out the clock and
-      LOSES — only a committed read of where the fog mass is wins.
+      Two unexplored pockets east of your base: a NEAR pocket at the
+      mid-east edge (around x=60, y=6) holding only enemy units, and
+      a FAR pocket near the east edge (around x=102, y=8) holding
+      the real target building. Sweeping the near pocket alone does
+      not satisfy the win — commit a sustained eastward push past
+      the near pocket to discover the building before about 23 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: perception-target-fog-easy
+        width: 112
+        height: 40
+        cordon: 2
+        # ONE mpspawn at the agent base; see header note on actor
+        # offset under multi-mpspawn maps.
+        spawns: [[6, 5]]
+        title: 'Perception Target vs Fog — Easy (2 zones)'
       actors:
-        - {type: jeep, owner: agent, position: [6, 5], count: 3}
-        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
-        # Target building in the single eastern fog mass.
-        - {type: fact, owner: enemy, position: [110, 8]}
-        # Light guard so it reads as a real objective, not a stray actor.
-        - {type: e1, owner: enemy, position: [106, 11], stance: 1}
+        # Agent base — fixed across the easy tier.
+        - {type: jeep, owner: agent, stance: 0, position: [6, 5], count: 3}
+        - {type: 1tnk, owner: agent, stance: 0, position: [8, 8], count: 2}
+        # NEAR-east decoy zone (no building, just two rifle infantry).
+        - {type: e1, owner: enemy, position: [60, 6], stance: 0, count: 2}
+        # FAR-east zone — the real target building + a light guard.
+        - {type: fact, owner: enemy, position: [102, 8], stance: 0}
+        - {type: e1,   owner: enemy, position: [98, 11], stance: 0}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
@@ -65,27 +175,43 @@ levels:
         - {not: {own_units_gte: 1}}
     max_turns: 26
 
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # 112×40, ONE mpspawn. THREE candidate fog zones: NE (60, 6),
+  # SE (60, 33), and FAR-EAST (105, 20). Target lives at FAR-EAST;
+  # NE and SE are decoy units (no building). A blind east charge
+  # along y≈8 sweeps NE only, finds no building; a blind south
+  # charge sweeps SE only, same. Only a sustained commit along the
+  # y=20 mid-axis reaches FAR-EAST and reveals the building.
   medium:
     description: >
-      Two unexplored regions: a NEAR one (NE, near the spawn latitude)
-      that holds only enemy UNITS — no building — and a FAR one (SE,
-      opposite corner) that holds the real target building. A blind
-      eastward charge sweeps the near pocket, finds no building, and
-      runs out the clock; the nearest-frontier sweep never reaches the
-      far corner. Only inferring "the near fog is empty, so the target
-      must be in the remaining unexplored region" and committing SE wins
-      in time. Missing the deadline is a LOSS.
+      Three unexplored pockets: NE (around x=60, y=6) holding only
+      enemy units, SE (around x=60, y=33) holding only enemy units,
+      and FAR-EAST (around x=105, y=20) holding the real target
+      building. Neither side pocket holds the target — commit a
+      sustained eastward push along the mid-latitude to discover
+      the building before about 26 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: perception-target-fog-medium
+        width: 112
+        height: 40
+        cordon: 2
+        spawns: [[6, 5]]
+        title: 'Perception Target vs Fog — Medium (3 zones)'
       actors:
-        - {type: jeep, owner: agent, position: [6, 5], count: 3}
-        - {type: 1tnk, owner: agent, position: [8, 8], count: 2}
-        # Near (NE) decoy region: enemy units but NO building (a trap
-        # that satisfies curiosity but not the win condition).
-        - {type: e1,  owner: enemy, position: [72, 5], stance: 1, count: 2}
-        - {type: jeep, owner: enemy, position: [76, 8], stance: 1}
-        # Far (SE) region: the actual target building.
-        - {type: fact, owner: enemy, position: [116, 35]}
-        - {type: e1,   owner: enemy, position: [112, 33], stance: 1}
+        # Agent base — fixed across the medium tier.
+        - {type: jeep, owner: agent, stance: 0, position: [6, 5], count: 3}
+        - {type: 1tnk, owner: agent, stance: 0, position: [8, 8], count: 2}
+        # NE decoy pocket — units only, no building.
+        - {type: e1,   owner: enemy, position: [60, 6],  stance: 0, count: 2}
+        - {type: jeep, owner: enemy, position: [64, 8],  stance: 0}
+        # SE decoy pocket — units only, no building.
+        - {type: e1,   owner: enemy, position: [60, 33], stance: 0, count: 2}
+        - {type: jeep, owner: enemy, position: [64, 31], stance: 0}
+        # FAR-EAST — the real target building + a light guard.
+        - {type: fact, owner: enemy, position: [105, 20], stance: 0}
+        - {type: e1,   owner: enemy, position: [101, 22], stance: 0}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
@@ -96,34 +222,82 @@ levels:
         - {not: {own_units_gte: 1}}
     max_turns: 30
 
+  # ── HARD ─────────────────────────────────────────────────────────
+  # 112×40, ONE mpspawn. FOUR candidate fog zones at the corners of
+  # the east half: NE (60, 6), SE (60, 33), FAR-NE (105, 8), FAR-SE
+  # (105, 32). The target `fact` lives in ONE of these zones per
+  # seed (enemy-side spawn_point 0..3, Wave-9 per-owner filter).
+  # The other three zones carry only decoy units. Hard tier seed-
+  # axis is ENEMY-side (no agent spawn_point), per the
+  # `adv-rps-counter-pick` idiom: agent base is identical across
+  # all seeds; the seed-axis varies WHICH fog pocket holds the
+  # target. A unit-loss cap of ≤1 punishes blind chases that
+  # engage decoys at close range.
   hard:
     description: >
-      Two decoy pockets — a NE squad and a mid-SOUTH squad, both enemy
-      units only, no building — flank the lane to the real target, a
-      lone building deep east on the mid latitude (counter-intuitive
-      relative to a spawn that pushes along its own edge). Short clock
-      and an attrition cap (≤1 unit lost): plowing scouts straight
-      through a decoy busts the cap or the clock; only reading which
-      fog pocket can still hold the target AND routing the clear
-      mid-lane around the decoys discovers it in time. Two seed-varied
-      spawn points (NW / SW).
+      Four candidate pockets in the east half: NE (60, 6), SE
+      (60, 33), FAR-NE (105, 8), FAR-SE (105, 32). The target
+      building is in one of them; the other three hold only decoy
+      units. WHICH pocket holds the target varies by seed — scout
+      with the jeeps to cover all four corner candidates so the
+      building is discovered before the clock. About 30-turn
+      budget; losing more than one unit busts the cap.
     overrides:
+      base_map:
+        generator: arena
+        name: perception-target-fog-hard
+        width: 112
+        height: 40
+        cordon: 2
+        spawns: [[6, 5]]
+        title: 'Perception Target vs Fog — Hard (4 zones, seed-rotated)'
       actors:
-        # spawn_point 0 — staged NW
-        - {type: jeep, owner: agent, position: [6, 5], count: 3, spawn_point: 0}
-        - {type: 1tnk, owner: agent, position: [8, 8], count: 2, spawn_point: 0}
-        # spawn_point 1 — staged SW (decoys/target fixed, so which
-        # decoy is "on the way" flips by seed)
-        - {type: jeep, owner: agent, position: [6, 33], count: 3, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [8, 30], count: 2, spawn_point: 1}
-        # Decoy A — NE squad, enemy units only, no target building.
-        - {type: e1,  owner: enemy, position: [64, 6],  stance: 1, count: 2}
-        # Decoy B — mid-south squad, enemy units only, no target.
-        - {type: e1,  owner: enemy, position: [62, 33], stance: 1, count: 2}
-        # The real target: a single building deep east on the mid
-        # latitude, reachable only via the clear lane between the decoys.
-        - {type: fact, owner: enemy, position: [116, 20]}
-        - {type: e1,   owner: enemy, position: [110, 25], stance: 1}
+        # Agent base — IDENTICAL across all seeds (no agent
+        # spawn_point declared; the per-owner agent filter is
+        # inactive, so every agent actor passes through
+        # unconditionally — the seed axis is purely enemy-side).
+        - {type: jeep, owner: agent, stance: 0, position: [6, 5],  count: 3}
+        - {type: 1tnk, owner: agent, stance: 0, position: [8, 8],  count: 2}
+
+        # ── ENEMY spawn_point=0 — target in NE (60, 6) ────────
+        - {type: fact, owner: enemy, position: [60, 6],   stance: 0, spawn_point: 0}
+        - {type: e1,   owner: enemy, position: [56, 8],   stance: 0, spawn_point: 0}
+        # SE decoy.
+        - {type: e1,   owner: enemy, position: [60, 33],  stance: 0, count: 2, spawn_point: 0}
+        # FAR-NE decoy.
+        - {type: e1,   owner: enemy, position: [105, 8],  stance: 0, count: 2, spawn_point: 0}
+        # FAR-SE decoy.
+        - {type: e1,   owner: enemy, position: [105, 32], stance: 0, count: 2, spawn_point: 0}
+
+        # ── ENEMY spawn_point=1 — target in SE (60, 33) ───────
+        - {type: fact, owner: enemy, position: [60, 33],  stance: 0, spawn_point: 1}
+        - {type: e1,   owner: enemy, position: [56, 31],  stance: 0, spawn_point: 1}
+        # NE decoy.
+        - {type: e1,   owner: enemy, position: [60, 6],   stance: 0, count: 2, spawn_point: 1}
+        # FAR-NE decoy.
+        - {type: e1,   owner: enemy, position: [105, 8],  stance: 0, count: 2, spawn_point: 1}
+        # FAR-SE decoy.
+        - {type: e1,   owner: enemy, position: [105, 32], stance: 0, count: 2, spawn_point: 1}
+
+        # ── ENEMY spawn_point=2 — target in FAR-NE (105, 8) ───
+        - {type: fact, owner: enemy, position: [105, 8],  stance: 0, spawn_point: 2}
+        - {type: e1,   owner: enemy, position: [101, 11], stance: 0, spawn_point: 2}
+        # NE decoy.
+        - {type: e1,   owner: enemy, position: [60, 6],   stance: 0, count: 2, spawn_point: 2}
+        # SE decoy.
+        - {type: e1,   owner: enemy, position: [60, 33],  stance: 0, count: 2, spawn_point: 2}
+        # FAR-SE decoy.
+        - {type: e1,   owner: enemy, position: [105, 32], stance: 0, count: 2, spawn_point: 2}
+
+        # ── ENEMY spawn_point=3 — target in FAR-SE (105, 32) ──
+        - {type: fact, owner: enemy, position: [105, 32], stance: 0, spawn_point: 3}
+        - {type: e1,   owner: enemy, position: [101, 30], stance: 0, spawn_point: 3}
+        # NE decoy.
+        - {type: e1,   owner: enemy, position: [60, 6],   stance: 0, count: 2, spawn_point: 3}
+        # SE decoy.
+        - {type: e1,   owner: enemy, position: [60, 33],  stance: 0, count: 2, spawn_point: 3}
+        # FAR-NE decoy.
+        - {type: e1,   owner: enemy, position: [105, 8],  stance: 0, count: 2, spawn_point: 3}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}

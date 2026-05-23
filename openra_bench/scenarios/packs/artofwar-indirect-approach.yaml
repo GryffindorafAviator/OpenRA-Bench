@@ -21,7 +21,36 @@ meta:
     one (around the obstacle's flank) whose payoff is far delayed.
   author: openra-bench
 
-base_map: rush-hour-arena
+# Per-pack tailored 128×40 arena. The map identity matches the pack's
+# topology: the agent stages at the WEST edge, an e3 guard wall stands
+# at y=22 across the middle longitude, and the only safe flank routes
+# are the FAR-EDGE corridors at y=2..6 (north) and y=36..37 (south).
+# Two narrow water spurs ABOVE and BELOW the wall (y=18..19 and
+# y=24..25, x=26..86) fill the "near-line" shortcut cells: a tank that
+# tries to shave the detour by clipping just above/below the e3 wall
+# (still well inside e3 aggro 16) is now also blocked by terrain — the
+# only navigable bypass is the FAR FLANK as designed. The guard wall
+# itself is unit-based (so the model still has the tactical option of
+# attriting it head-on, which loses on the deadline + loss-cap), but
+# the map physically reinforces the indirect-approach doctrine.
+base_map:
+  generator: arena
+  name: artofwar-indirect-approach-arena
+  width: 128
+  height: 40
+  cordon: 2
+  title: 'Indirect Approach — 128x40 Wall + Far-Edge Flanks'
+  obstacles:
+    # Near-line water spur ABOVE the e3 wall, x=26..86 y=18..20.
+    # Forces a flanker that wants to shave the detour back UP to
+    # the open lane y=2..17 (the wall ends at x=86, so cells at
+    # y=21 just east of x=86 and at y=18..20 east of x=86 stay
+    # navigable for the descent to the objective at (112,20)).
+    - {x: 26, y: 18, w: 61, h: 3}
+    # Near-line water spur BELOW the e3 wall, x=26..86 y=24..26.
+    # Symmetric: a tank dipping south past the wall's end at x=86
+    # still has y=27..36 as the navigable south-flank corridor.
+    - {x: 26, y: 24, w: 61, h: 3}
 
 # The enemy is a LEASHED GUARD wall (engine scripted bot 'guard'): a
 # dense rocket-infantry (e3) line laid HORIZONTALLY across the direct
@@ -67,14 +96,21 @@ levels:
   # flank route around the wall's east end lands the force. Generous
   # clock. Loss-cap of 1 (a single clipped tank is forgivable here).
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # A leashed rocket-infantry wall blocks the direct lane east to the
+    # objective and shreds anything that tries to cross it. Get THREE
+    # tanks to the objective (far east, marked by the enemy structure).
+    # Driving the column straight in loses it in a turn; go the long way
+    # — climb to the open flank, run east PAST the end of the wall, then
+    # turn down to the objective. Idling never commits and loses on the
+    # clock.
     description: >
-      A leashed rocket-infantry wall blocks the direct lane east to the
-      objective and shreds anything that tries to cross it. Get THREE
-      tanks to the objective (far east, marked by the enemy structure).
-      Driving the column straight in loses it in a turn; go the long way
-      — climb to the open flank, run east PAST the end of the wall, then
-      turn down to the objective. Idling never commits and loses on the
-      clock.
+      A rocket-infantry wall blocks the direct lane east. Get three
+      tanks to the far east objective within about 59 turns, losing at
+      most one. Crossing the wall head-on is fatal.
     overrides: {}
     win_condition:
       all_of:
@@ -92,12 +128,18 @@ levels:
   # east, x=26..86) so the survivable flank route is longer and the
   # detour costs more turns before it pays off; tighter clock; zero-loss.
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # The guard wall now extends much farther east — the long way round
+    # is longer and costlier, and a single clipped tank now fails. Same
+    # task: ignore the lethal short lane entirely, take the flank route
+    # around the (longer) wall's end, land THREE tanks on the objective
+    # before the tighter deadline.
     description: >
-      The guard wall now extends much farther east — the long way round
-      is longer and costlier, and a single clipped tank now fails. Same
-      task: ignore the lethal short lane entirely, take the flank route
-      around the (longer) wall's end, land THREE tanks on the objective
-      before the tighter deadline.
+      Longer rocket-infantry wall. Get three tanks to the far east
+      objective within about 65 turns with ZERO losses.
     overrides:
       actors:
         - {type: 1tnk, owner: agent, position: [6, 20], stance: 1, count: 3}
@@ -138,13 +180,21 @@ levels:
   # can't be memorised. Strongest/longest wall; strict zero-loss; every
   # surviving unit must arrive (all_units_in_region) and ≥3 must.
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Strongest, longest wall; the force stages from a seed-chosen
+    # latitude (north or south of the wall), so the length and shape of
+    # the long way round varies by seed and can't be memorised. The
+    # short lane is lethal from either start. Get the WHOLE force (every
+    # surviving tank, ≥3) onto the objective with ZERO losses, via the
+    # long way around the wall's end, before the tight deadline.
     description: >
-      Strongest, longest wall; the force stages from a seed-chosen
-      latitude (north or south of the wall), so the length and shape of
-      the long way round varies by seed and can't be memorised. The
-      short lane is lethal from either start. Get the WHOLE force (every
-      surviving tank, ≥3) onto the objective with ZERO losses, via the
-      long way around the wall's end, before the tight deadline.
+      Strongest wall. Stage from a seed-chosen latitude (north or south
+      of the wall). Land the WHOLE surviving force (at least three
+      tanks) on the far east objective with ZERO losses, within about
+      69 turns.
     overrides:
       actors:
         # spawn_point 0 — northern staging

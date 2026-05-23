@@ -17,9 +17,17 @@ A scenario is defective if any of the following hold:
 1. The win predicate is satisfiable by a play that ignores the
    advertised capability (the "laziest play wins" inversion).
 2. `within_ticks` or `after_ticks` is set above the tick reachable
-   within `max_turns` (engine advances ~90 ticks per decision turn ⇒
-   `tick ≤ 93 + 90·(max_turns − 1)`); the deadline never bites ⇒ the
-   episode times out as a **DRAW**, not a LOSS.
+   within `max_turns`; the deadline never bites ⇒ the episode times
+   out as a **DRAW**, not a LOSS. The engine constant is
+   `DEFAULT_TICKS_PER_STEP = 30` (`openra-train/src/env.rs:33`), so a
+   non-interrupt-mode pack reaches `tick ≈ 30·max_turns`. Interrupt-
+   mode runs (any pack with a non-empty `interrupts:` block) advance
+   1–`max_ticks` ticks per turn (`max_ticks` defaults to 5 in the
+   bench call site, `openra_bench/eval_core.py`), so per-turn tick
+   advance is variable — read the actual value from
+   `info["ticks_advanced"]` instead of assuming it. The historical
+   "engine advances ~90 ticks per decision turn" estimate is wrong;
+   triaged in `docs/ENGINE_FOLLOWUPS_TRIAGE.md` finding #1.
 3. There is no `fail_condition`, or it only triggers on full
    force-wipe; a stall / preserve / partial outcome silently draws.
 4. The intended capability is not solvable inside the declared budget
@@ -57,9 +65,15 @@ A scenario is defective if any of the following hold:
 
 ## Engine facts you must internalise
 
-- **Ticks/turn:** ~90. Max tick at `max_turns` ≈ `93 + 90·(max_turns
-  − 1)`. Any `within_ticks` / `after_ticks` above this is **inert**
-  (won't bite) ⇒ draw degeneracy.
+- **Ticks/turn:** non-interrupt mode advances exactly
+  `DEFAULT_TICKS_PER_STEP = 30` ticks per `env.step()`
+  (`openra-train/src/env.rs:33`). Max tick at `max_turns` ≈
+  `30·max_turns`. Interrupt mode (`step_until_event`, used whenever
+  `interrupts:` is non-empty) advances 1–`max_ticks` ticks per turn
+  (variable; default `max_ticks = 5`) and breaks on the first signal
+  — read `info["ticks_advanced"]` rather than computing
+  arithmetically. Any `within_ticks` / `after_ticks` above the
+  reachable tick is **inert** (won't bite) ⇒ draw degeneracy.
 - **Engine auto-done:** the engine sets `done=True` when all enemy
   actors are eliminated, or sometimes when an agent unit reaches an
   enemy-key location. Without a persistent enemy actor a win-by-reach
@@ -195,6 +209,52 @@ A scenario is defective if any of the following hold:
   `stance:3` AGENT combat unit auto-hunts the whole map; for a
   perception pack keep the agent's combat arm `stance:0` so a
   stall policy can't win for free by self-delivering the army.
+- **`reveal_map:` — the no-fog perception cell** (pinned by
+  `OpenRA-Rust/openra-data/tests/test_reveal_map.rs` +
+  `tests/test_perception_ablation.py`). A scenario may declare a
+  top-level `reveal_map: true`; the agent player then observes the
+  whole map with NO fog of war — every enemy actor is reported
+  regardless of shroud and `explored_percent` is 100. Parsed by
+  `oramap.rs::parse_scenario_yaml` (mirrors `spawn_mcvs`), applied
+  in `env.rs` (`is_visible_to` short-circuits true for the agent;
+  `refresh_explored_cells` fills the playable rectangle). This is
+  the no-fog half of the **perception ablation grid**. The bench
+  `fog_mode` spans 3 observation channels × 2 fog states = 6 cells
+  (`openra_bench/scenarios/schema.py::PERCEPTION_MODES`):
+  - `structured` — text briefing + a text 'Unexplored regions'
+    block; no image.
+  - `vision` — text briefing + PNG minimap. NOTE the briefing
+    already enumerates units/enemies with coordinates, so the image
+    is a redundant SUPPLEMENT — `vision` does NOT isolate
+    image-reading.
+  - `image` — image-PRIMARY: `prompt_v2.briefing_image_primary`
+    redacts every coordinate from the text; the labelled minimap
+    (`render_tactical_minimap(..., unit_labels=...)`) is the sole
+    spatial source. The model references units by the on-map
+    handle (`tank-1`, `enemy-2`); `agent._to_commands` maps the
+    handle back to the engine id. The clean "can the model read a
+    minimap" probe.
+  Each channel has a fogged form and a `-clear` (no-fog) form. A
+  `-clear` cell is a perfect-information CONTROL that isolates the
+  perception cost — a stall/observe policy WINS a `-clear`
+  perception pack (perception removed), so the no-cheat bar
+  applies ONLY to the fogged cells, never the `-clear` ones. Run
+  the full grid with `run_eval --perception-sweep` (expands every
+  `pack:level` into `pack:level:<mode>`); the human Play tab stays
+  on the canonical `vision` (fogged) modality.
+- **Handoff ablation** (`openra_bench/handoff.py`, `run_eval
+  --handoff-sweep`). A `HandoffController` lets a `prefix` controller
+  play the first K turns, then the model inherits the live game state
+  ("take over from here" — a pure STATE handoff, no transcript). A
+  `stall` prefix hands the model a losing position (recovery test); a
+  replayed winning trajectory (`TrajectoryController`, sourced from a
+  `--handoff-bank` of Playback runs) hands it a winning one
+  (capitalize-on-advantage). Sweep cells are
+  `pack:level:handoff-{base,bad,good}`. Every result carries a
+  `passivity` stat — the fraction of the model's turns spent on
+  `observe`/`stop` only — the freeze-and-panic signal. A replayed
+  trajectory MUST come from the same `pack:level:seed` (engine actor
+  ids are seed-deterministic).
 - **`pbox` costs 600** (not the 400 some old specs assumed);
   defense and infantry are SEPARATE production queues so an
   efficient policy queues `build('pbox')` and `build('e1')` in
@@ -277,6 +337,66 @@ A scenario is defective if any of the following hold:
   `e1` at some cells doesn't surface in `enemy_positions` — `e3`
   does. For perception packs, use `e3` for hidden clusters and
   verify cluster cells on a smoke run before authoring against them.
+- **`place_building('proc')` now auto-spawns the new harv at the
+  NEW proc's footprint and binds it to the closest refinery by
+  PATH DISTANCE** (engine fix, pinned by
+  `OpenRA-Rust/openra-sim/tests/test_proc_auto_spawn_at_new_proc.rs`
+  + `tests/test_proc_auto_spawn_python.py`). Historical footgun:
+  the engine routed the auto-harv through `find_spawn_location`,
+  which sorts candidates by `(!is_primary, id)` — so a 2nd proc
+  placed far from the 1st always materialised its harv at the
+  LOWEST-ID proc, and `find_refinery` returned the lowest-id proc
+  unconditionally. The combined effect: expansion to a contested
+  patch was a no-op (the new harv trekked back to the old
+  refinery, and the old harv kept depositing at the old
+  refinery). The fix: a new `spawn_unit_near_building(actor,
+  unit_type, owner, building_id)` anchors the spawn scan on the
+  NEW proc's footprint, and `find_refinery_from(owner, cell)`
+  picks the proc with the shortest A* path from `cell` (with
+  fallback to Chebyshev-nearest then lowest-id). A 2nd refinery
+  placed near a contested patch now produces real throughput.
+  **Existing harvesters do NOT re-snap** to the new proc — the
+  re-resolve only fires when the stored refinery id is stale
+  (proc destroyed / never existed). To reroute live harvesters,
+  the agent must `set_primary` on the new proc or sell the old
+  one.
+- **Thief `Infiltrate` is a no-op against any non-`proc` /
+  non-`silo` enemy building** (engine match-arm intent). The thf
+  walks to the target, is consumed, and 0 cash is drained. The
+  Python tool description (`infiltrate`) already documents this:
+  the cash-drain branch is gated on `proc | silo`. Bench
+  scenarios that want the thief to load-bear must direct it at a
+  refinery or silo specifically.
+- **`stance:0` HoldFire defenders never return fire even when
+  attacked** — engine-intended (pinned by
+  `test_stance_semantics.rs::test_stance_0_holds_fire`). The
+  defenders die silently. For a defense scenario where the model
+  is expected to flip stance under threat: pre-place defenders at
+  `stance:0`, expose `set_stance` in `tools:`, and gate the win
+  on combat damage so a stall play (no stance flip) loses by
+  having the base destroyed without resistance.
+- **Per-player starting cash is now plumbed end-to-end** (engine
+  fix, pinned by `OpenRA-Rust/openra-sim/tests/test_per_player_starting_cash.rs`
+  + `OpenRA-Rust/openra-data/tests/test_per_player_starting_cash.rs`
+  + `tests/test_per_player_starting_cash.py`). A scenario YAML's
+  `agent: {cash: N}` / `enemy: {cash: M}` is honoured per slot;
+  back-compat path (neither override set) falls back to the
+  top-level `starting_cash:`. This is the wiring the thief
+  `spec-thief-steal-cash` and asymmetric-econ packs depend on.
+- **`Command.fire_superweapon` is the only superweapon verb**
+  (no other `Command::*` variant fires nukes / iron curtain /
+  chrono). Tool entry: `fire_superweapon{kind, target_x?, target_y?,
+  target_id?}`. End-to-end pin:
+  `tests/test_superweapons_python.py` (Python) +
+  `OpenRA-Rust/openra-sim/tests/test_superweapons.rs` (Rust). The
+  engine validates (a) the agent owns a launcher building of the
+  matching `kind`, (b) the weapon is fully charged (charge time
+  is hard-coded 100 ticks per kind for tests; real-play values
+  live in `gamerules.rs`); a failed validation is logged and the
+  order is dropped silently. Nuke needs `target_cell`; iron
+  curtain needs `target_id` only; chrono needs both
+  (`target_cell` = destination, `target_id` = friendly actor to
+  teleport).
 
 ## Engine blockers: fix the engine, do not compromise the pack
 

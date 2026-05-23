@@ -44,7 +44,23 @@ meta:
   robotics_analogue: "SLAM frontier detection — picking the next unexplored cell to drive a scout robot toward, for every disjoint frontier"
   author: "openra-bench"
 
-base_map: rush-hour-arena
+base_map:
+  generator: arena
+  name: perception-frontier-reading-arena
+  width: 128
+  height: 40
+  cordon: 2
+  title: Perception Frontier Reading 128x40
+  # Two mid-map water islands fragment the open east into UPPER and
+  # LOWER scout lanes (passable: y<14, 18<y<24, y>28). A scout
+  # charging east along the central spawn rows (y≈30..33) routes
+  # cleanly through the LOWER lane; the NE / NW markers force a
+  # detour around the upper island. Reading WHERE the fog band hides
+  # which marker — and therefore which lane to commit each scout to
+  # — is the load-bearing capability.
+  obstacles:
+    - {x: 60, y: 14, w: 8, h: 4}   # upper island (splits north flank)
+    - {x: 60, y: 24, w: 8, h: 4}   # lower island (splits south flank)
 
 base:
   agent: {faction: allies}
@@ -62,12 +78,21 @@ base:
 
 levels:
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # One hidden marker building sits far east, off the scouts' spawn
+    # rows, inside a single contiguous fog mass. Reading "the unknown is
+    # the eastern dark band, drive a scout into it" is direct. Generous
+    # clock — but stalling or a blind near-spawn path never enters the
+    # pocket and loses on the deadline.
     description: >
-      One hidden marker building sits far east, off the scouts' spawn
-      rows, inside a single contiguous fog mass. Reading "the unknown
-      is the eastern dark band, drive a scout into it" is direct.
-      Generous clock — but stalling or a blind near-spawn path never
-      enters the pocket and loses on the deadline.
+      One hidden enemy marker sits far east, off the scouts' spawn rows,
+      inside a single contiguous fog mass. The unknown IS the eastern dark
+      band — drive a scout into it. Generous clock, but stalling or
+      sticking near spawn never enters the pocket. Discover at least one
+      enemy building within about 25 turns.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [5, 33], stance: 0, count: 3}
@@ -90,28 +115,38 @@ levels:
     max_turns: 26
 
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # The frontier is split in two: a near pocket and a FAR one. Two
+    # hidden marker buildings must BOTH be discovered. A decoy enemy squad
+    # sits just off the spawn lane inside the already-seen band to bait
+    # scouts into re-treading known ground; the second marker is far NE
+    # and only a deliberate split push reveals it in time.
     description: >
-      The frontier is split in two: a near pocket and a FAR one. Two
-      hidden marker buildings must BOTH be discovered. A decoy enemy
-      squad sits just off the spawn lane inside the already-seen band
-      to bait scouts into re-treading known ground; the second marker
-      is far NE and only a deliberate split push reveals it in time.
+      Two hidden marker buildings sit in the far NE fog pocket, well above
+      the scouts' spawn rows. Both must be discovered. A blind eastward
+      charge along the spawn corridor never reveals either; only a
+      deliberate north-east push reveals both in time. Within about 32
+      turns.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [5, 33], stance: 0, count: 3}
         - {type: jeep, owner: agent, position: [7, 30], stance: 0, count: 2}
-        # Decoy: passive enemy infantry parked OFF the egress lane
-        # (high y, away from the scout corridor) — pure time-bait, not
-        # an instant-kill wall.
-        - {type: e1, owner: enemy, position: [30, 41], stance: 0, count: 2}
-        # Marker A — far SE fog pocket (well below the spawn rows, so a
-        # fixed eastward charge along y≈30..33 never reveals it).
-        - {type: proc, owner: enemy, position: [100, 41]}
-        # Marker B — far NE fog pocket (the deliberate-split reveal,
-        # well above the spawn rows).
+        # Two co-located markers in the far NE fog pocket (well above
+        # the y=30..33 spawn rows so a fixed eastward charge never
+        # reveals them). `powr` and `barr` are both MBD buildings;
+        # discovering them requires entering the NE pocket. The
+        # previous medium also declared an SE marker `proc` at
+        # (100,41) and a decoy `e1` at (30,41) — both OOB on the
+        # 128x40 arena (valid y: 0..39) and silently dropped by the
+        # engine. The SE marker was already redundant given the
+        # `buildings_discovered_gte: 2` predicate is satisfied by
+        # entering the NE pocket alone, and the decoy did nothing
+        # because it never appeared on the terrain. Both removed
+        # (per SCENARIO_SOLVABILITY_AUDIT.md).
         - {type: powr, owner: enemy, position: [118, 6]}
-        # Passive persistence marker co-located with B (no free
-        # discovery — still inside that far pocket).
         - {type: barr, owner: enemy, position: [116, 8]}
     win_condition:
       all_of:
@@ -124,14 +159,23 @@ levels:
     max_turns: 32
 
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # The frontier is fragmented across three corners — far NE, far SE,
+    # and a NW strip — each hiding one marker building; ALL three must be
+    # discovered. A decoy squad sits in the explored center to pull scouts
+    # off the true frontier, the spawn corner is seed-varied (so a
+    # memorised reading order cannot generalise), and the clock is short:
+    # only a correct, simultaneous read of all three fog pockets discovers
+    # every marker in time.
     description: >
-      The frontier is fragmented across three corners — far NE, far SE,
-      and a NW strip — each hiding one marker building; ALL three must
-      be discovered. A decoy squad sits in the explored center to pull
-      scouts off the true frontier, the spawn corner is seed-varied
-      (so a memorised reading order cannot generalise), and the clock
-      is short: only a correct, simultaneous read of all three fog
-      pockets discovers every marker in time.
+      Three fog pockets at three corners — far NE, far SE, and a NW strip
+      — each hiding one marker building. A decoy in the seen centre pulls
+      scouts off the true frontier and your spawn corner varies by seed.
+      Discover all three, within about 39 turns. Only a simultaneous read
+      of all three fog pockets fits the clock.
     overrides:
       actors:
         # spawn_point 0 — scouts staged SW.
@@ -151,10 +195,13 @@ levels:
         # reveals more than one — only a genuine three-way frontier
         # read discovers all three in time.
         - {type: powr, owner: enemy, position: [122, 18]}   # far E, mid-band
-        - {type: proc, owner: enemy, position: [118, 40]}   # deep SE corner
         - {type: gun,  owner: enemy, position: [62, 4]}      # top edge, mid-x
-        # Passive persistence marker co-located with the SE marker so
-        # it hands no free discovery (still inside that far pocket).
+        # Deep SE corner marker — `barr` plays both the marker and
+        # passive-persistence roles. The previous design also declared
+        # a `proc` at (118,40) here, but y=40 was OOB on the 128x40
+        # arena (valid y: 0..39) and silently dropped by the engine
+        # — it was a redundant marker that never existed on the
+        # terrain. Removed per SCENARIO_SOLVABILITY_AUDIT.md.
         - {type: barr, owner: enemy, position: [116, 38]}
     win_condition:
       all_of:

@@ -55,6 +55,23 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     # Rust scenario parser reads (default 5000 when unset).
     if compiled.starting_cash is not None:
         data["starting_cash"] = compiled.starting_cash
+    # Per-player cash plumbing footgun: `PlayerSetup.cash` defaults to
+    # `int = 0` (not Optional), so an unset `agent: {faction: ...}` in
+    # the pack serializes as `{faction: ..., cash: 0}`. With the
+    # engine's per-player-cash fix landed, that 0 silently OVERRIDES
+    # the top-level `starting_cash:` — production stalls because the
+    # agent has no money to consume. Defensive bench-side fix: if
+    # `agent.cash` / `enemy.cash` is 0 AND `starting_cash` > 0, STRIP
+    # the per-player cash field so the engine falls back to the
+    # top-level. (A pack that genuinely wants cash=0 should also set
+    # `starting_cash: 0`, in which case there's nothing to fall back
+    # to and the behavior is unchanged.)
+    _top_cash = int(data.get("starting_cash") or 0)
+    for _side in ("agent", "enemy"):
+        _block = data.get(_side)
+        if isinstance(_block, dict) and _block.get("cash", None) == 0 and _top_cash > 0:
+            _block.pop("cash", None)
+            data[_side] = _block
     # The Rust engine defaults spawn_mcvs:true → it auto-seeds MCVs at
     # the map's built-in spawn points (e.g. (124,36)), which reveal fog
     # and pollute unit counts for scenarios that never asked for them.
@@ -67,6 +84,29 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     sched = getattr(compiled, "scheduled_events", None) or []
     if sched:
         data["scheduled_events"] = sched
+    # Resource-wave `ore_patches:` — same lifting pattern as
+    # `scheduled_events`. Each entry is `{x, y, amount, radius}` and
+    # the engine (`oramap.rs::read_ore_patches`) materialises it into
+    # a disk of ore cells on the terrain at world-build time.
+    ore = getattr(compiled, "ore_patches", None) or []
+    if ore:
+        data["ore_patches"] = ore
+    # No-fog perception cells (fog_mode ends with "-clear") flip the
+    # engine's `reveal_map` flag: the agent observes the whole map with
+    # no fog of war — the clear half of the perception ablation grid.
+    if getattr(compiled, "reveal_map", False):
+        data["reveal_map"] = True
+    # Naval-MVP overlay: forward declared `water_cells:` and
+    # `water_rect:` so the Rust engine marks the corresponding
+    # terrain cells as ship-passable / ground-impassable. Without
+    # this lift the engine's terrain stays all-grass and ships have
+    # nowhere to move.
+    wc = getattr(compiled, "water_cells", None) or []
+    if wc:
+        data["water_cells"] = [list(c) for c in wc]
+    wr = getattr(compiled, "water_rect", None)
+    if wr:
+        data["water_rect"] = list(wr)
     fd = tempfile.NamedTemporaryFile(
         "w", suffix=f"_{compiled.pack_id}_{compiled.level}.yaml", delete=False
     )
@@ -207,6 +247,7 @@ def run_level(
     agent_fn: "AgentFn | Controller" = scripted_explore_agent,
     seed: int = 0,
     playback=None,
+    full_playback=None,
 ) -> EpisodeResult:
     """Run one scenario-pack level, scoring against its declarative
     win/fail conditions (checked every turn). Outcome maps to the
@@ -249,6 +290,15 @@ def run_level(
         # model actually saw (same vendored _minimap_v2, accumulating).
         _pb_explored: set = set()
         _pb_terrain = None
+        # Audit-capture wiring: when a FullPlayback is attached, surface
+        # the underlying ModelAgent (if any) and flip on `audit_capture`
+        # so per-turn briefing / wire request+response are stashed for
+        # the audit JSONL.
+        _audit_agent = (
+            introspection_source(controller) if full_playback is not None else None
+        )
+        if _audit_agent is not None and hasattr(_audit_agent, "audit_capture"):
+            _audit_agent.audit_capture = True
         # Interrupt-driven mode (step 4): if the scenario enabled any
         # interrupt signals, advance with step_until_event so the agent
         # is re-prompted (debriefed) the moment an event fires
@@ -333,6 +383,57 @@ def run_level(
                     interrupt=interrupt,
                     goal=turn_goal(compiled.win_condition, ctx),
                 )
+            if full_playback is not None:
+                # Mirror the same PNG (when the legacy playback rendered
+                # one). Otherwise render on-demand for the audit format.
+                _fp_png = locals().get("_png") if playback is not None else None
+                if _fp_png is None:
+                    try:
+                        from .minimap import terrain_png_for
+                        if _pb_terrain is None:
+                            _pb_terrain = terrain_png_for(
+                                compiled.scenario.base_map
+                            )
+                        from .prompt_v2 import minimap_b64 as _v2_mm
+                        _fp_png = _v2_mm(
+                            rs, _pb_terrain, _pb_explored,
+                            constant_colors=compiled.level in ("easy", "medium"),
+                        )
+                        if _fp_png is None:
+                            from .agent import _render_minimap_b64
+                            _fp_png = _render_minimap_b64(rs, _pb_terrain)
+                    except Exception:  # noqa: BLE001 — audit never breaks a run
+                        _fp_png = None
+                try:
+                    full_playback.record_turn(
+                        turn=turns,
+                        tick=adapter.signals.game_tick,
+                        obs=rs,
+                        briefing=getattr(_audit_agent, "last_briefing", "")
+                        if _audit_agent is not None
+                        else "",
+                        system_prompt=getattr(_audit_agent, "system_prompt", "")
+                        if _audit_agent is not None
+                        else "",
+                        model_request=getattr(_audit_agent, "last_request", None)
+                        if _audit_agent is not None
+                        else None,
+                        model_response=getattr(_audit_agent, "last_response", None)
+                        if _audit_agent is not None
+                        else None,
+                        commands_issued=cmds,
+                        engine_warnings=(
+                            info.get("warnings", [])
+                            if isinstance(info, dict)
+                            else []
+                        ),
+                        signals=adapter.signals,
+                        minimap_png_b64=_fp_png,
+                        done=bool(done),
+                        interrupt=interrupt,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             trace.append(
                 {
                     "turn": turns,
@@ -431,8 +532,43 @@ def run_level(
                     },
                 }
             )
+        if full_playback is not None:
+            try:
+                full_playback.finalize(
+                    outcome=outcome,
+                    final_obs=final_rs,
+                    manifest_extra={
+                        "scenario": result.scenario,
+                        "pack_id": compiled.pack_id,
+                        "level": compiled.level,
+                        "capability": compiled.meta.capability,
+                        "seed": seed,
+                        "outcome": outcome,
+                        "turns": turns,
+                        "max_turns": compiled.max_turns,
+                        "actions_issued": issued,
+                        "actions_warned": warned,
+                        "agent_stats": getattr(
+                            introspection_source(controller), "stats", None
+                        ),
+                        "objective_progress": result.objective_progress,
+                        "reward_vector": result.reward_vector,
+                    },
+                )
+            except Exception:  # noqa: BLE001 — never break a run on I/O
+                pass
         return result
     finally:
+        # Abort the audit recorder if the loop crashed before finalize —
+        # leaves a `.partial` on disk for forensics; the resume scanner
+        # correctly sees no `.jsonl` and retries the cell.
+        try:
+            if full_playback is not None and Path(
+                full_playback.jsonl_path
+            ).exists() is False:
+                full_playback.abort()
+        except Exception:  # noqa: BLE001
+            pass
         pool.release(env)
         pool.shutdown()
         Path(tmp_path).unlink(missing_ok=True)

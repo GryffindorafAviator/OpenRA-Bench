@@ -16,6 +16,21 @@
 # defender cannot focus on either prong in detail.
 #
 # Engine notes (per CLAUDE.md):
+#   - Map: per-tier custom 128x48 arena (cordon 2 ⇒ playable y in
+#     [2..45]) generated via mapgen's `arena` generator with WATER
+#     walls that physically reinforce the two-prong pincer doctrine:
+#       * easy / medium: walls y=12..16 and y=24..28 across x=10..40
+#         carve a TWO-PRONG approach. NW spawn (5,8) routes east via
+#         the open band y=2..11 (reaching the cluster from the north
+#         flank); SW spawn (5,32) routes east via the open band
+#         y=29..45. The central engagement axis y=17..23 is open at
+#         x>=41 so both prongs converge ON the cluster from off-axis
+#         directions — no shortcut to "merge" the squads onto a
+#         single approach lane.
+#       * hard: same 128x48 wall layout plus the existing two-spawn-
+#         group axis (group 0 stages at (5,8)/(5,32), group 1 at
+#         (3,5)/(3,35)) so the exact start cells differ across seeds
+#         and a memorised single-cell opening cannot generalise.
 #   - Enemy cluster anchored at (50,19) / (50,21) — CLAUDE.md warns
 #     that (50,20) silently fails to place enemy clusters; the off-by-
 #     one cells are confirmed working. The win region centre at
@@ -143,19 +158,48 @@ levels:
   # only enforces stall-loses and intended-wins; the sequence-vs-
   # sync delta lives on medium and hard.
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # You command TWO squads of medium tanks (3× 2tnk each, 6 tanks
+    # total). Squad A stages at the NORTH-WEST corner (5,8); Squad B
+    # stages at the SOUTH-WEST corner (5,32). A central enemy cluster sits
+    # at the mid-map (around (50,20)): 4 rifle infantry (e1) + 2 anti-tank
+    # rocket soldiers (e3). Both squads must converge on the cluster
+    # SIMULTANEOUSLY from the north and the south (a pincer). Win when you
+    # have killed 6 enemies AND at least 4 of your 6 tanks are inside an
+    # 8-cell radius of (50,20) AND no more than 2 tanks are lost, before
+    # tick 4500. Sending only one squad cannot satisfy the 4-in-region
+    # clause. A stall loses on the clock.
     description: >
-      You command TWO squads of medium tanks (3× 2tnk each, 6 tanks
-      total). Squad A stages at the NORTH-WEST corner (5,8); Squad B
-      stages at the SOUTH-WEST corner (5,32). A central enemy cluster
-      sits at the mid-map (around (50,20)): 4 rifle infantry (e1) +
-      2 anti-tank rocket soldiers (e3). Both squads must converge on
-      the cluster SIMULTANEOUSLY from the north and the south
-      (a pincer). Win when you have killed 6 enemies AND at least 4
-      of your 6 tanks are inside an 8-cell radius of (50,20) AND no
-      more than 2 tanks are lost, before tick 4500. Sending only one
-      squad cannot satisfy the 4-in-region clause. A stall loses on
-      the clock.
+      You have two tank squads — three medium tanks in the NW corner at
+      (5,8) and three more in the SW at (5,32). A mid-map cluster of four
+      riflemen and two rocket soldiers sits at (50,20). Send both squads
+      at once so they hit from north and south together; one squad alone
+      can't satisfy the four-in-region clause. Six kills, four tanks at
+      (50,20), no more than two losses, within about 50 turns.
     overrides:
+      # EASY MAP — 128x48 arena (cordon 2 -> playable y in [2..45]).
+      # Two-prong corridors: walls y=12..16 and y=24..28 across
+      # x=10..40 carve a NORTH lane (y=2..11) and a SOUTH lane
+      # (y=29..45) that NW and SW spawns must take respectively.
+      # The central engagement axis y=17..23 is open at x>=41 so
+      # both prongs converge ON the cluster at (50,20) from off-axis
+      # directions; no shortcut allows one squad to absorb the
+      # other's role.
+      base_map:
+        generator: arena
+        name: combat-pincer-coordination-easy
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Pincer Coordination — Easy (Two-Prong Approach)'
+        obstacles:
+          # NORTH wall — closes y=12..16 across x=10..40.
+          - {x: 10, y: 12, w: 31, h: 5}
+          # SOUTH wall — closes y=24..28 across x=10..40.
+          - {x: 10, y: 24, w: 31, h: 5}
       actors:
         # Squad A (NORTH-WEST) — 3 medium tanks at (5,8).
         - {type: 2tnk, owner: agent, position: [5, 8],  stance: 1, count: 3}
@@ -196,24 +240,48 @@ levels:
   # commit halves the clear time and the per-tank damage share, so
   # the sync wins comfortably (validated: ≤2 losses on every seed).
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # You command TWO squads of medium tanks (3× 2tnk each, 6 tanks
+    # total). Squad A stages at the NORTH-WEST corner (5,8); Squad B
+    # stages at the SOUTH-WEST corner (5,32). A central enemy cluster sits
+    # at the mid-map (around (50,20)): 4 rifle infantry (e1) + 2 anti-tank
+    # rocket soldiers (e3, Dragon launcher) + 2 medium tanks (2tnk) — the
+    # enemy armour gives the cluster enough sustained anti-armour DPS to
+    # shred a lone 3-tank squad before it can clear the cluster. Both
+    # squads must converge SIMULTANEOUSLY (a pincer): attack-moving with
+    # both squads at once on turn 1 doubles the strike force and halves
+    # the per-tank damage share, clearing the cluster before either side
+    # bleeds out. Sending only one squad cannot satisfy the 4-in-region
+    # clause; sending A first and B late lets the cluster shred A before B
+    # arrives. Win when you have killed 8 enemies AND at least 4 of your 6
+    # tanks are inside an 8-cell radius of (50,20) AND no more than 2
+    # tanks are lost, before tick 4500.
     description: >
-      You command TWO squads of medium tanks (3× 2tnk each, 6 tanks
-      total). Squad A stages at the NORTH-WEST corner (5,8); Squad B
-      stages at the SOUTH-WEST corner (5,32). A central enemy cluster
-      sits at the mid-map (around (50,20)): 4 rifle infantry (e1) +
-      2 anti-tank rocket soldiers (e3, Dragon launcher) + 2 medium
-      tanks (2tnk) — the enemy armour gives the cluster enough
-      sustained anti-armour DPS to shred a lone 3-tank squad before
-      it can clear the cluster. Both squads must converge
-      SIMULTANEOUSLY (a pincer): attack-moving with both squads at
-      once on turn 1 doubles the strike force and halves the per-tank
-      damage share, clearing the cluster before either side bleeds
-      out. Sending only one squad cannot satisfy the 4-in-region
-      clause; sending A first and B late lets the cluster shred A
-      before B arrives. Win when you have killed 8 enemies AND at
-      least 4 of your 6 tanks are inside an 8-cell radius of (50,20)
-      AND no more than 2 tanks are lost, before tick 4500.
+      Same NW and SW staging — three tanks each — but the mid-map cluster
+      now adds two enemy medium tanks alongside the four rifles and two
+      rocket soldiers. A lone squad gets shredded by the armour before it
+      can clear. Launch both squads on turn one for a true pincer: six
+      kills, four tanks in the (50,20) disc, no more than two losses,
+      within about 50 turns.
     overrides:
+      # MEDIUM MAP — 128x48 arena (cordon 2 -> playable y in [2..45]).
+      # Same two-prong wall layout as easy: walls y=12..16 and
+      # y=24..28 across x=10..40 force the NW and SW squads onto
+      # off-axis lanes that converge on the cluster from above and
+      # below.
+      base_map:
+        generator: arena
+        name: combat-pincer-coordination-medium
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Pincer Coordination — Medium (Armoured Cluster)'
+        obstacles:
+          - {x: 10, y: 12, w: 31, h: 5}
+          - {x: 10, y: 24, w: 31, h: 5}
       actors:
         - {type: 2tnk, owner: agent, position: [5, 8],  stance: 1, count: 3}
         - {type: 2tnk, owner: agent, position: [5, 32], stance: 1, count: 3}
@@ -255,21 +323,47 @@ levels:
   # listed explicitly. The defender cluster is symmetric across y=20
   # so both spawns face the same simultaneous-pincer decision.
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # You command TWO squads of medium tanks (3× 2tnk each, 6 tanks total)
+    # staged on the west edge — one squad to the NORTH, one to the SOUTH
+    # (the exact staging cells vary by seed; treat the two squads
+    # symmetrically). A central enemy cluster sits at the mid-map (around
+    # (50,20)): 4 rifle infantry (e1) + 2 anti-tank rocket soldiers (e3,
+    # Dragon launcher) + 2 medium tanks (2tnk) — the enemy armour gives
+    # the cluster enough sustained anti-armour DPS to shred a lone 3-tank
+    # squad. Both squads must converge SIMULTANEOUSLY (a pincer): attack-
+    # moving with both squads at once on turn 1 clears the cluster before
+    # either side bleeds out. Win when you have killed 8 enemies AND at
+    # least 4 of your 6 tanks are inside an 8-cell radius of (50,20) AND
+    # no more than 2 tanks are lost, before tick 4500.
     description: >
-      You command TWO squads of medium tanks (3× 2tnk each, 6 tanks
-      total) staged on the west edge — one squad to the NORTH, one
-      to the SOUTH (the exact staging cells vary by seed; treat the
-      two squads symmetrically). A central enemy cluster
-      sits at the mid-map (around (50,20)): 4 rifle infantry (e1) +
-      2 anti-tank rocket soldiers (e3, Dragon launcher) + 2 medium
-      tanks (2tnk) — the enemy armour gives the cluster enough
-      sustained anti-armour DPS to shred a lone 3-tank squad. Both
-      squads must converge SIMULTANEOUSLY (a pincer): attack-moving
-      with both squads at once on turn 1 clears the cluster before
-      either side bleeds out. Win when you have killed 8 enemies AND
-      at least 4 of your 6 tanks are inside an 8-cell radius of
-      (50,20) AND no more than 2 tanks are lost, before tick 4500.
+      Two tank squads start north and south along the west edge — exact
+      cells vary by seed. The mid-map enemy mixes infantry with two of
+      their own medium tanks, which means a lone squad gets crushed before
+      help arrives. Drive both squads in simultaneously so neither side
+      bleeds out. Six kills, four tanks in the (50,20) disc, two losses or
+      fewer, within about 50 turns.
     overrides:
+      # HARD MAP — 128x48 arena (cordon 2 -> playable y in [2..45]).
+      # Same two-prong wall layout as easy/medium plus the existing
+      # spawn-point round-robin: spawn_point 0 stages at (5,8)/(5,32),
+      # spawn_point 1 at (3,5)/(3,35). All staging cells sit in the
+      # open NORTH band (y=2..11) or SOUTH band (y=29..45); the wall
+      # bands y=12..16 and y=24..28 across x=10..40 still force the
+      # two-prong off-axis approach regardless of seed.
+      base_map:
+        generator: arena
+        name: combat-pincer-coordination-hard
+        width: 128
+        height: 48
+        cordon: 2
+        title: 'Pincer Coordination — Hard (Spawn-Varied Two-Prong)'
+        obstacles:
+          - {x: 10, y: 12, w: 31, h: 5}
+          - {x: 10, y: 24, w: 31, h: 5}
       actors:
         # spawn_point 0 — Squad A NORTH (5,8), Squad B SOUTH (5,32).
         - {type: 2tnk, owner: agent, position: [5, 8],  stance: 1, count: 3, spawn_point: 0}

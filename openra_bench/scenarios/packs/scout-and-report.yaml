@@ -53,8 +53,7 @@ meta:
     home" as success rather than the binding "discovered AND full
     team extracted" criterion.
   robotics_analogue: >
-    Multi-drone reconnaissance overflight with return-to-base + zero-
-    attrition acceptance: the mission counts as a success only if the
+    Multi-drone reconnaissance overflight with return-to-base + zero-attrition acceptance: the mission counts as a success only if the
     platforms reveal the named target AND ALL platforms recover. A
     one-way commit that surfaces the target but loses any drone is a
     partial failure, not a win — the report channel requires both the
@@ -66,7 +65,14 @@ meta:
     - "intel ops: gather then withdraw"
   author: "openra-bench"
 
-base_map: rush-hour-arena
+# Tailored 128x40 arena with TWO water bands at y=10..11 and y=29..30
+# spanning x=54..67 — the inner detour bands the medium/hard tiers
+# describe in prose are now PHYSICALLY closed by terrain. The central
+# picket band (y=14..24, x=58..62) and the FAR-edge corridors (y<10
+# above, y>30 below) remain clear so the geometry the scenario prose
+# describes is enforced by the map, not by the optimism of the model.
+# Single mpspawn at (6, 5) keeps actor coords stable across seeds.
+base_map: scout-and-report-arena
 
 base:
   # The advertised tool surface includes attack_unit (the model CAN
@@ -94,17 +100,25 @@ levels:
   # by both jeeps wins. Bruting bleeds a jeep; stalling busts the
   # clock; reaching the fact but stopping east loses on n:2 return.
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Two jeep scouts at the west (10, 20). The discovery target — a
+    # specific far enemy fact — sits at (110, 20). Two enemy rifle
+    # infantry block the direct east lane (around x=60, y=20). Drive
+    # AROUND the pickets, reveal the fact, and bring BOTH jeeps BACK to
+    # the start region (radius 5 around (10, 20)) before the clock
+    # expires. Any jeep loss FAILS the mission (zero attrition). Bruting
+    # the pickets bleeds a jeep (low jeep DPS vs infantry); stopping after
+    # the discovery in enemy territory loses on the n:2 return clause;
+    # stalling loses on the clock.
     description: >
-      Two jeep scouts at the west (10, 20). The discovery target —
-      a specific far enemy fact — sits at (110, 20). Two enemy
-      rifle infantry block the direct east lane (around x=60, y=20).
-      Drive AROUND the pickets, reveal the fact, and bring BOTH
-      jeeps BACK to the start region (radius 5 around (10, 20))
-      before the clock expires. Any jeep loss FAILS the mission
-      (zero attrition). Bruting the pickets bleeds a jeep (low
-      jeep DPS vs infantry); stopping after the discovery in
-      enemy territory loses on the n:2 return clause; stalling
-      loses on the clock.
+      Two jeep scouts at (10,20). The discovery target — a far enemy yard
+      — sits at (110,20). Two enemy rifles block the direct east lane near
+      (60,20). Drive around the pickets, reveal the yard, bring BOTH jeeps
+      back into the (10,20) disc. ZERO losses, within about 50 turns.
+      Bruting the pickets bleeds a jeep.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [10, 20], stance: 1, count: 2}
@@ -140,17 +154,24 @@ levels:
   # both jeeps, but not a stall and not a brute attempt (4× e1
   # kills a jeep easily).
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Two jeep scouts at the west (10, 20). The discovery target — a
+    # specific far enemy fact — sits at (110, 20). FOUR enemy rifle
+    # infantry form a defended bottleneck across the central lane (around
+    # x=58..62, y=16..22), closing the direct east route. Detour AROUND
+    # the bottleneck (y<14 or y>26), reveal the fact, and bring BOTH jeeps
+    # BACK to the start region (radius 5 around (10, 20)) before the
+    # clock. Any jeep loss FAILS the mission. Bruting four e1 with jeeps
+    # loses; the central lane is closed. Stalling loses on the clock; one-
+    # way commits that strand a jeep east lose on the n:2 return.
     description: >
-      Two jeep scouts at the west (10, 20). The discovery target —
-      a specific far enemy fact — sits at (110, 20). FOUR enemy
-      rifle infantry form a defended bottleneck across the central
-      lane (around x=58..62, y=16..22), closing the direct east
-      route. Detour AROUND the bottleneck (y<14 or y>26), reveal
-      the fact, and bring BOTH jeeps BACK to the start region
-      (radius 5 around (10, 20)) before the clock. Any jeep loss
-      FAILS the mission. Bruting four e1 with jeeps loses; the
-      central lane is closed. Stalling loses on the clock; one-way
-      commits that strand a jeep east lose on the n:2 return.
+      Two jeeps at (10,20), discovery target at (110,20). Four rifles now
+      form a bottleneck across (58..62, 16..22) — the central lane is
+      closed. Detour above y<14 or below y>26, surface the yard, return
+      BOTH jeeps to the (10,20) disc. Zero losses, within about 50 turns.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [10, 20], stance: 1, count: 2}
@@ -190,21 +211,30 @@ levels:
   # persistent enemy building remain at the eastern edge so the
   # engine doesn't auto-`done` on a chance kill.
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Two jeep scouts at the west, started at the NORTH (10, 8) or SOUTH
+    # (10, 32) corner by seed. The discovery target — a specific far enemy
+    # fact — sits at (110, 20). SIX stationary infantry thicken the
+    # central bottleneck (spanning y=14..24 around x=58..62) and TWO
+    # additional flank pickets (one north, one south) sit forward at x≈50
+    # so the inner detour bands are also contested. The scout team must
+    # pick the FAR edge of the map matching its spawn corner (y≈4 lane for
+    # a NORTH start, y≈35 lane for a SOUTH start), weave east to surface
+    # the fact, climb back to that edge, and RETURN BOTH jeeps to the
+    # matching corner region (radius 5 around (10, 8) NORTH or (10, 32)
+    # SOUTH). Any jeep loss FAILS the mission. Bruting the bottleneck
+    # loses; the wrong-corner edge attrites the jeeps before they cross;
+    # stalling loses on the clock.
     description: >
-      Two jeep scouts at the west, started at the NORTH (10, 8) or
-      SOUTH (10, 32) corner by seed. The discovery target — a
-      specific far enemy fact — sits at (110, 20). SIX stationary
-      infantry thicken the central bottleneck (spanning y=14..24
-      around x=58..62) and TWO additional flank pickets (one
-      north, one south) sit forward at x≈50 so the inner detour
-      bands are also contested. The scout team must pick the FAR
-      edge of the map matching its spawn corner (y≈4 lane for a
-      NORTH start, y≈35 lane for a SOUTH start), weave east to
-      surface the fact, climb back to that edge, and RETURN BOTH
-      jeeps to the matching corner region (radius 5 around (10, 8)
-      NORTH or (10, 32) SOUTH). Any jeep loss FAILS the mission.
-      Bruting the bottleneck loses; the wrong-corner edge attrites
-      the jeeps before they cross; stalling loses on the clock.
+      Four jeeps stage at the NORTH (10,8) or SOUTH (10,32) corner by
+      seed. Discovery target at (110,20). Six rifles thicken the central
+      bottleneck and two flank pickets contest the inner detour bands too.
+      Route the FAR edge matching your spawn (y≈4 for NORTH or y≈35 for
+      SOUTH), surface the yard, return BOTH jeeps to the matched corner
+      disc. Zero losses, within about 50 turns.
     overrides:
       actors:
         # Two seed-varied agent spawn corners (N vs S). count:2 at

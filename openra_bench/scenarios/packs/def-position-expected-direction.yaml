@@ -3,21 +3,43 @@
 # REASONING capability — DEFENSE POSITIONING BASED ON DECLARED THREAT
 # DIRECTION. The model is TOLD where the enemy will attack from (the
 # objective brief states the intel: "rushers will come from the
-# NORTH"). The decision is purely one of spatial commitment: invest
-# the defence budget on the CORRECT lane — the NORTH lane — and
-# the rush is blunted; commit the SAME budget on the WRONG lane
-# (SOUTH) and the rushers walk past, the deadline expires (the
-# wrong-direction pbox cannot satisfy the NORTH region clause), and
-# the run loses. Building no defences at all also loses (no pbox).
+# EAST"). The decision is purely one of spatial commitment: invest
+# the defence budget on the CORRECT lane — the EAST lane — and the
+# rush is blunted; commit the SAME budget on the WRONG lane (WEST,
+# behind the base) and the rushers walk past the empty corridor, the
+# deadline expires (the wrong-direction pbox cannot satisfy the EAST
+# region clause), and the run loses. Building no defences at all
+# also loses (no pbox).
+#
+# MAP — per-tier dedicated arenas built by `openra_bench.mapgen`
+# (replaces the generic rush-hour-arena). The easy/medium arenas
+# carry an OBSTACLE FENCE on the western half (two water bands
+# flanking the agent base at x=2..27, sealing the north and south
+# approaches to the base), so the eastern lane (y≈18..22) is the
+# only corridor the rushers can use. The fence is a VISIBLE,
+# READABLE topology cue — even without reading the brief, the map
+# shows that any inbound attacker is funnelled through the eastern
+# mouth.
+# Hard rotates to a N/S axis on an OPEN 96×40 arena: per-seed agent
+# spawn picks the latitude (NORTH base at y=12 vs SOUTH base at
+# y=28), and the matching rush band is at the map edge on the same
+# latitude.
 #
 # Win idiom:
 #   * `building_count_gte:{pbox, 3}` — three pillboxes total
 #     (forces a real defence commitment, not a token pbox);
-#   * `building_in_region:{pbox, NORTH_centre, r, 3}` — ALL THREE
-#     must be in the NORTH-of-base region (a SOUTH-built triple
-#     does not satisfy this clause);
-#   * `has_building: fact` — the construction yard still stands
-#     (sanity / anti-degeneracy);
+#   * `building_in_region:{pbox, CORRECT_centre, r, 3}` — ALL THREE
+#     must be in the EAST-of-base region for easy/medium (a
+#     WEST-built triple does not satisfy this clause). Hard uses an
+#     `any_of` over the two correct N/S region orientations matching
+#     the spawn-selected latitude.
+#   * `building_count_gte:{fact, 1}` — the construction yard still
+#     stands. NOT `has_building: fact`: per CLAUDE.md the latter
+#     checks own_building_types which ACCUMULATES across the episode
+#     (once owned it stays true even after the fact dies), so it is
+#     useless as a "still standing" fail clause. `building_count_gte`
+#     reads the live own_buildings list each frame and bites
+#     correctly when the fact is razed.
 #   * `own_units_gte: 3` — the pre-placed defenders must mostly
 #     survive (a chaotic micro or a naked threat axis that bleeds
 #     them out fails this even with the pbox triple in place;
@@ -64,9 +86,9 @@ meta:
     but "WHERE should I defend, given what intel says?".
   robotics_analogue: >
     Intel-driven facility hardening: a security operator is told the
-    threat axis (a perimeter breach is expected on the NORTH gate)
+    threat axis (a perimeter breach is expected on the EAST gate)
     and must commit the available barriers / sensors / responders to
-    that axis. Spending the same budget on the SOUTH gate satisfies
+    that axis. Spending the same budget on the WEST gate satisfies
     no objective. This pack tests whether the policy converts a
     textual directional cue into a CORRECT spatial commitment.
   benchmark_anchor:
@@ -76,22 +98,18 @@ meta:
     - 'intel-driven facility hardening'
   author: openra-bench
 
-# rush-hour-arena (128×40, playable x∈[2..126], y∈[2..38]). Agent
-# base at (20, 20) with the fact + tent + powr + 4 starter e1s
-# pre-placed (so 3 pbox can build immediately — pbox needs tent which
-# needs powr — and the throughput SLA `own_units_gte:3` is trivially
-# satisfied at start; the rush will erode it unless the NORTH lane is
-# covered). The scripted `rusher` bot concentrates its whole band on
-# the agent centroid (~8-tick interval, see scripted_bot.rs::Rusher)
-# — declared NORTH of the base, so the band charges SOUTH straight at
-# the fact and is intercepted by a NORTH-placed pbox triple.
-base_map: rush-hour-arena
+# Per-tier dedicated arenas — see header MAP block. Easy/medium share
+# a fence-funnel layout on the EAST axis; hard rotates to N/S via
+# spawn_point on an open layout. Each level's `overrides:` declares
+# its own `base_map:` generator spec; the pack-level base_map below
+# is the loader sentinel (every level overrides it).
+base_map: def-pos-expected-east-easy-arena
 
-# Pack-wide budget — funds exactly the intended NORTH-pbox triple
+# Pack-wide budget — funds exactly the intended pbox triple
 # (3 × 600cr = 1800cr) with a small buffer (~600) for any
 # replacement e1 the agent decides to queue. Spamming pbox in the
 # wrong direction burns the same budget without satisfying the
-# NORTH region clause.
+# region clause.
 starting_cash: 2400
 
 base:
@@ -99,7 +117,7 @@ base:
     faction: allies
   # Relentless concentrated charge at the agent centroid every
   # ~8 ticks — the canonical rush-defence opponent. The bot's
-  # spawn position (NORTH for easy/medium, NORTH+SOUTH on hard) is
+  # spawn position (EAST for easy/medium, NORTH/SOUTH on hard) is
   # the declared intel the model gets in the brief.
   enemy:
     faction: soviet
@@ -123,183 +141,256 @@ base:
   actors:
     # Base-pack defaults; each level overrides with the spawn-specific
     # layout. (Anti-empty-actors sanity for the loader.)
-    - {type: fact, owner: agent, position: [20, 20]}
+    - {type: fact, owner: agent, position: [12, 20]}
 
 levels:
   # ── EASY ── the bare directional-commit skill. A LIGHT rusher push
-  # (3 e1) comes from the NORTH (spawn at (20, 6)). The model is told
-  # in the brief "rushers will come from the NORTH" and must place
-  # three pillboxes in the NORTH region of its base (around (20, 14),
-  # radius 6). The starting 4 defenders survive the light push so
-  # own_units_gte:3 holds; the deadline is forgiving but real.
+  # (3 e1) comes from the EAST (spawn at (84, 20)). The map carries a
+  # VISIBLE obstacle fence flanking the agent base — water bands at
+  # (x=2..27, y=10..13) and (x=2..27, y=26..29) seal the north and
+  # south approaches to the base, so the rusher band has only one way
+  # in: the eastern mouth at y≈14..25. The model is told in the brief
+  # "rushers will come from the EAST" AND can see the funnel on the
+  # minimap. It must place three pillboxes in the EAST region of its
+  # base (around (24, 20), radius 5). The starting 4 defenders survive
+  # the light push so own_units_gte:3 holds; the deadline is
+  # forgiving but real.
   # max_turns 66 → reachable tick 93+90·65 = 5943 ≥ 5402 even with
   # interrupts firing (per-turn step shrinks below 90 ticks when an
   # interrupt fires; the empirical floor on this pack is ~86 t/turn,
   # so 66 turns × 86 ≈ 5676 still clears the 5401 deadline).
   easy:
+    # INTEL: the enemy will attack from the EAST. Your map shows water
+    # bands flanking your base to the north and south, so the only
+    # approach lane is from the EAST through the open corridor at
+    # y∈[14..25]. You start with a construction yard, a barracks, a
+    # power plant, and four rifle defenders at (12, 20). Build at least
+    # THREE pillboxes (pbox) and place them in the EAST region of your
+    # base (within radius 5 of (24, 20)) — that is, BETWEEN your base
+    # and the eastern mouth of the funnel. Keep your construction yard
+    # standing AND ≥3 of your own units alive. Win before tick 5400.
+    # Placing pillboxes WEST of your base does not satisfy the
+    # EAST-region clause; building no pillboxes never reaches the count;
+    # stalling loses on the clock.
     description: >
-      INTEL: the enemy will attack from the NORTH. You start with a
-      construction yard, a barracks, a power plant, and four rifle
-      defenders at (20, 20). Build at least THREE pillboxes (pbox)
-      and place them in the NORTH region of your base (within radius
-      6 of (20, 14)) — that is, BETWEEN your base and the enemy's
-      approach. Keep your construction yard standing AND ≥3 of your
-      own units alive. Win before tick 5400. Placing pillboxes south
-      of your base does not satisfy the NORTH-region clause; building
-      no pillboxes never reaches the count; stalling loses on the
-      clock.
+      Intel says the enemy will attack from the EAST. Your map is fenced by
+      water bands flanking the base — the only approach is the east
+      corridor. You start with a yard, barracks, power plant and four
+      defenders at (12,20). Build at least three pillboxes and place all
+      three in the east strip near (24,20) — between your base and the
+      threat. Yard alive, three defenders alive, within about 60 turns.
+      Pillboxes west of base satisfy nothing.
     overrides:
+      base_map:
+        generator: arena
+        name: def-pos-expected-east-easy-arena
+        width: 96
+        height: 40
+        cordon: 2
+        title: Defense Expected East Easy 96x40
+        obstacles:
+          # North wall — seals the north approach to the western base.
+          # Spans x=2..27 y=10..13 (4 rows × 26 cols of WATER) so any
+          # attacker trying to swing around the top of the base is
+          # blocked; only the eastern mouth at y∈[14..25] stays open.
+          - {x: 2, y: 10, w: 26, h: 4}
+          # South wall — mirror of the north wall, x=2..27 y=26..29.
+          - {x: 2, y: 26, w: 26, h: 4}
       actors:
-        # Agent base — fact at the centre, tent + powr supporting
-        # so the pbox tech chain is satisfied from turn 1 (no
-        # waiting on powr→tent before pbox). Tent placed WEST of the
-        # fact, powr SOUTH; both well clear of the NORTH defence
-        # region so a NORTH-placed pbox triple is unobstructed.
-        - {type: fact, owner: agent, position: [20, 20]}
-        - {type: tent, owner: agent, position: [16, 20]}
-        - {type: powr, owner: agent, position: [20, 24]}
-        # Four starter defenders south of the base (away from the
-        # NORTH lane mouth) — they survive a light push and satisfy
+        # Agent base — fact at the WEST, tent + powr supporting the
+        # pbox tech chain. Tent placed SOUTH of fact, powr NORTH;
+        # both clear of the eastern lane mouth so a pbox triple at
+        # x≈24 is unobstructed. Mirrors the original NORTH design
+        # but on the WEST side, with the rush axis rotated 90°.
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: tent, owner: agent, position: [12, 24]}
+        - {type: powr, owner: agent, position: [12, 16]}
+        # Four starter defenders SOUTH of the base (off the eastern
+        # lane mouth) — they survive a light push and satisfy
         # `own_units_gte:3` even if one dies; positioning them away
-        # from the lane avoids the auto-target-fire complication.
-        - {type: e1, owner: agent, position: [22, 24], stance: 2}
-        - {type: e1, owner: agent, position: [24, 24], stance: 2}
-        - {type: e1, owner: agent, position: [22, 26], stance: 2}
-        - {type: e1, owner: agent, position: [24, 26], stance: 2}
-        # Light rusher push from the NORTH — 3 e1 at (20, 6).
-        # The rusher bot drives them straight at the agent
-        # centroid (the fact at 20,20); a NORTH pbox triple at
-        # y≈12..16 intercepts them on the way.
-        - {type: e1, owner: enemy, position: [20, 6], stance: 3, count: 3}
+        # from the lane mouth keeps them out of the rush's auto-target
+        # chain. Original NORTH design placed defenders SOUTH of fact
+        # for the same reason (rush hits fact first; defenders engage
+        # only the survivors).
+        - {type: e1, owner: agent, position: [16, 24], stance: 2}
+        - {type: e1, owner: agent, position: [18, 24], stance: 2}
+        - {type: e1, owner: agent, position: [16, 22], stance: 2}
+        - {type: e1, owner: agent, position: [18, 22], stance: 2}
+        # Light rusher push from the EAST — 3 e1 at (84, 20).
+        # The rusher bot drives them straight at the agent centroid
+        # (the fact at 12,20); a pbox triple at x≈24, y∈[18..22]
+        # intercepts them at the funnel mouth.
+        - {type: e1, owner: enemy, position: [84, 20], stance: 3, count: 3}
         # Unarmed high-HP enemy marker far east — keeps the episode
         # alive past the rush, so the win/fail predicate has time
         # to evaluate (anti-DRAW per CLAUDE.md footgun).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [92, 2]}
     win_condition:
       all_of:
         - building_count_gte: {type: pbox, n: 3}
-        - building_in_region: {type: pbox, x: 20, y: 14, radius: 6, count: 3}
-        - has_building: fact
+        - building_in_region: {type: pbox, x: 24, y: 20, radius: 5, count: 3}
+        - building_count_gte: {type: fact, n: 1}
         - own_units_gte: 3
         - within_ticks: 5400
     fail_condition:
       any_of:
         - after_ticks: 5401
-        - not: {has_building: fact}
+        - not: {building_count_gte: {type: fact, n: 1}}
         - not: {own_units_gte: 1}
     max_turns: 66
 
-  # ── MEDIUM ── +1 controlled variable: a STRONGER northern push
+  # ── MEDIUM ── +1 controlled variable: a STRONGER eastern push
   # (5 e1 + 1 e3). The starter 4 defenders can no longer absorb the
-  # rush on their own — a NORTH pbox triple is REQUIRED to blunt the
-  # rocket soldier (e3 splash) before it ploughs through the
-  # defenders. Wrong-direction pbox (SOUTH) leaves the NORTH lane
-  # naked, the e3 kills the defenders, `own_units_gte:3` fails AND
-  # `building_in_region` fails ⇒ double LOSS path.
-  # max_turns 62 → reachable tick 5583 ≥ 5402.
+  # rush on their own — a pbox triple at the funnel mouth is REQUIRED
+  # to blunt the rocket soldier (e3 splash) before it ploughs through
+  # the defenders. Wrong-direction pbox (WEST, behind the base)
+  # leaves the eastern mouth naked, the e3 kills the defenders,
+  # `own_units_gte:3` fails AND `building_in_region` fails ⇒ double
+  # LOSS path. The map fence is the SAME topology as easy (same
+  # arena bytes content-but distinct name for cache) — the lane is
+  # OBVIOUS from the obstacle layout, but the BRIEFING IS IMPLICIT:
+  # the description says "threat from the open corridor" without
+  # naming the cardinal direction, requiring the model to read the
+  # map to identify the EAST corridor.
+  # max_turns 66 → reachable tick 5943 ≥ 5402.
   medium:
+    # INTEL: water fences seal the north and south approaches to your
+    # base, so an inbound rush has only one corridor to use — the open
+    # lane towards the agent base. A stronger push (5 rifles + 1 rocket
+    # soldier) will charge through it. You start with a construction
+    # yard, a barracks, a power plant, and four rifle defenders at
+    # (12, 20). Build at least THREE pillboxes (pbox) and place all
+    # three in the mouth of the corridor (within radius 5 of (24, 20)).
+    # Keep the yard standing AND ≥3 of your own units alive before tick
+    # 5400. Placing pillboxes behind the base does not satisfy the
+    # region clause AND leaves the corridor naked (the rocket soldier
+    # ploughs through); building no pillboxes loses on both counts;
+    # stalling loses on the clock.
     description: >
-      INTEL: the enemy will attack from the NORTH. You start with a
-      construction yard, a barracks, a power plant, and four rifle
-      defenders at (20, 20). A stronger northern push — 5 rifle
-      infantry and 1 rocket soldier — will charge your base. Build
-      at least THREE pillboxes (pbox) and place all three in the
-      NORTH region of your base (within radius 6 of (20, 14)). Keep
-      the construction yard standing AND ≥3 of your own units alive
-      before tick 5400. Placing pillboxes south of your base does
-      not satisfy the NORTH-region clause AND leaves the northern
-      lane naked (the rocket soldier ploughs through the defenders);
-      building no pillboxes loses on both counts; stalling loses on
-      the clock.
+      The map fences your base on north and south — only one corridor
+      stays open. A stronger push (five rifles plus one rocket soldier)
+      will charge through it. Pre-position three pillboxes at the mouth of
+      the corridor near (24,20); a behind-the-base placement leaves the
+      lane naked and the rocket soldier ploughs through. Yard alive, three
+      defenders alive, within about 60 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-pos-expected-east-medium-arena
+        width: 96
+        height: 40
+        cordon: 2
+        title: Defense Expected East Medium 96x40
+        obstacles:
+          # Identical fence topology to easy — the funnel is the
+          # CONSTANT; medium varies only the rush size, so the
+          # capability gradient is the +1 e3 splash unit, not the
+          # map shape. Distinct map name (suffix `-medium`) so the
+          # mapgen cache treats it as a separate artefact even
+          # though the bytes are identical to easy's arena.
+          - {x: 2, y: 10, w: 26, h: 4}
+          - {x: 2, y: 26, w: 26, h: 4}
       actors:
-        - {type: fact, owner: agent, position: [20, 20]}
-        - {type: tent, owner: agent, position: [16, 20]}
-        - {type: powr, owner: agent, position: [20, 24]}
-        - {type: e1, owner: agent, position: [22, 24], stance: 2}
-        - {type: e1, owner: agent, position: [24, 24], stance: 2}
-        - {type: e1, owner: agent, position: [22, 26], stance: 2}
-        - {type: e1, owner: agent, position: [24, 26], stance: 2}
-        # Stronger northern push: 5 e1 + 1 e3. The e3 is the
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: tent, owner: agent, position: [12, 24]}
+        - {type: powr, owner: agent, position: [12, 16]}
+        - {type: e1, owner: agent, position: [16, 24], stance: 2}
+        - {type: e1, owner: agent, position: [18, 24], stance: 2}
+        - {type: e1, owner: agent, position: [16, 22], stance: 2}
+        - {type: e1, owner: agent, position: [18, 22], stance: 2}
+        # Stronger eastern push: 5 e1 + 1 e3. The e3 is the
         # discriminator — it has splash + AT damage; a defender-only
         # screen cannot kill it before it bursts the screen.
-        - {type: e1, owner: enemy, position: [20, 6], stance: 3, count: 5}
-        - {type: e3, owner: enemy, position: [22, 6], stance: 3, count: 1}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: e1, owner: enemy, position: [84, 20], stance: 3, count: 5}
+        - {type: e3, owner: enemy, position: [84, 22], stance: 3, count: 1}
+        - {type: fact, owner: enemy, position: [92, 2]}
     win_condition:
       all_of:
         - building_count_gte: {type: pbox, n: 3}
-        - building_in_region: {type: pbox, x: 20, y: 14, radius: 6, count: 3}
-        - has_building: fact
+        - building_in_region: {type: pbox, x: 24, y: 20, radius: 5, count: 3}
+        - building_count_gte: {type: fact, n: 1}
         - own_units_gte: 3
         - within_ticks: 5400
     fail_condition:
       any_of:
         - after_ticks: 5401
-        - not: {has_building: fact}
+        - not: {building_count_gte: {type: fact, n: 1}}
         - not: {own_units_gte: 1}
     max_turns: 66
 
-  # ── HARD ── +1 controlled variable: TWO spawn_point groups — the
-  # AGENT base round-robins between a NORTH-staged base (centre
-  # (20, 12), enemy comes from y≈4) and a SOUTH-staged base (centre
-  # (20, 28), enemy comes from y≈36). The intel rotates accordingly:
-  # for the NORTH base, "fortify NORTH" means defend at (20, 6)
-  # (between the base and the enemy north of it); for the SOUTH
-  # base, "fortify SOUTH" means defend at (20, 34) (between the
-  # base and the enemy south of it). The win predicate uses `any_of`
-  # over the two correct region orientations — the agent must place
-  # its pbox triple on the lane that matches its OWN spawn (a
-  # NORTH-base pbox triple does NOT satisfy the SOUTH-base region).
-  # The rusher hits from BOTH latitudes (each spawn faces the side
-  # matching its base — see comment on enemy actors below).
-  # max_turns 62 → reachable tick 5583 ≥ 5402.
+  # ── HARD ── +1 controlled variable: SEED-VARIED THREAT DIRECTION
+  # via spawn_point. The hard arena is an OPEN 96×40 (no fence — the
+  # capability test on hard is identifying axis from the brief +
+  # spawn observation, not reading a topology cue), and the AGENT
+  # base round-robins between a NORTH-staged base (centre (48, 12),
+  # enemy at y≈4) and a SOUTH-staged base (centre (48, 28), enemy at
+  # y≈36). The intel rotates accordingly: for the NORTH base,
+  # "fortify NORTH" means defend at (48, 6); for the SOUTH base,
+  # "fortify SOUTH" means defend at (48, 34). The win predicate uses
+  # `any_of` over the two correct region orientations — the agent
+  # must place its pbox triple on the lane that matches its OWN
+  # spawn (a NORTH-base pbox triple does NOT satisfy the SOUTH-base
+  # region). The rusher hits from BOTH latitudes (each spawn faces
+  # the side matching its base — see comment on enemy actors below).
+  # max_turns 66 → reachable tick 5943 ≥ 5402.
   hard:
+    # INTEL: the enemy will attack from the side FACING your base — from
+    # the NORTH if your base is in the NORTH half, from the SOUTH if your
+    # base is in the SOUTH half. Identify your base's latitude from the
+    # observation, then build at least THREE pillboxes (pbox) and place
+    # all three BETWEEN your base and the threat — within radius 5 of
+    # either (48, 6) (if your base is at y=12) or (48, 34) (if your base
+    # is at y=28). Keep the construction yard standing AND ≥3 of your own
+    # units alive before tick 5400. Defending on the WRONG side (the side
+    # away from your base's threat) does not satisfy the region clause AND
+    # leaves the threat axis naked; building no pillboxes loses both
+    # clauses; stalling loses on the clock.
     description: >
-      INTEL: the enemy will attack from the side FACING your base —
-      from the NORTH if your base is in the NORTH half, from the
-      SOUTH if your base is in the SOUTH half. Identify your base's
-      latitude from the observation, then build at least THREE
-      pillboxes (pbox) and place all three BETWEEN your base and the
-      threat — within radius 6 of either (20, 6) (if your base is at
-      y=12) or (20, 34) (if your base is at y=28). Keep the
-      construction yard standing AND ≥3 of your own units alive
-      before tick 5400. Defending on the WRONG side (the side away
-      from your base's threat) does not satisfy the region clause
-      AND leaves the threat axis naked; building no pillboxes loses
-      both clauses; stalling loses on the clock.
+      Intel says the threat comes from the side FACING your base — north
+      if you spawn north, south if you spawn south (by seed). Read your
+      latitude, then plant three pillboxes between your base and the
+      threat — near (48,6) for a north spawn or (48,34) for a south spawn.
+      Wrong side leaves the axis naked. Yard alive, three defenders alive,
+      within about 60 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-pos-expected-ns-hard-arena
+        width: 96
+        height: 40
+        cordon: 2
+        title: Defense Expected NS Hard 96x40
       actors:
-        # ── NORTH spawn (spawn_point 0) — base centred at (20, 12).
-        # Defence region for THIS spawn: (20, 6) r 5 (between the
+        # ── NORTH spawn (spawn_point 0) — base centred at (48, 12).
+        # Defence region for THIS spawn: (48, 6) r 5 (between the
         # base and the rusher band north of it at y=4).
-        - {type: fact, owner: agent, position: [20, 12], spawn_point: 0}
-        - {type: tent, owner: agent, position: [16, 12], spawn_point: 0}
-        - {type: powr, owner: agent, position: [20, 16], spawn_point: 0}
+        - {type: fact, owner: agent, position: [48, 12], spawn_point: 0}
+        - {type: tent, owner: agent, position: [44, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [48, 16], spawn_point: 0}
         # FIVE starter defenders (one more than easy/medium): the
         # post-engine-balance northern push reliably kills ~2 of the
         # screen, so a 5-strong screen keeps `own_units_gte:3`
         # satisfied for the intended correct-axis play while a stall
         # / wrong-axis play (no working pbox screen) still bleeds
         # below the floor or loses on the count/region clauses.
-        - {type: e1, owner: agent, position: [22, 16], stance: 2, spawn_point: 0}
-        - {type: e1, owner: agent, position: [24, 16], stance: 2, spawn_point: 0}
-        - {type: e1, owner: agent, position: [22, 18], stance: 2, spawn_point: 0}
-        - {type: e1, owner: agent, position: [24, 18], stance: 2, spawn_point: 0}
-        - {type: e1, owner: agent, position: [26, 18], stance: 2, spawn_point: 0}
-        # ── SOUTH spawn (spawn_point 1) — base centred at (20, 28).
-        # Defence region for THIS spawn: (20, 34) r 5 (between the
+        - {type: e1, owner: agent, position: [50, 16], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [52, 16], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [50, 18], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [52, 18], stance: 2, spawn_point: 0}
+        - {type: e1, owner: agent, position: [54, 18], stance: 2, spawn_point: 0}
+        # ── SOUTH spawn (spawn_point 1) — base centred at (48, 28).
+        # Defence region for THIS spawn: (48, 34) r 5 (between the
         # base and the rusher band south of it at y=36).
-        - {type: fact, owner: agent, position: [20, 28], spawn_point: 1}
-        - {type: tent, owner: agent, position: [16, 28], spawn_point: 1}
-        - {type: powr, owner: agent, position: [20, 24], spawn_point: 1}
+        - {type: fact, owner: agent, position: [48, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [44, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [48, 24], spawn_point: 1}
         # FIVE starter defenders (mirrors spawn_point 0) — same
         # post-engine-balance attrition headroom for the SOUTH base.
-        - {type: e1, owner: agent, position: [22, 22], stance: 2, spawn_point: 1}
-        - {type: e1, owner: agent, position: [24, 22], stance: 2, spawn_point: 1}
-        - {type: e1, owner: agent, position: [22, 24], stance: 2, spawn_point: 1}
-        - {type: e1, owner: agent, position: [24, 24], stance: 2, spawn_point: 1}
-        - {type: e1, owner: agent, position: [26, 24], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [50, 22], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [52, 22], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [50, 24], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [52, 24], stance: 2, spawn_point: 1}
+        - {type: e1, owner: agent, position: [54, 24], stance: 2, spawn_point: 1}
         # Enemy rushers — CLAUDE.md: enemy actors WITHOUT a
         # spawn_point are placed regardless of the chosen agent
         # group, so we declare BOTH a north and a south rush band.
@@ -308,25 +399,25 @@ levels:
         # threat (the opposite band has further to walk and the
         # matching-side correct pbox triple will already be
         # absorbing the lead band by the time the far band closes).
-        - {type: e1, owner: enemy, position: [20, 4],  stance: 3, count: 4}
-        - {type: e3, owner: enemy, position: [22, 4],  stance: 3, count: 1}
-        - {type: e1, owner: enemy, position: [20, 36], stance: 3, count: 4}
-        - {type: e3, owner: enemy, position: [22, 36], stance: 3, count: 1}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: e1, owner: enemy, position: [48, 4],  stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [50, 4],  stance: 3, count: 1}
+        - {type: e1, owner: enemy, position: [48, 36], stance: 3, count: 4}
+        - {type: e3, owner: enemy, position: [50, 36], stance: 3, count: 1}
+        - {type: fact, owner: enemy, position: [92, 20]}
     # Two CORRECT region orientations — the pbox triple must sit
     # between THIS spawn's base and THIS spawn's matching rush band.
     win_condition:
       all_of:
         - building_count_gte: {type: pbox, n: 3}
         - any_of:
-            - building_in_region: {type: pbox, x: 20, y: 6,  radius: 5, count: 3}
-            - building_in_region: {type: pbox, x: 20, y: 34, radius: 5, count: 3}
-        - has_building: fact
+            - building_in_region: {type: pbox, x: 48, y: 6,  radius: 5, count: 3}
+            - building_in_region: {type: pbox, x: 48, y: 34, radius: 5, count: 3}
+        - building_count_gte: {type: fact, n: 1}
         - own_units_gte: 3
         - within_ticks: 5400
     fail_condition:
       any_of:
         - after_ticks: 5401
-        - not: {has_building: fact}
+        - not: {building_count_gte: {type: fact, n: 1}}
         - not: {own_units_gte: 1}
     max_turns: 66

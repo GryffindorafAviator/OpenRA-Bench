@@ -1,0 +1,171 @@
+# Validate: python -m openra_bench.scenarios.validate packs/spec-thief-steal-cash.yaml
+# See ../CONTRIBUTING.md for the full win-condition grammar.
+#
+# SPEC-THIEF-STEAL-CASH — special-ability capability cell for the
+# `Command.infiltrate` engine order using a `thf` infiltrator (thief).
+# A thief walks into an enemy `proc` or `silo` and on adjacency drains
+# a chunk of the target owner's cash to the agent's wallet; the thief
+# is consumed.
+#
+# Capability under test: "infiltrate to STEAL — convert proximity to
+# an enemy cash-store into a wallet transfer". The load-bearing win
+# predicate is `cash_gte: M` with the agent starting at 0 and no
+# other cash source available — so the M can ONLY come from the
+# infiltration steal.
+#
+# Why brute / stall / wrong-target policies LOSE:
+#   * `stall` (observe-only) — wallet stays at 0; timeout.
+#   * `wander` — thief never reaches a stealable building; timeout.
+#   * `attack_unit` on the silo — thief carries no weapon; no-op.
+#   * `infiltrate` against a non-cash building (e.g. a powr) — the
+#     thief is consumed but no cash transfers (only proc/silo are
+#     stealable in the parity model).
+# Only `Command.infiltrate([thf_id], <proc-or-silo-id>)` wins.
+#
+# Real-world anchor: opportunistic asset extraction — a small mobile
+# crew transfers value (cash / data / ammunition) from an
+# under-defended depot to the operator's pool. Single-use action;
+# the crew does not return.
+#
+# Map design (per-pack, NOT the shared rush-hour arena):
+# `spec-thief-chokepoint-40x20` — a compact chokepoint-arena (40x20,
+# corridor at y=10, width 4, pinch at x=20, wall thickness 4). The
+# corridor frames the depot's natural defense: there is exactly ONE
+# route to the cash-store and the depot sits at the chokepoint exit.
+# This is the canonical "infiltrator picks the target and commits"
+# map — small (vision constraint), no excess room. Each level adds a
+# persistent enemy `fact` keep-alive marker at the east corner so
+# the engine doesn't auto-`done` when the silo/proc is the only
+# enemy MustBeDestroyed building.
+
+meta:
+  id: spec-thief-steal-cash
+  title: 'Thief Steal Cash — Drain an Enemy Depot'
+  capability: action
+  real_world_meaning: >
+    Specialist tasked with VALUE EXTRACTION rather than destruction:
+    proximity to an enemy cash-store transfers a fixed quantum to
+    the operator's wallet and consumes the asset. The decision is
+    "which depot to hit" under a single-use crew constraint.
+  robotics_analogue: >
+    A loadout-extraction drone dispatched to an under-defended
+    cache; on arrival it transfers a fixed inventory quantum to the
+    operator's pool and is consumed in the process.
+  author: engine-infiltrate-task
+
+base_map:
+  generator: chokepoint-arena
+  name: spec-thief-chokepoint-40x20
+  width: 40
+  height: 20
+  cordon: 2
+  pinch_x: 20
+  pinch_width: 4
+  corridor_width: 4
+  corridor_y: 10
+  title: Thief Chokepoint 40x20
+starting_cash: 0
+
+base:
+  agent: {faction: allies}
+  # Enemy seeded with cash — that's where the steal comes from.
+  enemy: {faction: soviet, cash: 3000}
+  # Minimal toolset — infiltrate is the load-bearing verb;
+  # move_units / attack_unit are present so the brute / wander /
+  # wrong-target policies can be expressed and observed to LOSE.
+  tools: [observe, move_units, attack_unit, infiltrate]
+  spawn_mcvs: false
+  planning: true
+  termination: {max_ticks: 8000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Thief at the corridor mouth, enemy proc at the corridor exit.
+  # The proc is the target AND a persistent MustBeDestroyed marker
+  # (proc IS MustBeDestroyed, so no auto-done on infiltrate). A
+  # second enemy `fact` keep-alive at the far corner guarantees a
+  # persistent enemy building even if the proc footprint is
+  # consumed mid-episode.
+  # One infiltrate call wins.
+  easy:
+    description: >
+      Thief at the west corridor mouth, undefended enemy refinery
+      one step into the corridor. One infiltrate call drains some
+      enemy cash into your wallet. Win = own cash ≥400 before tick
+      1350.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: thf,  owner: agent, position: [16, 10]}
+        - {type: proc, owner: enemy, position: [20, 10]}
+        - {type: fact, owner: enemy, position: [35, 4]}
+    win_condition:
+      all_of:
+        - {cash_gte: 400}
+        - {within_ticks: 1350}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1351}
+        - {not: {own_units_gte: 1}}
+    max_turns: 15
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Distractor target: a `powr` sits BETWEEN the thief and the silo
+  # — closer than the silo, so a greedy "nearest enemy building"
+  # policy infiltrates the powr (no-op: only proc/silo are
+  # stealable) and the thief is wasted. The correct play is to walk
+  # past the powr to the silo at the corridor exit.
+  medium:
+    description: >
+      Two enemy buildings: a Power Plant (closer; NOT stealable)
+      and a Silo (one step farther; stealable). Infiltrate the
+      SILO — the Power Plant gives nothing and burns your thief.
+      Win = own cash ≥400 before tick 1800.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: thf,  owner: agent, position: [16, 10]}
+        - {type: powr, owner: enemy, position: [18, 10]}
+        - {type: silo, owner: enemy, position: [20, 10]}
+        - {type: fact, owner: enemy, position: [35, 4]}
+    win_condition:
+      all_of:
+        - {cash_gte: 400}
+        - {within_ticks: 1800}
+    fail_condition:
+      any_of:
+        - {after_ticks: 1801}
+        - {not: {own_units_gte: 1}}
+    max_turns: 20
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two thieves (redundancy) + a stance:2 enemy rifleman one cell
+  # west of the silo. Each infiltrate yields ≤500 cash, so BOTH
+  # thieves must arrive and drain to clear cash_gte:800. The
+  # defender chips the thieves on approach (≈25% hp loss per
+  # transit) but both survive a single pass; if the agent sacrifices
+  # one thief or runs out of units, the run loses on `own_units_gte`.
+  hard:
+    description: >
+      Defended depot: a stance:2 enemy rifleman guards the silo at
+      the corridor exit. You have two thieves AND must steal twice
+      — each infiltrate yields ≤500 cash, so both must arrive and
+      drain. Win = own cash ≥800 before tick 2700.
+    starting_cash: 0
+    overrides:
+      actors:
+        - {type: thf,  owner: agent, position: [16, 9]}
+        - {type: thf,  owner: agent, position: [16, 11]}
+        - {type: silo, owner: enemy, position: [20, 10]}
+        - {type: e1,   owner: enemy, position: [19, 10], stance: 2}
+        - {type: fact, owner: enemy, position: [35, 4]}
+    win_condition:
+      all_of:
+        - {cash_gte: 800}
+        - {within_ticks: 2700}
+    fail_condition:
+      any_of:
+        - {after_ticks: 2701}
+        - {not: {own_units_gte: 1}}
+    max_turns: 30

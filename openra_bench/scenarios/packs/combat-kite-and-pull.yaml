@@ -57,7 +57,11 @@
 #     across fire-then-retreat cycles while preserving the survival
 #     bar.
 #
-# Topology (rush-hour-arena, 128×40, playable x 2..126, y 2..38):
+# Topology (combat-kite-pull-arena — tailored OPEN 128×40 arena,
+# playable x 2..125, y 2..37; same dimensions as the legacy
+# rush-hour-arena it replaces, but cordon-only with NO interior
+# obstacles so the kiter has unimpeded reverse-fire mobility along
+# the lane — a stalled retreat cannot be blamed on terrain):
 #   • Raiders stage centre-west, spread across three cells (not
 #     stacked — a stack pin-piles in retreat).
 #   • The heavy starts centre-east on the MID latitude (y=20) under
@@ -65,10 +69,15 @@
 #     must out-pace it, and the hunt advance is what brings the
 #     heavy into vision so the kite cycle has a target.
 #   • Raiders stage OFF the heavy's latitude (a north corridor on
-#     easy/medium) so the kite cycle has a reactive y-axis window.
-#   • Persistent unarmed enemy `fact` far east keeps the episode
-#     alive past the heavy's death so the win/fail evaluator runs
-#     (CLAUDE.md auto-done footgun).
+#     easy/medium; on hard the corridor flips per seed between
+#     y=10 north and y=30 south for spawn variation).
+#   • The arena is fully open inside the cordon — the kiter has the
+#     ENTIRE west half available to retreat into without snagging on
+#     terrain, which is the load-bearing freedom the kite-and-pull
+#     cycle needs to keep the heavy at standoff range.
+#   • Persistent unarmed enemy `fact` far east (x=124) keeps the
+#     episode alive past the heavy's death so the win/fail evaluator
+#     runs (CLAUDE.md auto-done footgun).
 #
 # Validate (no model / no network):
 #   python3 -m pytest tests/test_combat_kite_and_pull.py -q
@@ -101,7 +110,22 @@ meta:
     - "economy-of-force"
   author: openra-bench
 
-base_map: rush-hour-arena
+# combat-kite-pull-arena: tailored OPEN 128×40 arena (playable x in
+# [2..125], y in [2..37]). Generator: `arena` with NO interior
+# obstacles — every cell inside the cordon is clear ground so the
+# kiter has unimpeded reverse-fire mobility along the lane and any
+# failed retreat is the policy's fault, not the terrain's. Same
+# dimensions as the legacy `rush-hour-arena` it replaces (so the
+# proven actor coords carry across unchanged) but owned by THIS
+# pack so the obstacle-free guarantee is reasoned about precisely
+# and isn't subject to drift in the shared training map.
+base_map:
+  generator: arena
+  name: combat-kite-pull-arena
+  width: 128
+  height: 40
+  cordon: 2
+  title: Kite and Pull Arena 128x40
 
 base:
   agent: {faction: allies, cash: 0}
@@ -125,19 +149,28 @@ levels:
   # unmet → deadline). Stand-and-fight / brute LOSE (the heavy
   # cannon out-trades the stack head-on).
   easy:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Three fast medium-tank raiders (2tnk) stage at the centre-west north
+    # corridor (y=10). ONE enemy heavy tank (3tnk) sits centre-east on the
+    # mid latitude (x≈80, y=20). The heavy out-trades your raiders at
+    # close range — standing and fighting LOSES. The only winning play is
+    # the kite-and-PULL cycle: each turn, if the heavy has closed within
+    # ~6 cells, MOVE your raiders a few cells AWAY along the lane;
+    # otherwise attack_unit the heavy from range; repeat. Kill the heavy
+    # and keep at least TWO raiders alive before tick 4500. Stall (observe
+    # only) LOSES — your raiders hold fire and never engage. Standing
+    # still or bruting east with no disengage LOSES — the heavy cannon
+    # collapses the stack.
     description: >
-      Three fast medium-tank raiders (2tnk) stage at the centre-west
-      north corridor (y=10). ONE enemy heavy tank (3tnk) sits
-      centre-east on the mid latitude (x≈80, y=20). The heavy
-      out-trades your raiders at close range — standing and fighting
-      LOSES. The only winning play is the kite-and-PULL cycle: each
-      turn, if the heavy has closed within ~6 cells, MOVE your
-      raiders a few cells AWAY along the lane; otherwise attack_unit
-      the heavy from range; repeat. Kill the heavy and keep at least
-      TWO raiders alive before tick 4500. Stall (observe only) LOSES
-      — your raiders hold fire and never engage. Standing still or
-      bruting east with no disengage LOSES — the heavy cannon
-      collapses the stack.
+      Three medium-tank raiders stage on the north corridor (y=10). One
+      enemy heavy tank sits centre-east at roughly (80,20) — it out-trades
+      you head-on and would shred a stand-and-fight. Kite: when the heavy
+      closes inside six cells, move your raiders back along the lane;
+      otherwise shoot from range. One kill, two raiders alive, within
+      about 50 turns.
     overrides:
       actors:
         # RAIDERS — 3 medium tanks, stance:1 (ReturnFire): they
@@ -173,17 +206,25 @@ levels:
   # in the engine combat sheet — verified — so the medium escalation
   # is bar tightness, not enemy count).
   medium:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Three medium-tank raiders (2tnk) stage at the centre-west north
+    # corridor (y=10). ONE enemy heavy tank (3tnk) starts centre-east on
+    # the mid latitude (x≈80, y=20) and HUNTS your raiders. The heavy out-
+    # trades your raiders head-on. Win by kiting: each turn, if the heavy
+    # is within ~6 cells MOVE your raiders AWAY along the lane, else
+    # attack_unit the heavy; repeat. Kill the heavy and keep ALL THREE
+    # raiders alive before tick 4500 — a kite that lets the heavy land
+    # even one cannon shot trades a raider and LOSES. Stall, stand-and-
+    # fight, and brute attack_move all LOSE.
     description: >
-      Three medium-tank raiders (2tnk) stage at the centre-west
-      north corridor (y=10). ONE enemy heavy tank (3tnk) starts
-      centre-east on the mid latitude (x≈80, y=20) and HUNTS your
-      raiders. The heavy out-trades your raiders head-on. Win by
-      kiting: each turn, if the heavy is within ~6 cells MOVE your
-      raiders AWAY along the lane, else attack_unit the heavy;
-      repeat. Kill the heavy and keep ALL THREE raiders alive
-      before tick 4500 — a kite that lets the heavy land even one
-      cannon shot trades a raider and LOSES. Stall, stand-and-fight,
-      and brute attack_move all LOSE.
+      Three raiders on the north corridor face one enemy heavy tank that
+      actively hunts. The heavy out-trades you in close, so any cannon hit
+      costs a raider. Kite hard — back off whenever the heavy enters six
+      cells, snipe from outside — and kill the heavy without losing one of
+      three raiders, within about 50 turns.
     overrides:
       actors:
         - {type: 2tnk, owner: agent, position: [28,  9], stance: 1}
@@ -223,19 +264,25 @@ levels:
   # raiders survive on the tight hard clock — while still
   # out-trading a stand-and-fight stack head-on.
   hard:
+    # Original (pre-verbosity-sweep) description preserved for
+    # contributors. The trimmed version below removes scripted-policy
+    # spoilers and cell-coord dumps; load-bearing intent kept.
+    #
+    # Three medium-tank raiders (2tnk) stage at ONE of two centre-west
+    # corridors (NORTH y=10 OR SOUTH y=30, chosen by seed). ONE enemy
+    # heavy tank (3tnk) starts centre-east on the mid latitude (y=20)
+    # between the two corridors and HUNTS your raiders. The heavy out-
+    # trades your raiders head-on; the only winning play is the kite-and-
+    # PULL cycle — when the heavy closes within ~6 cells MOVE your raiders
+    # AWAY along your lane, else attack_unit the heavy; repeat. Kill the
+    # heavy and keep ALL THREE raiders alive before tick 3600. Stall,
+    # stand-and-fight, and brute attack_move all LOSE. The start corridor
+    # varies by seed so a memorised opening cannot generalise.
     description: >
-      Three medium-tank raiders (2tnk) stage at ONE of two
-      centre-west corridors (NORTH y=10 OR SOUTH y=30, chosen by
-      seed). ONE enemy heavy tank (3tnk) starts centre-east on the
-      mid latitude (y=20) between the two corridors and HUNTS your
-      raiders. The heavy out-trades your raiders head-on; the only
-      winning play is the kite-and-PULL cycle — when the heavy
-      closes within ~6 cells MOVE your raiders AWAY along your lane,
-      else attack_unit the heavy; repeat. Kill the heavy and keep
-      ALL THREE raiders alive before tick 3600. Stall,
-      stand-and-fight, and brute attack_move all LOSE. The start
-      corridor varies by seed so a memorised opening cannot
-      generalise.
+      Three raiders stage in the north (y=10) or south (y=30) corridor by
+      seed; one enemy heavy hunts from the middle latitude. The kite-and-pull cycle is the same — retreat past six cells, attack from range —
+      but the clock tightens to about 40 turns. All three raiders must
+      survive.
     overrides:
       actors:
         # spawn_point 0 — NORTH corridor (y=10)
