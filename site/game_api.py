@@ -141,6 +141,7 @@ def _serialize_state(sess) -> dict:
         "done": status["done"],
         "game_tick": status.get("tick", sig.game_tick),
         "objective": sess.objective,
+        "save_path": status.get("save_path"),
         "units": units,
         "enemies": enemies,
         "own_buildings": own_buildings,
@@ -192,7 +193,7 @@ def start_game(req: StartRequest):
         from openra_bench.human_labeling import InteractiveSession
 
         sess = InteractiveSession.from_pack(
-            req.pack_id, req.level, req.seed, record=False,
+            req.pack_id, req.level, req.seed, record=True, player="Human",
         )
         sid = uuid.uuid4().hex[:12]
         sess._session_id = sid
