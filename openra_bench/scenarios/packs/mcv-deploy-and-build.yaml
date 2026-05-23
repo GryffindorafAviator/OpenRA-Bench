@@ -30,8 +30,9 @@
 #   - `spawn_mcvs: False` is the eval_core default (eval_core.py:54),
 #     but we declare it on `base` explicitly so the engine does not
 #     auto-spawn a second MCV alongside the scenario-declared one.
-#   - Persistent unarmed enemy `fact` MARKER far away (cell (120,20))
-#     prevents engine auto-`done` via the all-enemies-eliminated path
+#   - Persistent unarmed enemy `fact` MARKER far east (cell (88,20),
+#     inside the 96×40 per-tier arena's playable bounds) prevents
+#     engine auto-`done` via the all-enemies-eliminated path
 #     (CLAUDE.md engine-auto-done footgun) — so a non-winner emits a
 #     real LOSS on the deadline, never a DRAW.
 #   - fail_condition uses BOTH (after_ticks: deadline+1) and
@@ -69,7 +70,64 @@ meta:
     - "critical-infrastructure siting under defensibility"
   author: "openra-bench"
 
-base_map: rush-hour-arena
+# Per-tier tailored arena (`mcv-deploy-and-build-arena`, 96×40 cordon
+# 2) materialised from a generator spec on each level's `overrides:`.
+# The map encodes the load-bearing DEPLOY-SITE choice for this pack:
+#
+#   Site A — "NW pocket" (cell ≈ (12,8) for hard / (20,20) for
+#     easy+medium). Shielded by a water cluster at x=30..35 y=4..8
+#     (the cluster sits BETWEEN the deploy pocket and the central
+#     patrol corridor), open build cells around the resulting fact at
+#     (mcv_x-1, mcv_y-1) so the fact+powr+tent (+2nd powr) chain has
+#     room to lay down adjacent. BEST site on medium/hard — the
+#     cluster screens the MCV from the y=20..22 patrol's line of
+#     approach and keeps the build chain safe to completion.
+#
+#   Site B — "Center" (cell ≈ (20,20)). Open on all sides, build room
+#     present, but the y=20 patrol lane sweeps right through here on
+#     medium/hard — picking center on those tiers means racing the
+#     patrol to the chain. Used as the canonical EASY spawn (no
+#     patrol on easy, so center is fine; on medium/hard the
+#     "lazy/center" siting loses).
+#
+#   Site C — "SW pocket" (cell ≈ (12,32) for hard). Mirror of Site A,
+#     shielded by the south water cluster at x=30..35 y=32..36. Same
+#     defensibility as Site A; this is the SOUTHERN spawn group on
+#     hard so the agent never sees the SAME site choice twice in a
+#     row across seeds.
+#
+# The map also adds two mid-map water columns (x=50..52, y=10..14 and
+# y=26..30) that funnel the patrol's wandering through the central
+# y=18..22 corridor — so a "deploy in center" MCV is on the patrol's
+# natural path, while NW/SW pockets stay clear of patrol traffic.
+# A small east-mid pair of obstacles at (70..72, y=15..17 and y=23..25)
+# fragments the patrol's late-episode lunge toward any agent who built
+# far east. None of the obstacles touch the canonical deploy/build
+# cells (verified before authoring): MCV cells (12,8), (12,32), (20,20)
+# and their fact/powr/tent placement cells are all on CLEAR ground.
+base_map:
+  generator: arena
+  name: mcv-deploy-and-build-arena
+  width: 96
+  height: 40
+  cordon: 2
+  title: "MCV Deploy and Build Arena 96x40"
+  obstacles:
+    # North shield — protects the NW pocket (Site A) from the central
+    # patrol corridor; sits between the deploy cells and the y=20
+    # patrol lane.
+    - {x: 30, y: 4,  w: 6, h: 5}
+    # South shield — mirror, protects the SW pocket (Site C).
+    - {x: 30, y: 32, w: 6, h: 5}
+    # Mid-map funnel columns — channel the patrol through the central
+    # y=18..22 corridor (the lazy/center deploy site is on this path).
+    - {x: 50, y: 10, w: 3, h: 5}
+    - {x: 50, y: 26, w: 3, h: 5}
+    # East-mid splitters — fragment any late patrol lunge toward
+    # downstream agent buildings.
+    - {x: 70, y: 15, w: 3, h: 3}
+    - {x: 70, y: 23, w: 3, h: 3}
+
 starting_cash: 1000
 
 base:
@@ -120,8 +178,9 @@ levels:
         # Persistent unarmed enemy marker far away — prevents engine
         # auto-`done` (all-enemies-eliminated) so a non-winner LOSES
         # on the deadline (never a DRAW). The marker is itself a
-        # MustBeDestroyed building (fact) at (120,20).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # MustBeDestroyed building (fact) at (88,20) — inside the
+        # 96×40 per-tier arena's playable bounds (x∈[2,93]).
+        - {type: fact, owner: enemy, position: [88, 20]}
     win_condition:
       all_of:
         - has_building: fact
@@ -175,8 +234,9 @@ levels:
         - {type: e1, owner: enemy, position: [60, 20], stance: 2}
         - {type: e1, owner: enemy, position: [60, 22], stance: 2}
         # Persistent far marker keeps the episode alive past
-        # any partial outcome (LOSS-not-DRAW guarantee).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # any partial outcome (LOSS-not-DRAW guarantee). At (88,20)
+        # — inside the 96×40 per-tier arena's playable bounds.
+        - {type: fact, owner: enemy, position: [88, 20]}
     win_condition:
       all_of:
         - has_building: fact
@@ -237,8 +297,9 @@ levels:
         # equidistant from y=8 and y=32). Stance 2 = return fire.
         - {type: e1, owner: enemy, position: [60, 20], stance: 2}
         - {type: e1, owner: enemy, position: [60, 22], stance: 2}
-        # Persistent far marker (LOSS-not-DRAW guarantee).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # Persistent far marker (LOSS-not-DRAW guarantee). At (88,20)
+        # — inside the 96×40 per-tier arena's playable bounds.
+        - {type: fact, owner: enemy, position: [88, 20]}
     win_condition:
       all_of:
         - has_building: fact
