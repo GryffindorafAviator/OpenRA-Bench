@@ -1035,6 +1035,34 @@ Then run `evaluate.py --agent custom` with your agent integrated.
 _PLAY_LEVELS = ["easy", "medium", "hard"]
 _PLAY_UPSCALE = 5  # tactical-minimap cell scale for the Play tab
 
+_PLAY_KEYBOARD_JS = r"""
+() => {
+  if (window.__openraBenchPlayEnterBound) return;
+  window.__openraBenchPlayEnterBound = true;
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.metaKey ||
+        event.ctrlKey || event.altKey || event.repeat) {
+      return;
+    }
+    const target = event.target;
+    const tag = (target && target.tagName || "").toLowerCase();
+    if (["input", "textarea", "select", "button"].includes(tag) ||
+        (target && target.isContentEditable)) {
+      return;
+    }
+    const root = document.getElementById("play-end-turn-btn");
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return;
+    const button = root.tagName && root.tagName.toLowerCase() === "button"
+      ? root : root.querySelector("button");
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    button.click();
+  }, true);
+}
+"""
+
 
 def _play_scenarios() -> list[str]:
     """Active pack ids playable in the Play tab."""
@@ -1600,6 +1628,10 @@ def build_app() -> gr.Blocks:
                     label="Show objective rings", value=False,
                     info="Only available when the scenario already reveals exact coordinates.",
                 )
+                gr.Markdown(
+                    "_Press **Enter** to end the turn when focus is outside "
+                    "inputs._"
+                )
                 play_objective = gr.Markdown()
                 play_status = gr.Markdown(_play_status_md(None))
                 # Minimap on its own full-width row. No fixed height —
@@ -1624,7 +1656,8 @@ def build_app() -> gr.Blocks:
                         "Cancel queued orders", scale=1
                     )
                     play_end_btn = gr.Button(
-                        "End Turn ▶", variant="primary", scale=2,
+                        "End Turn (Enter) ▶", variant="primary", scale=2,
+                        elem_id="play-end-turn-btn",
                     )
 
                 play_start.click(
@@ -1682,6 +1715,7 @@ def build_app() -> gr.Blocks:
                     ],
                     outputs=play_img,
                 )
+                app.load(fn=None, js=_PLAY_KEYBOARD_JS)
 
             # ── About Tab ─────────────────────────────────────────────────
             with gr.Tab("About"):
