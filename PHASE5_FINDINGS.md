@@ -62,12 +62,18 @@ model-specific refusal mode where it issues only `Observe` for the
 entire decision budget, even on trivially-winnable cells where
 other models of comparable scale win cleanly.
 
-| metric              | Qwen3.5-9B | Qwen3.6-Plus | gemma-4-31B-it (4 cells) |
-|---------------------|-----------|--------------|-----------|
-| win rate, easy      | 48% (11/23) | **0% (0/12)** | n/a |
-| win rate, medium    | 17% (4/23)  | **0% (0/16)** | 2W / 2L (50%) |
-| **win rate, total** | **33% (15/46)** | **0% (0/28)** | **50% (2/4)** |
-| dominant loss verb  | MoveUnits (33-34×) | **Observe (23-34×)** | MoveUnits (33×) |
+**Final 83-cell numbers** (after orphan-dir cleanup; tasks/triage_phase4.py):
+
+| model              | cells | W   | L   | D   | win rate | dominant loss verb |
+|--------------------|-------|-----|-----|-----|----------|--------------------|
+| Qwen/Qwen3.5-9B    | 48    | 20  | 27  | 1   | **41.7%**| MoveUnits (33×)    |
+| google/gemma-4-31B-it | 5  | 2   | 3   | 0   | **40.0%**| MoveUnits (33-34×) |
+| Qwen/Qwen3.6-Plus  | 30    | 0   | 28  | 2   | **0.0%** | **Observe (17-40×)** |
+
+Two models at very different scales (9B and 31B) win 40-42% of
+cells. Plus (a much larger model) wins **zero** cells across 30
+runs, with `Observe×N` as its only action across the entire
+budget on every cell.
 
 The most striking comparison is `spec-tanya-c4-strike` — which
 Qwen3.5-9B wins 4/4 (proc in initial sight, walk + C4 = trivial).
