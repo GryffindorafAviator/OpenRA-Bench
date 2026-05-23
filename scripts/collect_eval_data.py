@@ -244,6 +244,82 @@ def _pack_path_for(pack_id: str) -> Path:
     return PACKS_DIR / f"{pack_id}.yaml"
 
 
+# ── transient-error detection for cell-level retry ──────────────────
+# A cell whose subprocess errored at the provider layer (429, 503,
+# transport reset, read timeout) leaves an `episodes[*].notes` entry
+# in the stats.json with the underlying exception text. We retry only
+# on patterns known to be transient — 404 / 400 / auth errors are
+# never retried (would just burn quota).
+_TRANSIENT_NOTE_MARKERS = (
+    "429",
+    "500 from provider",
+    "502 from provider",
+    "503 from provider",
+    "504 from provider",
+    "Too many requests",
+    "rate limit",
+    "RuntimeError: 5",
+    "TimeoutException",
+    "ReadTimeout",
+    "ConnectError",
+    "TransportError",
+    "RemoteProtocolError",
+)
+
+
+def _stats_path_for(cell: dict, args) -> Path:
+    return Path(args.output_dir) / ".logs" / f"{cell['cell_id']}.stats.json"
+
+
+def _is_transient_failure(stats_path: Path) -> bool:
+    """True if the most recent attempt's stats.json shows a retryable
+    error in the episode notes. False on missing file, parse error,
+    no episodes, or a non-transient note (e.g. 404 model_not_available).
+    """
+    try:
+        d = json.loads(stats_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    eps = d.get("episodes") or []
+    if not eps:
+        return False
+    notes = " ".join(str(n) for n in (eps[-1].get("notes") or []))
+    if not notes:
+        return False
+    return any(m in notes for m in _TRANSIENT_NOTE_MARKERS)
+
+
+def _run_cell_with_retry(cell: dict, args, python_bin: str) -> dict:
+    """Wrap _run_cell with bounded backoff on transient failures.
+    The cell counts as 'failed and retryable' when:
+      (a) `is_complete_cell(jsonl_path)` returns False, AND
+      (b) the cell's stats.json carries a transient-error note.
+    Any other outcome (success, or a permanent error like 404) is
+    returned immediately.
+    """
+    max_attempts = max(1, int(args.cell_retries))
+    base = float(args.cell_retry_base_delay)
+    cap = 300.0  # 5 min hard cap; long enough for Together rate windows
+    last = None
+    for attempt in range(1, max_attempts + 1):
+        r = _run_cell(cell, args, python_bin)
+        r["attempts"] = attempt
+        last = r
+        if r["complete"] or attempt >= max_attempts:
+            return r
+        stats_path = _stats_path_for(cell, args)
+        if not _is_transient_failure(stats_path):
+            return r  # permanent error — don't burn quota
+        delay = min(cap, base * (2 ** (attempt - 1)))
+        print(
+            f"  ↻ retry {attempt + 1}/{max_attempts} for {cell['cell_id']} "
+            f"after {delay:.0f}s (transient failure)",
+            flush=True,
+        )
+        time.sleep(delay)
+    return last  # unreachable, but keeps type-checkers quiet
+
+
 def _run_cell(cell: dict, args, python_bin: str) -> dict:
     """Spawn one `python -m openra_bench.run_eval` for a single cell.
     Returns a result dict with rc / log_path / jsonl_path."""
@@ -366,6 +442,20 @@ def main(argv: list[str]) -> int:
         type=int,
         default=1,
         help="how many cell subprocesses to run at once",
+    )
+    ap.add_argument(
+        "--cell-retries",
+        type=int,
+        default=3,
+        help="max attempts per cell on transient failure (429/5xx/"
+        "timeout/transport). 1 = no retry. Default: 3",
+    )
+    ap.add_argument(
+        "--cell-retry-base-delay",
+        type=float,
+        default=30.0,
+        help="base seconds before first retry; doubles each attempt, "
+        "capped at 300s. Default: 30",
     )
     ap.add_argument(
         "--provider",
@@ -495,7 +585,7 @@ def main(argv: list[str]) -> int:
     started = time.time()
     if a.parallel_cells <= 1:
         for c in todo:
-            r = _run_cell(c, a, a.python)
+            r = _run_cell_with_retry(c, a, a.python)
             results.append(r)
             completed += 1 if r["complete"] else 0
             fail += 0 if r["rc"] == 0 else 1
@@ -507,7 +597,7 @@ def main(argv: list[str]) -> int:
             )
     else:
         with ThreadPoolExecutor(max_workers=a.parallel_cells) as ex:
-            futs = {ex.submit(_run_cell, c, a, a.python): c for c in todo}
+            futs = {ex.submit(_run_cell_with_retry, c, a, a.python): c for c in todo}
             for fu in as_completed(futs):
                 r = fu.result()
                 results.append(r)
