@@ -64,10 +64,29 @@
 #     the flanker (out of range), fact is unguarded, raze in time.
 #
 # Engine guardrails (per CLAUDE.md / SCENARIO_REVIEW_CHECKLIST.md):
-#   - Map: rush-hour-arena (128 × 40, playable x in [2..126],
-#     y in [2..38]). Strike force at x=6; line at x=50; fact at
-#     (100,20). Fog lanes at y=2 (north edge) and y=38 (south
-#     edge) — both inside playable bounds.
+#   - Map: per-tier custom arena (128 × 40, cordon 2 ⇒ playable
+#     x in [2..125], y in [2..37]) generated via mapgen's `arena`
+#     generator with WATER obstacle clusters that physically
+#     reinforce the design:
+#       * easy   — `combat-attack-from-behind-fog-easy`: ONE obvious
+#                  fog lane at y=2..5 (north). Middle band y=6..14
+#                  walled off across x=10..85 so a flanker MUST use
+#                  the north corridor. South half y=26..37 walled
+#                  off across x=10..125 so south flank is impossible.
+#       * medium — `combat-attack-from-behind-fog-medium`: TWO fog
+#                  lanes (north y=2..5 + south y=35..37). Mid-bands
+#                  y=6..14 and y=26..34 walled off across x=10..85
+#                  so neither lane can be "shortened" inside the
+#                  line's range envelope.
+#       * hard   — `combat-attack-from-behind-fog-hard`: BOTH lanes
+#                  open, but the agent stages NORTH or SOUTH per
+#                  seed (spawn_point round-robin) so the relevant
+#                  flank latitude flips per seed. Symmetric walls
+#                  y=6..13 (x=10..85) and y=27..34 (x=10..85) keep
+#                  each lane the only viable bypass for its spawn.
+#     Strike force at x=6 (west); line at x=50; fact at (100,20).
+#     East descent windows x=86..125 stay clear in the bands so the
+#     flanker can drop from the corridor to y=20 to raze the fact.
 #   - Win predicate uses `enemy_key_buildings_destroyed_in_region`
 #     scoped to {x:100,y:20,radius:6,types:[fact]} so a stray kill
 #     on the SENTINEL fact (far west or far corner) doesn't satisfy
@@ -190,6 +209,28 @@ levels:
       or south fringe, then strike the yard with at least two tanks intact
       within about 60 turns.
     overrides:
+      # EASY MAP — one obvious fog corridor (north y=2..5). The middle
+      # band y=6..14 is walled off across x=10..85 so the flanker can
+      # only slip past the line via the north lane. The south half is
+      # walled off entirely so south flank is impossible (the easy
+      # tier teaches the single-corridor recognition). East descent
+      # window x=86..125 (y=6..14) stays clear so the flanker drops
+      # from y=5 to y=20 to raze the fact at (100,20).
+      base_map:
+        generator: arena
+        name: combat-attack-from-behind-fog-easy
+        width: 128
+        height: 40
+        cordon: 2
+        title: 'Attack-From-Behind-Fog — Easy (North Lane Only)'
+        obstacles:
+          # North middle wall — closes y=6..14 across x=10..85.
+          # West strip x=2..9 stays clear so tanks at x=6 can climb
+          # from y=18 to the fog corridor at y=2..5.
+          - {x: 10, y: 6,  w: 76, h: 9}
+          # South wall — closes y=26..37 across x=10..125. West strip
+          # x=2..9 stays clear (cordon-side connector).
+          - {x: 10, y: 26, w: 116, h: 12}
       actors:
         # STRIKE FORCE — 4 medium tanks stacked at the west edge,
         # stance:1 ReturnFire so they only engage when ordered.
@@ -259,6 +300,25 @@ levels:
       undefended yard at (100,20). Two tanks must survive, within about 50
       turns.
     overrides:
+      # MEDIUM MAP — TWO fog corridors (north y=2..5 + south y=35..37).
+      # Mid-bands y=6..14 and y=26..34 walled off across x=10..85 so
+      # neither lane can be "shortened" by cutting close to the line
+      # (cutting at y=10 or y=30 would put the tank inside pbox+e3
+      # range). East descent windows x=86..125 stay clear in BOTH
+      # bands so the flanker can drop from y=5 OR climb from y=37
+      # back to y=20 to raze the fact at (100,20).
+      base_map:
+        generator: arena
+        name: combat-attack-from-behind-fog-medium
+        width: 128
+        height: 40
+        cordon: 2
+        title: 'Attack-From-Behind-Fog — Medium (Two Fog Lanes)'
+        obstacles:
+          # North middle wall — closes y=6..14 across x=10..85.
+          - {x: 10, y: 6,  w: 76, h: 9}
+          # South middle wall — closes y=26..34 across x=10..85.
+          - {x: 10, y: 26, w: 76, h: 9}
       actors:
         - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
@@ -349,6 +409,31 @@ levels:
       enemy yard at (100,20) with at least two tanks surviving, within
       about 50 turns.
     overrides:
+      # HARD MAP — BOTH fog corridors open (north y=2..5 + south
+      # y=35..37), but the agent stages NORTH (y=14..17) or SOUTH
+      # (y=23..26) per seed (spawn_point round-robin) so the
+      # appropriate flank latitude flips per seed. Symmetric walls
+      # y=6..13 and y=27..34 across x=10..85 keep each lane the
+      # only viable bypass (no shortcut at y=10 or y=30 inside the
+      # 10-defender wall's kill envelope). East descent windows
+      # x=86..125 stay clear in BOTH bands so either flanker can
+      # descend/climb back to y=20 to raze the fact at (100,20).
+      base_map:
+        generator: arena
+        name: combat-attack-from-behind-fog-hard
+        width: 128
+        height: 40
+        cordon: 2
+        title: 'Attack-From-Behind-Fog — Hard (Spawn-Varied Flank)'
+        obstacles:
+          # North middle wall — closes y=6..13 across x=10..85. y=14
+          # stays clear so the NORTH staging corridor (y=14..17) is
+          # not isolated from the west connector x=2..9.
+          - {x: 10, y: 6,  w: 76, h: 8}
+          # South middle wall — closes y=27..34 across x=10..85. y=26
+          # stays clear so the SOUTH staging corridor (y=23..26) is
+          # not isolated from the west connector x=2..9.
+          - {x: 10, y: 27, w: 76, h: 8}
       actors:
         # spawn_point 0 — NORTH staging corridor (y=14..17). Fog
         # flank latitude from this spawn is y=2 (north edge).
