@@ -47,14 +47,15 @@ def _ctx(own_buildings=(), tick=1000):
 
 def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    base1 = ("fact", 15, 20)
-    # WIN: 2 facts, one at east (90,20) within radius 8 — in time.
-    east = ("fact", 90, 20)
+    base1 = ("fact", 15, 10)  # primary base in NW lobe per YAML
+    # WIN: 2 facts, one in the SE expansion disk centred at (95, 30)
+    # radius 8 — in time.
+    east = ("fact", 95, 30)
     assert evaluate(c.win_condition, _ctx([base1, east], tick=3000))
     # FAIL: only 1 fact (never deployed)
     assert not evaluate(c.win_condition, _ctx([base1], tick=3000))
     # FAIL: 2 facts but second one is in the CENTER (next to MCV start
-    # ~ (60,20)) — well outside the east region radius-8.
+    # ~ (60,20)) — well outside the east region radius-8 around (95,30).
     next_to_mcv = ("fact", 60, 20)
     assert not evaluate(c.win_condition, _ctx([base1, next_to_mcv], tick=3000))
     # FAIL: 2 facts but second one is in NW corner (wrong region).
@@ -72,11 +73,11 @@ def test_predicates_easy():
 
 def test_predicates_medium():
     c = compile_level(load_pack(PACK_PATH), "medium")
-    base1 = ("fact", 15, 20)
-    east = ("fact", 92, 18)  # inside radius-8 around (90,20)
+    base1 = ("fact", 15, 10)
+    east = ("fact", 92, 28)  # inside radius-8 around (95,30)
     assert evaluate(c.win_condition, _ctx([base1, east], tick=2500))
     # Just outside the radius
-    outside = ("fact", 99, 20)  # distance 9 > 8
+    outside = ("fact", 95, 39)  # distance 9 > 8 from (95,30)
     assert not evaluate(c.win_condition, _ctx([base1, outside], tick=2500))
     # Timeout reachable
     assert 4501 <= 93 + 90 * (c.max_turns - 1)
