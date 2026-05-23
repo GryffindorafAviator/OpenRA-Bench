@@ -235,6 +235,37 @@ _TOOL_SCHEMAS: dict[str, dict] = {
             },
         },
     },
+    "fire_superweapon": {
+        "type": "function",
+        "function": {
+            "name": "fire_superweapon",
+            "description": (
+                "Fire one of the three superweapons (kind = 'mslo' "
+                "nuke / 'iron' iron curtain / 'pdox' chronosphere). "
+                "The agent must own a launcher building of the matching "
+                "kind AND the weapon must be fully charged; otherwise "
+                "the order is silently dropped. Nuke needs target_x / "
+                "target_y (the impact cell). Iron curtain needs "
+                "target_id (a friendly actor to make invulnerable for "
+                "~750 ticks). Chronosphere needs both target_x / "
+                "target_y (destination cell) AND target_id (the "
+                "friendly actor to teleport)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["mslo", "iron", "pdox"],
+                    },
+                    "target_x": {"type": "integer"},
+                    "target_y": {"type": "integer"},
+                    "target_id": {"type": "integer"},
+                },
+                "required": ["kind"],
+            },
+        },
+    },
 }
 
 
@@ -510,6 +541,20 @@ def _to_commands(
                     Command.place_building(
                         str(args["item"]), int(args["target_x"]), int(args["target_y"])
                     )
+                )
+            elif name == "fire_superweapon":
+                kind = str(args["kind"])
+                tx = args.get("target_x")
+                ty = args.get("target_y")
+                cell = (
+                    (int(tx), int(ty))
+                    if tx is not None and ty is not None
+                    else None
+                )
+                tid = args.get("target_id")
+                tid_str = _rid(tid) if tid is not None else None
+                cmds.append(
+                    Command.fire_superweapon(kind, cell, tid_str)
                 )
         except (KeyError, TypeError, ValueError) as e:
             logger.debug("dropping malformed tool call %s: %s", call, e)

@@ -323,6 +323,66 @@ A scenario is defective if any of the following hold:
   `e1` at some cells doesn't surface in `enemy_positions` — `e3`
   does. For perception packs, use `e3` for hidden clusters and
   verify cluster cells on a smoke run before authoring against them.
+- **`place_building('proc')` now auto-spawns the new harv at the
+  NEW proc's footprint and binds it to the closest refinery by
+  PATH DISTANCE** (engine fix, pinned by
+  `OpenRA-Rust/openra-sim/tests/test_proc_auto_spawn_at_new_proc.rs`
+  + `tests/test_proc_auto_spawn_python.py`). Historical footgun:
+  the engine routed the auto-harv through `find_spawn_location`,
+  which sorts candidates by `(!is_primary, id)` — so a 2nd proc
+  placed far from the 1st always materialised its harv at the
+  LOWEST-ID proc, and `find_refinery` returned the lowest-id proc
+  unconditionally. The combined effect: expansion to a contested
+  patch was a no-op (the new harv trekked back to the old
+  refinery, and the old harv kept depositing at the old
+  refinery). The fix: a new `spawn_unit_near_building(actor,
+  unit_type, owner, building_id)` anchors the spawn scan on the
+  NEW proc's footprint, and `find_refinery_from(owner, cell)`
+  picks the proc with the shortest A* path from `cell` (with
+  fallback to Chebyshev-nearest then lowest-id). A 2nd refinery
+  placed near a contested patch now produces real throughput.
+  **Existing harvesters do NOT re-snap** to the new proc — the
+  re-resolve only fires when the stored refinery id is stale
+  (proc destroyed / never existed). To reroute live harvesters,
+  the agent must `set_primary` on the new proc or sell the old
+  one.
+- **Thief `Infiltrate` is a no-op against any non-`proc` /
+  non-`silo` enemy building** (engine match-arm intent). The thf
+  walks to the target, is consumed, and 0 cash is drained. The
+  Python tool description (`infiltrate`) already documents this:
+  the cash-drain branch is gated on `proc | silo`. Bench
+  scenarios that want the thief to load-bear must direct it at a
+  refinery or silo specifically.
+- **`stance:0` HoldFire defenders never return fire even when
+  attacked** — engine-intended (pinned by
+  `test_stance_semantics.rs::test_stance_0_holds_fire`). The
+  defenders die silently. For a defense scenario where the model
+  is expected to flip stance under threat: pre-place defenders at
+  `stance:0`, expose `set_stance` in `tools:`, and gate the win
+  on combat damage so a stall play (no stance flip) loses by
+  having the base destroyed without resistance.
+- **Per-player starting cash is now plumbed end-to-end** (engine
+  fix, pinned by `OpenRA-Rust/openra-sim/tests/test_per_player_starting_cash.rs`
+  + `OpenRA-Rust/openra-data/tests/test_per_player_starting_cash.rs`
+  + `tests/test_per_player_starting_cash.py`). A scenario YAML's
+  `agent: {cash: N}` / `enemy: {cash: M}` is honoured per slot;
+  back-compat path (neither override set) falls back to the
+  top-level `starting_cash:`. This is the wiring the thief
+  `spec-thief-steal-cash` and asymmetric-econ packs depend on.
+- **`Command.fire_superweapon` is the only superweapon verb**
+  (no other `Command::*` variant fires nukes / iron curtain /
+  chrono). Tool entry: `fire_superweapon{kind, target_x?, target_y?,
+  target_id?}`. End-to-end pin:
+  `tests/test_superweapons_python.py` (Python) +
+  `OpenRA-Rust/openra-sim/tests/test_superweapons.rs` (Rust). The
+  engine validates (a) the agent owns a launcher building of the
+  matching `kind`, (b) the weapon is fully charged (charge time
+  is hard-coded 100 ticks per kind for tests; real-play values
+  live in `gamerules.rs`); a failed validation is logged and the
+  order is dropped silently. Nuke needs `target_cell`; iron
+  curtain needs `target_id` only; chrono needs both
+  (`target_cell` = destination, `target_id` = friendly actor to
+  teleport).
 
 ## Engine blockers: fix the engine, do not compromise the pack
 

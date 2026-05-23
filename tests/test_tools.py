@@ -40,7 +40,10 @@ def test_explicit_allowlist_is_exactly_honored():
 def test_wildcard_exposes_everything():
     assert _names(["*"]) == set(_TOOL_SCHEMAS)
     assert _names(["all"]) == set(_TOOL_SCHEMAS)
-    assert len(_names(["*"])) == 21
+    # 25 verbs: every Command::* enum variant in
+    # openra-train/src/command.rs has a Python static + tool entry
+    # (audited Phase 1, ENGINE_AUDIT.md §4).
+    assert len(_names(["*"])) == 25
 
 
 def test_unknown_tool_names_are_ignored_not_errors():
