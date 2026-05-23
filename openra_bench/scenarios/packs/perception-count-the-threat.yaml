@@ -2,245 +2,307 @@
 #   openra_bench/scenarios/packs/perception-count-the-threat.yaml
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
-# PERCEPTION focus, exact-count cell of the perception ladder
-# (sibling to perception-frontier-reading / perception-target-vs-fog):
-# state estimation under partial observability where the EXACT census
-# matters, not an upper bound. The agent must DISCOVER ≥K hidden
-# enemies in the fog (`enemies_discovered_gte:K`) while preserving
-# its force (`units_lost_lte:1`) and the clock. Under-scouting (stop
-# early, K-1 discovered) LOSES the discovery bar. Over-scouting (run
-# every unit through every fog patch — including a mid-map sweep that
-# brushes stance:3 inner-defender missiles) bleeds the clock (the
-# detour through every patch never finishes the count in time) and
-# busts the attrition cap. Stalling LOSES the clock. Only an intended
-# "just-enough scout" policy — visit each genuine hidden-pocket lane
-# (north + south band) until ≥K threats are tagged from a safe
-# sight-line, then halt — passes all three teeth.
+# perception-count-the-threat — exact-count perception × commit cell.
 #
-# Real-world anchor (ICU triage, inventory before a binding commit,
-# ERQA state estimation, POMDP exact-count sub-tasks, ScienceWorld
-# inventory): you need the actual count, not a safe upper bound; the
-# act of counting consumes finite probe budget and excessive probing
-# is itself costly. The capability under test is calibrating WHEN to
-# stop counting — not just "see fog → drive in".
+# CAPABILITY: state estimation under partial observability where the
+# EXACT census matters, NOT an upper bound. The agent must:
+#   (1) SCOUT the fog to count exactly how many enemy UNITS are hidden,
+#   (2) COMMIT to a build of EXACTLY that many army units (e1 rifles).
+# Over-commit (build N+1) LOSES on the `unit_type_count_gte:n+1` fail.
+# Under-commit / stall LOSES on the clock (the `unit_type_count_eq:n`
+# WIN clause never latches → after_ticks deadline fires).
 #
-# Hard tier (binding contract): two agent spawn_point groups (NW / SW)
-# round-robined by seed (`tests/test_hard_tier.py::UPGRADED`). The
-# physical enemy roster is six hidden threats spread across BOTH
-# halves of the map; depending on the seed-chosen spawn, the natural
-# scout path encounters a different subset first, so a memorised
-# reading order from one spawn cannot generalise. The predicate K=5
-# is the binding lower bound: the agent must reliably discover 5 of 6
-# regardless of which corner it started from. (The Rust engine
-# filters AGENT actors by spawn_point but always places ALL enemy
-# actors — see openra-data/src/oramap.rs:expand_scenario_actors — so
-# K-as-physical-count cannot vary across seeds within a single
-# scenario file. Functional K-variation is achieved by spawn-rotated
-# reachable-subsets, not by enemy-actor filtering.)
+# Real-world anchor: ICU triage / inventory pass before a binding
+# commit / POMDP exact-count sub-tasks / ScienceWorld inventory. The
+# act of counting consumes finite probe budget; you need the actual
+# count, not an upper bound.
+#
+# Map: arena generator (96×40, cordon=2) — a tailored open arena that
+# matches the THREE per-tier authored layouts. Custom map, NOT
+# rush-hour-arena, because the tier geometry needs known scout-
+# reachable cluster cells (see "Mid-map cluster footgun" in
+# CLAUDE.md — cells like (50,20), (60,28), (90,30) silently drop, but
+# (60,10), (60,30), (40,30), (35,10), (75,30) were verified to
+# surface in `enemy_positions` via a smoke compile before authoring).
+#
+# DESIGN PER TIER:
+#   easy   = N=3, single cluster at the NE (one-pass scout).
+#   medium = N=5 (3 NE + 2 SE clusters) + 1 enemy BUILDING distractor
+#            (silo) that is NOT a unit and must NOT be counted —
+#            tests unit-vs-building discrimination on top of count.
+#   hard   = N=5 FIXED with two ENEMY spawn_point groups (Wave-9
+#            per-owner seed axis, mirror of adv-rps-counter-pick).
+#            Each spawn group places 5 hidden units across two
+#            clusters but rotates WHICH HALF carries the larger
+#            sub-cluster (NE-heavy 3+2 vs SE-heavy 2+3). A memorised
+#            one-lane scout sees only 2 or 3 of the 5; only a true
+#            both-lane scout reads N=5. Two building distractors
+#            (silo + gun turret) on both spawn groups.
+#
+# (Stretch goal: per-seed varied N {5/7/9}. Not implementable with
+# the current declarative predicate grammar — `unit_type_count_eq`
+# is a fixed N. An `any_of` ladder over {5,7,9} would let an
+# under-count (build 5 in a 7-seed) WIN the eq:5 clause illegally,
+# because the eq predicate is seed-agnostic. The honest design
+# holds N=5 for hard and varies geometry — still defeats
+# memorisation, still tests scout-and-commit. Documented rather
+# than masked.)
+#
+# WHY THE WIN PREDICATE USES `after_ticks` AS A HOLD-PERIOD:
+# A naive WIN `unit_type_count_eq:N` would latch the moment the
+# count transitions through N — so an over-commit policy queuing
+# N+1 e1 sneaks a WIN on the same turn count momentarily passes
+# through N, BEFORE the (N+1)th unit finishes. The hold-tick
+# inside the WIN (`after_ticks:800` for easy, `after_ticks:1500`
+# for medium/hard) forces the count to STILL equal N at a later
+# tick by which the build queue has fully settled (each e1 ~25
+# ticks → build-6 ≤ 150 ticks; the 800/1500 hold gives a >5×
+# margin). An over-commit policy ends up at count N+1 at the
+# hold-tick → eq:N FALSE → WIN never fires → after_ticks LOSS.
+# `enemies_discovered_gte:N` inside the WIN forces real scouting —
+# a no-scout build-N policy can't latch that clause and so can't
+# WIN even with a perfectly sized force.
+#
+# SCRIPTED-POLICY BAR (no-defect, every tier × every hard seed):
+#   • stall (only observe): no scout → no count → no build → kill
+#     bar / count bar never met → after_ticks fires → LOSS.
+#   • over-commit (build N+1 e1): `unit_type_count_gte:n+1` fires
+#     the same tick the (N+1)th e1 finishes → LOSS. Even if it
+#     somehow doesn't, the WIN hold-tick check eq:N is FALSE at
+#     the hold tick because count is N+1 → never wins.
+#   • under-commit (build N-1 e1): eq:N never latches → after_ticks
+#     fires → LOSS.
+#   • correct (scout + build EXACTLY N e1): scout latches
+#     enemies_discovered_gte:N, build settles at eq:N, hold-tick
+#     passes, within_ticks holds → WIN.
+#
+# ENGINE FACTS USED (CLAUDE.md):
+#   - Tick budget ~90/turn. Max tick at max_turns ≈ 93+90·(N-1).
+#     Easy max_turns:30 → max tick 2703; deadline within_ticks:2400,
+#     fail after_ticks:2401. Medium/Hard max_turns:45, within_ticks
+#     3600 / fail 3601.
+#   - Hidden enemies are stance:0 HoldFire so a stall policy can NOT
+#     accidentally win by self-discovery (a stance:3 hidden enemy
+#     would hunt the scout into vision; a stance:2 defender would
+#     fire on the scout, contaminating the perception channel).
+#     Discovery is therefore FREE — the only cost the agent pays is
+#     the time to scout + the build-spec discipline.
+#   - Mid-map cells (50,20), (60,28), (90,30) silently drop clusters;
+#     verified-working cells (60,10), (60,30), (40,30), (35,10),
+#     (75,30) confirmed by smoke compile. e3 (rocket) used because
+#     e1 cluster instances are empirically missing from
+#     `enemy_positions` even when the scout stands on the cell.
+#   - Per-owner spawn_point filter (Wave-9): when ANY enemy declares
+#     spawn_point, ALL enemies WITHOUT spawn_point are filtered out
+#     on that seed. The persistent enemy `fact` far-corner marker
+#     (anti-DRAW per CLAUDE.md auto-`done` rule) is duplicated
+#     across BOTH enemy spawn groups at identical coords.
+#   - Pre-placed `fact` for both sides at t=0 means
+#     `building_count_gte:fact:1` fail clause does NOT mis-fire on
+#     turn 1 (CLAUDE.md `not own_units_gte:1` footgun avoided).
+#   - Agent base: fact + powr + tent so the e1 production queue is
+#     ONLINE from turn 1 — the scenario tests perception+commit, NOT
+#     build-order, so prerequisite tech is pre-staged. Starting cash
+#     sized so 5-9 e1 + scout movement is affordable but a runaway
+#     build (10+ e1) is also affordable, so the over-commit fail
+#     clause genuinely bites (a budget that simply ran out would
+#     mask the no-cheat tooth).
 
 meta:
   id: perception-count-the-threat
-  title: 'Count the Threat — Discover EXACTLY Enough Hidden Enemies'
+  title: 'Count the Threat — Commit a Force Sized EXACTLY to the Hidden Count'
   capability: perception
   real_world_meaning: >
     State estimation under partial observability where over-counting
     wastes resources and under-counting commits blind to a binding
-    decision — you need the EXACT census, not an upper bound.
-  robotics_analogue: "Warehouse inventory pass before committing to a binding purchase order: probe enough shelves to satisfy the count, then stop — every extra probe is overhead and missing one breaks the commit"
+    decision — you need the EXACT census, not an upper bound. The
+    agent scouts the fog to count hidden enemy units, then commits a
+    build of EXACTLY that many army units. Build too many → LOSS;
+    build too few → LOSS; only a correctly-sized commit WINS.
+  robotics_analogue: >
+    Warehouse inventory pass before committing to a binding purchase
+    order: probe enough shelves to satisfy the count, then commit the
+    purchase at EXACTLY that quantity. Over-ordering wastes budget
+    and shelf space; under-ordering breaks the downstream commit.
   benchmark_anchor:
     - "ERQA state-estimation"
     - "POMDP exact-count sub-tasks"
     - "ScienceWorld inventory"
     - "ICU triage exact census"
     - "inventory-before-commit"
+    - "BFCL strict parameter fidelity (count-exact)"
   author: "openra-bench"
 
-base_map: rush-hour-arena
+base_map:
+  generator: arena
+  name: perception-count-arena
+  width: 96
+  height: 40
+  cordon: 2
+
+starting_cash: 3000
 
 base:
   agent: {faction: allies}
   enemy: {faction: soviet}
-  tools: [move_units, attack_unit, stop_units]
+  tools: [build, place_building, move_units, stop, set_stance, observe]
   planning: true
-  termination: {max_ticks: 10000}
+  termination: {max_ticks: 8000}
+  # Default base used by easy/medium. Agent gets fact + powr + tent so
+  # the e1 production queue is online from turn 1 (the test is
+  # perception+commit, not build-order). One jeep scout for easy; the
+  # tier overrides bump to two on medium/hard.
   actors:
-    # Scout team — fast jeeps + a light tank so the agent can split
-    # the count work across lanes without being one-shot by a stance:2
-    # defender that the over-scout policy provokes. Agent stance:1
-    # (ReturnFire) — scouts do NOT auto-engage on sight, so a
-    # just-enough scout glides past stance:2 inner defenders without
-    # provoking; only an explicit attack_unit (over-scout) triggers
-    # the attrition tooth.
-    - {type: jeep, owner: agent, position: [6, 6], stance: 1, count: 3}
-    - {type: 1tnk, owner: agent, position: [8, 9], stance: 1, count: 2}
+    - {type: fact, owner: agent, position: [10, 20], stance: 0}
+    - {type: powr, owner: agent, position: [8, 18], stance: 0}
+    - {type: tent, owner: agent, position: [12, 18], stance: 0}
+    - {type: jeep, owner: agent, position: [16, 20], stance: 1}
 
 levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # N=3. Single cluster at the NE. One-pass scout suffices.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Visible-by-default rehearsal of the count task: K=3 hidden threats
-    # sit on the map but in this tier the scouts spawn close enough to all
-    # three that a single sweep reveals every one without exposing the
-    # force. The bare skill: read the brief ("≥3 hidden enemies, find them
-    # all"), move into each pocket, stop. Stalling at spawn never reaches
-    # K and LOSES on the clock.
     description: >
-      Three hidden enemy threats sit on the map and your scouts spawn
-      close enough that a single sweep reveals all three. Move through
-      each pocket; stop. Discover at least three within about 25 turns.
-      Idling at spawn never reaches the count.
+      Three hidden enemy units sit clustered in a single fog pocket on
+      the north-east half. Scout with the jeep until you have read the
+      count, then build EXACTLY three rifle infantry (e1). Building a
+      fourth busts the over-commit fail; stopping at two never reaches
+      the build target. Within about 30 turns.
+    starting_cash: 2000
     overrides:
       actors:
-        - {type: jeep, owner: agent, position: [6, 6], stance: 1, count: 3}
-        - {type: 1tnk, owner: agent, position: [8, 9], stance: 1, count: 2}
-        # K=3 hidden threats packed in a single near-east cluster
-        # (count:3 at one cell — the engine offsets adjacent copies).
-        # A committed move-to-sightline pass (e.g. scout to (40,5))
-        # reveals all three at the next snapshot via vehicle sight≈7.
-        # stance:0 (HoldFire) so the revealed enemies never engage —
-        # discovery is FREE; the only cost the agent pays is the time
-        # spent moving and the risk of an explicit `attack_unit` (the
-        # brute "attack everything" failure mode). e3 (rocket
-        # soldier) in preference to e1 because the engine reliably
-        # surfaces e3 in the visible-enemy stream — e1 cluster
-        # instances were empirically missing from `enemy_positions`
-        # even when the scout stood on the cluster cell.
-        - {type: e3, owner: enemy, position: [40, 12], stance: 0, count: 3}
-        # Persistent passive marker so the engine does not auto-end
-        # the episode the moment the agent eliminates the three
-        # threats (would short-circuit the clock-discrimination).
-        - {type: barr, owner: enemy, position: [120, 36], stance: 0}
+        - {type: fact, owner: agent, position: [10, 20], stance: 0}
+        - {type: powr, owner: agent, position: [8, 18],  stance: 0}
+        - {type: tent, owner: agent, position: [12, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [16, 20], stance: 1}
+        # N=3 hidden cluster at the verified-working NE cell.
+        # stance:0 HoldFire so discovery is FREE (scout never gets
+        # shot at, so a stall policy can't win by self-discovery
+        # of a moving threat).
+        - {type: e3, owner: enemy, position: [60, 10], stance: 0, count: 3}
+        # Persistent far-corner enemy marker — anti-DRAW per
+        # CLAUDE.md (the engine auto-`done`s on enemy-elim before
+        # the win evaluator runs, so without this marker an
+        # over-commit play that ALSO kills the cluster could end
+        # the episode prematurely).
+        - {type: fact, owner: enemy, position: [90, 36]}
+    # WIN: scout-latch + count-eq + hold-tick + deadline. The
+    # `after_ticks:800` hold forces an over-commit (build 4) to
+    # actually realise count=4 by the hold tick → eq:3 FALSE →
+    # never WIN. See header note "WHY THE WIN PREDICATE USES
+    # after_ticks AS A HOLD-PERIOD".
     win_condition:
       all_of:
         - {enemies_discovered_gte: 3}
-        - {within_ticks: 2200}
+        - {unit_type_count_eq: {type: e1, n: 3}}
+        - {after_ticks: 800}
+        - {within_ticks: 2400}
     fail_condition:
       any_of:
-        - {after_ticks: 2201}
-        - {not: {own_units_gte: 1}}
-    max_turns: 26
+        - {after_ticks: 2401}
+        - {unit_type_count_gte: {type: e1, n: 4}}     # over-commit teeth
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 30
 
+  # ── MEDIUM ────────────────────────────────────────────────────────
+  # N=5 across TWO clusters (3+2), plus a BUILDING distractor (silo)
+  # that is NOT a unit and must not be counted. Tests unit-vs-building
+  # discrimination on top of the count itself.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Now fogged with K=5 hidden threats spread across both halves of the
-    # map. Under-scouting (stop after 3–4 discoveries) LOSES the discovery
-    # bar. Over-scouting (push every unit through every fog patch,
-    # brushing the stance:2 inner defenders) blows the attrition cap (≤1
-    # lost). Stalling LOSES the clock. The intended just-enough-scout
-    # policy splits the force across the two genuine hidden-pocket lanes
-    # (NE band + SE band), tags ≥5 threats, and halts.
     description: >
-      Five hidden threats are spread across both halves of the map under
-      fog. Stopping after three or four misses the bar; pushing into every
-      fog patch brushes the stance:2 inner defenders and busts the loss
-      cap. Split the force across the two real hidden-pocket lanes (NE and
-      SE bands), tag five, halt. At most one loss, within about 40 turns.
+      Five hidden enemy UNITS are spread across two fog pockets on the
+      north-east and south-east halves of the map. An enemy supply
+      silo also sits between the clusters — it is a BUILDING, NOT a
+      unit, and must NOT be counted toward the build target. Scout
+      with both jeeps until you have read the unit count, then build
+      EXACTLY five rifle infantry (e1). A sixth busts the over-commit
+      fail; stopping at four or counting the silo into the build
+      misses the spec. Within about 45 turns.
+    starting_cash: 2400
     overrides:
       actors:
-        - {type: jeep, owner: agent, position: [6, 6], stance: 1, count: 3}
-        - {type: 1tnk, owner: agent, position: [8, 9], stance: 1, count: 2}
-        # Two genuine hidden-pocket clusters (count:3 each — the
-        # engine packs three units around the named cell, total K=6
-        # physically placed). stance:0 (HoldFire) so discovery is
-        # FREE: the scout reveals all three at the next snapshot via
-        # vehicle sight≈7 (drive to (60,5) / (60,33) — one cell off
-        # the cluster latitude — and pass the sight cone over it
-        # without engaging). The clusters sit on opposite halves
-        # (y=12 NORTH and y=28 SOUTH), so a single one-lane scout
-        # caps at K=3 — far short of K=5. Only a genuine TWO-LANE
-        # scout (split N/S) clears the discovery bar.
+        - {type: fact, owner: agent, position: [10, 20], stance: 0}
+        - {type: powr, owner: agent, position: [8, 18],  stance: 0}
+        - {type: tent, owner: agent, position: [12, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [16, 20], stance: 1}
+        - {type: jeep, owner: agent, position: [16, 22], stance: 1}
+        # N=5 total hidden units across two clusters (3 NE + 2 SE).
+        # stance:0 HoldFire so discovery is free.
         - {type: e3, owner: enemy, position: [60, 10], stance: 0, count: 3}
-        - {type: e3, owner: enemy, position: [100, 30], stance: 0, count: 3}
-        # Inner defender wall: stance:2 (Defend) e3 missiles parked
-        # mid-y x=50, between the north (y≈6-10) and south (y≈30-34)
-        # scout lanes. stance:2 auto-fires on an in-range foe but
-        # NEVER advances — so the defenders hold their post and a
-        # just-enough scout that stays in its lane never even sees
-        # them (a stance:3 hunter would chase the scout up the lane
-        # and contaminate the perception count). An OVER-scout that
-        # pulls every unit through every fog patch (mid-map sweep)
-        # drives straight into the wall and bleeds time AND units —
-        # the over-scout tooth bites via clock (the detour never
-        # finishes the count) and on a deeper sweep via attrition.
-        - {type: e3, owner: enemy, position: [50, 19], stance: 2}
-        - {type: e3, owner: enemy, position: [50, 21], stance: 2}
-        # Persistent passive marker for episode-end safety (see easy).
-        - {type: barr, owner: enemy, position: [120, 36], stance: 0}
+        - {type: e3, owner: enemy, position: [60, 30], stance: 0, count: 2}
+        # BUILDING distractor — enemy silo. A silo is a non-unit
+        # building (CLAUDE.md: `silo` is NOT MustBeDestroyed, fine as
+        # a non-objective landmark). It appears in the enemy_buildings
+        # stream but NOT in the enemy unit stream — the agent must
+        # not include it in the unit count.
+        - {type: silo, owner: enemy, position: [40, 20]}
+        # Persistent far-corner enemy marker (anti-DRAW).
+        - {type: fact, owner: enemy, position: [90, 36]}
     win_condition:
       all_of:
         - {enemies_discovered_gte: 5}
-        - {units_lost_lte: 1}
+        - {unit_type_count_eq: {type: e1, n: 5}}
+        - {after_ticks: 1500}
         - {within_ticks: 3600}
     fail_condition:
       any_of:
         - {after_ticks: 3601}
-        - {not: {units_lost_lte: 1}}
-        - {not: {own_units_gte: 1}}
-    max_turns: 40
+        - {unit_type_count_gte: {type: e1, n: 6}}     # over-commit teeth
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 45
 
+  # ── HARD ──────────────────────────────────────────────────────────
+  # N=5 FIXED with two ENEMY spawn_point groups (Wave-9 per-owner
+  # seed axis, mirror of adv-rps-counter-pick). The cluster
+  # arrangement rotates per seed (NE-heavy 3+2 vs SE-heavy 2+3) so
+  # a memorised single-lane scout misses 2-3 of 5 on half the seeds.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Two seed-varied spawn groups (NW / SW) round-robin the start corner;
-    # the hidden-threat roster spans BOTH halves of the map so a memorised
-    # reading order from one spawn cannot generalise. The agent must
-    # discover ≥5 hidden threats (of six physically placed) while losing
-    # ≤1 unit, on a tighter clock. Under-scout LOSES the discovery bar;
-    # over-scout brushes stance:2 inner defenders and busts the attrition
-    # cap; stall LOSES the clock. Only a just-enough split scout that
-    # probes both bands and stops once K=5 is reached clears every tooth.
     description: >
-      Two spawn corners (NW or SW) by seed; the hidden-threat roster spans
-      both halves of the map so a memorised reading order fails. Split the
-      scouts across both bands, tag five (of six placed), stop. At most
-      one loss, within about 40 turns.
+      Five hidden enemy units are spread across both halves of the map
+      under fog. Two enemy buildings (a silo and a turret) sit on the
+      map but they are NOT units and must NOT be counted. The cluster
+      arrangement rotates per seed — memorising "always scout
+      north-east" misses two or three of the five on the south-heavy
+      seed. Split the two jeeps across both lanes, read the count,
+      build EXACTLY five rifle infantry. A sixth busts the over-commit
+      fail; stopping at four misses the spec. Within about 45 turns.
+    starting_cash: 2400
     overrides:
       actors:
-        # spawn_point 0 — scouts staged NW.
-        - {type: jeep, owner: agent, position: [6, 6],  stance: 1, count: 3, spawn_point: 0}
-        - {type: 1tnk, owner: agent, position: [8, 9],  stance: 1, count: 2, spawn_point: 0}
-        # spawn_point 1 — scouts staged SW (threats fixed, so which
-        # band is "on the way" flips by seed; what counted as the
-        # natural first-pocket from NW becomes the longer reach from
-        # SW and vice-versa).
-        - {type: jeep, owner: agent, position: [6, 33], stance: 1, count: 3, spawn_point: 1}
-        - {type: 1tnk, owner: agent, position: [8, 30], stance: 1, count: 2, spawn_point: 1}
-        # Two genuine hidden-pocket clusters (count:3 each, total K=6
-        # placed). stance:0 — REVEALING is free (HoldFire), the only
-        # combat cost comes from the stance:2 inner defenders that an
-        # over-scout brushes. The clusters sit on opposite halves;
-        # a one-lane sweep caps at K=3 (short of K=5). Either spawn
-        # corner reaches one cluster naturally and the other on a
-        # detour — so a memorised single-spawn reading order from NW
-        # (or SW) cannot generalise.
-        - {type: e3, owner: enemy, position: [60, 10], stance: 0, count: 3}
-        - {type: e3, owner: enemy, position: [100, 30], stance: 0, count: 3}
-        # Inner defender wall (stance:2 Defend) at mid-y x=50. They
-        # hold their post and auto-fire on anything in range but
-        # never advance — a just-enough scout that stays in its lane
-        # never sees them (a stance:3 hunter would chase a passing
-        # scout and contaminate the perception count). An OVER-scout
-        # that runs every unit through every fog patch bleeds time
-        # AND units crossing this wall — the over-scout teeth.
-        - {type: e3, owner: enemy, position: [50, 19], stance: 2}
-        - {type: e3, owner: enemy, position: [50, 21], stance: 2}
-        # Persistent passive marker for episode-end safety.
-        - {type: barr, owner: enemy, position: [120, 20], stance: 0}
+        # Agent base — no spawn_point, identical every seed. The
+        # per-owner agent filter stays inactive because no agent
+        # actor declares spawn_point (CLAUDE.md per-owner rule).
+        - {type: fact, owner: agent, position: [10, 20], stance: 0}
+        - {type: powr, owner: agent, position: [8, 18],  stance: 0}
+        - {type: tent, owner: agent, position: [12, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [16, 20], stance: 1}
+        - {type: jeep, owner: agent, position: [16, 22], stance: 1}
+
+        # ── ENEMY spawn_point=0 — NE-heavy (3 NE + 2 SE) ──
+        - {type: e3,   owner: enemy, position: [60, 10], stance: 0, count: 3, spawn_point: 0}
+        - {type: e3,   owner: enemy, position: [60, 30], stance: 0, count: 2, spawn_point: 0}
+        # Building distractors (silo + gun turret) — non-counted.
+        - {type: silo, owner: enemy, position: [40, 20], spawn_point: 0}
+        - {type: gun,  owner: enemy, position: [75, 30], spawn_point: 0}
+        # Persistent far-corner marker (anti-DRAW, duplicated across
+        # spawn groups per CLAUDE.md per-owner enemy idiom).
+        - {type: fact, owner: enemy, position: [90, 36], spawn_point: 0}
+
+        # ── ENEMY spawn_point=1 — SE-heavy (2 NE + 3 SE) ──
+        - {type: e3,   owner: enemy, position: [60, 10], stance: 0, count: 2, spawn_point: 1}
+        - {type: e3,   owner: enemy, position: [60, 30], stance: 0, count: 3, spawn_point: 1}
+        - {type: silo, owner: enemy, position: [40, 20], spawn_point: 1}
+        - {type: gun,  owner: enemy, position: [35, 10], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [90, 36], spawn_point: 1}
     win_condition:
       all_of:
         - {enemies_discovered_gte: 5}
-        - {units_lost_lte: 1}
+        - {unit_type_count_eq: {type: e1, n: 5}}
+        - {after_ticks: 1500}
         - {within_ticks: 3600}
     fail_condition:
       any_of:
         - {after_ticks: 3601}
-        - {not: {units_lost_lte: 1}}
-        - {not: {own_units_gte: 1}}
-    max_turns: 40
+        - {unit_type_count_gte: {type: e1, n: 6}}     # over-commit teeth
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 45
