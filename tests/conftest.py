@@ -8,7 +8,13 @@ import pytest
 
 
 _ENGINE_SKIP = pytest.mark.skip(reason="Rust env wheel not installed")
-_ENGINE_TOKENS = ("run_level(", "RustEnvPool(", "import openra_train")
+_ENGINE_TOKENS = (
+    "run_level(",
+    "RustEnvPool(",
+    "run_handoff(",
+    "open_study_session(",
+    "import openra_train",
+)
 
 
 def pytest_collection_modifyitems(config, items):
