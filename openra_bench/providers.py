@@ -362,6 +362,13 @@ class OpenAICompatibleProvider(ChatProvider):
                         fn["arguments"] = json.dumps(args)
                     fixed.append({**tc, "function": fn})
                 wm["tool_calls"] = fixed
+            elif "tool_calls" in wm:
+                # Strict endpoints (Together's Qwen3.6-Plus, some vLLM
+                # builds) reject an assistant message that carries
+                # `tool_calls: []` — "Empty tool_calls is not supported
+                # in message." A plain-text assistant turn must omit
+                # the key entirely.
+                wm.pop("tool_calls", None)
             out.append(wm)
         return out
 
