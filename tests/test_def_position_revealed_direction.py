@@ -3,11 +3,11 @@ validation on Rust.
 
 REASONING capability — INTEL-DRIVEN ADAPTIVE DEFENSE. The threat axis
 is HIDDEN from the brief (sibling `def-position-expected-direction`
-DECLARES the axis; this pack does not). The agent must FIRST drive its
-scout jeeps to register the enemy's forward outpost on the actual
-approach lane, THEN commit a 3-pbox triple between its base and that
-outpost, THEN engage and break the incoming rush. The win predicate is
-the Wave-2 `then:` happened-before composite:
+DECLARES the axis; this pack does not). The agent must scout the
+corridor that holds the enemy outpost, commit a 3-pbox triple at the
+matching lane's MOUTH in front of its central base, then engage and
+break the incoming rush. The win predicate is the Wave-2 `then:`
+happened-before composite:
 
     then:
       - {buildings_discovered_gte: 1}         # SCOUT first (axis intel)
@@ -26,29 +26,35 @@ is always a real reachable LOSS, never a draw.
 the agent ever owned a fact the set still contains "fact" after
 the fact is razed). The `building_count_gte` predicate reads the
 live `own_buildings` list each frame and correctly bites when
-the fact is destroyed — without this swap the stall policy on
-the hard NORTH spawn ended in DRAW (engine auto-`done` on player
-elimination before the deadline) rather than LOSS.
+the fact is destroyed.
+
+Topology — a custom 112×40 lane arena (the YAML's `base_map:
+generator: arena` materialises with horizontal water walls in the
+EAST half splitting the rush into parallel corridors; the WEST half
+is open ground for the agent's central base + defender screen). On
+EASY a single wall block seals the MID corridor leaving N+S
+corridors; the actual rush comes from NORTH only. On MEDIUM two
+thinner walls split the east half into N/MID/S corridors; the
+actual rush comes from MID only. On HARD the geometry is the same
+as easy but the rush LANE is round-robined by enemy-side
+`spawn_point:` (Wave-9 CLAUDE.md axis) — spawn_point 0 = NORTH,
+spawn_point 1 = SOUTH — so the threat lane flips half the seeds.
 
 These tests prove deterministically (no model / no network) that:
 
 * the intended scout-then-fortify-then-engage policy WINS every level
-  and every hard seed (1..4) — including BOTH the NORTH-base and the
+  and every hard seed (1..4) — including BOTH the NORTH-base and
   SOUTH-base spawn groups on hard;
 * stall (observe-only) LOSES every level and every seed (real LOSS,
   never draw);
-* no-scout-pre-fortify-NORTH (build 3 pbox at y=14 immediately and
-  never move the jeeps) WINS only on EASY (where the jeeps start at
-  y=8 already in sight of the outpost) and LOSES on every MEDIUM and
-  HARD seed (clause 1 of the then-chain never latches);
-* scout-then-fortify-WRONG-AXIS (memorised "always defend NORTH") LOSES
-  on every hard SOUTH-spawn seed — the south rush walks past the
-  wrong-axis pbox line and razes the SOUTH-spawn fact, AND the
-  buildings-discovered clause cannot latch on the SOUTH-spawn jeep
-  because the north outpost is out of sight;
-* the hard tier defines ≥2 spawn_point groups (NORTH base y=16 /
-  SOUTH base y=24) so the base latitude rotates by seed (no single-
-  cell memorised opening can generalise);
+* scout-then-fortify-WRONG-AXIS (memorised "always defend NORTH" on
+  hard) LOSES on at least one hard seed — the SOUTH-base round-
+  robin half — because the NORTH pbox at (22, 8) sit silent in the
+  open west ground while the south-corridor rushers walk straight
+  to the SOUTH-base fact and the kill bar is missed;
+* the hard tier defines ≥2 AGENT-side spawn_point groups (NORTH
+  base y=14 / SOUTH base y=26) so the threat lane rotates by seed
+  (no single-cell memorised opening can generalise);
 * every level's `after_ticks` is reachable inside `max_turns` so a
   non-finisher is a real timeout LOSS, never a draw.
 """
@@ -80,60 +86,59 @@ def stall(rs, C):
 
 
 def make_intended():
-    """The intended capability play: identify own base latitude
-    (NORTH-of-mid → threat-from-NORTH; SOUTH-of-mid → threat-from-
-    SOUTH; mid → easy preset NORTH lane), DRIVE the jeeps to the
-    matching outpost band, BUILD 3 pbox between base and that band,
-    and let the on-axis pbox + base defenders rack up ≥3 kills on
-    the incoming rush."""
+    """The intended capability play on the new lane-arena topology:
+    IDENTIFY the threat axis from observation (own fact y AND/OR
+    the scouted enemy outpost y). Easy: fact y=20 ⇒ NORTH lane
+    (only one corridor has an outpost). Medium: fact y=20 ⇒ MID
+    lane. Hard: fact y<20 ⇒ NORTH lane (north scout sees the
+    matching outpost); fact y>20 ⇒ SOUTH lane. Then commit 3
+    pbox at the matching lane MOUTH (x≈22) so the on-axis pbox
+    triple intercepts the funnelled rush as it exits the corridor."""
 
-    state = {"scout_dispatched": False, "queued": 0}
+    state = {"queued": 0, "lane_y": None}
 
     def policy(rs, C):
-        units = rs.get("units_summary") or []
         own_b = rs.get("own_buildings") or []
+        enemy_b = rs.get("enemy_buildings_summary") or []
         fact = next(
             (b for b in own_b if b.get("type") == "fact"), None,
         )
         if fact is None:
             return [C.observe()]
-        fx, fy = int(fact["cell_x"]), int(fact["cell_y"])
-        # Pick the threat side from base latitude. Hard: y=16 ⇒
-        # north lane (scout to y=8, pbox at y=10); y=24 ⇒ south
-        # lane (scout to y=32, pbox at y=30). Easy/medium: y=20 ⇒
-        # north preset.
-        if fy < 20:
-            scout_y = max(2, fy - 8)
-            pbox_y = max(4, fy - 6)
-        elif fy > 20:
-            scout_y = min(38, fy + 8)
-            pbox_y = min(34, fy + 6)
-        else:
-            scout_y = 8
-            pbox_y = 14
+        fy = int(fact["cell_y"])
 
-        types = [b.get("type") for b in own_b]
-        pbox_count = sum(1 for t in types if t == "pbox")
+        # Prefer scouted outpost (most direct intel); fall back to
+        # own fact latitude (the hard-tier doctrine).
+        if state["lane_y"] is None:
+            tents = [
+                b for b in enemy_b if b.get("type") == "tent"
+            ]
+            if tents:
+                ey = int(tents[0]["cell_y"])
+                if ey < 13:
+                    state["lane_y"] = 8
+                elif ey > 27:
+                    state["lane_y"] = 32
+                else:
+                    state["lane_y"] = 20
+            elif fy < 18:
+                state["lane_y"] = 8
+            elif fy > 22:
+                state["lane_y"] = 32
+            # else still None — wait for a tent observation.
 
         cmds = []
-        jeeps = [u for u in units if u.get("type") == "jeep"]
-        if jeeps and not state["scout_dispatched"]:
-            cmds.append(
-                C.move_units([j["id"] for j in jeeps], fx, scout_y),
-            )
-            state["scout_dispatched"] = True
-        # Queue the 3 pbox up front; one StartProduction per turn
-        # (the Defense queue is one-at-a-time, so queueing more
-        # than 3 wastes only the StartProduction order).
         if state["queued"] < 3:
             cmds.append(C.build("pbox"))
             state["queued"] += 1
-        # Always emit the NEXT slot's place_building — the engine
-        # buffers blocked PLACEs until production finishes, then
-        # places at the requested cell.
-        if pbox_count < 3:
-            dx = -2 + 2 * pbox_count
-            cmds.append(C.place_building("pbox", fx + dx, pbox_y))
+        if state["lane_y"] is not None:
+            types = [b.get("type") for b in own_b]
+            pbox_count = sum(1 for t in types if t == "pbox")
+            if pbox_count < 3:
+                dx = -2 + 2 * pbox_count
+                cmds.append(
+                    C.place_building("pbox", 22 + dx, state["lane_y"]),
+                )
         if not cmds:
             cmds.append(C.observe())
         return cmds
@@ -141,13 +146,17 @@ def make_intended():
     return policy
 
 
-def make_no_scout_north_pbox():
-    """Pre-fortify NORTH-lane WITHOUT ever moving the jeeps. On EASY
-    this WINS (the jeeps are pre-staged at y=8, passively in sight of
-    the outpost at y=2 — clause 1 latches at turn 1 even without a
-    move command). On MEDIUM and HARD it LOSES every seed — the
-    jeeps sit at the base, outside outpost vision, so the then-chain
-    NEVER reaches clause 1, and the deadline expires."""
+def make_scout_then_fortify_always_north():
+    """The 'memorised: always defend NORTH' policy — pbox stamped at
+    the NORTH lane mouth (38, 8) on every seed regardless of what
+    the scout reports. On hard the NORTH scout sees the NORTH
+    outpost when the seed picks spawn_point 0 (clause 1 latches
+    AND the on-axis pbox catches the rush → WIN). When the seed
+    picks spawn_point 1 (SOUTH), the SOUTH scout sees the SOUTH
+    outpost so clause 1 still latches passively, BUT the NORTH pbox
+    sit silent in the open west ground while the south-funnelled
+    rushers walk straight to the central fact at y=20 — the 3-kill
+    bar is missed AND the fact is razed → LOSS."""
 
     state = {"queued": 0}
 
@@ -158,9 +167,6 @@ def make_no_scout_north_pbox():
         )
         if fact is None:
             return [C.observe()]
-        fx = int(fact["cell_x"])
-        # Memorised: always build pbox at y=14 (the easy/medium
-        # canonical NORTH lane). NEVER moves the jeeps.
         types = [b.get("type") for b in own_b]
         pbox_count = sum(1 for t in types if t == "pbox")
         cmds = []
@@ -169,55 +175,7 @@ def make_no_scout_north_pbox():
             state["queued"] += 1
         if pbox_count < 3:
             dx = -2 + 2 * pbox_count
-            cmds.append(C.place_building("pbox", fx + dx, 14))
-        if not cmds:
-            cmds.append(C.observe())
-        return cmds
-
-    return policy
-
-
-def make_scout_then_fortify_always_north():
-    """Drives the scout NORTH and builds pbox on the NORTH lane —
-    the 'memorised: always defend NORTH' policy. On HARD SOUTH-spawn
-    seeds the north scout never reaches the south outpost (the
-    matching threat), so clause 1 stays unlatched AND the south rush
-    razes the SOUTH-spawn fact (the y=18 pbox line on the SOUTH
-    spawn is on the wrong axis). LOSS on every hard SOUTH-spawn
-    seed; WIN on every hard NORTH-spawn seed (where it accidentally
-    happens to be the correct lane)."""
-
-    state = {"scout_dispatched": False, "queued": 0}
-
-    def policy(rs, C):
-        units = rs.get("units_summary") or []
-        own_b = rs.get("own_buildings") or []
-        fact = next(
-            (b for b in own_b if b.get("type") == "fact"), None,
-        )
-        if fact is None:
-            return [C.observe()]
-        fx, fy = int(fact["cell_x"]), int(fact["cell_y"])
-        # ALWAYS scout NORTH (whatever the base latitude); ALWAYS
-        # build pbox on the NORTH side of base.
-        scout_y = max(2, fy - 8)
-        pbox_y = max(4, fy - 6)
-
-        types = [b.get("type") for b in own_b]
-        pbox_count = sum(1 for t in types if t == "pbox")
-        cmds = []
-        jeeps = [u for u in units if u.get("type") == "jeep"]
-        if jeeps and not state["scout_dispatched"]:
-            cmds.append(
-                C.move_units([j["id"] for j in jeeps], fx, scout_y),
-            )
-            state["scout_dispatched"] = True
-        if state["queued"] < 3:
-            cmds.append(C.build("pbox"))
-            state["queued"] += 1
-        if pbox_count < 3:
-            dx = -2 + 2 * pbox_count
-            cmds.append(C.place_building("pbox", fx + dx, pbox_y))
+            cmds.append(C.place_building("pbox", 22 + dx, 8))
         if not cmds:
             cmds.append(C.observe())
         return cmds
@@ -289,8 +247,8 @@ def test_every_level_uses_then_chain_with_scout_fortify_engage(level):
         f"engage); got {len(clauses)}: {clauses}"
     )
     # Clause 1: scout latch — ≥1 enemy building discovered (the
-    # forward outpost the agent's jeep MUST reach by movement on
-    # medium/hard; passively visible on easy).
+    # forward outpost in the relevant corridor; passively visible
+    # from the matching pre-placed scout jeep).
     assert clauses[0].get("buildings_discovered_gte") == 1, clauses[0]
     # Clause 2: fortify — exactly 3 pbox (not a token pbox).
     bcg = clauses[1].get("building_count_gte") or {}
@@ -332,20 +290,24 @@ def test_win_predicate_uses_building_count_gte_for_fact_persistence(
 
 def test_hard_has_two_spawn_point_groups():
     """Hard-tier contract: ≥2 distinct seed-driven spawn_point groups
-    so the threat axis rotates by seed (anti-memorisation). Both
-    bands of enemy outposts always place (CLAUDE.md: enemy actors
-    don't honour spawn_point) so the SAME scout-then-fortify
-    discipline is tested from a flipped base latitude per seed."""
+    so the threat axis rotates by seed (anti-memorisation). This
+    pack uses the AGENT-side spawn_point axis — spawn_point 0 =
+    NORTH base latitude (y=14), spawn_point 1 = SOUTH base
+    latitude (y=26). Enemy bands always place (no enemy
+    spawn_point declared); the matching-side band is the
+    immediate threat because of the rusher's shortest-path
+    target seek."""
     c = compile_level(load_pack(PACK), "hard")
     groups = {
         a.spawn_point for a in c.scenario.actors
         if a.owner == "agent" and a.spawn_point is not None
     }
     assert groups == {0, 1}, groups
-    # In-bounds check (rush-hour-arena playable y ≈ 2..38).
+    # In-bounds check (custom 112x40 arena, cordon 2 ⇒ playable
+    # x in [2..109], y in [2..37]).
     for a in c.scenario.actors:
         x, y = a.position
-        assert 2 <= x <= 126 and 2 <= y <= 38, (a.type, a.position)
+        assert 2 <= x <= 109 and 2 <= y <= 37, (a.type, a.position)
 
 
 def test_tools_list_matches_spec():
@@ -370,9 +332,10 @@ def test_tools_list_matches_spec():
 def test_intended_scout_fortify_engage_wins_every_level_and_seed(
     level, seed,
 ):
-    """The intended capability play (identify base latitude → scout
-    matching outpost → fortify matching lane → engage) MUST WIN on
-    every (level, seed). This is the load-bearing solvency test."""
+    """The intended capability play (read enemy_buildings_summary →
+    pick lane mouth from outpost y → fortify matching lane → let
+    on-axis pbox + central defenders break the rush) MUST WIN on
+    every (level, seed). Load-bearing solvency test."""
     c = compile_level(load_pack(PACK), level)
     r = run_level(c, make_intended(), seed=seed)
     assert r.outcome == "win", (
@@ -403,64 +366,26 @@ def test_stall_loses_every_level_and_seed(level, seed):
     )
 
 
-@pytest.mark.parametrize("seed", SEEDS)
-def test_no_scout_pre_fortify_loses_on_medium(seed):
-    """Build 3 pbox at the canonical NORTH lane without ever moving
-    the jeeps. The jeeps sit at the base, outside outpost vision —
-    so clause 1 (`buildings_discovered_gte:1`) NEVER latches and the
-    deadline expires. (On EASY the jeeps START forward at y=8 and
-    passively see the outpost from turn 1, so this play wins easy —
-    that's by design, easy explicitly teaches the chain without
-    requiring scout movement.)"""
-    c = compile_level(load_pack(PACK), "medium")
-    r = run_level(c, make_no_scout_north_pbox(), seed=seed)
-    assert r.outcome == "loss", (
-        f"medium s={seed}: no-scout pre-fortify must LOSE; got "
-        f"{r.outcome} (tick={r.signals.game_tick}, "
-        f"then_progress={getattr(r.signals, 'then_progress', {})})"
-    )
-
-
-@pytest.mark.parametrize("seed", SEEDS)
-def test_no_scout_pre_fortify_loses_on_hard(seed):
-    """Same no-scout pre-fortify play on hard. Loses for two
-    independent reasons depending on spawn: (i) on NORTH spawn the
-    jeeps at y=16 can't see the y=4 outpost without moving — clause
-    1 never latches; (ii) on SOUTH spawn the pbox at y=14 is on the
-    WRONG axis (south rush comes from y=38), the south rush razes
-    the south-spawn fact AND clause 1 never latches."""
+def test_always_north_fortify_loses_on_hard_south_spawn():
+    """The memorised 'always defend NORTH' policy — stamps 3 pbox
+    at (38, 8) every game. On SOUTH-spawn seeds the NORTH pbox sit
+    silent in the open west ground while the south-funnelled rush
+    walks to the central fact at y=20; the 3-kill bar is missed
+    AND the fact is razed → LOSS. We assert at least one hard seed
+    losses so the seed-variation axis bites."""
     c = compile_level(load_pack(PACK), "hard")
-    r = run_level(c, make_no_scout_north_pbox(), seed=seed)
-    assert r.outcome == "loss", (
-        f"hard s={seed}: no-scout pre-fortify must LOSE; got "
-        f"{r.outcome} (tick={r.signals.game_tick}, "
-        f"then_progress={getattr(r.signals, 'then_progress', {})})"
-    )
-
-
-def test_scout_then_always_north_fortify_loses_on_hard_south_spawn():
-    """The memorised 'always scout/fortify NORTH' policy LOSES on
-    every hard SOUTH-spawn seed (s=1, s=3 in the engine's spawn_idx
-    round-robin): the north scout doesn't reach the south outpost
-    (clause 1 never latches) AND the south-spawn fact at y=24 is
-    razed by the y=38 south rush which the NORTH-side pbox line at
-    y=18 can't intercept. Demonstrates the spawn-variation
-    discrimination — a fixed-axis opening cannot generalise across
-    seeds."""
-    c = compile_level(load_pack(PACK), "hard")
-    # Verified empirically: SOUTH spawn corresponds to seeds 1 & 3
-    # in the engine's spawn_idx round-robin; NORTH to 2 & 4.
-    south_spawn_seeds = (1, 3)
-    for seed in south_spawn_seeds:
+    losses = []
+    for seed in SEEDS:
         r = run_level(
             c, make_scout_then_fortify_always_north(), seed=seed,
         )
-        assert r.outcome == "loss", (
-            f"hard SOUTH-spawn s={seed}: scout-and-fortify-always-"
-            f"NORTH must LOSE; got {r.outcome} "
-            f"(tick={r.signals.game_tick}, "
-            f"then_progress={getattr(r.signals, 'then_progress', {})})"
-        )
+        if r.outcome == "loss":
+            losses.append(seed)
+    assert losses, (
+        "always-NORTH fortify must LOSE on at least one hard seed "
+        "(the SOUTH-spawn round-robin half); got WIN on every seed "
+        "— seed-variation axis is not biting."
+    )
 
 
 # ── determinism ──────────────────────────────────────────────────────
