@@ -701,9 +701,15 @@ def main(argv: list[str]) -> int:
         help="comma seeds run as a held-out split; reports the "
         "generalization gap (anti-memorization metric)",
     )
-    ap.add_argument("--provider", help="openrouter|vllm|openai|together (omit = scripted baseline)")
+    ap.add_argument("--provider", help="openrouter|vllm|openai|together|bedrock (omit = scripted baseline)")
     ap.add_argument("--model", default="anthropic/claude-3.5-sonnet")
     ap.add_argument("--base-url")
+    ap.add_argument(
+        "--bedrock-region", default="us-west-2",
+        help="AWS region for provider=bedrock. Sonnet 4.6 lives on the "
+        "`us.anthropic.claude-sonnet-4-6` cross-region inference profile "
+        "served from us-west-2 (default).",
+    )
     ap.add_argument("--no-vision", action="store_true")
     ap.add_argument("--out", default="eval_stats.json")
     ap.add_argument(
@@ -802,6 +808,8 @@ def main(argv: list[str]) -> int:
         )
         if a.temperature is not None:
             cfg_kw["temperature"] = a.temperature
+        if a.provider == "bedrock":
+            cfg_kw["bedrock_region"] = a.bedrock_region
         cfg = ProviderConfig(**cfg_kw)
 
     stats = evaluate(
