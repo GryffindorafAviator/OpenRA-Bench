@@ -1026,6 +1026,193 @@ Then run `evaluate.py --agent custom` with your agent integrated.
 """
 
 
+# ── Scenarios tab (interactive catalog) ────────────────────────────────────────
+
+_CAP_COLORS = {
+    "perception": "#7497db",
+    "reasoning": "#9b8cce",
+    "action": "#5fae7a",
+    "adversarial": "#d2683c",
+}
+
+_translate_cache: dict[str, str] = {}
+
+
+def _google_translate_zh(text: str) -> str:
+    """Translate English text to Simplified Chinese via Google Translate."""
+    if not text or not text.strip():
+        return text
+    if text in _translate_cache:
+        return _translate_cache[text]
+    import urllib.parse
+    import urllib.request
+
+    url = (
+        "https://translate.googleapis.com/translate_a/single"
+        "?client=gtx&sl=en&tl=zh-CN&dt=t&q="
+        + urllib.parse.quote(text)
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            result = "".join(seg[0] for seg in data[0] if seg[0])
+        _fixups = [
+            ("游戏前勾选", "游戏刻"), ("游戏勾选", "游戏刻"),
+            ("游戏滴答", "游戏刻"), ("游戏刻度", "游戏刻"),
+            ("游戏蜱虫", "游戏刻"), ("游戏壁虱", "游戏刻"),
+            ("游戏报价", "游戏刻"), ("游戏打勾", "游戏刻"),
+            ("决策轮次", "决策回合"), ("决策转弯", "决策回合"),
+            ("勾号", "刻"),
+        ]
+        for wrong, right in _fixups:
+            result = result.replace(wrong, right)
+        _translate_cache[text] = result
+        return result
+    except Exception:
+        return text
+
+
+def _scenarios_catalog_df() -> pd.DataFrame:
+    """Load every active scenario pack into a DataFrame for the catalog."""
+    try:
+        from openra_bench.scenarios import discover_packs
+    except Exception:  # noqa: BLE001
+        return pd.DataFrame(columns=[
+            "ID", "Title", "Capability", "Map", "Real-World Meaning",
+            "Robotics Analogue", "Benchmark Anchor",
+        ])
+    rows = []
+    for p in discover_packs():
+        if p.meta.status != "active":
+            continue
+        anchors = ", ".join(p.meta.benchmark_anchor) if p.meta.benchmark_anchor else ""
+        rows.append({
+            "ID": p.meta.id,
+            "Title": p.meta.title,
+            "Capability": p.meta.capability,
+            "Map": p.base_map if isinstance(p.base_map, str) else "generated",
+            "Real-World Meaning": p.meta.real_world_meaning,
+            "Robotics Analogue": p.meta.robotics_analogue,
+            "Benchmark Anchor": anchors,
+        })
+    return pd.DataFrame(rows)
+
+
+def _scenarios_filter(search: str, capabilities: list[str]) -> pd.DataFrame:
+    """Filter the scenario catalog by search term and capability."""
+    df = _scenarios_catalog_df()
+    if not len(df):
+        return df
+    df = df[df["Capability"].isin(capabilities or [])]
+    if search and search.strip():
+        q = search.strip().lower()
+        mask = (
+            df["ID"].str.lower().str.contains(q, na=False)
+            | df["Title"].str.lower().str.contains(q, na=False)
+            | df["Real-World Meaning"].str.lower().str.contains(q, na=False)
+        )
+        df = df[mask]
+    return df.reset_index(drop=True)
+
+
+def _scenarios_detail_md(pack_id: str, lang: str = "en") -> str:
+    """Render full detail for one scenario pack as Markdown.
+
+    When lang='zh', all objectives are shown in Chinese via Google Translate.
+    """
+    if not pack_id or not pack_id.strip():
+        return "_Select a scenario from the table above to see details._"
+    pack_id = pack_id.strip()
+    try:
+        from openra_bench.game_knowledge import objective_brief
+        from openra_bench.scenarios import load_pack
+        from openra_bench.scenarios.loader import PACKS_DIR
+
+        path = PACKS_DIR / f"{pack_id}.yaml"
+        if not path.exists():
+            return f"Pack `{pack_id}` not found."
+        pack = load_pack(path)
+    except Exception as e:  # noqa: BLE001
+        return f"Error loading `{pack_id}`: {e}"
+
+    cap = pack.meta.capability
+    color = _CAP_COLORS.get(cap, "#666")
+    anchors = ", ".join(pack.meta.benchmark_anchor) if pack.meta.benchmark_anchor else "none"
+
+    rwm = pack.meta.real_world_meaning
+    rob = pack.meta.robotics_analogue
+    if lang == "zh":
+        rwm = _google_translate_zh(rwm)
+        rob = _google_translate_zh(rob)
+
+    why_label = "为什么有这个场景：" if lang == "zh" else "Why this exists:"
+    robo_label = "机器人类比：" if lang == "zh" else "Robotics analogue:"
+    anchor_label = "基准锚点：" if lang == "zh" else "Benchmark anchors:"
+    levels_label = "### 难度等级" if lang == "zh" else "### Levels"
+
+    lines = [
+        f"## {_md_escape(pack.meta.title)}",
+        f"**ID:** `{pack.meta.id}` | **Capability:** "
+        f"<span style='background:{color};color:#fff;padding:2px 8px;"
+        f"border-radius:4px;font-size:0.85em'>{cap}</span> | "
+        f"**Map:** `{pack.base_map if isinstance(pack.base_map, str) else 'generated'}`",
+        "",
+        f"**{why_label}** {_md_escape(rwm)}",
+        "",
+        f"**{robo_label}** {_md_escape(rob)}",
+        "",
+        f"**{anchor_label}** {_md_escape(anchors)}",
+        "",
+        "---",
+        "",
+        levels_label,
+    ]
+
+    cells = []
+    if pack.configs:
+        for c in pack.configs:
+            try:
+                cl = pack.compile_config(c.name)
+                cells.append((c.name, cl))
+            except Exception as e:  # noqa: BLE001
+                cells.append((c.name, e))
+    else:
+        for lv in ("easy", "medium", "hard"):
+            try:
+                cl = pack.compile(lv)
+                cells.append((lv, cl))
+            except Exception as e:  # noqa: BLE001
+                cells.append((lv, e))
+
+    diff_zh = {"easy": "简单", "medium": "中等", "hard": "困难"}
+
+    for label, cl in cells:
+        if isinstance(cl, Exception):
+            lines.append(f"\n**{label}** — compile error: {cl}")
+            continue
+        fog = getattr(cl, "fog_mode", "vision")
+        cash_str = f" | cash: {cl.starting_cash}" if cl.starting_cash is not None else ""
+        display_label = diff_zh.get(label, label) if lang == "zh" else label
+        lines.append(
+            f"\n**{display_label}** (level {cl.level} | fog: {fog} | "
+            f"turns: {cl.max_turns}{cash_str})"
+        )
+        try:
+            ob = objective_brief(
+                cl.scenario.description, cl.win_condition,
+                cl.fail_condition, cl.max_turns,
+                getattr(cl, "objective_coords", "exact"),
+            )
+            if lang == "zh":
+                ob = _google_translate_zh(ob)
+            lines.append(f"```\n{ob}\n```")
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"_(objective error: {e})_")
+
+    return "\n".join(lines)
+
+
 # ── Play tab (human-labeling machine) ─────────────────────────────────────────
 # Lets a human play the exact scenarios LLM agents are scored on, by
 # clicking the minimap — the Phase 2 human-labeling machine. Backed by
@@ -1034,6 +1221,34 @@ Then run `evaluate.py --agent custom` with your agent integrated.
 
 _PLAY_LEVELS = ["easy", "medium", "hard"]
 _PLAY_UPSCALE = 5  # tactical-minimap cell scale for the Play tab
+
+_PLAY_KEYBOARD_JS = r"""
+() => {
+  if (window.__openraBenchPlayEnterBound) return;
+  window.__openraBenchPlayEnterBound = true;
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.metaKey ||
+        event.ctrlKey || event.altKey || event.repeat) {
+      return;
+    }
+    const target = event.target;
+    const tag = (target && target.tagName || "").toLowerCase();
+    if (["input", "textarea", "select", "button"].includes(tag) ||
+        (target && target.isContentEditable)) {
+      return;
+    }
+    const root = document.getElementById("play-end-turn-btn");
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return;
+    const button = root.tagName && root.tagName.toLowerCase() === "button"
+      ? root : root.querySelector("button");
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    button.click();
+  }, true);
+}
+"""
 
 
 def _play_scenarios() -> list[str]:
@@ -1105,6 +1320,14 @@ def _play_minimap(render_state: dict, sel=None, queue=None):
         )
     except Exception:  # noqa: BLE001
         return None
+
+
+def _play_render_state(sess, show_objectives: bool = False) -> dict:
+    rs = sess.render_state()
+    if not show_objectives and "objective_regions" in rs:
+        rs = dict(rs)
+        rs.pop("objective_regions", None)
+    return rs
 
 
 def _play_objective_md(sess) -> str:
@@ -1198,9 +1421,9 @@ def _play_briefing_md(sess, sel, queue, note: str = "") -> str:
     )
 
 
-def _play_render(sess, sel, queue):
+def _play_render(sess, sel, queue, show_objectives=False):
     img = (
-        _play_minimap(sess.render_state(), sel, queue)
+        _play_minimap(_play_render_state(sess, show_objectives), sel, queue)
         if sess is not None else None
     )
     return (
@@ -1211,7 +1434,7 @@ def _play_render(sess, sel, queue):
     )
 
 
-def _play_start(prev_sess, pack, level, seed):
+def _play_start(prev_sess, pack, level, seed, show_objectives=False):
     # Release any prior session's engine env before opening a new one.
     if prev_sess is not None:
         try:
@@ -1235,10 +1458,161 @@ def _play_start(prev_sess, pack, level, seed):
             None, [], [], "", None, f"⚠️ {e}", "_start failed_",
             empty_units,
         )
-    img, brief, status, units = _play_render(sess, [], [])
+    img, brief, status, units = _play_render(sess, [], [], show_objectives)
     return (
         sess, [], [], _play_objective_md(sess),
         img, brief, status, units,
+    )
+
+
+def _play_click(sess, sel, queue, show_objectives, evt: gr.SelectData):
+    """Contextual minimap click — classic RTS interaction, no mode:
+
+    * click a cell holding YOUR unit(s)  → select/deselect them (toggle);
+    * click an enemy with units selected → queue an ATTACK on it;
+    * click empty ground with a selection → queue a MOVE there.
+
+    So 'select a unit, then click where to send it' just works."""
+    if sess is None or evt is None or evt.index is None:
+        return (
+            sel, queue, _play_briefing_md(sess, sel, queue),
+            _play_units_df(sess, sel), None,
+        )
+    note = ""
+    try:
+        from openra_bench.human_labeling import (
+            HumanAction,
+            enemy_at_cell,
+            minimap_click_to_cell,
+            own_units_at_cell,
+        )
+
+        px, py = evt.index  # pixels in the displayed (upscaled) image
+        rs = sess.render_state()
+        rows = [r for r in (rs.get("minimap") or "").split("\n") if r]
+        if not rows:
+            return (
+                sel, queue, _play_briefing_md(sess, sel, queue),
+                _play_units_df(sess, sel), None,
+            )
+        h = len(rows)
+        w = max(len(r) for r in rows)
+        img_w = w * 6 * _PLAY_UPSCALE
+        img_h = h * 6 * _PLAY_UPSCALE
+        cx, cy = minimap_click_to_cell(px, py, img_w, img_h, w, h)
+        note = f"🖱 Cell **({cx}, {cy})**"
+
+        own_here = own_units_at_cell(rs, cx, cy, radius=0)
+        enemy_here = enemy_at_cell(rs, cx, cy, radius=0)
+        sel = list(sel)
+
+        if own_here:
+            # Toggle-select your own unit(s) on this cell.
+            for uid in own_here:
+                if uid in sel:
+                    sel.remove(uid)
+                else:
+                    sel.append(uid)
+            note += (
+                f" — selected unit {', '.join(own_here)} · "
+                f"**{len(sel)} selected**"
+            )
+        elif sel and enemy_here:
+            queue = queue + [
+                HumanAction(
+                    mode="attack", units=list(sel),
+                    target_id=enemy_here, target=(cx, cy),
+                )
+            ]
+            note += (
+                f" — queued **attack** on enemy {enemy_here} "
+                f"({len(sel)} unit(s))"
+            )
+        elif sel:
+            queue = queue + [
+                HumanAction(mode="move", units=list(sel), target=(cx, cy))
+            ]
+            note += f" — queued **move** of {len(sel)} unit(s) here"
+        else:
+            note += " — empty (select one of your units first)"
+    except Exception as e:  # noqa: BLE001
+        logger.warning("play click failed: %s", e)
+        note = ""
+    # Re-render the minimap so the selection boundary + move arrows
+    # update live as the player clicks.
+    img = (
+        _play_minimap(_play_render_state(sess, show_objectives), sel, queue)
+        if sess is not None else None
+    )
+    return (
+        sel, queue, _play_briefing_md(sess, sel, queue, note),
+        _play_units_df(sess, sel), img,
+    )
+
+
+def _play_end_turn(sess, sel, queue, show_objectives=False):
+    if sess is not None and not sess.done:
+        try:
+            sess.submit_turn(list(queue))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("play submit_turn failed: %s", e)
+    img, brief, status, units = _play_render(sess, [], [], show_objectives)
+    return sess, [], [], img, brief, status, units
+
+
+def _play_clear_queue(sess, sel, show_objectives=False):
+    """Cancel queued orders this turn (keeps the unit selection)."""
+    img = (
+        _play_minimap(_play_render_state(sess, show_objectives), sel, [])
+        if sess is not None else None
+    )
+    return (
+        [], _play_briefing_md(sess, sel, []),
+        _play_units_df(sess, sel), img,
+    )
+
+
+def _play_clear_selection(sess, queue, show_objectives=False):
+    """Cancel the current unit selection (keeps queued orders)."""
+    img = (
+        _play_minimap(_play_render_state(sess, show_objectives), [], queue)
+        if sess is not None else None
+    )
+    return (
+        [], _play_briefing_md(sess, [], queue),
+        _play_units_df(sess, []), img,
+    )
+
+
+def _play_toggle_objectives(sess, sel, queue, show_objectives):
+    if sess is None:
+        return None
+    return _play_minimap(
+        _play_render_state(sess, show_objectives), sel, queue
+    )
+
+
+def _play_build_item(sess, sel, queue, item, show_objectives=False):
+    """Queue a production order for the current turn (Play tab build queue)."""
+    note = ""
+    if sess is not None:
+        item = str(item or "").strip().lower()
+        if item:
+            try:
+                from openra_bench.human_labeling import HumanAction
+
+                queue = queue + [HumanAction(mode="build", unit_type=item)]
+                note = f"Queued **build {item}**"
+            except Exception as e:  # noqa: BLE001
+                logger.warning("play build queue failed: %s", e)
+                note = ""
+    img = (
+        _play_minimap(_play_render_state(sess, show_objectives), sel, queue)
+        if sess is not None else None
+    )
+    return (
+        queue, "", _play_briefing_md(sess, sel, queue, note),
+        _play_units_df(sess, sel), img,
     )
 
 
@@ -1287,7 +1661,7 @@ def _study_render(st: dict, prev_sess):
     except Exception as e:  # noqa: BLE001
         return (None, [], [], "", None, f"⚠️ {e}",
                 "_study load failed_", empty, st, _study_progress_md(st))
-    img, brief, status, units = _play_render(sess, [], [])
+    img, brief, status, units = _play_render(sess, [], [], False)
     return (sess, [], [], _play_objective_md(sess), img, brief, status,
             units, st, _study_progress_md(st))
 
@@ -1310,125 +1684,6 @@ def _study_next(prev_sess, st):
     st = dict(st)
     st["idx"] = st.get("idx", 0) + 1
     return _study_render(st, prev_sess)
-
-
-def _play_click(sess, sel, queue, evt: gr.SelectData):
-    """Contextual minimap click — classic RTS interaction, no mode:
-
-    * click a cell holding YOUR unit(s)  → select/deselect them (toggle);
-    * click an enemy with units selected → queue an ATTACK on it;
-    * click empty ground with a selection → queue a MOVE there.
-
-    So 'select a unit, then click where to send it' just works."""
-    if sess is None or evt is None or evt.index is None:
-        return (
-            sel, queue, _play_briefing_md(sess, sel, queue),
-            _play_units_df(sess, sel),
-        )
-    note = ""
-    try:
-        from openra_bench.human_labeling import (
-            HumanAction,
-            enemy_at_cell,
-            minimap_click_to_cell,
-            own_units_at_cell,
-        )
-
-        px, py = evt.index  # pixels in the displayed (upscaled) image
-        rs = sess.render_state()
-        rows = [r for r in (rs.get("minimap") or "").split("\n") if r]
-        if not rows:
-            return (
-                sel, queue, _play_briefing_md(sess, sel, queue),
-                _play_units_df(sess, sel),
-            )
-        h = len(rows)
-        w = max(len(r) for r in rows)
-        img_w = w * 6 * _PLAY_UPSCALE
-        img_h = h * 6 * _PLAY_UPSCALE
-        cx, cy = minimap_click_to_cell(px, py, img_w, img_h, w, h)
-        note = f"🖱 Cell **({cx}, {cy})**"
-
-        own_here = own_units_at_cell(rs, cx, cy, radius=0)
-        enemy_here = enemy_at_cell(rs, cx, cy, radius=0)
-        sel = list(sel)
-
-        if own_here:
-            # Toggle-select your own unit(s) on this cell.
-            for uid in own_here:
-                if uid in sel:
-                    sel.remove(uid)
-                else:
-                    sel.append(uid)
-            note += (
-                f" — selected unit {', '.join(own_here)} · "
-                f"**{len(sel)} selected**"
-            )
-        elif sel and enemy_here:
-            queue = queue + [
-                HumanAction(
-                    mode="attack", units=list(sel),
-                    target_id=enemy_here, target=(cx, cy),
-                )
-            ]
-            note += (
-                f" — queued **attack** on enemy {enemy_here} "
-                f"({len(sel)} unit(s))"
-            )
-        elif sel:
-            queue = queue + [
-                HumanAction(mode="move", units=list(sel), target=(cx, cy))
-            ]
-            note += f" — queued **move** of {len(sel)} unit(s) here"
-        else:
-            note += " — empty (select one of your units first)"
-    except Exception as e:  # noqa: BLE001
-        logger.warning("play click failed: %s", e)
-        note = ""
-    # Re-render the minimap so the selection boundary + move arrows
-    # update live as the player clicks.
-    img = (
-        _play_minimap(sess.render_state(), sel, queue)
-        if sess is not None else None
-    )
-    return (
-        sel, queue, _play_briefing_md(sess, sel, queue, note),
-        _play_units_df(sess, sel), img,
-    )
-
-
-def _play_end_turn(sess, sel, queue):
-    if sess is not None and not sess.done:
-        try:
-            sess.submit_turn(list(queue))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("play submit_turn failed: %s", e)
-    img, brief, status, units = _play_render(sess, [], [])
-    return sess, [], [], img, brief, status, units
-
-
-def _play_clear_queue(sess, sel):
-    """Cancel queued orders this turn (keeps the unit selection)."""
-    img = (
-        _play_minimap(sess.render_state(), sel, [])
-        if sess is not None else None
-    )
-    return (
-        [], _play_briefing_md(sess, sel, []),
-        _play_units_df(sess, sel), img,
-    )
-
-
-def _play_clear_selection(sess, queue):
-    """Cancel the current unit selection (keeps queued orders)."""
-    img = (
-        _play_minimap(sess.render_state(), [], queue)
-        if sess is not None else None
-    )
-    return (
-        [], _play_briefing_md(sess, [], queue),
-        _play_units_df(sess, []), img,
-    )
 
 
 def build_app() -> gr.Blocks:
@@ -1517,6 +1772,91 @@ def build_app() -> gr.Blocks:
                 )
                 refresh_cap = gr.Button("Refresh")
                 refresh_cap.click(load_capability_leaderboard, outputs=cap_df)
+
+            # ── Scenarios Tab ─────────────────────────────────────────────
+            with gr.Tab("Scenarios"):
+                gr.Markdown(
+                    "Browse every active scenario pack. Each pack tests "
+                    "one capability at three difficulty levels with "
+                    "identical win/fail rules used to score LLM agents. "
+                    "Switch to **中文** for Chinese translations."
+                )
+                with gr.Row():
+                    scen_search = gr.Textbox(
+                        label="Search",
+                        placeholder="Filter by id, title, or meaning...",
+                        scale=3,
+                    )
+                    scen_cap_filter = gr.CheckboxGroup(
+                        choices=["perception", "reasoning", "action",
+                                 "adversarial"],
+                        value=["perception", "reasoning", "action",
+                               "adversarial"],
+                        label="Capability",
+                        scale=3,
+                    )
+                    scen_lang = gr.Radio(
+                        choices=["English", "中文"],
+                        value="English",
+                        label="Language",
+                        scale=1,
+                    )
+                scen_table = gr.Dataframe(
+                    value=_scenarios_filter("", [
+                        "perception", "reasoning", "action", "adversarial"
+                    ]),
+                    interactive=False,
+                    wrap=True,
+                    show_label=False,
+                )
+                scen_filter_inputs = [scen_search, scen_cap_filter]
+                for comp in scen_filter_inputs:
+                    comp.change(
+                        fn=_scenarios_filter,
+                        inputs=scen_filter_inputs,
+                        outputs=scen_table,
+                    )
+                gr.Markdown("---")
+                scen_id_input = gr.Textbox(
+                    label="Pack ID (click a row above or type)",
+                    placeholder="e.g. combat-focus-fire-priority",
+                )
+                scen_detail = gr.Markdown(
+                    "_Select a scenario from the table above to see "
+                    "details._"
+                )
+
+                def _scen_detail_with_lang(pack_id, lang_choice):
+                    lang = "zh" if lang_choice == "中文" else "en"
+                    return _scenarios_detail_md(pack_id, lang)
+
+                scen_id_input.change(
+                    fn=_scen_detail_with_lang,
+                    inputs=[scen_id_input, scen_lang],
+                    outputs=scen_detail,
+                )
+                scen_lang.change(
+                    fn=_scen_detail_with_lang,
+                    inputs=[scen_id_input, scen_lang],
+                    outputs=scen_detail,
+                )
+
+                def _scen_row_select(evt: gr.SelectData, df, lang_choice):
+                    if evt is None or df is None or not len(df):
+                        return gr.update(), gr.update()
+                    try:
+                        row_idx = evt.index[0]
+                        pack_id = str(df.iloc[row_idx]["ID"])
+                        lang = "zh" if lang_choice == "中文" else "en"
+                        return pack_id, _scenarios_detail_md(pack_id, lang)
+                    except Exception:  # noqa: BLE001
+                        return gr.update(), gr.update()
+
+                scen_table.select(
+                    fn=_scen_row_select,
+                    inputs=[scen_table, scen_lang],
+                    outputs=[scen_id_input, scen_detail],
+                )
 
             # ── Battle Viewer Tab ─────────────────────────────────────────
             # Browse saved playbacks: filter run → model → scenario,
@@ -1673,6 +2013,14 @@ def build_app() -> gr.Blocks:
                         value=1, label="Seed", precision=0, scale=1,
                     )
                     play_start = gr.Button("▶ Start", scale=1)
+                play_show_objectives = gr.Checkbox(
+                    label="Show objective rings", value=False,
+                    info="Only available when the scenario already reveals exact coordinates.",
+                )
+                gr.Markdown(
+                    "_Press **Enter** to end the turn when focus is outside "
+                    "inputs._"
+                )
                 play_objective = gr.Markdown()
                 play_status = gr.Markdown(_play_status_md(None))
                 # Minimap on its own full-width row. No fixed height —
@@ -1690,20 +2038,56 @@ def build_app() -> gr.Blocks:
                     interactive=False, wrap=True,
                 )
                 with gr.Row():
-                    play_clearsel_btn = gr.Button(
-                        "✖ Clear selection", scale=1
+                    play_build_item = gr.Textbox(
+                        label="Build item",
+                        value="e1",
+                        placeholder="e1, pbox, proc, powr, ...",
+                        scale=2,
                     )
-                    play_clear_btn = gr.Button("Clear queued", scale=1)
+                    play_build_btn = gr.Button("Queue build", scale=1)
+                with gr.Row():
+                    play_clearsel_btn = gr.Button(
+                        "✖ Clear selected units", scale=1
+                    )
+                    play_clear_btn = gr.Button(
+                        "Cancel queued orders", scale=1
+                    )
                     play_end_btn = gr.Button(
-                        "End Turn ▶", variant="primary", scale=2,
+                        "End Turn (Enter) ▶", variant="primary", scale=2,
+                        elem_id="play-end-turn-btn",
                     )
 
                 play_start.click(
                     _play_start,
-                    inputs=[play_sess, play_scen, play_level, play_seed],
+                    inputs=[
+                        play_sess, play_scen, play_level, play_seed,
+                        play_show_objectives,
+                    ],
                     outputs=[
                         play_sess, play_sel, play_queue, play_objective,
                         play_img, play_brief, play_status, play_units,
+                    ],
+                )
+                play_img.select(
+                    _play_click,
+                    inputs=[
+                        play_sess, play_sel, play_queue,
+                        play_show_objectives,
+                    ],
+                    outputs=[
+                        play_sel, play_queue, play_brief, play_units,
+                        play_img,
+                    ],
+                )
+                play_build_btn.click(
+                    _play_build_item,
+                    inputs=[
+                        play_sess, play_sel, play_queue, play_build_item,
+                        play_show_objectives,
+                    ],
+                    outputs=[
+                        play_queue, play_build_item, play_brief,
+                        play_units, play_img,
                     ],
                 )
                 _study_outputs = [
@@ -1719,17 +2103,12 @@ def build_app() -> gr.Blocks:
                     _study_next, inputs=[play_sess, study_state],
                     outputs=_study_outputs,
                 )
-                play_img.select(
-                    _play_click,
-                    inputs=[play_sess, play_sel, play_queue],
-                    outputs=[
-                        play_sel, play_queue, play_brief, play_units,
-                        play_img,
-                    ],
-                )
                 play_end_btn.click(
                     _play_end_turn,
-                    inputs=[play_sess, play_sel, play_queue],
+                    inputs=[
+                        play_sess, play_sel, play_queue,
+                        play_show_objectives,
+                    ],
                     outputs=[
                         play_sess, play_sel, play_queue,
                         play_img, play_brief, play_status, play_units,
@@ -1737,18 +2116,27 @@ def build_app() -> gr.Blocks:
                 )
                 play_clearsel_btn.click(
                     _play_clear_selection,
-                    inputs=[play_sess, play_queue],
+                    inputs=[play_sess, play_queue, play_show_objectives],
                     outputs=[
                         play_sel, play_brief, play_units, play_img,
                     ],
                 )
                 play_clear_btn.click(
                     _play_clear_queue,
-                    inputs=[play_sess, play_sel],
+                    inputs=[play_sess, play_sel, play_show_objectives],
                     outputs=[
                         play_queue, play_brief, play_units, play_img,
                     ],
                 )
+                play_show_objectives.change(
+                    _play_toggle_objectives,
+                    inputs=[
+                        play_sess, play_sel, play_queue,
+                        play_show_objectives,
+                    ],
+                    outputs=play_img,
+                )
+                app.load(fn=None, js=_PLAY_KEYBOARD_JS)
 
             # ── About Tab ─────────────────────────────────────────────────
             with gr.Tab("About"):

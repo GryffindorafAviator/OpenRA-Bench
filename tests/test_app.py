@@ -27,6 +27,9 @@ from app import (
     _safe_replay_link,
     _sanitize_csv_value,
     _save_raw_game,
+    _scenarios_catalog_df,
+    _scenarios_detail_md,
+    _scenarios_filter,
     _single_game_row,
     _submit_times,
     _verified_badge,
@@ -1349,3 +1352,75 @@ class TestPlayTab:
         assert _PLAY_UNIT_COLS == [
             "sel", "unit", "type", "cell", "hp", "status"
         ]
+
+
+# ── Scenarios tab (interactive catalog) ──────────────────────────────
+
+
+class TestScenariosTab:
+    """The Scenarios tab — interactive catalog of all active packs."""
+
+    def test_catalog_df_returns_dataframe(self):
+        df = _scenarios_catalog_df()
+        assert isinstance(df, pd.DataFrame)
+
+    def test_catalog_df_has_expected_columns(self):
+        df = _scenarios_catalog_df()
+        for col in ("ID", "Title", "Capability", "Map",
+                     "Real-World Meaning", "Robotics Analogue"):
+            assert col in df.columns, f"Missing column: {col}"
+
+    def test_catalog_df_has_active_packs(self):
+        df = _scenarios_catalog_df()
+        assert len(df) > 10, "Expected many active packs"
+
+    def test_catalog_df_only_active_packs(self):
+        df = _scenarios_catalog_df()
+        assert len(df) > 0
+        caps = set(df["Capability"].unique())
+        assert caps <= {"perception", "reasoning", "action", "adversarial"}
+
+    def test_filter_by_capability(self):
+        df = _scenarios_filter("", ["perception"])
+        assert len(df) > 0
+        assert all(df["Capability"] == "perception")
+
+    def test_filter_by_search(self):
+        df = _scenarios_filter("combat", [
+            "perception", "reasoning", "action", "adversarial"
+        ])
+        assert len(df) > 0
+        for _, row in df.iterrows():
+            matched = (
+                "combat" in row["ID"].lower()
+                or "combat" in row["Title"].lower()
+                or "combat" in row["Real-World Meaning"].lower()
+            )
+            assert matched, f"Row {row['ID']} doesn't match 'combat'"
+
+    def test_filter_empty_capabilities_returns_empty(self):
+        df = _scenarios_filter("", [])
+        assert len(df) == 0
+
+    def test_filter_no_match_returns_empty(self):
+        df = _scenarios_filter("zzz_nonexistent_pack_zzz", [
+            "perception", "reasoning", "action", "adversarial"
+        ])
+        assert len(df) == 0
+
+    def test_detail_md_no_selection(self):
+        md = _scenarios_detail_md("")
+        assert "select" in md.lower() or "Select" in md
+
+    def test_detail_md_nonexistent_pack(self):
+        md = _scenarios_detail_md("zzz-no-such-pack-zzz")
+        assert "not found" in md.lower()
+
+    def test_detail_md_valid_pack(self):
+        df = _scenarios_catalog_df()
+        if len(df) == 0:
+            pytest.skip("no packs available")
+        pack_id = df.iloc[0]["ID"]
+        md = _scenarios_detail_md(pack_id)
+        assert pack_id in md
+        assert "WIN WHEN" in md or "Levels" in md
