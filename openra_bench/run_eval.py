@@ -359,8 +359,23 @@ def evaluate(
             _fog = getattr(compiled, "fog_mode", "vision") or "vision"
             if len(parts) >= 3:
                 _fog = parts[-1]
+            # `full_playback_root` is treated as the FINAL per-model dir
+            # — callers (e.g. scripts/collect_eval_data.py) already
+            # build `<out>/<timestamp>__<model>` and pass it through. We
+            # previously appended `<run_id>__<model>` here which
+            # produced a double-nested path; if the caller supplied a
+            # plain root we still want a per-model subdir, but only if
+            # the path doesn't already look like one. Heuristic: if the
+            # leaf already starts with the run_id or contains the model
+            # safe-name, treat it as final; otherwise append.
+            _fp_root = Path(full_playback_root)
+            _leaf = _fp_root.name
+            if (run_id and _leaf.startswith(run_id)) or _safe_model in _leaf:
+                _fp_dir = _fp_root
+            else:
+                _fp_dir = _fp_root / f"{run_id}__{_safe_model}"
             fpb = FullPlayback(
-                Path(full_playback_root) / f"{run_id}__{_safe_model}",
+                _fp_dir,
                 pack_id=_pack_id,
                 level=_level,
                 seed=seed,
