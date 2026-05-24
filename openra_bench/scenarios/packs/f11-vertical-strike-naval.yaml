@@ -100,10 +100,13 @@ base:
   # `after_ticks` bites cleanly.
   interrupts: {}
   termination:
-    # Engine caps max_ticks at DEFAULT_MAX_TICKS=10000 regardless of
-    # this value. Every tier's deadline must be ≤ 9999 and `max_turns
-    # ≤ 110` (reachable tick = 93+90·(N-1)).
-    max_ticks: 10000
+    # Engine commit 493898e wires `termination.max_ticks` through
+    # end-to-end; the historical 10000-tick hard cap is removed.
+    # Hard tier restores the original `audits/family11_full_game.csv`
+    # design at max_turns 160 / within_ticks 14000 / reachable max
+    # 14403. Easy / medium stay at their POC-validated budgets so
+    # this single ceiling covers all three.
+    max_ticks: 14500
     # F11 §79: enemy_units_killed: false is MANDATORY for predicates
     # that gate on enemy_buildings_destroyed_gte. Without it, the
     # engine auto-`done`s the moment the agent wipes the last enemy
@@ -314,9 +317,11 @@ levels:
   # defense turret (`gun`) that menaces a lone destroyer in range —
   # forces the intended policy to either field ≥2 destroyers (focus
   # fire) OR have ground support to suppress while the dd shells.
-  # Tri-wave NOT used — engine caps max_ticks at 10000, so we stay
-  # with dual-wave: tank rusher @ tick 4500 and rocket-soldier
-  # reinforce @ tick 6500.
+  # Dual-wave: tank rusher @ tick 4500 and rocket-soldier reinforce
+  # @ tick 6500. Wave ticks are preserved from the POC budget; the
+  # post-wave window (tick 6500 → deadline 14000) now provides a
+  # ~7500-tick rebuild + strike runway, matching the original CSV
+  # design intent.
   #
   # Force composition: ≥3 tanks AND ≥2 destroyers; kill quota ≥3
   # (deliberately not 4 to keep the budget comfortable on hard given
@@ -336,9 +341,9 @@ levels:
       soldier reinforcement around tick 6500. Build a War Factory AND
       a Shipyard, field at least three medium tanks AND at least two
       destroyers, then raze at least three enemy buildings (with at
-      least one coastal AND one inland) — all within about 110 turns.
+      least one coastal AND one inland) — all within about 160 turns.
       Keep your Construction Yard standing.
-    starting_cash: 15000
+    starting_cash: 13500
     overrides:
       base_map:
         generator: naval-arena
@@ -440,13 +445,17 @@ levels:
               # solo dd before it razes 2 coastal targets. Stall /
               # all-arm losses are unchanged.
               - {enemy_buildings_destroyed_gte: 3}
-        # max_turns 110 ⇒ reachable max = 93+90·109 = 9903; deadline
-        # 9800 leaves a ~100-tick buffer.
-        - {within_ticks: 9800}
+        # max_turns 160 ⇒ reachable max = 93+90·159 = 14403; deadline
+        # 14000 leaves a ~400-tick buffer. Engine commit 493898e
+        # removed the historical 10000-tick max_ticks cap, so
+        # `base.termination.max_ticks: 14500` is honoured end-to-end
+        # and this is the original audits/family11_full_game.csv
+        # design budget.
+        - {within_ticks: 14000}
         - {building_count_gte: {type: fact, n: 1}}
     fail_condition:
       any_of:
-        - {after_ticks: 9801}
+        - {after_ticks: 14001}
         - {not: {building_count_gte: {type: fact, n: 1}}}
         - {not: {own_units_gte: 1}}
-    max_turns: 110
+    max_turns: 160
