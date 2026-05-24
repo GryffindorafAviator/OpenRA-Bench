@@ -62,12 +62,14 @@ class StartRequest(BaseModel):
 
 
 class ActionItem(BaseModel):
-    mode: str  # "move" | "attack" | "observe" | "build" | "surrender"
+    mode: str  # "move" | "attack" | "observe" | "build" | "place_building" | "surrender"
     unit_ids: List[str] = []
     target_x: Optional[int] = None
     target_y: Optional[int] = None
     target_id: Optional[str] = None
     building_type: Optional[str] = None
+    unit_type: Optional[str] = None
+    item: Optional[str] = None
 
 
 class StepRequest(BaseModel):
@@ -159,6 +161,13 @@ def _serialize_state(sess) -> dict:
         "harvesters": sig.harvesters,
         "power_provided": sig.power_provided,
         "power_drained": sig.power_drained,
+        "production": list(rs.get("production", []) or []),
+        "available_production": list(rs.get("available_production", []) or []),
+        "tools": list(
+            getattr(sess.compiled, "tools", None)
+            or getattr(getattr(sess.compiled, "scenario", None), "tools", None)
+            or []
+        ),
     }
 
 
@@ -231,6 +240,7 @@ def step_game(req: StepRequest):
                 units=a.unit_ids,
                 target=target,
                 target_id=a.target_id,
+                unit_type=a.unit_type or a.building_type or a.item or "",
             ))
 
         sess.submit_turn(actions)
