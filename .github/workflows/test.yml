@@ -94,6 +94,13 @@ jobs:
           .venv/bin/pip install pytest pytest-timeout pytest-xdist
           .venv/bin/pip install -r requirements.txt
 
+      # Verify vendor RA YAML exists in the OpenRA-Rust checkout (PR #15
+      # removed gamerules::defaults() — vendor is now strict-required).
+      - name: Verify vendor YAML present
+        run: |
+          ls OpenRA-Rust/vendor/OpenRA/mods/ra/rules/*.yaml | head -5
+          echo "VENDOR_DIR=$(pwd)/OpenRA-Rust/vendor/OpenRA/mods/ra" >> $GITHUB_ENV
+
       - name: Run tests
         # --timeout=120 per-test (was hanging the workflow at 20+ min with
         # no progress; engine-bound scripted-policy tests can be slow, but
@@ -101,6 +108,13 @@ jobs:
         # -n auto for parallel execution across CPU cores.
         # --maxfail=20 to cap noise on a broken commit and surface the
         # first 20 failures without burning the whole 6h budget.
+        # OPENRA_VENDOR_DIR — engine PR #15 (defaults() removed) requires
+        # vendor RA YAML at runtime. The auto-resolved paths
+        # (CARGO_MANIFEST_DIR/../vendor, ./vendor, ../vendor) don't reach
+        # the OpenRA-Rust sibling checkout in CI; set the env var
+        # explicitly to the cloned vendor dir.
+        env:
+          OPENRA_VENDOR_DIR: ${{ env.VENDOR_DIR }}
         run: |
           .venv/bin/python -m pytest tests/ -v \
             --timeout=120 \
