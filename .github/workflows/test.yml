@@ -91,8 +91,19 @@ jobs:
       # ── bench deps + tests ────────────────────────────────────────
       - name: Install bench dependencies (into the same venv as the wheel)
         run: |
-          .venv/bin/pip install pytest
+          .venv/bin/pip install pytest pytest-timeout pytest-xdist
           .venv/bin/pip install -r requirements.txt
 
       - name: Run tests
-        run: .venv/bin/python -m pytest tests/ -v
+        # --timeout=120 per-test (was hanging the workflow at 20+ min with
+        # no progress; engine-bound scripted-policy tests can be slow, but
+        # any single test taking >2 min is a hang or a bad-design bug.)
+        # -n auto for parallel execution across CPU cores.
+        # --maxfail=20 to cap noise on a broken commit and surface the
+        # first 20 failures without burning the whole 6h budget.
+        run: |
+          .venv/bin/python -m pytest tests/ -v \
+            --timeout=120 \
+            -n auto \
+            --maxfail=20 \
+            --tb=short
