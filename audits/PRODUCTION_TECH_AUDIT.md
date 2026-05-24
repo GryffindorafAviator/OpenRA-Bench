@@ -103,8 +103,23 @@ afford_at_start | afford_by_deadline | build_in_budget | faction | issues
   from `starting_cash` alone?
 - `afford_by_deadline` — bool, can `starting_cash + projected_income
   × max_turns` fund the intended build?
-- `build_in_budget` — bool, does the sum of build times (serialized
-  on a single production building) fit in `max_turns`?
+- `build_in_budget` — bool, does the LONGEST per-queue build time
+  fit in `max_turns`? The engine runs Building / Defense / Vehicle /
+  Infantry / Aircraft / Ship queues IN PARALLEL — chain steps in
+  DIFFERENT queues do NOT serialize. The check groups the chain by
+  queue (per `World::item_queue_type`, `openra-sim/src/world.rs:5559`),
+  sums build times within each queue, and compares the MAX queue
+  sum against `max_turns`. Engine pin:
+  `openra-sim/tests/test_parallel_production.rs` (two `weap`
+  buildings roughly double Vehicle throughput).
+  - Defense (1×1 footprint buildings: `pbox`, `gun`, `hbox`, `tsla`,
+    `sam`, `ftur`) is a DISTINCT queue from Building (≥2×2
+    footprint), even though both are fed by the construction yard
+    — they advance in parallel. A `pbox` and a `powr` can build
+    simultaneously.
+  - The `issues` column reports the bottleneck queue + the
+    per-queue breakdown (and the serial-total as diagnostic),
+    so a reviewer can see WHICH queue overflows.
 - `faction` — `allies` / `soviet` / `mixed`.
 - `issues` — short freeform notes; populate when any bool above is
   False or when a faction mismatch is detected.
@@ -124,8 +139,13 @@ afford_at_start | afford_by_deadline | build_in_budget | faction | issues
    build `2tnk` (medium tank, Allies-only) or `mtnk` (Mammoth). The
    bench default is Allies; only flip if intentional.
 5. **Build-time exceeds deadline.** A 30-turn `max_turns` cannot
-   serialize `weap` (30s) + `fix` (22s) + `2tnk` (18s) — needs ≥70
-   turns or pre-placed prereqs.
+   build the SINGLE longest-queue chain — e.g. Building queue
+   `weap` (30s) + `fix` (22s) totals 52s on the Building queue
+   alone, and that 52s must fit even though the Vehicle queue
+   (`2tnk` 18s) runs in PARALLEL with it. The audit reports the
+   MAX per-queue sum, not the cross-queue serial sum: a pack that
+   needs (`weap`, `fix`) on Building AND (`2tnk`) on Vehicle has a
+   binding bottleneck of 52s (Building), not 70s (serial).
 6. **`harv` not surfaced as buildable** when the win requires
    replacing a dead harv (the `econ-replace-dead-harvester` idiom
    needs `weap` exposed so the agent can produce a new harv).
