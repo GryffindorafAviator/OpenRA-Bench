@@ -96,7 +96,7 @@ def test_medium_predicates():
     # Force wipe → fail
     assert evaluate(c.fail_condition, _ctx(units=[], tick=2500, kills=4))
     # Timeout with bar unmet → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(2), tick=5401, kills=3))
+    assert evaluate(c.fail_condition, _ctx(units=_alive(2), tick=4502, kills=3))
 
 
 def test_hard_predicates():
@@ -108,7 +108,7 @@ def test_hard_predicates():
     # Force wipe → fail
     assert evaluate(c.fail_condition, _ctx(units=[], tick=3500, kills=6))
     # Timeout → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(1), tick=8551, kills=5))
+    assert evaluate(c.fail_condition, _ctx(units=_alive(1), tick=4502, kills=5))
 
 
 def test_timeout_reachable_inside_max_turns():
