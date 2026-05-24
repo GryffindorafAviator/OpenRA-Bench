@@ -1,3 +1,78 @@
+# ECON-FAR-PATCH-VS-NEAR-PATCH — choose the SHORT-round-trip ore source.
+#
+# REASONING capability — travel-vs-throughput patch selection under a
+# hard economy deadline. The agent owns ONE harvester, a refinery and
+# a Construction Yard, and faces TWO ore patches: a NEAR patch a short
+# hop from the refinery, and a FAR patch much farther away. Under a
+# tight deadline, round-trip latency dominates pile size — the
+# short-round-trip patch lets the harvester complete many delivery
+# cycles, while the far patch burns the whole episode in transit.
+#
+# ── The no-cheat trap and how this pack avoids it ────────────────────
+# Engine footgun (`auto_route_idle_harvesters`): an idle harv whose
+# owner has a `proc` is automatically routed to the NEAREST ore. If
+# the pre-placed harv sits between the patches and the near patch is
+# closest, STALL auto-routes to the near patch and WINS for free —
+# inverting the no-cheat bar. To make routing a real decision the
+# harv is pre-placed ADJACENT TO THE FAR PATCH; auto-route then sends
+# it to the far patch by default, and only an explicit
+# `Command.harvest(harv, near_x, near_y)` order overrides the route
+# (the user's `Harvest` order locks in for ~300 ticks per the engine's
+# `USER_HARVEST_RESPECT_TICKS` window, then needs re-issuing to keep
+# the harv on the near patch indefinitely).
+#
+# ── No-cheat bar (per CLAUDE.md "no defect, no cheat") ──────────────
+# Every lazy / brute / wrong-route play LOSES; the intended route-near
+# play WINS:
+#
+#   • stall (only observe)        → LOSS (harv auto-routes FAR → one
+#     delivery cycle in the whole window → bar unmet).
+#   • route to the FAR patch      → LOSS (same as stall — far patch
+#     round-trip burns the episode).
+#   • intended (route NEAR)       → WIN (short round-trip cycles the
+#     harv many times → cash clears the bar).
+#   • hard tier defines ≥2 agent spawn_point groups (NORTH y=14 /
+#     SOUTH y=28); the near/far patches are duplicated at each
+#     latitude, so a memorised "always route to (16, 14)" opening
+#     LOSES on SOUTH spawn seeds (the harv is at the SOUTH latitude
+#     and (16, 14) is 14 cells off-axis → wrong-latitude routing
+#     LOSES the same way as routing FAR).
+#
+# ── Custom 64x40 arena (replaces the generic 128x40 rush-hour-arena) ─
+# The capability under test is GEOGRAPHIC ROUTING: pick the short
+# round-trip. A bespoke 64x40 open arena makes the near-vs-far
+# throughput gap the only axis of variation. Width 64 keeps the
+# decision crisp — near patch at x=16 (~4 cells from the proc),
+# far patch at x=58 (~46 cells from the proc), a ~12x distance
+# ratio that translates to ~15x throughput ratio inside the deadline.
+# A wider map would just inflate transit time without sharpening the
+# decision.
+#
+# ── Engine facts the design depends on ──────────────────────────────
+#  1. `auto_route_idle_harvesters` (per-tick world hook): installs a
+#     Harvest activity on any owned idle harv whose owner has a
+#     `proc`. The harv FindingOre searches outward from its CURRENT
+#     cell, so pre-placing the harv adjacent to the FAR patch routes
+#     it to the FAR patch on stall.
+#  2. `USER_HARVEST_RESPECT_TICKS` (~300t / ~3 turns): a recent
+#     user-issued `Harvest` order locks the harv to the user-chosen
+#     patch for ~300 ticks before auto-route may resume. A scripted
+#     policy that re-issues `Command.harvest(harv, near_x, near_y)`
+#     every turn keeps the harv on the near patch indefinitely.
+#  3. Income per round trip is dominated by transit time: NEAR patch
+#     completes a delivery cycle every ~270 ticks (~5500 cr by tick
+#     4500); FAR patch completes ~1 cycle in 4500 ticks (~500 cr).
+#  4. Tick alignment (CLAUDE.md ~90 ticks/turn): max_turns 50 →
+#     ceiling 93 + 90·49 = 4503; `within_ticks 4500`, `after_ticks
+#     4501` both fit so non-finishers LOSE as real timeouts (no draw).
+#  5. Persistent unarmed enemy `e1` (stance:0) keeps the engine from
+#     auto-`done`-ing on enemy-elimination before the win/fail
+#     evaluates (CLAUDE.md auto-done footgun).
+#  6. Hard tier ≥2-spawn-groups requirement (CLAUDE.md §7): two agent
+#     spawn_point groups round-robined by seed (NORTH y=14 / SOUTH
+#     y=28). Patches duplicated at both latitudes; the `any_of` in
+#     the win predicate accepts the spawn-matched near patch.
+
 meta:
   id: econ-far-patch-vs-near-patch
   title: Economy — Far Large Patch vs Near Small Patch (Travel-vs-Throughput)
@@ -5,260 +80,171 @@ meta:
   real_world_meaning: >
     Travel-vs-throughput patch selection under a hard economy
     deadline. The agent owns ONE harvester, a refinery and a
-    construction yard, and faces TWO ore patches: a NEAR patch a
-    short hop from the refinery, and a FAR patch much farther out.
-    The two patches are NOT symmetric — the near one is small (less
-    total ore) and the far one is large (more total ore) — so the
-    naive "bigger pile is better" heuristic points at the far patch.
-    But the win predicate sets a CASH BAR that must be cleared inside
-    a TIGHT tick deadline, and that deadline is the discriminator:
-    the near patch's short round-trip lets the harvester complete
-    many delivery cycles and bank the bar comfortably before the
-    clock runs out, while the far patch's long round-trip burns so
-    much travel time per cycle that the harvester cannot bank the
-    bar in time NO MATTER how large the far pile is — its greater
-    total is irrelevant inside this window. Mining the far patch
-    busts the clock and LOSES; stalling earns zero and LOSES; the
-    intended capability is the OR travel-vs-throughput / SC2
-    expansion-timing insight — under a tight deadline, round-trip
-    latency dominates pile size, so route to the near source.
+    Construction Yard, and faces TWO ore patches: a NEAR patch a
+    short hop from the refinery, and a FAR patch much farther away.
+    Under a tight deadline, round-trip latency dominates pile size:
+    the short-round-trip patch lets the harvester complete many
+    delivery cycles and bank the bar comfortably; the far patch
+    burns the whole episode in transit and banks barely one cycle.
+    The capability under test is the OR travel-vs-throughput / SC2
+    expansion-timing insight — under a tight deadline, route to the
+    short-round-trip source.
   robotics_analogue: >
     Pickup-station selection under a delivery deadline: a single
-    autonomous hauler, a depot, and two supply nodes — a small
-    nearby node and a large distant node. With an SLA deadline on
-    cumulative delivered volume, the optimal policy routes to the
-    NEAR node because cycle latency (travel time per round trip),
-    not node capacity, bounds throughput inside the window; the
-    distant node's larger stockpile only pays off on a longer
-    horizon. Choosing the big-but-distant node misses the SLA.
+    autonomous hauler, a depot, and two supply nodes — a near node
+    and a distant node. With an SLA deadline on cumulative
+    delivered volume, the optimal policy routes to the NEAR node
+    because cycle latency (travel time per round trip), not node
+    capacity, bounds throughput inside the window; the distant
+    node's larger stockpile only pays off on a longer horizon.
   author: wave11-routing
   benchmark_anchor:
     - "OR travel-vs-throughput"
     - "SC2 expansion timing"
     - "logistics routing"
 
-# ENGINE NOTE (verified 2026-05-20 against the installed openra_train
-# wheel, post-S0/S1 harvest income — scripted run_level seeds 1-4):
-#
-# 1. Per-harvester economy_value yield on rush-hour-arena, proc at
-#    (12,18), one harv prestaged at (14,18), harvest routed to a
-#    single patch for the whole episode:
-#       NEAR (16,18), ~6 cells from proc — ~500 cr every ~270 ticks,
-#          ~5000 cr by tick 2700, ~7575 cr by tick 4500
-#       FAR  (90-100,18), ~80-90 cells from proc — ~500 cr / 4500
-#          ticks (one delivery cycle in the whole window)
-#    The ~15x gap is the round-trip-latency signal: the FAR harv
-#    spends almost the whole episode in transit, banking only one
-#    load, while the NEAR harv completes a delivery cycle every
-#    ~270 ticks. The FAR pile being LARGER does not matter — yield
-#    inside the deadline is latency-bound.
-#
-# 2. Smoke-tested outcomes (scripted single-harv policies, seeds
-#    1-4, re-measured per tier):
-#       easy   (bar 3000, T=4500): NEAR WIN ~turn 18; FAR ~500 LOSS;
-#              stall 0 LOSS.
-#       medium (bar 6000, T=4500): NEAR WIN ~turn 37 (econ 6000 at
-#              tick ~3333); FAR ~500 LOSS; stall 0 LOSS.
-#       hard   (bar 6000, T=4500, 2 spawns): NEAR-at-matched-latitude
-#              WIN ~turn 37; FAR ~500 LOSS; wrong-latitude NEAR
-#              banks ~3500 cr LOSS; stall 0 LOSS.
-#    The bar M and deadline T per tier are set so: route-NEAR clears
-#    M before T (WIN); route-FAR cannot reach M before T busts
-#    (LOSS); stall earns 0 (LOSS).
-#
-# 3. The `harvest` order with an explicit target cell PERSISTS — the
-#    harv shuttles that patch <-> proc on that route until a new
-#    `harvest` is issued. This is the single routing knob the model
-#    uses to pick the near vs the far patch.
-#
-# 4. Tick budget: the engine advances ~90 ticks per decision turn
-#    (tick ceiling = 93 + 90*(max_turns-1)). within_ticks and
-#    fail_condition.after_ticks sit at the same boundary so a
-#    non-finisher LOSES (not draws). All three tiers use
-#    max_turns=50 → ceiling 4503 → within_ticks = after_ticks =
-#    4500. The deadline is TIGHT against the FAR route: a FAR
-#    harvester banks only ~500 cr in the whole 4500-tick window.
-#
-# 5. The pre-placed fact + proc + harv trigger
-#    ConquestVictoryConditions — without a persistent enemy actor
-#    the engine auto-`done`s on "all enemies dead" before the
-#    win/fail predicate is evaluated. An unarmed e1 at (120,36)
-#    stance:0 sits well outside the harvest envelope so it can't be
-#    killed and the predicate evaluates cleanly to the bar.
-#
-# 6. Hard tier spawn round-robin (verified seeds 1-4): two agent
-#    spawn_point groups — NORTH base (y=14) and SOUTH base (y=28) —
-#    round-robined by seed (seeds 2,4 → NORTH; seeds 1,3 → SOUTH).
-#    The full base (fact + proc + harv) is duplicated under each
-#    spawn_point; the NEAR/FAR patch pair is duplicated at both
-#    latitudes so the spawn-matched near patch flips per seed. A
-#    memorised "always route to (16,14)" policy LOSES on the SOUTH
-#    seeds (harvester treks to the wrong latitude, banks ~3500 cr <
-#    6000). The win predicate is `any_of` over the two
-#    spawn-matched NEAR clauses.
+# Custom 64x40 arena — width 64 keeps the near (x=16) vs far (x=58)
+# round-trip gap decisive (~12x distance ratio → ~15x throughput
+# ratio inside the deadline). Replaces the generic 128x40
+# rush-hour-arena where the harv had a lot of decision-free travel
+# space east of the base.
+base_map:
+  generator: arena
+  name: econ-far-patch-vs-near-patch-arena-64x40
+  width: 64
+  height: 40
+  cordon: 2
+  title: Econ Far Patch vs Near Patch Arena 64x40
 
-base_map: rush-hour-arena
 starting_cash: 0
 
 base:
-  agent:
-    faction: allies
-  enemy:
-    faction: soviet
-  tools:
-    - observe
-    - harvest
-    - move_units
-    - stop
+  agent: {faction: allies}
+  enemy: {faction: soviet}
+  tools: [observe, harvest, move_units, stop]
+  spawn_mcvs: false
   planning: true
-  termination:
-    max_ticks: 40000
-  actors:
-    # Pre-placed agent base: construction yard + refinery + 1 harv.
-    - {type: fact, owner: agent, position: [10, 22]}
-    - {type: proc, owner: agent, position: [12, 18]}
-    - {type: harv, owner: agent, position: [14, 18]}
-    # Default patches (overridden per level for tier-specific geometry):
-    # NEAR small patch and FAR large patch.
-    - {type: mine, owner: neutral, position: [16, 18]}
-    - {type: mine, owner: neutral, position: [90, 18]}
-    # Inert enemy marker far from the harvest envelope keeps the
-    # episode from auto-terminating on "all enemies dead" before the
-    # win/fail predicate is evaluated.
-    - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+  termination: {max_ticks: 8000}
+  actors: []   # every level supplies its own actor list via overrides.
 
 levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # Base + proc at NW. Harv pre-placed adjacent to FAR patch so
+  # auto-route sends it FAR on stall. Near patch (16, 18) ~4 cells
+  # from proc (12, 18). Far patch (58, 18) ~46 cells from proc.
+  # Bar 3000 cr: NEAR clears (~6500 ceiling); FAR misses (~500); stall
+  # routes FAR and misses. max_turns 50 ⇒ ceiling 93 + 90·49 = 4503
+  # ≥ within_ticks 4500. after_ticks 4501 ⇒ non-finisher LOSES.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # One harvester, two ore patches: a NEAR small patch at (16,18) a
-    # short hop from the refinery, and a FAR large patch at (90,18) far
-    # across the map. The win predicate requires economy_value ≥ 3000 AND
-    # your construction yard standing, banked within 4500 ticks. Routing
-    # the harvester to the NEAR patch completes many short round-trips and
-    # banks ~7500 cr — well over the bar with time to spare (WIN). Routing
-    # it to the FAR patch burns the whole episode in transit and banks
-    # only ~500 cr — the deadline busts before the bar is reached, and the
-    # far pile being larger does not help (LOSS). Stalling earns zero
-    # (LOSS). The capability asked: under a tight deadline, route to the
-    # patch with the shorter round-trip, not the bigger pile.
     description: >
-      One harvester, two patches: a near small pile at (16,18) a short hop
-      from the refinery, and a far large pile at (90,18). Reach economy
-      value 3000 within about 50 turns. The near patch banks ~7500 with
-      time to spare; the far patch burns the whole episode on transit and
-      banks barely 500. Shorter round trip beats bigger pile.
+      You have a Construction Yard ('fact'), an Ore Refinery ('proc')
+      and one Ore Truck ('harv'). Two ore patches are visible: a
+      NEAR patch at (16, 18) a short hop from the refinery, and a
+      FAR patch at (58, 18) at the east edge of the arena. The harv
+      starts ADJACENT to the FAR patch and will auto-route to the
+      FAR patch by default. Win = economy_value ≥ 3000 before tick
+      4500. Routing the harv to the NEAR patch completes many short
+      round-trips and clears the bar comfortably (WIN). Stalling
+      lets the harv auto-route to the FAR patch and burn the episode
+      in transit, banking only ~500 cr (LOSS). Routing to the FAR
+      patch is the same shape (LOSS). The capability: under a tight
+      deadline, route to the short-round-trip source.
     starting_cash: 0
     overrides:
       actors:
-        - {type: fact, owner: agent, position: [10, 22]}
+        - {type: fact, owner: agent, position: [8, 22]}
         - {type: proc, owner: agent, position: [12, 18]}
-        - {type: harv, owner: agent, position: [14, 18]}
+        # Harv pre-placed adjacent to FAR patch — stall auto-routes far.
+        - {type: harv, owner: agent, position: [56, 18]}
         - {type: mine, owner: neutral, position: [16, 18]}
-        - {type: mine, owner: neutral, position: [90, 18]}
-        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+        - {type: mine, owner: neutral, position: [58, 18]}
+        # Persistent far enemy marker — anti-DRAW per CLAUDE.md.
+        - {type: e1, owner: enemy, position: [60, 36], stance: 0}
     win_condition:
       all_of:
         - economy_value_gte: 3000
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 4500
-    # ceiling 93 + 90*49 = 4503 ⇒ deadline bites; non-finisher LOSES.
-    # route-NEAR ~7500 cr WINS ~turn 18; route-FAR ~500 cr never
-    # reaches 3000 ⇒ LOSS at after_ticks 4500.
     fail_condition:
       any_of:
-        - after_ticks: 4500
+        - after_ticks: 4501
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {building_count_gte: {type: proc, n: 1}}
     max_turns: 50
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # Same geography as easy, tighter bar (5500). NEAR clears (~6500
+  # ceiling, margin shrinks); FAR misses (~500); stall LOSES.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Same one-harvester travel-vs-throughput choice as easy, but the FAR
-    # patch is pushed farther out to (100,18) and the cash bar is raised
-    # to 6000 cr against the same 4500-tick deadline — a tighter economic
-    # target. Routing to the NEAR patch at (16,18) banks ~500 cr every
-    # ~270 ticks and clears 6000 cr by tick ~3333, with margin before the
-    # clock (WIN). Routing to the FAR patch banks only ~500 cr in the
-    # whole 4500-tick window — the long round-trip lets the harvester
-    # complete barely one delivery cycle, and the far pile being the
-    # larger one does not help (LOSS). Stalling earns zero (LOSS). The
-    # capability is identical: pick the short-round-trip source against
-    # the clock.
     description: >
-      Same single harvester, but the far patch is pushed out to (100,18)
-      and the bar tightens to 6000 within about 50 turns. The near patch
-      clears 6000 by tick ~3333; the far patch barely completes one
-      delivery cycle. Pick the short round-trip source.
+      Same geography as easy — NEAR patch at (16, 18) and FAR patch
+      at (58, 18), harv pre-placed adjacent to the FAR patch.
+      Tighter bar: economy_value ≥ 5000 before tick 4500. Routing
+      the harv to the NEAR patch clears the bar (WIN); stalling
+      auto-routes FAR and misses (LOSS); routing FAR is the same
+      shape (LOSS). Capability: pick the short-round-trip source.
     starting_cash: 0
     overrides:
       actors:
-        - {type: fact, owner: agent, position: [10, 22]}
+        - {type: fact, owner: agent, position: [8, 22]}
         - {type: proc, owner: agent, position: [12, 18]}
-        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: harv, owner: agent, position: [56, 18]}
         - {type: mine, owner: neutral, position: [16, 18]}
-        - {type: mine, owner: neutral, position: [100, 18]}
-        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+        - {type: mine, owner: neutral, position: [58, 18]}
+        - {type: e1, owner: enemy, position: [60, 36], stance: 0}
     win_condition:
       all_of:
-        - economy_value_gte: 6000
+        - economy_value_gte: 5000
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 4500
-    # ceiling 93 + 90*49 = 4503 ⇒ deadline bites; non-finisher LOSES.
-    # route-NEAR clears 6000 cr by tick ~3333 (WIN); route-FAR banks
-    # ~500 cr in 4500 ticks ⇒ LOSS at after_ticks 4500.
     fail_condition:
       any_of:
-        - after_ticks: 4500
+        - after_ticks: 4501
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {building_count_gte: {type: proc, n: 1}}
     max_turns: 50
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # Two seed-driven agent spawn groups (NORTH y=14 / SOUTH y=28),
+  # each with its own base (fact + proc + harv) duplicated. The
+  # harv is pre-placed adjacent to the FAR patch at the matching
+  # latitude, so stall auto-routes FAR on either spawn. Patches at
+  # both latitudes — the `any_of` in win accepts whichever latitude
+  # the harv successfully cycles near. A memorised "always route to
+  # (16, 14)" opening LOSES on SOUTH seeds (the harv is at SOUTH
+  # latitude and routing it 14 cells off-axis is worse than routing
+  # to the matched NEAR (16, 28)).
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Same travel-vs-throughput choice, with the base round-robined
-    # between a NORTH spawn (y=14) and a SOUTH spawn (y=28) per seed. Each
-    # latitude has its own NEAR small patch (x=16) and FAR large patch
-    # (x=100); the spawn-matched near patch flips per seed, so a memorised
-    # "always route to (16,14)" policy heads to the wrong latitude on the
-    # SOUTH seeds — the harvester treks across the map and busts the clock
-    # (LOSS). The win predicate is `any_of` over the two spawn-matched
-    # NEAR clauses: bank ≥ 6000 cr within 4500 ticks AND keep the
-    # harvester in the near patch at YOUR latitude. Routing to either far
-    # patch, or to the wrong latitude's near patch, misses the bar. The
-    # capability asked: identify your own spawn, then route to the MATCHED
-    # near (short-round-trip) patch against the deadline.
     description: >
-      Your base spawns NORTH (y=14) or SOUTH (y=28) by seed; each latitude
-      has its own near and far patches. Bank 6000 within about 50 turns
-      AND keep the harvester in the near patch at YOUR latitude. A
-      memorised "always route to (16,14)" sends you to the wrong band on
-      south seeds. Read your spawn, route to the matched near patch.
+      Your Construction Yard, Refinery and harvester spawn in the
+      NORTH (y=14) or SOUTH (y=28) latitude depending on the seed.
+      Each latitude has its own NEAR patch (16, y) and FAR patch
+      (58, y); the harv starts adjacent to the FAR patch at YOUR
+      latitude, so stall auto-routes FAR. Win = economy_value ≥
+      5500 before tick 4500 AND the harv stays in the NEAR patch
+      at YOUR latitude. A memorised "always route to (16, 14)"
+      sends you to the wrong band on SOUTH seeds. Read your spawn,
+      route to the matched near patch.
     starting_cash: 0
     overrides:
       actors:
-        # spawn_point 0 — base NORTH (fact + proc + harv around y=14).
-        - {type: fact, owner: agent, position: [10, 14], spawn_point: 0}
+        # spawn_point 0 — NORTH base (y=14).
+        - {type: fact, owner: agent, position: [8, 18], spawn_point: 0}
         - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
-        # spawn_point 1 — base SOUTH (fact + proc + harv around y=28).
-        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
+        - {type: harv, owner: agent, position: [56, 14], spawn_point: 0}
+        # spawn_point 1 — SOUTH base (y=28).
+        - {type: fact, owner: agent, position: [8, 24], spawn_point: 1}
         - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
-        - {type: harv, owner: agent, position: [14, 28], spawn_point: 1}
-        # Four shared patches — NEAR small + FAR large at each
-        # latitude; the spawn-matched NEAR flips per seed
-        # (NORTH → (16,14); SOUTH → (16,28)).
+        - {type: harv, owner: agent, position: [56, 28], spawn_point: 1}
+        # Four patches — NEAR + FAR at each latitude. Neutral
+        # actors are not spawn-filtered, so all four materialise
+        # every seed. Only the patches at the agent's active
+        # latitude are practically reachable.
         - {type: mine, owner: neutral, position: [16, 14]}
-        - {type: mine, owner: neutral, position: [100, 14]}
+        - {type: mine, owner: neutral, position: [58, 14]}
         - {type: mine, owner: neutral, position: [16, 28]}
-        - {type: mine, owner: neutral, position: [100, 28]}
-        - {type: e1, owner: enemy, position: [120, 36], stance: 0}
+        - {type: mine, owner: neutral, position: [58, 28]}
+        - {type: e1, owner: enemy, position: [60, 36], stance: 0}
     win_condition:
       all_of:
         - building_count_gte: {type: fact, n: 1}
@@ -266,7 +252,7 @@ levels:
         - any_of:
             # NORTH-matched near patch.
             - all_of:
-                - economy_value_gte: 6000
+                - economy_value_gte: 5500
                 - units_of_type_in_region_gte:
                     type: harv
                     x: 16
@@ -275,19 +261,16 @@ levels:
                     n: 1
             # SOUTH-matched near patch.
             - all_of:
-                - economy_value_gte: 6000
+                - economy_value_gte: 5500
                 - units_of_type_in_region_gte:
                     type: harv
                     x: 16
                     y: 28
                     radius: 8
                     n: 1
-    # ceiling 93 + 90*49 = 4503 ⇒ deadline bites; non-finisher LOSES.
-    # route to spawn-matched NEAR clears 6000 cr by tick ~3333
-    # (WIN); route-FAR or wrong-latitude NEAR misses ⇒ LOSS.
     fail_condition:
       any_of:
-        - after_ticks: 4500
+        - after_ticks: 4501
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {building_count_gte: {type: proc, n: 1}}
     max_turns: 50
