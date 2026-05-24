@@ -103,19 +103,71 @@ meta:
     - "SC2 expansion timing"
     - "logistics routing"
 
-# Custom 64x40 arena — width 64 keeps the near (x=16) vs far (x=58)
-# round-trip gap decisive (~12x distance ratio → ~15x throughput
-# ratio inside the deadline). Replaces the generic 128x40
-# rush-hour-arena where the harv had a lot of decision-free travel
-# space east of the base.
+# ENGINE NOTE (verified 2026-05-20 against the installed openra_train
+# wheel, post-S0/S1 harvest income — scripted run_level seeds 1-4):
+#
+# 1. Per-harvester economy_value yield on rush-hour-arena, proc at
+#    (12,18), one harv prestaged at (14,18), harvest routed to a
+#    single patch for the whole episode:
+#       NEAR (16,18), ~6 cells from proc — ~500 cr every ~270 ticks,
+#          ~5000 cr by tick 2700, ~7575 cr by tick 4500
+#       FAR  (90-100,18), ~80-90 cells from proc — ~500 cr / 4500
+#          ticks (one delivery cycle in the whole window)
+#    The ~15x gap is the round-trip-latency signal: the FAR harv
+#    spends almost the whole episode in transit, banking only one
+#    load, while the NEAR harv completes a delivery cycle every
+#    ~270 ticks. The FAR pile being LARGER does not matter — yield
+#    inside the deadline is latency-bound.
+#
+# 2. Smoke-tested outcomes (scripted single-harv policies, seeds
+#    1-4, re-measured per tier):
+#       easy   (bar 3000, T=4500): NEAR WIN ~turn 18; FAR ~500 LOSS;
+#              stall 0 LOSS.
+#       medium (bar 6000, T=4500): NEAR WIN ~turn 37 (econ 6000 at
+#              tick ~3333); FAR ~500 LOSS; stall 0 LOSS.
+#       hard   (bar 6000, T=4500, 2 spawns): NEAR-at-matched-latitude
+#              WIN ~turn 37; FAR ~500 LOSS; wrong-latitude NEAR
+#              banks ~3500 cr LOSS; stall 0 LOSS.
+#    The bar M and deadline T per tier are set so: route-NEAR clears
+#    M before T (WIN); route-FAR cannot reach M before T busts
+#    (LOSS); stall earns 0 (LOSS).
+#
+# 3. The `harvest` order with an explicit target cell PERSISTS — the
+#    harv shuttles that patch <-> proc on that route until a new
+#    `harvest` is issued. This is the single routing knob the model
+#    uses to pick the near vs the far patch.
+#
+# 4. Tick budget: the engine advances ~90 ticks per decision turn
+#    (tick ceiling = 93 + 90*(max_turns-1)). within_ticks and
+#    fail_condition.after_ticks sit at the same boundary so a
+#    non-finisher LOSES (not draws). All three tiers use
+#    max_turns=50 → ceiling 4503 → within_ticks = after_ticks =
+#    4500. The deadline is TIGHT against the FAR route: a FAR
+#    harvester banks only ~500 cr in the whole 4500-tick window.
+#
+# 5. The pre-placed fact + proc + harv trigger
+#    ConquestVictoryConditions — without a persistent enemy actor
+#    the engine auto-`done`s on "all enemies dead" before the
+#    win/fail predicate is evaluated. An unarmed e1 at (120,36)
+#    stance:0 sits well outside the harvest envelope so it can't be
+#    killed and the predicate evaluates cleanly to the bar.
+#
+# 6. Hard tier spawn round-robin (verified seeds 1-4): two agent
+#    spawn_point groups — NORTH base (y=14) and SOUTH base (y=28) —
+#    round-robined by seed (seeds 2,4 → NORTH; seeds 1,3 → SOUTH).
+#    The full base (fact + proc + harv) is duplicated under each
+#    spawn_point; the NEAR/FAR patch pair is duplicated at both
+#    latitudes so the spawn-matched near patch flips per seed. A
+#    memorised "always route to (16,14)" policy LOSES on the SOUTH
+#    seeds (harvester treks to the wrong latitude, banks ~3500 cr <
+#    6000). The win predicate is `any_of` over the two
+#    spawn-matched NEAR clauses.
+
 base_map:
   generator: arena
-  name: econ-far-patch-vs-near-patch-arena-64x40
-  width: 64
-  height: 40
-  cordon: 2
-  title: Econ Far Patch vs Near Patch Arena 64x40
-
+  name: econ-far-patch-vs-near-patch-arena
+  width: 128
+  height: 48
 starting_cash: 0
 
 base:
