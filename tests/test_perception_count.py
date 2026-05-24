@@ -44,47 +44,67 @@ def _stall(_rs, Command):
     return [Command.observe()]
 
 
+def _e1_count(rs):
+    return sum(
+        1
+        for u in (rs.get("units_summary") or [])
+        if str(u.get("type", "")).lower() == "e1"
+    )
+
+
 def _intended_easy(rs, Command):
-    """Easy: K=3 in a single near-east cluster — drive every scout to
-    the cluster's sight-line (40, 5) and reveal all three at once."""
+    """Easy: scout K=3 in the near-east cluster, then build EXACTLY 3
+    e1 in response (the pack win predicate is
+    `enemies_discovered_gte:3 AND unit_type_count_eq:e1:3` + hold).
+    Drive every jeep to the (40,5) sight-line, then queue e1 builds
+    until the visible count equals the read."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
-    return [
-        Command.move_units([str(u["id"])], target_x=40, target_y=5)
-        for u in units
-    ]
+    jeeps = [u for u in units if u.get("type") == "jeep"]
+    cmds = [
+        # Push to (55,8) — within RA jeep vision (~8 cells) of the
+        # cluster at (60,10). (40,5) was 20 cells short of vision
+        # range under vendor RA stats.
+        Command.move_units([str(u["id"])], target_x=55, target_y=8)
+        for u in jeeps
+    ] or [Command.observe()]
+    # Spawn the matching three rifle infantry — `unit_type_count_eq`
+    # is on `e1`, not `jeep`. Stop at 3 so the over-commit fail
+    # (`unit_type_count_gte:e1:4`) never trips.
+    if _e1_count(rs) < 3 and "e1" not in (rs.get("production") or []):
+        cmds.append(Command.build("e1"))
+    return cmds
 
 
 def _intended_med_hard(rs, Command):
-    """Medium/hard: two clusters — north (60,10) and south (100,30).
-    Jeeps push to the north sight-line (60,5); 1tnks detour south via
-    the x=10 column (away from the mid-map defender wall) then push
-    east to the south sight-line (100,33). Both bands' K total
-    satisfies ≥5; no unit enters the inner-defender attack radius.
-    Stable role assignment by unit type so reordering between turns
-    doesn't reshuffle who scouts which band."""
+    """Medium/hard: two clusters — north (60,10) and south (60,30).
+    Split jeeps across both bands then build EXACTLY 5 e1 (the pack
+    win predicate is `enemies_discovered_gte:5 AND
+    unit_type_count_eq:e1:5` + hold)."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
     cmds = []
-    for u in units:
-        uid = str(u["id"])
-        ux, uy = u["cell_x"], u["cell_y"]
-        if u.get("type") == "jeep":
-            cmds.append(
-                Command.move_units([uid], target_x=60, target_y=5)
+    jeeps = [u for u in units if u.get("type") == "jeep"]
+    # Sort jeeps by y so the first goes north, second south — stable
+    # across reshuffles between turns.
+    jeeps_sorted = sorted(jeeps, key=lambda u: u["cell_y"])
+    if jeeps_sorted:
+        cmds.append(
+            Command.move_units(
+                [str(jeeps_sorted[0]["id"])], target_x=60, target_y=5
             )
-        else:  # 1tnk → south band
-            if uy < 30:
-                cmds.append(
-                    Command.move_units([uid], target_x=10, target_y=33)
-                )
-            else:
-                cmds.append(
-                    Command.move_units([uid], target_x=100, target_y=33)
-                )
-    return cmds
+        )
+    if len(jeeps_sorted) > 1:
+        cmds.append(
+            Command.move_units(
+                [str(jeeps_sorted[1]["id"])], target_x=60, target_y=33
+            )
+        )
+    if _e1_count(rs) < 5 and "e1" not in (rs.get("production") or []):
+        cmds.append(Command.build("e1"))
+    return cmds if cmds else [Command.observe()]
 
 
 def _under_scout(rs, Command):
@@ -242,14 +262,16 @@ def _assert_ticks_reachable(node, max_reachable, level):
 
 
 def test_hard_has_two_seed_driven_spawn_groups():
+    """Hard uses Wave-9 ENEMY-side spawn_point variation (NE-heavy vs
+    SE-heavy enemy compositions) — agent base stays fixed every seed."""
     pack = load_pack(PACK_PATH)
     c = compile_level(pack, "hard")
     groups = {
         a.spawn_point
         for a in c.scenario.actors
-        if a.owner == "agent" and a.spawn_point is not None
+        if a.owner == "enemy" and a.spawn_point is not None
     }
     assert groups == {0, 1}, (
-        f"hard must define spawn_points {{0,1}} for seed-driven "
-        f"NW/SW alternation; got {sorted(groups)}"
+        f"hard must define enemy spawn_points {{0,1}} for seed-driven "
+        f"NE-heavy / SE-heavy alternation; got {sorted(groups)}"
     )

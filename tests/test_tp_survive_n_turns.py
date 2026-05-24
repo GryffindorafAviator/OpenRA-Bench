@@ -206,9 +206,15 @@ def test_persistent_inert_enemy_fact_marker():
     p = load_pack(PACK)
     for lv in LEVELS:
         c = compile_level(p, lv)
+        # The pack's per-tier overrides shrink the map to width 80
+        # (the agent base sits at x≈10, the rusher mouth at x=64);
+        # the marker lives at x=75 on every tier — east of the
+        # rusher line and just inside the east edge. The
+        # `>=70` threshold reflects the actual map width; an absolute
+        # 100 was a holdover from the pre-shrink (width=136) layout.
         far = [
             a for a in c.scenario.actors
-            if a.owner == "enemy" and a.type == "fact" and a.position[0] >= 100
+            if a.owner == "enemy" and a.type == "fact" and a.position[0] >= 70
         ]
         assert far, f"{lv}: missing the far-east anti-DRAW enemy fact marker"
 
