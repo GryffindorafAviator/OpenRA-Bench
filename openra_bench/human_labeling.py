@@ -690,6 +690,7 @@ class InteractiveSession:
         record: bool = True,
         playback_root: Any = None,
         player: str = "Human",
+        manual_review: bool = False,
     ):
         from openra_rl_training.training.rust_env_pool import RustEnvPool
 
@@ -731,6 +732,18 @@ class InteractiveSession:
         self._player = player
         self._playback = None
         self._finalized = False
+        # Human-review-before-save: when True, the playback is staged
+        # into a `.draft/` dir on finalize and `save_path` stays None
+        # until `commit_playback()` is called. The UI uses this to
+        # show a turn-by-turn review and ask the human to commit or
+        # discard the run.
+        self._manual_review = bool(manual_review)
+        self._committed = False
+        self._discarded = False
+        self._draft_path: str | None = None
+        # Cache the manifest used at finalize, so a later commit can
+        # re-finalize at the promoted path if needed.
+        self._final_manifest: dict | None = None
         self._history: list[dict] = []
         self._issued = 0
         self._pb_terrain = None
@@ -759,6 +772,7 @@ class InteractiveSession:
         playback_root: Any = None,
         player: str = "Human",
         fog_mode: str = "vision",
+        manual_review: bool = False,
     ) -> "InteractiveSession":
         """Compile a pack by id and open a session on it. `fog_mode`
         selects the observation modality — `vision-clear` (or any
@@ -774,6 +788,7 @@ class InteractiveSession:
         return cls(
             compiled, seed=seed, record=record,
             playback_root=playback_root, player=player,
+            manual_review=manual_review,
         )
 
     @property
@@ -814,6 +829,14 @@ class InteractiveSession:
             "done": self.done,
             "tick": self._adapter.signals.game_tick,
             "save_path": self.save_path,
+            "manual_review": self._manual_review,
+            "pending_review": bool(
+                self._manual_review
+                and self._finalized
+                and not self._committed
+                and not self._discarded
+            ),
+            "draft_path": self._draft_path,
         }
 
     # ── Standard-playback recording ──────────────────────────────────
@@ -844,6 +867,7 @@ class InteractiveSession:
                 root / f"{run_id}__{safe}",
                 cell=f"{self.compiled.pack_id}:{self.compiled.level}",
                 seed=self.seed,
+                draft=self._manual_review,
             )
             pb.run_id, pb.model = run_id, self._player
             self._playback = pb
@@ -939,7 +963,12 @@ class InteractiveSession:
 
     def _finalize_playback(self, ctx) -> None:
         """Write messages.json + manifest.json — the same manifest shape
-        `run_level` writes for a model run, tagged as a human run."""
+        `run_level` writes for a model run, tagged as a human run.
+
+        In `manual_review` mode the artifacts are staged in a `.draft/`
+        sibling of the real target; `save_path` stays None until the
+        caller invokes `commit_playback()`. The draft path is recorded
+        as `self._draft_path` so the UI can list / discard it."""
         if self._playback is None or self._finalized:
             return
         self._finalized = True
@@ -947,37 +976,146 @@ class InteractiveSession:
 
         final_goal = turn_goal(self.compiled.win_condition, ctx)
         sig = self._adapter.signals
+        manifest = {
+            "scenario": f"{self.compiled.pack_id}:{self.compiled.level}",
+            "pack_id": self.compiled.pack_id,
+            "level": self.compiled.level,
+            "capability": self.compiled.meta.capability,
+            "run_id": self._playback.run_id,
+            "model": self._playback.model,
+            "agent_type": "Human",
+            "seed": self.seed,
+            "outcome": self.outcome,
+            "turns": self.turn,
+            "max_turns": self.max_turns,
+            "actions_issued": self._issued,
+            "actions_warned": 0,
+            "agent_stats": {"turns": self.turn},
+            "objective_progress": final_goal.get(
+                "objective_progress", 0.0
+            ),
+            "reward_vector": final_goal.get("reward_vector", {}),
+            "signals": {
+                "economy_value": sig.cash + sig.resources,
+                "explored_percent": round(sig.explored_percent, 2),
+                "units_killed": sig.units_killed,
+                "units_lost": sig.units_lost,
+            },
+        }
+        self._final_manifest = manifest
         try:
             self._playback.write_messages(self._history)
-            self._playback.finalize({
-                "scenario": f"{self.compiled.pack_id}:{self.compiled.level}",
-                "pack_id": self.compiled.pack_id,
-                "level": self.compiled.level,
-                "capability": self.compiled.meta.capability,
-                "run_id": self._playback.run_id,
-                "model": self._playback.model,
-                "agent_type": "Human",
-                "seed": self.seed,
-                "outcome": self.outcome,
-                "turns": self.turn,
-                "max_turns": self.max_turns,
-                "actions_issued": self._issued,
-                "actions_warned": 0,
-                "agent_stats": {"turns": self.turn},
-                "objective_progress": final_goal.get(
-                    "objective_progress", 0.0
-                ),
-                "reward_vector": final_goal.get("reward_vector", {}),
-                "signals": {
-                    "economy_value": sig.cash + sig.resources,
-                    "explored_percent": round(sig.explored_percent, 2),
-                    "units_killed": sig.units_killed,
-                    "units_lost": sig.units_lost,
-                },
-            })
-            self.save_path = str(self._playback.dir)
+            self._playback.finalize(manifest)
+            if self._manual_review:
+                # Stay in draft — UI must commit/discard explicitly.
+                self._draft_path = str(self._playback.dir)
+                # IMPORTANT: do NOT set self.save_path here.
+            else:
+                self.save_path = str(self._playback.dir)
         except Exception:  # noqa: BLE001
             pass
+
+    # ── Human review (manual_review mode) ────────────────────────────
+    @property
+    def manual_review(self) -> bool:
+        """Whether this session stages playback artifacts for human
+        review before committing them to the dataset."""
+        return self._manual_review
+
+    @property
+    def draft_path(self) -> "str | None":
+        """Path to the staged playback dir (`.draft/...`) — populated
+        after `_finalize_playback` runs in manual_review mode. None
+        otherwise."""
+        return self._draft_path
+
+    @property
+    def is_committed(self) -> bool:
+        return self._committed
+
+    @property
+    def is_discarded(self) -> bool:
+        return self._discarded
+
+    def commit_playback(self) -> "str | None":
+        """Promote the staged draft to the real playback root and
+        publish `save_path`. Returns the final path (or None if
+        nothing was staged / already committed / not in review mode).
+        A no-op outside `manual_review`, and idempotent within."""
+        if not self._manual_review:
+            return self.save_path
+        if self._committed:
+            return self.save_path
+        if self._discarded or self._playback is None:
+            return None
+        try:
+            final_dir = self._playback.promote()
+        except Exception:  # noqa: BLE001
+            return None
+        self._committed = True
+        self._draft_path = None
+        self.save_path = str(final_dir)
+        return self.save_path
+
+    def discard_playback(self) -> None:
+        """Delete the staged draft. Idempotent; a no-op outside
+        manual_review."""
+        if not self._manual_review:
+            return
+        if self._discarded:
+            return
+        self._discarded = True
+        self._draft_path = None
+        if self._playback is None:
+            return
+        try:
+            self._playback.discard()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def preview_turns(self) -> "list[dict]":
+        """Per-turn summary suitable for a review UI. Reads the
+        staged (or finalized) turns.jsonl so the UI sees exactly what
+        will land on disk. Each item carries turn / tick / commands
+        / signals summary."""
+        import json
+        from pathlib import Path
+
+        if self._playback is None:
+            return []
+        path = Path(self._playback.dir) / "turns.jsonl"
+        if not path.is_file():
+            return []
+        rows: list[dict] = []
+        for ln in path.read_text().splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                rec = json.loads(ln)
+            except Exception:  # noqa: BLE001
+                continue
+            cmds = rec.get("commands") or []
+            sig = rec.get("signals") or {}
+            rows.append({
+                "turn": rec.get("turn"),
+                "tick": rec.get("tick"),
+                "commands": cmds,
+                "command_count": len(cmds),
+                "command_summary": (
+                    "; ".join(str(c) for c in cmds[:3])
+                    + (" ..." if len(cmds) > 3 else "")
+                ) if cmds else "observe",
+                "signals": {
+                    "cash": sig.get("cash"),
+                    "economy_value": sig.get("economy_value"),
+                    "explored_percent": sig.get("explored_percent"),
+                    "units_killed": sig.get("units_killed"),
+                    "units_lost": sig.get("units_lost"),
+                    "enemies_seen": sig.get("enemies_seen"),
+                },
+            })
+        return rows
 
     def submit_turn(self, actions: "list[HumanAction]") -> dict:
         """Advance one decision turn with the human's gestures. Mirrors
@@ -1063,6 +1201,21 @@ class InteractiveSession:
             except Exception:  # noqa: BLE001
                 pass
             shutil.rmtree(self._playback.dir, ignore_errors=True)
+        # Manual-review draft that never got committed/discarded is
+        # treated as abandoned — drop the staged dir so the .draft/
+        # tree doesn't accumulate.
+        if (
+            self._manual_review
+            and self._playback is not None
+            and not self._committed
+            and not self._discarded
+        ):
+            try:
+                self._playback.discard()
+            except Exception:  # noqa: BLE001
+                pass
+            self._discarded = True
+            self._draft_path = None
         try:
             self._pool.release(self._env)
             self._pool.shutdown()

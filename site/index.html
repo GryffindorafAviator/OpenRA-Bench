@@ -125,6 +125,21 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .btn-endturn{background:var(--accent);color:#fff;font-weight:600;padding:8px 24px}.btn-endturn:hover{opacity:.9}
 .btn-endturn:disabled{opacity:.4;cursor:not-allowed}
 @media(max-width:1100px){.game-layout{grid-template-columns:1fr}.game-minimap .placeholder{min-height:240px}.game-units{max-height:320px}}
+.review-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.review-modal{background:var(--card);border:1px solid var(--border);border-radius:10px;max-width:880px;width:100%;max-height:88vh;display:flex;flex-direction:column;padding:20px;gap:14px}
+.review-modal h2{margin:0;font-size:20px}
+.review-summary{font-size:14px;color:var(--muted);line-height:1.5}
+.review-summary b{color:#fff}
+.review-turns-wrap{flex:1;overflow:auto;border:1px solid var(--border);border-radius:6px;background:rgba(15,17,21,.45)}
+.review-turns{width:100%;border-collapse:collapse;font-size:12px;font-family:ui-monospace,monospace}
+.review-turns th{position:sticky;top:0;background:var(--bg);text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--muted);text-transform:uppercase;font-size:11px;letter-spacing:.03em}
+.review-turns td{padding:5px 10px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:top}
+.review-turns td.cmds{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#cfd3da}
+.review-turns tr:hover td{background:rgba(255,255,255,.03)}
+.review-actions{display:flex;gap:10px;justify-content:flex-end;align-items:center}
+.review-status{font-size:13px;color:var(--muted);min-height:18px}
+.review-status.ok{color:var(--green)}
+.review-status.err{color:var(--red)}
 </style>
 </head>
 <body>
@@ -241,6 +256,29 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
     </div>
   </div>
 </section>
+
+<div id="review-modal" class="review-modal-backdrop" style="display:none">
+  <div class="review-modal">
+    <h2 id="review-title">Review Episode</h2>
+    <div class="review-summary" id="review-summary"></div>
+    <div class="review-turns-wrap">
+      <table class="review-turns" id="review-turns">
+        <thead>
+          <tr><th>Turn</th><th>Tick</th><th>Commands</th><th>Cash</th>
+            <th>Kills</th><th>Lost</th><th>Seen</th><th>Explored%</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="review-actions">
+      <button class="btn-secondary" id="review-discard-btn"
+        onclick="reviewDiscard()">Discard (don't save)</button>
+      <button class="btn-play" id="review-save-btn"
+        onclick="reviewCommit()">Save to dataset</button>
+    </div>
+    <div class="review-status" id="review-status"></div>
+  </div>
+</div>
 
 <script>
 const CAPS=["perception","reasoning","action","adversarial"];
@@ -625,13 +663,19 @@ async function gameEndTurn(){
     gameRender();
     if(gameState.done){
       gameLog("GAME OVER — "+gameState.outcome.toUpperCase()+" at turn "+gameState.turn);
-      const completedId=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
-      setMissionStatus("complete",{render:false});
-      if(gameState.save_path)gameLog("Playback saved: "+gameState.save_path);
-      gameLog("Mission marked complete locally.");
-      renderMission();
-      if(completedId)advanceHumanEvalQueueAfterCompletion(completedId);
       document.getElementById("game-endturn-btn").disabled=true;
+      // Manual review gate: don't mark the mission complete or save
+      // the playback until the human confirms via the review modal.
+      if(gameState.pending_review){
+        openReviewModal();
+      }else{
+        const completedId=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
+        setMissionStatus("complete",{render:false});
+        if(gameState.save_path)gameLog("Playback saved: "+gameState.save_path);
+        gameLog("Mission marked complete locally.");
+        renderMission();
+        if(completedId)advanceHumanEvalQueueAfterCompletion(completedId);
+      }
     }else{
       gameLog("Turn "+gameState.turn+"/"+gameState.max_turns+
         " | Explored: "+gameState.explored_percent+"%"+
@@ -641,6 +685,112 @@ async function gameEndTurn(){
   }catch(e){
     gameLog("ERROR: "+e.message);
     document.getElementById("game-endturn-btn").disabled=false;
+  }
+}
+
+// ── Human-review-before-save modal ──
+async function openReviewModal(){
+  const modal=document.getElementById("review-modal");
+  const tbody=document.querySelector("#review-turns tbody");
+  const sum=document.getElementById("review-summary");
+  const status=document.getElementById("review-status");
+  const saveBtn=document.getElementById("review-save-btn");
+  const dropBtn=document.getElementById("review-discard-btn");
+  if(!modal||!tbody||!sum)return;
+  modal.style.display="flex";
+  saveBtn.disabled=false; dropBtn.disabled=false;
+  status.textContent="Loading preview..."; status.className="review-status";
+  tbody.innerHTML="";
+  sum.innerHTML=`<b>Outcome:</b> ${gameState.outcome.toUpperCase()} &nbsp;`+
+    `<b>Turns:</b> ${gameState.turn}/${gameState.max_turns} &nbsp;`+
+    `<b>Kills:</b> ${gameState.units_killed} &nbsp;`+
+    `<b>Lost:</b> ${gameState.units_lost} &nbsp;`+
+    `<b>Explored:</b> ${gameState.explored_percent}%`;
+  try{
+    const r=await fetch(gameServerUrl+"/api/game/preview/"+gameSession);
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
+    const data=await r.json();
+    const rows=data.preview||[];
+    if(!rows.length){
+      tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:14px;color:var(--muted)">No recorded turns.</td></tr>`;
+    }else{
+      const frag=document.createDocumentFragment();
+      for(const row of rows){
+        const tr=document.createElement("tr");
+        const s=row.signals||{};
+        tr.innerHTML=`<td>${row.turn??""}</td>`+
+          `<td>${row.tick??""}</td>`+
+          `<td class="cmds" title="${(row.commands||[]).join(' | ').replace(/"/g,'&quot;')}">${row.command_summary||""}</td>`+
+          `<td>${s.cash??""}</td>`+
+          `<td>${s.units_killed??""}</td>`+
+          `<td>${s.units_lost??""}</td>`+
+          `<td>${s.enemies_seen??""}</td>`+
+          `<td>${s.explored_percent??""}</td>`;
+        frag.appendChild(tr);
+      }
+      tbody.appendChild(frag);
+    }
+    status.textContent=`Loaded ${rows.length} turn(s). Review and choose Save or Discard.`;
+  }catch(e){
+    status.textContent="Failed to load preview: "+e.message;
+    status.className="review-status err";
+  }
+}
+
+function closeReviewModal(){
+  const modal=document.getElementById("review-modal");
+  if(modal)modal.style.display="none";
+}
+
+async function reviewCommit(){
+  if(!gameSession)return;
+  const saveBtn=document.getElementById("review-save-btn");
+  const dropBtn=document.getElementById("review-discard-btn");
+  const status=document.getElementById("review-status");
+  saveBtn.disabled=true; dropBtn.disabled=true;
+  status.textContent="Saving..."; status.className="review-status";
+  try{
+    const r=await fetch(gameServerUrl+"/api/game/commit/"+gameSession,{method:"POST"});
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
+    const data=await r.json();
+    status.textContent="Saved to "+(data.save_path||"(unknown)");
+    status.className="review-status ok";
+    gameLog("Playback saved: "+(data.save_path||""));
+    const completedId=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
+    setMissionStatus("complete",{render:false});
+    gameLog("Mission marked complete locally.");
+    renderMission();
+    if(completedId)advanceHumanEvalQueueAfterCompletion(completedId);
+    // The commit endpoint also closed the session server-side.
+    gameSession=null;
+    setTimeout(closeReviewModal,800);
+  }catch(e){
+    status.textContent="Save failed: "+e.message;
+    status.className="review-status err";
+    saveBtn.disabled=false; dropBtn.disabled=false;
+  }
+}
+
+async function reviewDiscard(){
+  if(!gameSession){closeReviewModal();return;}
+  const saveBtn=document.getElementById("review-save-btn");
+  const dropBtn=document.getElementById("review-discard-btn");
+  const status=document.getElementById("review-status");
+  if(!confirm("Discard this episode? It will NOT be saved to the dataset."))return;
+  saveBtn.disabled=true; dropBtn.disabled=true;
+  status.textContent="Discarding..."; status.className="review-status";
+  try{
+    const r=await fetch(gameServerUrl+"/api/game/discard/"+gameSession,{method:"POST"});
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
+    gameLog("Episode discarded — not saved to dataset.");
+    gameSession=null; gameState=null;
+    closeReviewModal();
+    // Return to the scenario picker.
+    if(typeof showSelection==="function")showSelection();
+  }catch(e){
+    status.textContent="Discard failed: "+e.message;
+    status.className="review-status err";
+    saveBtn.disabled=false; dropBtn.disabled=false;
   }
 }
 

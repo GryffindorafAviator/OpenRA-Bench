@@ -144,6 +144,9 @@ def _serialize_state(sess) -> dict:
         "game_tick": status.get("tick", sig.game_tick),
         "objective": sess.objective,
         "save_path": status.get("save_path"),
+        "manual_review": status.get("manual_review", False),
+        "pending_review": status.get("pending_review", False),
+        "draft_path": status.get("draft_path"),
         "units": units,
         "enemies": enemies,
         "own_buildings": own_buildings,
@@ -198,8 +201,12 @@ def start_game(req: StartRequest):
     try:
         from openra_bench.human_labeling import InteractiveSession
 
+        # The browser UI is the human-review-before-save path: stage
+        # playback artifacts in `.draft/` until the human clicks
+        # Save or Discard on the end-of-game review modal.
         sess = InteractiveSession.from_pack(
             req.pack_id, req.level, req.seed, record=True, player="Human",
+            manual_review=True,
         )
         sid = uuid.uuid4().hex[:12]
         sess._session_id = sid
@@ -259,6 +266,83 @@ def stop_game(session_id: str):
     except Exception:
         pass
     return {"status": "closed"}
+
+
+@app.get("/api/game/preview/{session_id}")
+def preview_game(session_id: str):
+    """Return the per-turn summary of the staged (draft) playback so
+    the UI can show the human exactly what would be saved if they
+    click Save. Available once `done=true`."""
+    sess = _sessions.get(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session_id,
+        "outcome": sess.outcome,
+        "turns": sess.turn,
+        "max_turns": sess.max_turns,
+        "pending_review": getattr(sess, "_finalized", False)
+        and getattr(sess, "_manual_review", False)
+        and not getattr(sess, "_committed", False)
+        and not getattr(sess, "_discarded", False),
+        "draft_path": getattr(sess, "draft_path", None),
+        "preview": sess.preview_turns(),
+    }
+
+
+@app.post("/api/game/commit/{session_id}")
+def commit_game(session_id: str):
+    """Promote the staged playback draft to the real playback root
+    and return the published `save_path`. Idempotent. The session is
+    closed afterwards (its env handle is released) so the browser
+    should treat the session id as consumed."""
+    sess = _sessions.get(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not getattr(sess, "_manual_review", False):
+        raise HTTPException(
+            status_code=400,
+            detail="Session is not in manual-review mode",
+        )
+    if not getattr(sess, "_finalized", False):
+        raise HTTPException(
+            status_code=400,
+            detail="Session has not finished yet — nothing to commit",
+        )
+    save_path = sess.commit_playback()
+    if save_path is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Commit failed — draft missing or already discarded",
+        )
+    # Release the engine handle now that the draft has been promoted.
+    try:
+        sess.close()
+    except Exception:
+        pass
+    _sessions.pop(session_id, None)
+    return {"status": "committed", "save_path": save_path}
+
+
+@app.post("/api/game/discard/{session_id}")
+def discard_game(session_id: str):
+    """Drop the staged playback draft without saving and close the
+    session. Idempotent on already-discarded sessions."""
+    sess = _sessions.get(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not getattr(sess, "_manual_review", False):
+        raise HTTPException(
+            status_code=400,
+            detail="Session is not in manual-review mode",
+        )
+    sess.discard_playback()
+    try:
+        sess.close()
+    except Exception:
+        pass
+    _sessions.pop(session_id, None)
+    return {"status": "discarded"}
 
 
 @app.get("/api/health")
