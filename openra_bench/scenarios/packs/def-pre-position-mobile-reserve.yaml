@@ -31,10 +31,7 @@
 #     whatever closes into the static cluster, but NEVER MOVES OUT
 #     of its starting cell. The FORWARD-zone clause
 #     (`units_in_region_gte` at the lane-mouth intercept point) is
-#     therefore never satisfied → LOSS on the position clause; the
-#     concurrent `hunt` bands also overwhelm the un-forward reserve
-#     (units lost busts the cap / the `after_ticks: 2401` fail
-#     bites at max_turns either way).
+#     therefore never satisfied → LOSS on the position clause.
 #
 #   • commit-NORTH (whole reserve sent north on turn 1): on easy
 #     (rush IS from NORTH) this matches the lane and satisfies the
@@ -59,23 +56,10 @@
 #   - `hunt` bot — each enemy unit attacks the NEAREST agent unit,
 #     so a band placed in lane Y engages whichever reserve
 #     detachment the agent committed to lane Y; the flanks are
-#     genuinely independent. (`rusher` pooled all bands onto the
-#     agent centroid; under the corrected post-engine-balance
-#     stance semantics that collapses the multi-flank test into a
-#     single fight, so the pack uses `hunt`.)
+#     genuinely independent.
 #   - Agent tanks are `stance:2` (Defend): they auto-fire on an
 #     in-range enemy but NEVER advance — so a stall reserve cannot
-#     self-deliver across the map, and the agent must actively
-#     order the forward intercept. (`stance:3` AttackAnything was
-#     used pre-fix; under the corrected stance semantics it
-#     auto-hunts the whole map, letting a stall policy clear every
-#     band for free — the no-cheat bar broke.)
-#   - Enemy actors with NO spawn_point ALWAYS place regardless of
-#     agent spawn group (CLAUDE.md). On medium/hard we DECLARE
-#     multiple bands and they BOTH/ALL place every seed. The
-#     "react to either flank" capability is enforced by having
-#     ALL candidate flanks active every seed — strictly the harder
-#     test than a per-seed flank flip.
+#     self-deliver across the map.
 #   - Inert enemy `fact` marker far east (anti-DRAW): without a
 #     persistent enemy actor the engine auto-`done`s on enemy-elim
 #     before the win/fail evaluator runs.
@@ -85,24 +69,11 @@
 #   - `units_in_region_gte: {x, y, radius, n}` — load-bearing
 #     position clause: forces the reserve to MOVE FORWARD (not just
 #     auto-defend at the centre).
-#   - 2tnk vs e1: tanks dominate per-shot (1-shot e1); e1 vs 2tnk has
-#     low damage (CLAUDE.md / combat-focus-fire-priority). So a
-#     reserve that actively `attack_unit`s the bands clears the
-#     kill bar without losing tanks; a stance:2 reserve that stays
-#     clustered at the centre is overrun by the concurrent `hunt`
-#     bands. The discriminator is POSITION + active commitment —
-#     the intended forward-intercept play satisfies the forward
-#     zones; a stall stays out of every zone and bleeds out.
-#   - Tick budget: ~90 ticks/turn fixed-step, ~60 ticks/turn in
-#     interrupt mode (every fired interrupt cuts the step short).
-#     max_turns 50 → reachable tick ≈ 3000 in interrupt mode;
-#     `within_ticks: 2400` and `after_ticks: 2401` are both reachable
-#     well inside max_turns so stall hits the deadline as a real
-#     LOSS (not a draw degeneracy).
+#   - 2tnk vs e1: tanks dominate per-shot (CLAUDE.md /
+#     combat-focus-fire-priority).
 #
 # Validate (no model / no network):
-#   python3 -m openra_bench.scenarios.validate \
-#     openra_bench/scenarios/packs/def-pre-position-mobile-reserve.yaml
+#   python3 -m pytest tests/test_def_pre_position_mobile_reserve.py -q
 
 meta:
   id: def-pre-position-mobile-reserve
@@ -156,13 +127,8 @@ base:
     # `hunt`: each enemy unit attacks the NEAREST agent unit, so a
     # band placed in lane Y engages whatever reserve detachment the
     # agent committed to lane Y — each flank is an independent
-    # threat. (`rusher` pooled every band onto the agent centroid;
-    # it was retired in the post-engine-balance recalibration —
-    # under the corrected stance semantics a `rusher` funnel
-    # collapses the multi-flank test into a single fight.)
+    # threat.
     bot_type: hunt
-  # Combat-only toolset (NO build / NO harvest): the test is reserve
-  # POSITIONING + COMMITMENT, not production.
   tools:
     - observe
     - move_units
@@ -170,9 +136,6 @@ base:
     - attack_move
     - stop
   planning: true
-  # React the INSTANT a rusher unit is spotted or a reserve tank is
-  # lost — the centre-then-react doctrine needs the flank-localisation
-  # alert to bite immediately, not on the next decision boundary.
   interrupts:
     enemy_unit_spotted: true
     own_unit_destroyed: true
@@ -186,66 +149,37 @@ levels:
   # y=10 every seed). The capability is "move the reserve OUT to
   # intercept the rush at its lane mouth". stance:2 tanks auto-fire
   # only on whatever closes into the static cluster, but the
-  # FORWARD-zone clause (units_in_region_gte
-  # at the NORTH-flank intercept point) is the load-bearing
-  # discriminator: stall keeps tanks at (40,20) → outside the
-  # (60,12) r=10 zone → LOSS.
-  # max_turns 50 → reachable tick ~3000 in interrupt mode, ~4503
-  # fixed-step; `after_ticks: 2401` bites well before max_turns.
+  # FORWARD-zone clause is the load-bearing discriminator: stall
+  # keeps tanks at (40,20) → outside the (60,12) r=10 zone → LOSS.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Your construction yard (fact) sits at the west edge (10,20). A
-    # mobile armoured reserve of 4 medium tanks (2tnk) is staged at the
-    # CENTRE (40,20). A rifle-infantry rush is incoming from the NORTH
-    # (spawn at (80,10)) and will drive straight at the centroid of your
-    # forces. Move the reserve FORWARD toward the NORTH lane mouth to
-    # intercept the rush — at least 2 tanks must be within radius 10 of
-    # the NORTH-flank intercept point (60,12) at win time AND you must
-    # destroy ≥4 of the rushers AND keep ≥1 tank alive AND finish before
-    # tick 2400. Holding the reserve at the centre never satisfies the
-    # forward-zone clause; committing south sends the tanks away from the
-    # threat (no forward-zone satisfaction); stalling loses on the clock.
     description: >
-      Yard at (10,20); a four-tank reserve sits at the centre (40,20). A
-      rifle rush is inbound from the NORTH. Move the reserve forward to
-      intercept — two tanks in the (60,12) disc when the win checks. Four
-      kills, one tank alive, within about 27 turns. Holding centre fails
-      the forward-zone clause.
+      Your Construction Yard sits at the west edge; a four-tank reserve
+      stands at the centre of the map, equidistant from both flanks. A
+      rifle rush is inbound from the NORTH. Destroy at least four
+      attackers, keep at least one tank alive, and have at least two
+      tanks inside a forward intercept disc around the north lane mouth
+      at the deadline, within about 27 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-pre-position-mr-easy-arena
+        width: 80
+        height: 40
+        cordon: 2
+        title: def-pre-position-mobile-reserve easy 80x40
       actors:
-        # Agent construction yard — WEST edge, the rusher target.
         - {type: fact, owner: agent, position: [10, 20]}
-        # Mobile reserve — 4 medium tanks at CENTRE (40,20).
-        # stance:2 (Defend) — auto-fires on an in-range enemy but
-        # never advances, so the agent must actively order the
-        # forward intercept. The discriminator is the FORWARD-ZONE
-        # clause: a passive reserve at (40,20) never reaches
-        # (60,12) r=10, so stall fails the position clause.
         - {type: 2tnk, owner: agent, position: [40, 19], stance: 2}
         - {type: 2tnk, owner: agent, position: [40, 20], stance: 2}
         - {type: 2tnk, owner: agent, position: [40, 21], stance: 2}
         - {type: 2tnk, owner: agent, position: [41, 20], stance: 2}
-        # NORTH rush band — 6× e1. e1-only so 4 tanks dominate the
-        # engagement (per CLAUDE.md / combat-focus-fire-priority:
-        # e1 vs 2tnk has very low damage). 6 enemies makes the
-        # units_killed_gte:4 bar comfortably achievable.
-        - {type: e1, owner: enemy, position: [80, 10], stance: 3, count: 6}
-        # Inert enemy `fact` marker far east (anti-DRAW): without it
-        # the engine auto-`done`s on enemy-elim before the win/fail
-        # evaluator runs (CLAUDE.md footgun).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: e1, owner: enemy, position: [72, 10], stance: 3, count: 6}
+        # Inert enemy `fact` marker far east (anti-DRAW).
+        - {type: fact, owner: enemy, position: [76, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 4}
         - {own_units_gte: 1}
-        # FORWARD-zone clause: ≥2 tanks within radius 10 of the
-        # NORTH-flank intercept point (60,12). Stall keeps tanks at
-        # (40,20) — distance sqrt(20²+8²) ≈ 21.5 > 10 → clause
-        # fails. Active forward intercept (attack_move toward
-        # (60,12)) puts the surviving tanks inside the zone.
         - {units_in_region_gte: {x: 60, y: 12, radius: 10, n: 2}}
         - {within_ticks: 2400}
     fail_condition:
@@ -257,72 +191,40 @@ levels:
 
   # ── MEDIUM ───────────────────────────────────────────────────────
   # +1 controlled variable: TWO simultaneous bands from BOTH flanks
-  # (NORTH y=10 and SOUTH y=30 — engine constraint per CLAUDE.md:
-  # enemy actors don't honour spawn_point, so we encode "either flank
-  # possible" as "BOTH flanks active every seed", which is strictly
-  # the harder test). The win clause requires `all_of` BOTH forward
-  # zones to hold ≥1 tank — the reserve MUST SPLIT or stagger sends
-  # so both lanes are addressed. A commit-NORTH puts 0 tanks in the
-  # S zone → S clause fails → LOSS. Stall puts everyone at the
-  # centre → both clauses fail.
+  # (NORTH y=10 and SOUTH y=30). The win clause requires `all_of`
+  # BOTH forward zones to hold ≥1 tank — the reserve MUST SPLIT or
+  # stagger sends so both lanes are addressed.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Your construction yard (fact) sits at the west edge (10,20). A
-    # mobile armoured reserve of 6 medium tanks (2tnk) is staged at the
-    # CENTRE (40,20). Two rush bands are incoming — one from the NORTH
-    # (spawn at (80,10)) and one from the SOUTH (spawn at (80,30)) — and
-    # both drive at the centroid of your forces. SPLIT or STAGGER the
-    # reserve so BOTH flanks are addressed — at least 1 tank within radius
-    # 12 of the NORTH intercept (60,14) AND at least 1 tank within radius
-    # 12 of the SOUTH intercept (60,26) at win time, AND destroy ≥6
-    # rushers AND keep ≥2 tanks alive AND keep the fact standing, AND
-    # finish before tick 2400. Holding the reserve at the centre never
-    # satisfies either forward-zone clause; committing the WHOLE reserve
-    # to ONE flank puts 0 tanks in the opposite zone (the other-flank
-    # clause fails); only an active split / staggered send to BOTH flanks
-    # wins.
     description: >
-      Yard at (10,20); a six-tank reserve at (40,20). Two rush bands
-      incoming — one from NORTH (80,10), one from SOUTH (80,30). Split or
-      stagger the reserve so BOTH flanks see a tank: at least one in the
-      (60,14) disc, at least one in the (60,26) disc. Six kills, two
-      alive, yard intact, within about 27 turns. Centre-only or one-flank
-      both fail.
+      Your Construction Yard sits at the west edge; a six-tank reserve
+      stands at the centre. Two rush bands incoming — one from the
+      NORTH lane (y≈10) and one from the SOUTH lane (y≈30). Destroy at
+      least six attackers, keep at least two tanks alive, and have at
+      least one tank in EACH of the north and south forward intercept
+      discs at the deadline, within about 27 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-pre-position-mr-medium-arena
+        width: 80
+        height: 40
+        cordon: 2
+        title: def-pre-position-mobile-reserve medium 80x40
       actors:
-        # Agent fact — west, the rusher target.
         - {type: fact, owner: agent, position: [10, 20]}
-        # 6× 2tnk mobile reserve at CENTRE — two extra tanks over
-        # easy to make the 2-way split tractable (3 to each flank
-        # is the canonical split; 2 to each flank if pursuing centre
-        # micro). stance:2 as on easy.
         - {type: 2tnk, owner: agent, position: [40, 19], stance: 2}
         - {type: 2tnk, owner: agent, position: [40, 20], stance: 2}
         - {type: 2tnk, owner: agent, position: [40, 21], stance: 2}
         - {type: 2tnk, owner: agent, position: [41, 19], stance: 2}
         - {type: 2tnk, owner: agent, position: [41, 20], stance: 2}
         - {type: 2tnk, owner: agent, position: [41, 21], stance: 2}
-        # NORTH rush band — 5× e1.
-        - {type: e1, owner: enemy, position: [80, 10], stance: 3, count: 5}
-        # SOUTH rush band — 5× e1. Total 10 e1 across both bands.
-        # The position-clause discriminator (BOTH N-zone AND S-zone
-        # must hold ≥1 tank) is the load-bearing test: a wrong-flank
-        # commit puts 0 tanks in the opposite zone → clause fails.
-        - {type: e1, owner: enemy, position: [80, 30], stance: 3, count: 5}
-        # Inert enemy `fact` marker far east (anti-DRAW).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: e1, owner: enemy, position: [72, 10], stance: 3, count: 5}
+        - {type: e1, owner: enemy, position: [72, 30], stance: 3, count: 5}
+        - {type: fact, owner: enemy, position: [76, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 6}
         - {own_units_gte: 2}
-        # BOTH forward-flank zones must hold ≥1 tank — the reserve
-        # MUST SPLIT (or stagger) to address both flanks. A
-        # commit-NORTH policy puts all tanks in the N zone (0 in S
-        # zone) → S clause fails → LOSS. Stall (everyone at centre)
-        # fails both zones.
         - {units_in_region_gte: {x: 60, y: 14, radius: 12, n: 1}}
         - {units_in_region_gte: {x: 60, y: 26, radius: 12, n: 1}}
         - {within_ticks: 2400}
@@ -336,48 +238,28 @@ levels:
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 controlled variable on top of medium: THREE rush directions
   # (N y=10, S y=30, E y=20 head-on) AND a strict attrition cap
-  # (units_lost_lte: 2 — at most 2 tanks lost) AND ≥2 agent
-  # spawn_point groups so the reserve's starting CELL varies per
-  # seed (centre column x=40 vs x=50 — both remain equidistant
-  # from N/S flanks; the centre-then-react DOCTRINE generalises,
-  # a memorised cell does not). Kill bar 6 — high enough that no
-  # single-flank commit kills enough alone but low enough that an
-  # active three-way split clears it comfortably. The win clause
-  # requires `all_of` THREE forward zones (N + CENTRE + S) — the
-  # reserve must split three ways or stagger across all three lanes.
-  # Same clock; same tick-aligned fail.
+  # (units_lost_lte: 2) AND ≥2 agent spawn_point groups so the
+  # reserve's starting cell varies per seed (x=40 vs x=50).
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Your construction yard (fact) sits at the west edge (10,20). A
-    # mobile armoured reserve of 6 medium tanks (2tnk) is staged at the
-    # CENTRE of the arena — a seed-chosen central cell (the reserve's
-    # exact column varies per seed so a memorised opening cannot
-    # generalise; the central reserve DOCTRINE still applies from either
-    # start). Three rush bands are incoming — NORTH (y=10), SOUTH (y=30),
-    # and EAST (y=20, head-on) — and all drive at the centroid of your
-    # forces. Win requires: destroy ≥6 rushers AND keep ≥2 tanks alive AND
-    # lose AT MOST 2 tanks AND at least 1 tank within radius 10 of the
-    # NORTH intercept (60,12) AND at least 1 tank within radius 12 of the
-    # CENTRE intercept (65,20) AND at least 1 tank within radius 10 of the
-    # SOUTH intercept (60,28) at win time AND keep the fact standing AND
-    # finish before tick 2400. Holding the reserve at the centre fails the
-    # N and S clauses; pre-committing to a single flank fails the other
-    # two; only an active three-way push wins.
     description: >
-      Twelve tanks stage at a seed-chosen central column; three rush bands
-      hit NORTH (y=10), CENTRE (y=20), and SOUTH (y=30). Push tanks to all
-      three intercepts at once — (60,12), (65,20), (60,28). Six kills, two
-      alive, loss cap two, yard intact, within about 27 turns. Sitting
-      central or pre-committing to one flank fails the others.
+      Your Construction Yard sits at the west edge; a twelve-tank
+      reserve stands at a seed-chosen central column. Three rush bands
+      incoming — NORTH (y≈10), CENTRE (y≈20 head-on), and SOUTH
+      (y≈30). Destroy at least six attackers, keep at least two tanks
+      alive, lose no more than two, and have at least one tank in EACH
+      of the north, centre, and south forward intercept discs at the
+      deadline, within about 27 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-pre-position-mr-hard-arena
+        width: 80
+        height: 40
+        cordon: 2
+        title: def-pre-position-mobile-reserve hard 80x40
       actors:
-        # Agent fact — duplicated across BOTH spawn_point groups at
-        # the SAME cell (CLAUDE.md: if ANY agent actor declares
-        # spawn_point, every agent actor WITHOUT spawn_point is
-        # filtered OUT — so we tag every agent actor).
+        # Agent fact duplicated across BOTH spawn_point groups at the
+        # SAME cell.
         - {type: fact, owner: agent, position: [10, 20], spawn_point: 0}
         - {type: fact, owner: agent, position: [10, 20], spawn_point: 1}
         # spawn_point 0 — reserve at centre column x=40.
@@ -387,36 +269,25 @@ levels:
         - {type: 2tnk, owner: agent, position: [41, 19], stance: 2, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [41, 20], stance: 2, spawn_point: 0}
         - {type: 2tnk, owner: agent, position: [41, 21], stance: 2, spawn_point: 0}
-        # spawn_point 1 — reserve at centre column x=50 (alternate
-        # central staging; equidistant from N/S flanks and between
-        # fact and rush spawn). A memorised "stage at (40,20)" cell
-        # cannot generalise; the doctrine (centre, react) does.
-        - {type: 2tnk, owner: agent, position: [50, 19], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [50, 20], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [50, 21], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [51, 19], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [51, 20], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [51, 21], stance: 2, spawn_point: 1}
+        # spawn_point 1 — reserve at centre column x=50.
+        - {type: 2tnk, owner: agent, position: [45, 19], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [45, 20], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [45, 21], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [46, 19], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [46, 20], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [46, 21], stance: 2, spawn_point: 1}
         # THREE rush bands — N (y=10), S (y=30), E (y=20 head-on).
-        # All ALWAYS placed (enemy actors don't honour spawn_point).
-        # Total 12 e1 — kill bar 6 is achievable with active forward
-        # intercepts on all three lanes.
-        - {type: e1, owner: enemy, position: [80, 10], stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [80, 30], stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [90, 20], stance: 3, count: 4}
-        # Inert enemy `fact` marker far east (anti-DRAW). Placed
-        # off-axis (y=2) so the head-on east band doesn't path
-        # through it.
-        - {type: fact, owner: enemy, position: [120, 2]}
+        - {type: e1, owner: enemy, position: [72, 10], stance: 3, count: 4}
+        - {type: e1, owner: enemy, position: [72, 30], stance: 3, count: 4}
+        - {type: e1, owner: enemy, position: [74, 20], stance: 3, count: 4}
+        # Inert enemy `fact` marker far east, off-axis so the head-on
+        # east band doesn't path through it.
+        - {type: fact, owner: enemy, position: [76, 4]}
     win_condition:
       all_of:
         - {units_killed_gte: 6}
         - {own_units_gte: 2}
         - {units_lost_lte: 2}
-        # THREE forward zones — each must hold ≥1 tank. The reserve
-        # must split three ways (2/2/2) or stagger sends across all
-        # three lanes. Holding at centre fails N and S; committing
-        # to one flank fails the other two.
         - {units_in_region_gte: {x: 60, y: 12, radius: 10, n: 1}}
         - {units_in_region_gte: {x: 65, y: 20, radius: 12, n: 1}}
         - {units_in_region_gte: {x: 60, y: 28, radius: 10, n: 1}}

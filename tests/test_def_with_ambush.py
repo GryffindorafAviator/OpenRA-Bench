@@ -109,7 +109,17 @@ def charge(rs, C):
     if not units:
         return [C.observe()]
     ids = [str(u["id"]) for u in units]
-    return [C.attack_move(ids, target_x=115, target_y=20)]
+    # Pick the east edge of the playable arena relative to the flanker
+    # row so the order is reachable on both the legacy 128x40 layout
+    # and the post-shrink 80x40 layout.
+    east_target_x = max((u["cell_x"] for u in units), default=40) + 40
+    flank_y = units[0]["cell_y"]
+    # Aim east on the band lane (base row, which is the y nearest 20
+    # or the hard-tier latitude — use the closest enemy's y when
+    # available, else the flanker row).
+    enemies = rs.get("enemy_summary", []) or []
+    target_y = enemies[0]["cell_y"] if enemies else flank_y
+    return [C.attack_move(ids, target_x=east_target_x, target_y=target_y)]
 
 
 def pile_on_fact(rs, C):

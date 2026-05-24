@@ -56,55 +56,45 @@ def stall(rs, Command):
     return [Command.observe()]
 
 
-def _harvest_all(rs, Command):
-    """Issue a harvest order to every owned harvester."""
-    cmds = []
-    harvs = [
-        u for u in rs.get("units_summary", []) or [] if u.get("type") == "harv"
-    ]
-    for h in harvs:
-        mx, my = min(
-            ALL_NEAR_MINES,
-            key=lambda m: (m[0] - h["cell_x"]) ** 2 + (m[1] - h["cell_y"]) ** 2,
-        )
-        cmds.append(Command.harvest([str(h["id"])], mx, my))
-    return cmds
-
-
 def one_harv_only(rs, Command):
-    """Run the pre-placed harvester, never expand (the BASELINE)."""
-    cmds = _harvest_all(rs, Command)
-    return cmds if cmds else [Command.observe()]
+    """Run the pre-placed harvester only — the BASELINE. The engine's
+    `auto_route_idle_harvesters` hook installs a Harvest activity on
+    any owned idle harvester whose owner has a `proc`; the pack ships
+    a pre-placed harv + proc so the single harv auto-cycles without
+    any explicit `harvest` order. Income tops out near 4000 cr over
+    30 turns — below every tier's bar."""
+    return [Command.observe()]
 
 
 def army_drain(rs, Command):
-    """Harvest with the pre-placed harv AND spam `e1` — the "spend the
-    reserve on a non-revenue line" decoy. e1 has no Infantry-queue host
-    (no tent), so the build is prereq-blocked; the play degenerates to
-    one-harv-only and still misses the bar."""
-    cmds = _harvest_all(rs, Command)
-    cmds.append(Command.build("e1"))
-    return cmds
+    """Spam `e1` — the "spend the reserve on a non-revenue line"
+    decoy. e1 has no Infantry-queue host (no tent), so the build is
+    prereq-blocked; the play degenerates to one-harv-only and still
+    misses the bar."""
+    return [Command.build("e1")]
 
 
 def _expand_factory(build_after_tick: int):
-    """Reinvestment factory: harvest with all harvs AND buy ONE extra
-    harvester once `game_tick >= build_after_tick`. Closure-local state
-    so each test invocation starts fresh."""
+    """Reinvestment factory: rely on the engine's auto-harvest (the
+    pre-placed harv auto-cycles the mines at (22,18)/(22,22) the
+    moment the pre-placed proc exists) AND buy ONE extra harvester
+    once `game_tick >= build_after_tick`. Closure-local state so each
+    test invocation starts fresh. The 2nd harv auto-routes the same
+    way once it spawns (the Vehicle-queue is hosted by the pre-placed
+    `weap`)."""
 
     def make():
         bought = [False]
 
         def p(rs, Command):
-            cmds = _harvest_all(rs, Command)
             if (
                 not bought[0]
                 and rs.get("game_tick", 0) >= build_after_tick
                 and rs.get("cash", 0) >= 1100
             ):
-                cmds.append(Command.build("harv"))
                 bought[0] = True
-            return cmds if cmds else [Command.observe()]
+                return [Command.build("harv")]
+            return [Command.observe()]
 
         return p
 

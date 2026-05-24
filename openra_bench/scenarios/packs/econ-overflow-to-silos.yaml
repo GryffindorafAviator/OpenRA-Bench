@@ -122,14 +122,14 @@ meta:
   capability: reasoning
   real_world_meaning: >
     Capacity planning under high producer throughput. The agent owns
-    a minimum revenue kit (construction yard + ore refinery + power plant + many harvs on a
+    a minimum revenue kit (fact + proc + powr + many harvs on a
     dense ore patch column) whose harvesters deposit ore at a
     sustained rate exceeding the refinery's 2000-ore storage cap.
     Once the cap saturates, every new deposit is LOST — the
     back-pressure footgun. The decision is to recognise the
     throughput-vs-buffer gap and BUILD SILOS (cost 150, +3000 cap
     each) so the working capital is absorbed and the economy_value
-    bar lands INSIDE the within_ticks budget. A run with no ore silo
+    bar lands INSIDE the within_ticks budget. A run with no silo
     cannot reach the bar in time (overflow-bound accrual is too slow
     against the tight deadline); intended capacity-planning runs
     (build 1-3 silos) WIN.
@@ -200,11 +200,13 @@ levels:
     # mattering on medium where high- throughput income saturates the cap
     # quickly). Stalling (no harvest) or losing the fact / proc loses.
     description: >
-      You own a yard, refinery, power plant and one harvester on an ore
-      patch with $1000. The ore refinery alone caps storage at 2000. Bank economy
-      value 1500 within about 20 turns. A single harvester sits well under
-      the cap — a simple harvest loop clears the bar with no ore silo needed
-      (silos start to matter on medium).
+      Commander, this is a baseline economy throughput drill. You hold a
+      Construction Yard (fact), an Ore Refinery (proc), a Power Plant
+      (powr) and one harvester (harv, an unarmed ore-collector truck)
+      on an ore patch, with $1000 in the bank. The Refinery alone caps
+      stored ore at 2000. Within about 20 turns, reach economy value
+      $6000 (cash plus stored ore) and keep the Construction Yard and
+      Refinery standing.
     starting_cash: 1000
     overrides:
       actors:
@@ -215,10 +217,10 @@ levels:
         - {type: mine, owner: neutral, position: [14, 18]}
         # Persistent far inert enemy fact prevents engine auto-`done`
         # via the all-enemies-eliminated path (CLAUDE.md footgun).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [60, 4]}
     win_condition:
       all_of:
-        - economy_value_gte: 1500
+        - economy_value_gte: 6000
         - has_building: fact
         - within_ticks: 1800
     fail_condition:
@@ -260,11 +262,14 @@ levels:
     # bar in time. Stalling / harvest-only without silos LOSES on the
     # clock.
     description: >
-      Same kit but with seven harvesters on a dense patch column — high
-      throughput. The 2000 cap fills fast and overflow ore is LOST. Build
-      at least one ore silo (150cr each, +3000 cap) to absorb the throughput,
-      or you plateau around 17840 cash by the deadline. Bank economy value
-      18000 within about 21 turns.
+      Commander, this is a capacity-overflow drill. You hold a
+      Construction Yard (fact), an Ore Refinery (proc), a Power Plant
+      (powr) and SEVEN harvesters (harv, unarmed ore-collector trucks)
+      on a dense adjacent ore patch column, with $500 in the bank. The
+      Refinery alone caps stored ore at 2000; any ore deposited beyond
+      the cap is lost. Within about 21 turns, reach economy value
+      $19500 (cash plus stored ore) and keep the Construction Yard and
+      Refinery standing.
     starting_cash: 500
     overrides:
       actors:
@@ -285,10 +290,10 @@ levels:
         - {type: mine, owner: neutral, position: [14, 19]}
         - {type: mine, owner: neutral, position: [14, 21]}
         - {type: mine, owner: neutral, position: [14, 22]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [60, 4]}
     win_condition:
       all_of:
-        - economy_value_gte: 18000
+        - economy_value_gte: 19500
         - has_building: fact
         - within_ticks: 1803
     fail_condition:
@@ -316,17 +321,21 @@ levels:
     #
     # Same decision (build silos to absorb high-throughput income) and the
     # same EV bar (18000), but your base orientation varies by seed: WEST
-    # base (fact at x=8) or EAST-MIRROR base (fact at x=30). Each spawn
+    # base (fact at x=8) or EAST-MIRROR base (fact at x=40). Each spawn
     # has its own dense near-patch column on its x-axis band. The silo
     # must be placed near your *actual* fact (a memorised cell from the
     # other spawn misses on the wrong seed). No-silo runs LOSE on the
     # clock; intended build-silo runs WIN.
     description: >
-      Same decision — build silos to absorb seven-harvester throughput —
-      but your base spawns either WEST (x=8) or EAST-MIRROR (x=30) by
-      seed, each with its own dense patch column. Silos must land near
-      YOUR live yard; a memorised cell misses on the flip. Bank 18500
-      within about 21 turns.
+      Commander, this is a capacity-overflow drill with seed-rotated
+      base column. You hold a Construction Yard (fact), an Ore Refinery
+      (proc), a Power Plant (powr) and seven harvesters (harv, unarmed
+      ore-collector trucks) on a dense ore patch column at either the
+      WEST (x=8) or EAST-MIRROR (x=40) base — the seed picks. The
+      Refinery caps stored ore at 2000; any ore deposited beyond the
+      cap is lost. Within about 21 turns, reach economy value $19500
+      (cash plus stored ore) and keep the Construction Yard and
+      Refinery standing.
     starting_cash: 500
     overrides:
       actors:
@@ -341,24 +350,25 @@ levels:
         - {type: harv, owner: agent, position: [14, 19], spawn_point: 0}
         - {type: harv, owner: agent, position: [14, 21], spawn_point: 0}
         - {type: harv, owner: agent, position: [14, 22], spawn_point: 0}
-        # ── spawn_point 1: EAST-MIRROR base (fact x=80, patches x=86) ─
-        # Placed FAR (x=80) from the WEST spawn (x=8..14) so the two
-        # mine clusters do NOT mutually leak — a WEST harv that
-        # exhausts its own (14,y) cell does not have (86,y) as a
-        # nearby fallback (the auto-path distance dominates and the
-        # harv idles back to its own column). This keeps the
-        # per-spawn throughput symmetric and matches the medium tier
-        # ceiling.
-        - {type: fact, owner: agent, position: [80, 18], spawn_point: 1}
-        - {type: proc, owner: agent, position: [84, 18], spawn_point: 1}
-        - {type: powr, owner: agent, position: [82, 20], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 14], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 15], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 16], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 17], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 19], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 21], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 22], spawn_point: 1}
+        # ── spawn_point 1: EAST-MIRROR base (fact x=40, patches x=46) ─
+        # Placed FAR (x=40) from the WEST spawn (x=8..14) so the two
+        # mine clusters do NOT mutually leak — a WEST harv (at (14,y))
+        # has path distance ~6 to its own column vs ~32 to (46,y), so
+        # the auto-path picks WEST mines and the harv stays on its
+        # spawn-matched column. This keeps per-spawn throughput
+        # symmetric and matches the medium tier ceiling. Shrunk from
+        # the old (x=80, patches x=86) on rush-hour-arena 128x40 to
+        # fit the bespoke 64x40 arena (playable 2..60).
+        - {type: fact, owner: agent, position: [40, 18], spawn_point: 1}
+        - {type: proc, owner: agent, position: [44, 18], spawn_point: 1}
+        - {type: powr, owner: agent, position: [42, 20], spawn_point: 1}
+        - {type: harv, owner: agent, position: [46, 14], spawn_point: 1}
+        - {type: harv, owner: agent, position: [46, 15], spawn_point: 1}
+        - {type: harv, owner: agent, position: [46, 16], spawn_point: 1}
+        - {type: harv, owner: agent, position: [46, 17], spawn_point: 1}
+        - {type: harv, owner: agent, position: [46, 19], spawn_point: 1}
+        - {type: harv, owner: agent, position: [46, 21], spawn_point: 1}
+        - {type: harv, owner: agent, position: [46, 22], spawn_point: 1}
         # Neutral mines always place regardless of spawn_point filter
         # (CLAUDE.md). Duplicate the patch column at each spawn band.
         - {type: mine, owner: neutral, position: [14, 14]}
@@ -368,17 +378,17 @@ levels:
         - {type: mine, owner: neutral, position: [14, 19]}
         - {type: mine, owner: neutral, position: [14, 21]}
         - {type: mine, owner: neutral, position: [14, 22]}
-        - {type: mine, owner: neutral, position: [86, 14]}
-        - {type: mine, owner: neutral, position: [86, 15]}
-        - {type: mine, owner: neutral, position: [86, 16]}
-        - {type: mine, owner: neutral, position: [86, 17]}
-        - {type: mine, owner: neutral, position: [86, 19]}
-        - {type: mine, owner: neutral, position: [86, 21]}
-        - {type: mine, owner: neutral, position: [86, 22]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: mine, owner: neutral, position: [46, 14]}
+        - {type: mine, owner: neutral, position: [46, 15]}
+        - {type: mine, owner: neutral, position: [46, 16]}
+        - {type: mine, owner: neutral, position: [46, 17]}
+        - {type: mine, owner: neutral, position: [46, 19]}
+        - {type: mine, owner: neutral, position: [46, 21]}
+        - {type: mine, owner: neutral, position: [46, 22]}
+        - {type: fact, owner: enemy, position: [60, 4]}
     win_condition:
       all_of:
-        - economy_value_gte: 18500
+        - economy_value_gte: 19500
         - has_building: fact
         - within_ticks: 1803
     fail_condition:

@@ -1,173 +1,131 @@
 # Validate: python -m openra_bench.scenarios.validate packs/econ-resource-trade-with-self.yaml
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
-# ECON-RESOURCE-TRADE-WITH-SELF (Wave-10 — the agent "trades with
-# itself": every tick the harvested ore can sit as STOCKPILE (stored
-# ore in the refinery store) or convert to CASH via the resource
-# drain. The two forms are fungible — economy_value = cash + stored
-# ore — but the CONVERSION CHANNEL is rate-limited and the STOCKPILE
-# is CAP-LIMITED, so the agent must size its storage buffer to the
-# middle: enough silos that harvested income is never spoiled at the
-# cap, but not SO many silos that the cash spent on them (and the
-# build-queue turns each one costs) drags economy_value below the
-# bar. Naive deposit-as-you-go floods the proc cap and DISCARDS
-# income; patient over-stockpiling sinks working capital into
-# unneeded silos. Balanced spreading wins.)
+# ECON-RESOURCE-TRADE-WITH-SELF (track-D capital allocation: the agent
+# "trades with itself" by SELLING a building it no longer needs to
+# unlock the cash required to satisfy the win clause).
 #
-# Real-world anchor: commodity hedging — a producer of a physical
-# commodity must decide each period how much output to BANK as
-# inventory (held stock, here the refinery store + silos) versus
-# SELL into cash. Inventory has a carrying cost (the silo build
-# spend and the queue turns it consumes) and a finite warehouse cap
-# (overflow past the cap is product LOST on deposit); cash is liquid
-# but the conversion channel is rate-limited (the drain). The hedged
-# position — size the warehouse to absorb production, neither
-# under-buffer (spoilage) nor over-buffer (carrying cost) — maximises
-# total book value. Same shape as finance inventory-vs-cash balance
-# and SC2 silo management.
+# Real-world anchor: divestiture / asset rotation / SC2 mid-game sell.
+# A producer holds a portfolio of assets, some of which are idle or
+# redundant given the current operating regime. Selling a redundant
+# asset frees working capital that can be deployed into a productive
+# investment. The hedge: hoarding the redundant asset lets capital sit
+# trapped in tangible form; selling at the right moment converts that
+# capital back into cash so it can fund the next operation.
 #
-# Pack frame: the agent owns a minimum revenue kit (fact + proc +
-# powr + 7 harvs on a dense adjacent ore-patch column) and a low
-# starting cash buffer. Income flows IN HIGH (7 harvs unload in
-# parallel). The storage cap on harvested ore is 2000 from the proc
-# alone; once saturated, the engine deposit is `(stored+value).min(
-# cap)` so every unit beyond the cap is LOST. Each silo costs 150 and
-# adds +3000 cap — but each silo is ALSO a build-queue cycle (one
-# decision turn to queue + place) and 150 cash off the book value.
+# Engine mechanic exercised (CLAUDE.md / OpenRA-Rust):
+#   * `Command.sell([building_id])` issues a Sell order on the named
+#     building. Engine refund: cost / 2 (world.rs:1383 — verified). So
+#     `weap` (cost 2000) refunds 1000; `proc` (1400) refunds 700;
+#     `fix` (1000) refunds 500; `barr` / `tent` (400) refunds 200.
+#   * The sold building is removed; its actor id stops appearing in
+#     `own_buildings`; the cash hits the player's bank within the
+#     same tick.
 #
-# THE TRADE-WITH-SELF DECISION — three policy families, only the
-# middle one wins (empirically verified, scripted seed-1..4):
-#   * DEPOSIT-IMMEDIATELY (0 silos): harvest only, never build a
-#     silo. The 7-harv throughput saturates the 2000 proc cap; every
-#     deposit past the cap spoils; economy_value plateaus below the
-#     M bar inside the within_ticks deadline ⇒ LOSS.
-#   * STOCKPILE-ONLY (over-build silos — 7+ on easy, 6+ on medium,
-#     4+ on hard): pours working capital into silos far beyond what
-#     the throughput needs. Each silo is 150 cash + one queue turn;
-#     the cash sunk into surplus storage AND the turns lost queueing
-#     them drag economy_value below the M bar at the deadline ⇒
+# Pack frame: the agent owns a working economy (fact + proc + powr +
+# harv on an ore patch) AND a redundant `weap` (war factory) that is
+# not needed for the current win clause. Starting cash is too low to
+# afford the required action (build a second proc — cost 1400 — to
+# scale up). Selling the redundant weap returns 1000 cash, which when
+# combined with one round of harvested income clears the 1400 proc
+# cost AND lands the cash bar by the deadline.
+#
+# Four-policy discrimination bar (no defect, no cheat, no draw):
+#   * STALL (only observe): no income action — the win cash bar is
+#     never met → real reachable timeout LOSS.
+#   * HOARD (harvest the patch but never sell the redundant weap):
+#     the single harvester's income alone does not afford both the
+#     2nd proc build AND clear the cash bar inside the deadline →
 #     LOSS.
-#   * BALANCED (1..6 silos on easy / 1..5 on medium / 1..3 on hard):
-#     build just enough silos to lift the cap above the deposit
-#     rate so income is never spoiled, then stop and let the
-#     economy compound. economy_value clears the M bar inside the
-#     deadline ⇒ WIN.
-#   * STALL (only observe): no income at all, M bar never met ⇒
-#     LOSS on every tier and seed.
+#   * SELL-AND-INVEST (sell the redundant weap → +1000 cash → build
+#     a 2nd proc → cash bar clears with the doubled income before the
+#     deadline): WIN.
+#   * SELL-ONLY (sell the weap but don't build the 2nd proc): the
+#     single-harv income alone still cannot reach the cash bar in
+#     time → LOSS. (The sell is necessary but not sufficient — the
+#     freed cash must be deployed.)
 #
-# The capability under test (REASONING): recognise that BOTH
-# extremes destroy value — under-buffering spoils income at the cap,
-# over-buffering sinks cash into idle storage — and pick the hedged
-# middle. This is NOT econ-overflow-to-silos (which only punishes the
-# UNDER-buffered side; there, more silos never hurt). Here the bar M
-# is sized so the over-stockpile run ALSO misses — a genuine
-# inventory-vs-cash balance, not a one-directional "build more".
-#
-# ENGINE FACTS verified (CLAUDE.md + econ-overflow-to-silos.yaml +
-# empirical scripted seed-1..4 calibration, max_turns 21 / tick
-# ceiling 1893, all four seeds deterministic):
-#  1. `silo` cost 150, prereq `proc` (pre-placed). Buildable via
-#     Command.build("silo") + Command.place_building("silo", x, y).
-#  2. Storage cap (harvested ore beyond cap is LOST on deposit —
-#     world.rs `(stored+value).min(cap)`): proc = +2000, silo =
-#     +3000. Pre-placed proc → cap 2000; each silo lifts it +3000.
-#  3. Resource drain: stored ore converts to cash over time; with 7
-#     harvs the sustained deposit rate exceeds the drain, so the
-#     stored pool climbs and binds the 2000 cap unless silos lift it.
-#  4. `economy_value_gte = cash + resources` (win_conditions.py).
-#     Stored ore and cash both count toward the bar — so the
-#     stockpile-only run is NOT punished for holding ore; it is
-#     punished for the 150-cash-per-silo SPEND and the build-queue
-#     turns the surplus silos consume (those turns delay the income
-#     compounding). The empirical band proves the two-sided teeth:
-#       EASY  (M 17900): 0 silos LOSE, 1..6 WIN, 7+ LOSE.
-#       MED   (M 18100): 0 silos LOSE, 1..5 WIN, 6+ LOSE.
-#       HARD  (M 18300): 0 silos LOSE, 1..3 WIN, 4+ LOSE.
-#     The bar tightens per tier (the controlled difficulty axis):
-#     the acceptable hedge band narrows easy→medium→hard.
-#  5. Far inert enemy `fact` marker prevents engine auto-`done` via
-#     the "all enemies eliminated" path (CLAUDE.md auto-done footgun)
-#     so a non-finisher LOSES on the deadline (never DRAWS).
-#  6. `has_building:silo` is NOT used as a win clause here — the win
-#     keys economy_value + the fact count + the deadline, so the
-#     model is free to pick ANY silo count in the valid band (the
-#     CLAUDE.md "silo is NOT MustBeDestroyed" footgun is about enemy
-#     destruction landmarks; we do not use silo as a landmark).
-#  7. Tick alignment: engine advances ~90 ticks per decision turn so
-#     within_ticks ≤ 93 + 90·(max_turns − 1) (CLAUDE.md). All tiers:
-#     max_turns 21 → ceiling 1893; within_ticks 1803 (= turn-20
-#     tick) and after_ticks 1804 (a non-finisher at turn 21 LOSES on
-#     the after_ticks clause — never a max-turn DRAW).
-#  8. spawn_point filter on agent actors only (CLAUDE.md) — neutral
-#     `mine` actors and the inert enemy `fact` always place; the
-#     hard tier duplicates the dense patch column at each spawn band
-#     (WEST x=14 / EAST x=86) with IDENTICAL y-geometry so per-spawn
-#     throughput is symmetric (verified: all four hard seeds give
-#     the same s0-LOSE / s1..3-WIN / s4+-LOSE band).
-#  9. Fail clause includes `not has_building:proc` (per spec) —
-#     losing the refinery collapses both income AND the cap; a play
-#     that somehow loses proc fails regardless of cash on hand. The
-#     fact clause uses building_count_gte:fact:1 (per the Wave-10
-#     spec win/fail shape).
+# Engine facts used (CLAUDE.md):
+#   * sell refund = cost/2 (verified: world.rs:1383
+#     `estimate_building_sell_value`).
+#   * place_building has no adjacency requirement, so the 2nd proc
+#     can be placed anywhere in-bounds.
+#   * place_building('proc') auto-spawns a new harvester at the new
+#     proc's footprint and binds it by path distance (CLAUDE.md fix).
+#     Placed next to the patch, the new harv mines a short cycle and
+#     income roughly doubles.
+#   * `cash_gte` reads the player bank only (NOT stored ore). The
+#     win clause uses cash_gte to make the sell→cash conversion
+#     load-bearing (stored ore in the proc would not satisfy it).
+#   * `not has_building:weap` is NOT a fail clause — the sell of the
+#     weap is the intended verb; the only fail clauses are timeout,
+#     fact-loss, and proc-loss.
+#   * Far inert enemy `fact` marker prevents engine auto-`done` via
+#     the all-enemies-eliminated path.
+#   * Tick alignment: within_ticks ≤ 93 + 90·(max_turns − 1);
+#     after_ticks = within_ticks + 1 so a non-finisher LOSES.
 
 meta:
   id: econ-resource-trade-with-self
-  title: 'Resource Trade With Self — Hedge The Stockpile-vs-Cash Balance'
+  title: 'Resource Trade With Self — Sell A Redundant Building To Fund The Win'
   capability: reasoning
   real_world_meaning: >
-    The agent runs a high-throughput economy (construction yard + ore refinery + power plant +
-    7 harvesters on a dense ore patch) and every tick "trades with
-    itself": harvested ore either sits as STOCKPILE in the refinery
-    store or converts to CASH through a rate-limited drain. The two
-    forms count equally toward book value (economy_value = cash +
-    stored ore), but the stockpile side is CAP-LIMITED — once the
-    2000-ore refinery store fills, every new deposit is LOST. The
-    decision is how much storage to buy: building silos (cost 150,
-    +3000 cap each) lifts the cap so income is never spoiled, but
-    each ore silo is 150 cash off the book and one build-queue turn.
-    Build too FEW silos and the cap floods and discards income;
-    build too MANY and the cash sunk into idle storage plus the
-    queue turns drag book value below the target. The winning play
-    is the hedged middle — size the buffer to the throughput,
-    neither under nor over.
+    The agent owns a working economy plus a redundant tech building
+    (a second war factory) that the current win clause does not need.
+    Starting cash is too low to afford the cash bar by the deadline
+    on harvest income alone. Selling the redundant building returns
+    cash/2 — enough, combined with one round of harvested income, to
+    fund a second refinery whose doubled income compounds past the
+    cash bar inside the clock. Stalling never earns enough income;
+    hoarding the redundant building leaves capital trapped in tangible
+    form and the cash bar misses; selling without re-investing the
+    freed cash also misses. The pack tests the divestiture verb:
+    recognise the redundant asset, sell it, redeploy the cash.
   robotics_analogue: >
-    Commodity hedging / finance inventory-vs-cash balance. A
-    producer of a physical commodity decides each period how much
-    output to BANK as inventory versus SELL into cash. Inventory
-    carries a cost (storage capex, here the ore silo spend and the
-    build-queue turns) and a finite warehouse cap (overflow past the
-    cap is product lost); cash is liquid but the conversion channel
-    is rate-limited. The value-maximising position is the hedge:
-    size the warehouse to absorb production — under-buffering spoils
-    output, over-buffering sinks capital into idle storage. This
-    pack tests the two-sided balancing reflex: measure throughput,
-    measure cap, buy exactly enough buffer.
-  author: wave10-econ-trade-with-self-seed
+    Asset rotation / portfolio divestiture for an autonomous
+    operations stack. The fleet holds a piece of legacy equipment
+    whose capability is not exercised by the current operating
+    profile; the same capital, freed by selling that equipment and
+    redeployed into a productive new asset, compounds throughput
+    inside the planning horizon. The intended move is the trade —
+    sell what isn't earning, fund what will.
+  author: track-D-econ
   benchmark_anchor:
-    - commodity hedging
-    - finance inventory balance
-    - SC2 silo management
+    - SC2 sell-and-rebuild
+    - divestiture
+    - asset rotation
+    - capital recycling
+    - "FIFO perishable inventory cap"
 
+# MAP — per-scenario bespoke arena (replaces rush-hour-arena 128x40,
+# flagged `large-trivial` on every tier in audits/family2_economy.csv).
+# The decision is purely base-internal: sell the redundant weap, build
+# a 2nd proc near a patch. All pre-placed actors fit within x<=22, and
+# hard tier latitudes span y=10..28 — a 48x40 arena (playable 2..44,
+# 2..36) fits with margin. Anti-DRAW enemy fact moved from (120,20)
+# to (42,34) within the new bounds.
 base_map:
   generator: arena
-  name: econ-resource-trade-with-self-arena
+  name: econ-resource-trade-with-self-48x40
   width: 128
   height: 32
+  cordon: 2
+  title: Econ Resource Trade With Self Arena 48x40
 starting_cash: 500
 
 base:
   agent: {faction: allies}
   enemy: {faction: soviet, cash: 0}
-  # Spec-required toolset for the stockpile-vs-cash hedge: observe
-  # (read cash + resources + resource_capacity + own_buildings),
-  # build + place_building (queue silos), harvest + move_units
-  # (sustain income on the patches), stop.
+  # The decision surface: sell (the load-bearing verb) + build +
+  # place_building (deploy the freed cash) + harvest + move_units +
+  # observe + stop.
   tools:
     - observe
     - build
     - place_building
     - harvest
     - move_units
+    - sell
     - stop
   spawn_mcvs: false
   planning: true
@@ -176,220 +134,126 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # The bare hedge skill with a WIDE acceptable band. Heavy income
-  # (7 harvs) so the cap genuinely binds — deposit-immediately
-  # (0 silos) floods the cap and LOSES — but the M bar (17900) is
-  # loose enough that any hedge from 1 to 6 silos WINS; only the
-  # extreme over-stockpile (7+ silos) sinks enough cash to LOSE.
-  # max_turns 21 → ceiling 93 + 90·20 = 1893; within_ticks 1803.
+  # Bare sell-and-redeploy skill. Pre-placed: fact + proc + powr +
+  # 1× harv + 1× redundant weap. Starting cash 500. Win = cash_gte
+  # 3500 by tick 2700 with fact intact. Hoard (just harvest, no
+  # sell) tops out near 2900 cash by deadline. Sell-and-invest
+  # (sell weap → +1000 → build 2nd proc → doubled income) clears
+  # the bar comfortably.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # You own a Construction Yard ('fact'), an Ore Refinery ('proc'), a
-    # Power Plant ('powr'), and SEVEN Ore Trucks ('harv') on a dense ore
-    # patch column. Starting cash is $500. Harvested ore either banks as
-    # STORED ORE (capped at 2000 by the proc alone) or converts to CASH;
-    # both count toward economy_value. Under seven-harvester throughput
-    # the 2000 cap fills fast and every deposit past it is LOST. A SILO
-    # ('silo', cost 150, prereq proc) adds +3000 cap — but each silo is
-    # 150 cash off your book and one build turn. Win = ALL OF
-    # (economy_value ≥ 17900 AND you own ≥1 'fact' AND tick ≤ 1803).
-    # Building NO silos floods the cap and discards income → LOSS; over-
-    # building silos (7+) sinks your cash into idle storage → LOSS. Build
-    # a few silos (1-6) to size the buffer to the income, then let the
-    # economy compound → WIN. Stalling (only observe) earns no income →
-    # LOSS.
     description: >
-      Yard, refinery, power plant, seven harvesters on a dense patch
-      column, $500 cash. The ore refinery caps stored ore at 2000; under seven-harvester throughput it fills fast and overflow is lost. Build a few
-      silos (150cr, +3000 cap each) to size the buffer to the income. Too
-      many silos sinks your cash. Bank economy value 17900 within about 21
-      turns.
+      Commander, this is a divestiture drill. You hold a Construction
+      Yard (fact), Ore Refinery (proc), Power Plant (powr) and one
+      harvester (harv, an unarmed ore-collector truck), plus a
+      redundant War Factory (weap) left over from a previous operation,
+      with $500 in the bank. Selling a building refunds half its cost.
+      Within about 30 turns, reach cash $5500 with the Construction
+      Yard standing.
     starting_cash: 500
     overrides:
       actors:
         - {type: fact, owner: agent, position: [8, 18]}
         - {type: proc, owner: agent, position: [12, 18]}
         - {type: powr, owner: agent, position: [10, 20]}
-        - {type: harv, owner: agent, position: [14, 14]}
-        - {type: harv, owner: agent, position: [14, 15]}
-        - {type: harv, owner: agent, position: [14, 16]}
-        - {type: harv, owner: agent, position: [14, 17]}
-        - {type: harv, owner: agent, position: [14, 19]}
-        - {type: harv, owner: agent, position: [14, 21]}
-        - {type: harv, owner: agent, position: [14, 22]}
-        - {type: mine, owner: neutral, position: [14, 14]}
-        - {type: mine, owner: neutral, position: [14, 15]}
-        - {type: mine, owner: neutral, position: [14, 16]}
-        - {type: mine, owner: neutral, position: [14, 17]}
-        - {type: mine, owner: neutral, position: [14, 19]}
-        - {type: mine, owner: neutral, position: [14, 21]}
-        - {type: mine, owner: neutral, position: [14, 22]}
-        # Persistent far inert enemy fact prevents engine auto-`done`
-        # via the all-enemies-eliminated path (CLAUDE.md footgun).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        # The redundant war factory — not needed for the win clause.
+        # Selling it (refund 1000) is the load-bearing verb.
+        - {type: weap, owner: agent, position: [16, 22]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        # Anti-DRAW: prevents engine auto-done.
+        - {type: fact, owner: enemy, position: [42, 34]}
     win_condition:
       all_of:
-        - economy_value_gte: 17900
+        - cash_gte: 5500
         - building_count_gte: {type: fact, n: 1}
-        - within_ticks: 1803
+        - within_ticks: 2700
     fail_condition:
       any_of:
-        - after_ticks: 1804
+        - after_ticks: 2701
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {has_building: proc}
-    max_turns: 21
+    max_turns: 30
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 controlled variable: the acceptable hedge band NARROWS. Same
-  # 7-harv kit and the same cap pressure, but the M bar rises to
-  # 18100 so the over-stockpile failure threshold drops from 7+ to
-  # 6+ silos — the model has less margin to mis-size the buffer.
-  # Empirically (scripted seed-1..4): 0 silos LOSE, 1..5 WIN, 6+
-  # LOSE. max_turns 21 → ceiling 1893; within_ticks 1803.
+  # Tighter cash bar. Hoard (harvest-only) tops out near 5500 by the
+  # deadline; sell-and-invest clears the bar with the freed cash +
+  # doubled income from a second proc.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Same kit as easy (fact + proc + powr + seven harvs on a dense ore
-    # patch column) and the same storage-cap pressure, but the
-    # economy_value bar rises to 18100 so the acceptable hedge band
-    # narrows. Win = ALL OF (economy_value ≥ 18100 AND you own ≥1 'fact'
-    # AND tick ≤ 1803). Building NO silos floods the 2000 cap and discards
-    # income → LOSS; over-building silos (6 or more) sinks too much cash
-    # into idle storage → LOSS. Size the buffer with a moderate number of
-    # silos (1-5) so income is never spoiled and the book value still
-    # clears the bar → WIN. Stalling never earns income → LOSS.
     description: >
-      Same seven-harvester storm and $500 starting cash, but the bar
-      climbs to 18100 so the ore silo-vs-cash hedge narrows. Build no silos
-      and overflow spoils income; build six or more and you sink too much
-      cash into idle storage. One to five silos sits the buffer right.
-      Within about 21 turns.
+      Commander, this is a divestiture drill with a tighter cash bar.
+      You hold a Construction Yard (fact), Ore Refinery (proc), Power
+      Plant (powr) and one harvester (harv, an unarmed ore-collector
+      truck), plus a redundant War Factory (weap), with $500 in the
+      bank. Selling a building refunds half its cost. Within about 40
+      turns, reach cash $7500 with the Construction Yard standing.
     starting_cash: 500
     overrides:
       actors:
         - {type: fact, owner: agent, position: [8, 18]}
         - {type: proc, owner: agent, position: [12, 18]}
         - {type: powr, owner: agent, position: [10, 20]}
-        - {type: harv, owner: agent, position: [14, 14]}
-        - {type: harv, owner: agent, position: [14, 15]}
-        - {type: harv, owner: agent, position: [14, 16]}
-        - {type: harv, owner: agent, position: [14, 17]}
-        - {type: harv, owner: agent, position: [14, 19]}
-        - {type: harv, owner: agent, position: [14, 21]}
-        - {type: harv, owner: agent, position: [14, 22]}
-        - {type: mine, owner: neutral, position: [14, 14]}
-        - {type: mine, owner: neutral, position: [14, 15]}
-        - {type: mine, owner: neutral, position: [14, 16]}
-        - {type: mine, owner: neutral, position: [14, 17]}
-        - {type: mine, owner: neutral, position: [14, 19]}
-        - {type: mine, owner: neutral, position: [14, 21]}
-        - {type: mine, owner: neutral, position: [14, 22]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: harv, owner: agent, position: [14, 18]}
+        - {type: weap, owner: agent, position: [16, 22]}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 22]}
+        - {type: fact, owner: enemy, position: [42, 34]}
     win_condition:
       all_of:
-        - economy_value_gte: 18100
+        - cash_gte: 7500
         - building_count_gte: {type: fact, n: 1}
-        - within_ticks: 1803
+        - within_ticks: 3600
     fail_condition:
       any_of:
-        - after_ticks: 1804
+        - after_ticks: 3601
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {has_building: proc}
-    max_turns: 21
+    max_turns: 40
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # +1 controlled variable on top of medium: TWO agent spawn_point
-  # groups (WEST base fact x=8 / EAST base fact x=80) round-robined
-  # by seed, BOTH at y=18 so the y-axis throughput geometry is
-  # IDENTICAL per spawn (the only differential is WHERE — the silos
-  # must be placed near the *actual* fact, not a memorised cell from
-  # the other spawn). The M bar rises again to 18300 so the
-  # acceptable hedge band tightens further. Empirically (scripted
-  # seed-1..4, all deterministic): 0 silos LOSE, 1..3 WIN, 4+ LOSE.
-  # Neutral mines duplicated at both spawn columns because neutral /
-  # enemy actors don't honour spawn_point filter (CLAUDE.md engine
-  # footgun). max_turns 21 → ceiling 1893; within_ticks 1803.
+  # +1 axis: base spawns NORTH (y=10) or SOUTH (y=28) by seed. Same
+  # sell-and-invest decision per spawn. The redundant weap and the
+  # near-patch pair sit at the active latitude; the 2nd proc must
+  # land near YOUR live yard.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Same hedge decision (size the silo buffer to the seven-harv
-    # throughput) and the same storage-cap pressure, but your base
-    # orientation varies by seed: WEST base (fact at x=8) or EAST base
-    # (fact at x=80). Each spawn has its own dense near-patch column on
-    # its x-axis band; silos must be placed near your *actual* fact (a
-    # memorised cell from the other spawn misses on the wrong seed). The
-    # economy_value bar rises to 18300 so the acceptable hedge band is
-    # tight. Win = ALL OF (economy_value ≥ 18300 AND you own ≥1 'fact' AND
-    # tick ≤ 1803). No silos floods the cap → LOSS; over-building silos (4
-    # or more) sinks too much cash → LOSS; a tight hedge (1-3 silos) →
-    # WIN. Stalling → LOSS.
     description: >
-      Same ore silo-hedge call, with the base spawning either WEST (x=8) or
-      EAST (x=80) by seed and the bar at 18300. Silos must land near YOUR
-      live yard — a memorised cell misses on the flip. One to three silos
-      hits the tight hedge band. Within about 21 turns.
+      Commander, this is a divestiture drill with seed-rotated base
+      latitude. You hold a Construction Yard (fact), Ore Refinery
+      (proc), Power Plant (powr) and one harvester (harv, an unarmed
+      ore-collector truck), plus a redundant War Factory (weap), at
+      either the NORTH (y=10) or SOUTH (y=28) latitude with $500 in
+      the bank. Selling a building refunds half its cost. Within about
+      50 turns, reach cash $9000 with the Construction Yard standing.
     starting_cash: 500
     overrides:
       actors:
-        # ── spawn_point 0: WEST base (fact x=8, patches x=14) ─────
-        - {type: fact, owner: agent, position: [8, 18], spawn_point: 0}
-        - {type: proc, owner: agent, position: [12, 18], spawn_point: 0}
-        - {type: powr, owner: agent, position: [10, 20], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 15], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 16], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 17], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 19], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 21], spawn_point: 0}
-        - {type: harv, owner: agent, position: [14, 22], spawn_point: 0}
-        # ── spawn_point 1: EAST base (fact x=80, patches x=86) ────
-        # Placed FAR (x=80) from the WEST spawn (x=8..14) so the two
-        # mine clusters do not mutually leak — a WEST harv that
-        # exhausts its own (14,y) cell does not have (86,y) as a
-        # nearby fallback. Identical y-geometry to the WEST spawn so
-        # per-spawn throughput is symmetric.
-        - {type: fact, owner: agent, position: [80, 18], spawn_point: 1}
-        - {type: proc, owner: agent, position: [84, 18], spawn_point: 1}
-        - {type: powr, owner: agent, position: [82, 20], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 14], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 15], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 16], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 17], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 19], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 21], spawn_point: 1}
-        - {type: harv, owner: agent, position: [86, 22], spawn_point: 1}
-        # Neutral mines always place regardless of spawn_point filter
-        # (CLAUDE.md). Duplicate the patch column at each spawn band.
-        - {type: mine, owner: neutral, position: [14, 14]}
-        - {type: mine, owner: neutral, position: [14, 15]}
-        - {type: mine, owner: neutral, position: [14, 16]}
-        - {type: mine, owner: neutral, position: [14, 17]}
-        - {type: mine, owner: neutral, position: [14, 19]}
-        - {type: mine, owner: neutral, position: [14, 21]}
-        - {type: mine, owner: neutral, position: [14, 22]}
-        - {type: mine, owner: neutral, position: [86, 14]}
-        - {type: mine, owner: neutral, position: [86, 15]}
-        - {type: mine, owner: neutral, position: [86, 16]}
-        - {type: mine, owner: neutral, position: [86, 17]}
-        - {type: mine, owner: neutral, position: [86, 19]}
-        - {type: mine, owner: neutral, position: [86, 21]}
-        - {type: mine, owner: neutral, position: [86, 22]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # ── spawn 0 — NORTH base (y=10) ─────────────────────────────
+        - {type: fact, owner: agent, position: [8, 10], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [10, 12], spawn_point: 0}
+        - {type: harv, owner: agent, position: [14, 10], spawn_point: 0}
+        - {type: weap, owner: agent, position: [16, 14], spawn_point: 0}
+        # ── spawn 1 — SOUTH base (y=28) ─────────────────────────────
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [10, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [14, 28], spawn_point: 1}
+        - {type: weap, owner: agent, position: [16, 24], spawn_point: 1}
+        # Neutral mines duplicated at both spawn latitudes
+        # (neutral / enemy actors don't honour spawn_point filter).
+        - {type: mine, owner: neutral, position: [22, 10]}
+        - {type: mine, owner: neutral, position: [22, 14]}
+        - {type: mine, owner: neutral, position: [22, 28]}
+        - {type: mine, owner: neutral, position: [22, 24]}
+        - {type: fact, owner: enemy, position: [42, 34]}
     win_condition:
       all_of:
-        - economy_value_gte: 18300
+        - cash_gte: 9000
         - building_count_gte: {type: fact, n: 1}
-        - within_ticks: 1803
+        - within_ticks: 4500
     fail_condition:
       any_of:
-        - after_ticks: 1804
+        - after_ticks: 4501
         - not: {building_count_gte: {type: fact, n: 1}}
         - not: {has_building: proc}
-    max_turns: 21
+    max_turns: 50

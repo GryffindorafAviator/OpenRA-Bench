@@ -8,10 +8,13 @@
 # swarm vs carrier doctrine; military mass conscription vs elite
 # professional formations.
 #
-# Pre-placed (per spec): agent fact + barr (infantry trainer) + weap
-# (vehicle trainer) + 2 starter units. The barr+weap pair makes BOTH
-# the mass-cheap (e1 @ $100) and elite (3tnk @ $950) compositions
+# Pre-placed: agent fact + powr + tent (allied infantry trainer) +
+# weap (vehicle trainer) + fix (allied service depot — 2tnk tech
+# gate) + 2 starter e1. The tent+weap+fix kit makes BOTH the
+# mass-cheap (e1 @ $100) and elite (2tnk @ $800) compositions
 # buildable from turn 1 — the decision is *composition*, not tech.
+# (Switched from Soviet 3tnk to Allied 2tnk so both compositions are
+# actionable without a `dome` radar prereq blocking the armour path.)
 #
 # Discrimination on EASY / MEDIUM (single garrison, both comps work):
 #   • stall (only observe): never reaches the kill bar → after_ticks
@@ -22,8 +25,10 @@
 #   • intended commit-cheap (8× e1 swarm): swarm firepower overwhelms the
 #     small garrison, infantry are individually expendable under the
 #     loss cap → WIN.
-#   • intended commit-elite (3× 3tnk wedge): 3 heavy tanks ($30 firepower,
-#     $450 HP each) burn through the same garrison with ≤1 loss → WIN.
+#   • intended commit-elite (3-5× 2tnk wedge, held until grouped):
+#     medium tanks burn through the same garrison cleanly. A
+#     piecemeal commit gets shredded; the test policy holds until
+#     3+ tanks are queued before attack-moving → WIN.
 #
 # Discrimination on HARD (composition flips per spawn):
 #   • The map carries TWO garrisons placed at fixed (north / south)
@@ -43,9 +48,14 @@
 #     the local garrison and counter-pick.
 #
 # Engine guardrails:
-#   • Map: rush-hour-arena (128 × 40, playable x in [2..126],
-#     y in [2..38]).
-#   • Far enemy `fact` at (124,20) prevents engine auto-done when a
+#   • Map: bespoke 56x40 procedural arena (Family-2 §10/§7 audit shrink
+#     from rush-hour-arena 128x40). The composition decision is purely
+#     spend-side (which units to BUILD with $4500) — the engagement
+#     position is fixed and the long traversal added no test value.
+#     Playable rectangle (2..54, 2..37); base in the NW lobe, garrison
+#     at x≈40, persistent far-east enemy fact at x=52. Hard tier still
+#     fits NORTH y=10 / SOUTH y=30 spawn rows on the 40-cell height.
+#   • Far enemy `fact` at (52,20) prevents engine auto-done when a
 #     garrison falls — the kill bar is satisfied on units, not
 #     buildings; the fact keeps the episode running through the
 #     terminal evaluator frame.
@@ -73,7 +83,7 @@ meta:
   capability: reasoning
   real_world_meaning: >
     A fixed cash budget funds either a SWARM of cheap rifle infantry
-    (8× rifle infantry @ $100) OR a small ELITE armoured fist (3× heavy tank @ $950).
+    (8× e1 @ $100) OR a small ELITE armoured fist (3-5× 2tnk @ $800).
     Either composition fits the same budget — the decision is which
     is right for the threat the agent must clear. The kill bar AND
     the attrition cap jointly bind: a stall never reaches the bar;
@@ -107,24 +117,29 @@ base_map:
 starting_cash: 4500
 
 base:
-  agent: {faction: soviet}
-  enemy: {faction: allies}
+  agent: {faction: allies}
+  enemy: {faction: soviet}
   tools: [build, place_building, move_units, attack_unit, attack_move, stop]
   planning: true
   termination: {max_ticks: 8000}
-  # Pre-placed: agent fact + barr + weap + 2 starter units. The barr
-  # enables e1 (infantry trainer); the weap enables 3tnk (vehicle
-  # trainer); the two starter e1 give the agent some scouts on turn 1
-  # but cannot meet the kill bar alone — production is required.
+  # Pre-placed: agent fact + powr + tent + weap + 2 starter units. The
+  # tent enables e1 (allied infantry trainer); the weap enables 2tnk
+  # (allied medium tank, vehicle trainer). The 2tnk needs only weap as
+  # a prereq (no dome needed — verified gamerules.rs prereq table) so
+  # both compositions are actionable on turn 1. The two starter e1
+  # give the agent some scouts but cannot meet the kill bar alone —
+  # production is required.
   actors:
     - {type: fact, owner: agent, stance: 0, position: [10, 20]}
-    - {type: barr, owner: agent, stance: 0, position: [14, 18]}
-    - {type: weap, owner: agent, stance: 0, position: [14, 22]}
+    - {type: powr, owner: agent, stance: 0, position: [10, 23]}
+    - {type: tent, owner: agent, stance: 0, position: [13, 23]}
+    - {type: weap, owner: agent, stance: 0, position: [16, 21]}
+    - {type: fix,  owner: agent, stance: 0, position: [8, 26]}
     - {type: e1,   owner: agent, stance: 0, position: [12, 20]}
     - {type: e1,   owner: agent, stance: 0, position: [12, 21]}
     # Far persistent enemy marker — prevents engine auto-done when the
     # garrison falls so the win/fail evaluator sees the terminal frame.
-    - {type: fact, owner: enemy, position: [124, 20]}
+    - {type: fact, owner: enemy, position: [52, 20]}
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
@@ -145,26 +160,38 @@ levels:
     # killed AND ≤5 of your units are lost, before tick 5400. Stalling,
     # building neither, or under-producing fails the clock.
     description: >
-      Fixed budget $4500. A centre garrison of four rifles plus two rocket
-      soldiers waits. Either composition fits and clears: a swarm of eight
-      rifles ($800) or three heavy tanks ($2850). Pick one and commit. Six
-      kills, no more than five losses, within about 60 turns.
+      Commander, this is a composition-choice drill. You hold a
+      Construction Yard (fact), Power Plant (powr), Allied Barracks
+      (tent), War Factory (weap) and Service Depot (fix), two starter
+      rifle infantry (e1), and $4500 in the bank. A small enemy garrison
+      sits at centre — four rifle infantry (e1) plus two rocket
+      infantry (e3). Within about 60 turns, kill at least six enemies
+      and lose no more than five of your own.
     overrides:
+      base_map:
+        generator: arena
+        name: econ-quantitative-vs-qualitative-56x40
+        width: 56
+        height: 40
+        cordon: 2
+        title: 'Econ Quantitative vs Qualitative Arena 56x40'
       actors:
         - {type: fact, owner: agent, stance: 0, position: [10, 20]}
-        - {type: barr, owner: agent, stance: 0, position: [14, 18]}
-        - {type: weap, owner: agent, stance: 0, position: [14, 22]}
+        - {type: powr, owner: agent, stance: 0, position: [10, 23]}
+        - {type: tent, owner: agent, stance: 0, position: [13, 23]}
+        - {type: weap, owner: agent, stance: 0, position: [16, 21]}
+        - {type: fix,  owner: agent, stance: 0, position: [8, 26]}
         - {type: e1,   owner: agent, stance: 0, position: [12, 20]}
         - {type: e1,   owner: agent, stance: 0, position: [12, 21]}
         # Single centre garrison: 4 e1 + 2 e3, stance:3 (attack
         # anything in range — fires on contact).
-        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
-        - {type: e3, owner: enemy, position: [72, 19], stance: 3}
-        - {type: e3, owner: enemy, position: [72, 21], stance: 3}
-        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: e1, owner: enemy, position: [40, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 22], stance: 3}
+        - {type: e3, owner: enemy, position: [42, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [42, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [52, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 6}
@@ -200,28 +227,39 @@ levels:
     # units are killed AND ≤4 of your units are lost, before tick 5400.
     # Stalling, mixing, or under-producing fails the bar.
     description: >
-      Same $4500 budget and centre garrison. Same two pure choices — eight
-      rifles or three heavy tanks — but the loss cap tightens to four.
-      Mixing a tank with a few rifles under-delivers firepower and bleeds past
-      the cap. Commit to ONE composition. Six kills, within about 60
-      turns.
+      Commander, this is a composition-choice drill with a tighter loss
+      cap. You hold a Construction Yard (fact), Power Plant (powr),
+      Allied Barracks (tent), War Factory (weap) and Service Depot
+      (fix), two starter rifle infantry (e1), and $4500 in the bank. A
+      centre garrison waits — four rifle infantry (e1) plus two rocket
+      infantry (e3). Within about 60 turns, kill at least six enemies
+      and lose no more than four of your own.
     overrides:
+      base_map:
+        generator: arena
+        name: econ-quantitative-vs-qualitative-56x40
+        width: 56
+        height: 40
+        cordon: 2
+        title: 'Econ Quantitative vs Qualitative Arena 56x40'
       actors:
         - {type: fact, owner: agent, stance: 0, position: [10, 20]}
-        - {type: barr, owner: agent, stance: 0, position: [14, 18]}
-        - {type: weap, owner: agent, stance: 0, position: [14, 22]}
+        - {type: powr, owner: agent, stance: 0, position: [10, 23]}
+        - {type: tent, owner: agent, stance: 0, position: [13, 23]}
+        - {type: weap, owner: agent, stance: 0, position: [16, 21]}
+        - {type: fix,  owner: agent, stance: 0, position: [8, 26]}
         - {type: e1,   owner: agent, stance: 0, position: [12, 20]}
         - {type: e1,   owner: agent, stance: 0, position: [12, 21]}
         # Single centre garrison, mixed (rifle + rocket); same as easy
         # but the loss cap is tighter (≤4) so a brittle mini-spend
         # fails.
-        - {type: e1, owner: enemy, position: [70, 18], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 21], stance: 3}
-        - {type: e1, owner: enemy, position: [70, 22], stance: 3}
-        - {type: e3, owner: enemy, position: [72, 19], stance: 3}
-        - {type: e3, owner: enemy, position: [72, 21], stance: 3}
-        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: e1, owner: enemy, position: [40, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [40, 22], stance: 3}
+        - {type: e3, owner: enemy, position: [42, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [42, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [52, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 6}
@@ -270,25 +308,41 @@ levels:
     # mass" opening loses on half the seeds. Win when 6 enemy units are
     # killed AND ≤4 of your units are lost, before tick 5400.
     description: >
-      $4500 budget. TWO enemy garrisons sit on the map: a NORTH one tuned
-      anti-infantry (rifles, dog, pillbox — punishes swarms) and a SOUTH
-      one tuned anti-vehicle (rocket soldiers — punishes armour). Your
-      base spawns at one corner by seed; engage only the local garrison.
-      Read its composition, then pick the correct counter — rifles vs
-      anti-vehicle, tanks vs anti-infantry. Six kills, loss cap four,
-      within about 60 turns.
+      Commander, this is a composition counter-pick drill with
+      seed-rotated base corner. You hold a Construction Yard (fact),
+      Power Plant (powr), Allied Barracks (tent), War Factory (weap) and
+      Service Depot (fix), two starter rifle infantry (e1), and $4500
+      in the bank — your base spawns at either the NORTH (y=10) or
+      SOUTH (y=30) corner by seed. TWO enemy garrisons sit on the map:
+      a NORTH garrison tuned anti-infantry (rifles, attack dog, pillbox
+      — punishes swarms) and a SOUTH garrison tuned anti-vehicle
+      (rocket infantry e3 — punishes armour). The clock is too tight
+      to cross the map; engage only your local garrison. Within about
+      60 turns, kill at least six enemies and lose no more than four
+      of your own.
     overrides:
+      base_map:
+        generator: arena
+        name: econ-quantitative-vs-qualitative-56x40
+        width: 56
+        height: 40
+        cordon: 2
+        title: 'Econ Quantitative vs Qualitative Arena 56x40'
       actors:
         # ── AGENT spawn 0 — NORTH base (y=10) ─────────────────────
         - {type: fact, owner: agent, stance: 0, position: [10, 10], spawn_point: 0}
-        - {type: barr, owner: agent, stance: 0, position: [14,  8], spawn_point: 0}
-        - {type: weap, owner: agent, stance: 0, position: [14, 12], spawn_point: 0}
+        - {type: powr, owner: agent, stance: 0, position: [10, 13], spawn_point: 0}
+        - {type: tent, owner: agent, stance: 0, position: [13, 13], spawn_point: 0}
+        - {type: weap, owner: agent, stance: 0, position: [16, 11], spawn_point: 0}
+        - {type: fix,  owner: agent, stance: 0, position: [8, 5], spawn_point: 0}
         - {type: e1,   owner: agent, stance: 0, position: [12, 10], spawn_point: 0}
         - {type: e1,   owner: agent, stance: 0, position: [12, 11], spawn_point: 0}
         # ── AGENT spawn 1 — SOUTH base (y=30) ─────────────────────
         - {type: fact, owner: agent, stance: 0, position: [10, 30], spawn_point: 1}
-        - {type: barr, owner: agent, stance: 0, position: [14, 28], spawn_point: 1}
-        - {type: weap, owner: agent, stance: 0, position: [14, 32], spawn_point: 1}
+        - {type: powr, owner: agent, stance: 0, position: [10, 27], spawn_point: 1}
+        - {type: tent, owner: agent, stance: 0, position: [13, 27], spawn_point: 1}
+        - {type: weap, owner: agent, stance: 0, position: [16, 29], spawn_point: 1}
+        - {type: fix,  owner: agent, stance: 0, position: [8, 35], spawn_point: 1}
         - {type: e1,   owner: agent, stance: 0, position: [12, 30], spawn_point: 1}
         - {type: e1,   owner: agent, stance: 0, position: [12, 31], spawn_point: 1}
         # ── NORTH GARRISON — ANTI-INFANTRY (counters mass cheap) ──
@@ -308,15 +362,15 @@ levels:
         # rifles in front would absorb the rocket overkill; against a
         # 3-tank fist the rockets stack up firepower and bust the loss cap.
         # Total enemy unit count = 6 (6× e3).
-        - {type: e3, owner: enemy, position: [70, 28], stance: 3}
-        - {type: e3, owner: enemy, position: [70, 29], stance: 3}
-        - {type: e3, owner: enemy, position: [70, 30], stance: 3}
-        - {type: e3, owner: enemy, position: [70, 31], stance: 3}
-        - {type: e3, owner: enemy, position: [70, 32], stance: 3}
-        - {type: e3, owner: enemy, position: [72, 30], stance: 3}
+        - {type: e3, owner: enemy, position: [40, 28], stance: 3}
+        - {type: e3, owner: enemy, position: [40, 29], stance: 3}
+        - {type: e3, owner: enemy, position: [40, 30], stance: 3}
+        - {type: e3, owner: enemy, position: [40, 31], stance: 3}
+        - {type: e3, owner: enemy, position: [40, 32], stance: 3}
+        - {type: e3, owner: enemy, position: [42, 30], stance: 3}
         # Far persistent enemy marker — prevents engine auto-done
         # when the local garrison falls.
-        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: fact, owner: enemy, position: [52, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 6}

@@ -54,7 +54,7 @@
 #     e1 mass on raw infantry-vs-infantry numbers (e3 hp45 < e1
 #     hp50; slow anti-armour projectiles under-perform vs small
 #     targets) → after_ticks / force-wipe LOSS.
-#   • intended build-2tnk (3× medium tanks @ $850 = $2550): the
+#   • intended build-2tnk (3× medium tanks @ $800 = $2400): the
 #     right counter — heavy armour soaks small-arms fire, tank
 #     dps22 + rng 4.75 + sight 6c walks through a static e1 mass.
 #     2tnk:3 clause met, kill bar met, fact intact → WIN.
@@ -77,21 +77,33 @@
 #     is satisfied on units killed, not buildings; the marker keeps
 #     the episode running through the win/fail evaluator's terminal
 #     frame).
-#   • `after_ticks` fail clauses reachable within max_turns
-#     (within_ticks 5400 ≤ 5403 at max_turns 60): a staller hits
-#     after_ticks 5401 and LOSES, never draws.
+#   • `after_ticks` fail clauses reachable within max_turns:
+#     empirically the engine advances ~90 ticks/turn here so
+#     max_turns 60 reaches tick ~5400 BUT the engine auto-`done`s
+#     much earlier once the live e1 swarm finishes hunting (turn
+#     ~36 on medium/hard with the 12-strong cluster, turn ~50 on
+#     easy with the 8-strong cluster). within_ticks 2700 /
+#     after_ticks 2701 fits well inside the earliest auto-done
+#     envelope (~3243 ticks on medium/hard) so a staller LOSES via
+#     after_ticks on every tier, never DRAWS. Intended-build-2tnk
+#     wins at ~tick 1623 (~18 turns) on every level, leaving ~1000
+#     ticks of headroom.
 #   • Starting `jeep` is `stance: 0` (HoldFire) — it scouts but
 #     never auto-fires, so a pure-observe stall policy cannot score
 #     kills with it. The win predicate's `unit_type_count_gte`
 #     2tnk:3 is the real anti-cheat: only the agent that builds the
 #     3-tank fist can clear the bar. The fail clause is
-#     `after_ticks | not has_building:fact | not own_units_gte:1` —
-#     the agent starts WITH the jeep so `own_units_gte:1` is
-#     satisfied from t=0 (the unit-less turn-1 mis-fire footgun in
-#     CLAUDE.md does not apply); the force-wipe clause turns a
-#     stalled-and-overrun episode into a real LOSS instead of an
-#     engine auto-`done` DRAW when the entrenched e1 swarm hunts
-#     down the idle HoldFire jeep.
+#     `after_ticks | not has_building:fact` — a stalled policy hits
+#     after_ticks 2701 and LOSES; a base-wipe (stance:3 e1 swarm
+#     marches west and destroys the fact) hits `not has_building:fact`
+#     and LOSES. The previous `not own_units_gte:1` fail clause was
+#     dropped (Qwen-9B triage B.4): it punished the briefing-mandated
+#     scout doctrine — the jeep is sent forward to scout the fogged
+#     cluster, dies in 4-5 turns, and the run instant-failed at
+#     tick ~300 long before the 3-tank fist was built. The base-wipe
+#     clause still keeps a stalled-and-overrun episode from
+#     degenerating to a DRAW because the entrenched stance:3 e1
+#     swarm hunts west and destroys the agent fact.
 #   • The vehicle queue (`weap` war factory) needs `powr` online
 #     AND a `fix` service depot present for `2tnk` to clear its
 #     prerequisites — both are pre-placed in every base so the
@@ -118,7 +130,7 @@ meta:
   capability: reasoning
   real_world_meaning: >
     A fixed cash budget funds EITHER a small armoured fist (3× medium tank
-    medium tanks @ $850) OR a mass anti-tank rocket squad (8× rocket soldier
+    medium tanks @ $800) OR a mass anti-tank rocket squad (8× rocket soldier
     rocket soldiers @ $300) OR a rifle company (up to 25× rifle infantry @ $100).
     The enemy is PURE rifle infantry (rifle infantry mass entrenched at centre).
     The correct rock-paper-scissors counter is armour: heavy tanks
@@ -200,26 +212,24 @@ levels:
     # yard (fact), a barracks (tent), a war factory (weap), and a single
     # scout jeep. The barracks and war factory are both ONLINE from turn 1
     # — you can build EITHER mass anti- tank rocket soldiers (e3 @ $300,
-    # up to 8 for $2400) OR a small armoured fist (2tnk @ $850, exactly 3
-    # for $2550) OR rifle infantry (e1 @ $100, up to 25). Scout the enemy
+    # up to 8 for $2400) OR a small armoured fist (2tnk @ $800, exactly 3
+    # for $2400 with $150 residual) OR rifle infantry (e1 @ $100, up to
+    # 25). Scout the enemy
     # with the jeep, pick the correct hard counter, and commit the whole
     # budget. Win when you have fielded 3 medium tanks (2tnk) AND 6 enemy
     # units are killed AND your construction yard still stands, before
-    # tick 5400. Stalling or picking the wrong counter never fields the
+    # tick 2700. Stalling or picking the wrong counter never fields the
     # 3-tank fist and fails the bar.
     description: >
-      Commander, this is a hard-counter selection mission. You are given
-      a full starter base on the west — Construction Yard, Power Plant,
-      Infantry Barracks, War Factory, Service Depot — plus a scout jeep
-      on hold-fire orders (it scouts, it does not fight). You have $2550
-      cash. The enemy is a cluster of 8 pure rifle infantry around
-      (40,20); tanks crush riflemen easily (Heavy armour soaks small-arms
-      fire). Your budget buys exactly one dominant composition: 3 medium
-      tanks at $850 each ($2550 total). Mass rockets waste cost-per-effect
-      against soft targets; matching with own rifles is a 1:1 trade with
-      no advantage. Build the three tanks from the War Factory and crush
-      the cluster. Hold the Construction Yard, ≥6 kills, within about 60
-      turns.
+      Commander, this is a counter-selection engagement on a 64x40
+      arena. You are given a full starter base on the west —
+      Construction Yard, Power Plant, Infantry Barracks, War
+      Factory, Service Depot — plus a scout jeep on hold-fire
+      orders. Starting cash: $2550. The enemy is a cluster of 8
+      rifle infantry around (40,20) on AttackAnything orders. Field
+      at least 3 medium tanks (2tnk, cost $800 each, Heavy armour),
+      score at least 6 kills, hold the Construction Yard, within
+      2700 ticks.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
@@ -245,12 +255,11 @@ levels:
         - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 6}
         - {has_building: fact}
-        - {within_ticks: 5400}
+        - {within_ticks: 2700}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 2701}
         - {not: {has_building: fact}}
-        - {not: {own_units_gte: 1}}
     max_turns: 60
 
   # ── MEDIUM ───────────────────────────────────────────────────────
@@ -271,23 +280,23 @@ levels:
     # anti-tank rocket soldiers, no tanks). Your construction yard,
     # barracks, and war factory are online from turn 1; commit the whole
     # $2550 to the dominant counter — armoured medium tanks (3× 2tnk @
-    # $850 = $2550) walk through small-arms fire. Mass rockets (e3 @ $300)
+    # $800 = $2400, $150 residual) walk through small-arms fire. Mass
+    # rockets (e3 @ $300)
     # waste cost- per-effect against soft targets and get out-DPSed by the
     # rifle mass on attrition; matching with own rifles (e1 @ $100) is a
     # 1:1 trade with no advantage. Win when you have fielded 3 medium
     # tanks (2tnk) AND 8 enemy units are killed AND your fact still
-    # stands, before tick 5400.
+    # stands, before tick 2700.
     description: >
-      Commander, this is a hard-counter selection mission. You are given
-      a full starter base on the west — Construction Yard, Power Plant,
-      Infantry Barracks, War Factory, Service Depot — plus a scout jeep
-      on hold-fire orders. You have $2550 cash. The enemy holds the
-      centre with 12 rifle infantry around (40,20) under fog of war;
-      scout with the jeep to verify they carry no anti-tank threats
-      hiding among them. Three medium tanks ($2550 exactly) walk through
-      small-arms fire; rockets waste cost-per-effect and own rifles are
-      a 1:1 trade with no advantage. Build the trio, kill eight, hold
-      the Construction Yard, within about 60 turns.
+      Commander, this is a counter-selection engagement on a 64x40
+      arena. You are given a full starter base on the west —
+      Construction Yard, Power Plant, Infantry Barracks, War
+      Factory, Service Depot — plus a scout jeep on hold-fire
+      orders. Starting cash: $2550. The enemy holds the centre with
+      12 rifle infantry around (40,20) under fog of war on
+      AttackAnything orders. Field at least 3 medium tanks (2tnk,
+      cost $800 each, Heavy armour), score at least 8 kills, hold
+      the Construction Yard, within 2700 ticks.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
@@ -315,12 +324,11 @@ levels:
         - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 8}
         - {has_building: fact}
-        - {within_ticks: 5400}
+        - {within_ticks: 2700}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 2701}
         - {not: {has_building: fact}}
-        - {not: {own_units_gte: 1}}
     max_turns: 60
 
   # ── HARD ─────────────────────────────────────────────────────────
@@ -348,19 +356,19 @@ levels:
     # and get out- DPSed on attrition; matching with own rifles is a 1:1
     # trade with no advantage. Win when you have fielded 3 medium tanks
     # (2tnk) AND 8 enemy units are killed AND your fact still stands,
-    # before tick 5400.
+    # before tick 2700.
     description: >
-      Commander, this is a hard-counter selection mission with
-      seed-varied staging. You are given a full starter base — Construction
-      Yard, Power Plant, Infantry Barracks, War Factory, Service Depot
-      — plus a scout jeep on hold-fire orders. The base spawns either
-      NORTH (y=12) or SOUTH (y=28) depending on seed — read your own
-      position from the map. You have $2550 cash. The enemy holds the
-      central lane around (40,20) with 12 rifle infantry under fog of
-      war; scout with the jeep to verify they carry no anti-tank threats.
-      Three medium tanks ($2550 exactly) walk through small-arms fire;
-      rockets and own rifles both lose the trade. Build the trio, kill
-      eight, hold a Construction Yard, within about 60 turns.
+      Commander, this is a counter-selection engagement on a 64x40
+      arena with seed-varied staging. You are given a full starter
+      base — Construction Yard, Power Plant, Infantry Barracks, War
+      Factory, Service Depot — plus a scout jeep on hold-fire orders.
+      The base spawns either NORTH (y=12) or SOUTH (y=28) depending
+      on seed — read your own position from the map. Starting cash:
+      $2550. The enemy holds the central lane around (40,20) with
+      12 rifle infantry under fog of war on AttackAnything orders.
+      Field at least 3 medium tanks (2tnk, cost $800 each, Heavy
+      armour), score at least 8 kills, hold the Construction Yard,
+      within 2700 ticks.
     overrides:
       actors:
         # ── AGENT spawn 0 — NORTH base (y=12) ─────────────────────
@@ -401,10 +409,9 @@ levels:
         - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 8}
         - {has_building: fact}
-        - {within_ticks: 5400}
+        - {within_ticks: 2700}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 2701}
         - {not: {has_building: fact}}
-        - {not: {own_units_gte: 1}}
     max_turns: 60

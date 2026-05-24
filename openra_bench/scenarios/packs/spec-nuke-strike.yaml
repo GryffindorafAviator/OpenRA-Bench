@@ -59,15 +59,32 @@
 #     (≈ 93 + 90·21 = 1983); a stall play hits the deadline and
 #     LOSES rather than drawing.
 #
-# Known engine gap: `detonate_nuke` does NOT credit
-# `kills_per_player` — `units_killed` stays 0 even when a nuke
-# clears a cluster of infantry. This pack uses
-# `enemy_buildings_destroyed_gte` instead (which the bench computes
-# adapter-side from disappeared-but-recently-seen building ids).
-# Flag for future engine work: extend `detonate_nuke` to bump
-# `kills_per_player[owner]` for every actor it removes (mirroring
-# the data-driven attack path at world.rs:4237), so a future nuke
-# pack can use `units_killed_gte` over infantry too.
+# Historical engine gap (now FIXED, engine commit d089615 on main /
+# merged onto engine-feature-wave): `detonate_nuke` originally did
+# NOT credit `kills_per_player`, so `units_killed` stayed 0 even
+# when a nuke cleared a cluster. The fix (`world.rs::detonate_nuke`
+# lines 2143-2193) now bumps `kills_per_player[owner]` for every
+# actor the blast removes, with a friendly-fire filter (a victim
+# owned by the firer does NOT credit) that mirrors the projectile-
+# resolve path.
+#
+# This pack continues to use `enemy_buildings_destroyed_gte:N`
+# rather than `units_killed_gte:N` — the choice is now PREFERENCE,
+# not a workaround:
+#   • the targets are BUILDINGS (`silo`), so the building-typed
+#     predicate is the semantically-correct measurement;
+#   • `enemy_buildings_destroyed_gte` is the bench-side
+#     adapter-computed count (disappeared-but-recently-seen
+#     building ids), independent of engine kill credit;
+#   • `units_killed_gte` would now also work given the engine fix
+#     (and would count building kills since `kills_per_player`
+#     is bumped for any actor the nuke removes), but it would
+#     also leak credit for incidental jeep / infantry kills if a
+#     future variant of this pack added them — the building-typed
+#     predicate stays tight.
+# Future nuke packs that strike INFANTRY/VEHICLE clusters can
+# safely use `units_killed_gte` (the engine fix removes that
+# blocker).
 
 meta:
   id: spec-nuke-strike

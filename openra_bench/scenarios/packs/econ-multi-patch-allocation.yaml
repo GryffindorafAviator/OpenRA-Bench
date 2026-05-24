@@ -1,5 +1,30 @@
 # ECON-MULTI-PATCH-ALLOCATION — choose WHICH ore patches to claim.
 #
+# MAP WIDTH JUSTIFICATION (wide-justified, 128x40 kept by design):
+# The capability is "pick WHICH subset of K candidate patches to
+# commit refineries to under a CAPEX cap, so total throughput-over-
+# deadline is maximised". Distinguishable patch distances ARE the
+# spatial reasoning under test — patch A at x=20 (near, small), B/C
+# at x=40 (medium ring), D at x=115 (far rich). The choice between
+# "commit to two medium patches" vs "commit to the far rich patch
+# with an unrecoverable round-trip cost" requires the FAR patch to
+# be far enough that its lone-harv cycle-time defeats the cash bar
+# inside the deadline. At 64x40 the "far rich" patch would sit at
+# x≈60 — the round-trip would be short enough that single-proc-at-D
+# becomes a viable cookbook play, collapsing the test.
+#
+# Distance audit:
+#   - Home base (8, *) vs near patch A (20, *): ~12 cells — the
+#     "single-proc-at-home" foil (loses on proc count, not throughput).
+#   - Home vs medium ring B/C (40, *): ~32 cells — the intended
+#     two-refinery placement.
+#   - Home vs far rich D (115, *): ~107 cells — the "rich-patch
+#     bait" foil (sole proc here = inadequate throughput in budget).
+#   - Far-edge sentinel (125, 20) is the engine auto-`done`
+#     mitigation.
+# Per audit policy: WIDE is justified when distinguishable distance
+# IS the capability under test.
+#
 # REASONING capability — mid-game resource allocation across multiple
 # sites. The agent owns a Construction Yard + Power Plant (no home
 # refinery, no home harvester clump) and looks out at FOUR ore patches
@@ -130,7 +155,7 @@ meta:
     whether to commit to at least two refineries (the multi-patch
     allocation insight), and which patches to commit them to —
     stalling earns nothing and loses, a single-refinery opening
-    fails the ore refinery-count clause, and the intended efficient play
+    fails the proc-count clause, and the intended efficient play
     is to commit to two medium-distance patches so parallel
     harvest cycles deposit ample cash inside the deadline.
   robotics_analogue: >
@@ -177,28 +202,16 @@ levels:
   # gap #5 above). max_turns 40 ⇒ ceiling 3603.
   easy:
     description: >
-      You have a Construction Yard (`construction yard`) and a Power Plant
-      (`power plant`) at your home base in the WEST. FOUR ore patches
-      are visible on the ore-cells channel, EACH with a
-      pre-positioned idle Ore Truck (`harvester`) sitting next to it:
-        • Patch A near your base at (20,20) — small (≈500 ore,
-          radius 2). Drains fast.
-        • Patch B north at (40,8) — medium (≈2000, radius 3).
-        • Patch C south at (40,32) — medium (≈2000, radius 3).
-        • Patch D far east at (115,20) — rich (≈3500, radius 3),
-          but the round-trip distance from any home refinery
-          dominates throughput.
-      A harvester only deposits when a refinery (`ore refinery`) exists
-      somewhere on your side (the auto-route hook installs a
-      Harvest activity on every idle owned harvester the moment an ore refinery
-      exists). You have $1500 — enough to START one ore refinery (1400);
-      a second ore refinery requires the income from the first. Win when
-      you OWN ≥ 2 refineries AND cash ≥ 4500 before tick 3600.
-      Stalling (no procs) and any single-ore refinery opening (only-A,
-      only-D, only-B, only-C) miss the ore refinery-count requirement.
-      The intended efficient play is to commit to the two
-      MEDIUM-distance patches B + C so two parallel harvest
-      cycles run on ample, short-round-trip patches.
+      Commander, this is a multi-patch allocation mission. You hold a
+      Construction Yard (fact) and a Power Plant (powr) at your home
+      base in the west, with $1500 in the bank. Four ore patches are
+      visible, each with a pre-positioned idle harvester (harv, an
+      unarmed ore-collector truck) waiting beside it: a small near
+      patch A at (20,20) that drains fast, two medium patches B at
+      (40,8) and C at (40,32), and a rich far patch D at (115,20)
+      whose round-trip dominates throughput. A harvester only deposits
+      when an Ore Refinery (proc) exists. Within about 40 turns, own at
+      least two refineries and finish with cash at least $4500.
     starting_cash: 1500
     overrides:
       actors:
@@ -244,13 +257,16 @@ levels:
   # count 2 — but the placement options are the same as easy).
   medium:
     description: >
-      Same four-patch geometry and pre-positioned harvesters as
-      easy (A small near, B medium N, C medium S, D rich far).
-      Tighter bar: ≥ 2 refineries owned AND cash ≥ 5000 before
-      tick 3600. Stalling and any single-ore refinery opening fail the
-      ore refinery-count clause; the intended play is to commit to the
-      two medium-distance patches B + C so two parallel harvest
-      cycles deposit enough cash inside the deadline.
+      Commander, this is a multi-patch allocation mission with a
+      tighter cash bar. You hold a Construction Yard (fact) and a
+      Power Plant (powr) at your home base in the west, with $1500 in
+      the bank. Four ore patches are visible, each with a pre-positioned
+      idle harvester (harv, an unarmed ore-collector truck): a small
+      near patch A at (20,20), two medium patches B at (40,8) and C at
+      (40,32), and a rich far patch D at (115,20). A harvester only
+      deposits when an Ore Refinery (proc) exists. Within about 40
+      turns, own at least two refineries and finish with cash at least
+      $5000.
     starting_cash: 1500
     overrides:
       actors:
@@ -291,23 +307,17 @@ levels:
   # spawn-relative geometry rotates.
   hard:
     description: >
-      Your base orientation varies by seed — NORTH (y=12) or
-      SOUTH (y=28). You have a Construction Yard (`construction yard`) and a
-      Power Plant (`power plant`) in your band. FOUR ore patches are
-      visible, each with one pre-positioned idle Ore Truck:
-        • a small near patch next to your base (depletes fast),
-        • TWO medium patches at the medium-distance ring (one
-          slightly north, one slightly south of your base
-          latitude),
-        • a rich patch at the far east edge whose round-trip
-          dominates throughput.
-      Starting cash (1500) starts ONE refinery; income from the
-      first funds the second. Win when ≥ 2 refineries owned AND
-      cash ≥ 5500 before tick 3600. Stalling and any single-ore refinery
-      opening miss the ore refinery-count clause; a memorised opening
-      whose placements ignore the seed-rotated harvester geometry
-      misses the cash bar. The intended play is to commit to the
-      two MEDIUM patches that sit closest to YOUR spawn.
+      Commander, this is a multi-patch allocation mission with
+      seed-rotated base latitude. You hold a Construction Yard (fact)
+      and a Power Plant (powr) at either the NORTH (y=12) or SOUTH
+      (y=28) latitude, with $1500 in the bank. Four ore patches are
+      visible, each with one pre-positioned idle harvester (harv, an
+      unarmed ore-collector truck): a small near patch beside your
+      base, two medium patches at the medium-distance ring relative
+      to your latitude, and a rich patch far east whose round-trip
+      dominates throughput. A harvester only deposits when an Ore
+      Refinery (proc) exists. Within about 40 turns, own at least two
+      refineries and finish with cash at least $5500.
     starting_cash: 1500
     overrides:
       actors:

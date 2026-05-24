@@ -251,7 +251,13 @@ def run_level(
 ) -> EpisodeResult:
     """Run one scenario-pack level, scoring against its declarative
     win/fail conditions (checked every turn). Outcome maps to the
-    `reward_outcome` convention: win=1.0, draw=0.5, loss=0.0.
+    `reward_outcome` convention: win=1.0, draw=0.0 (= loss), loss=0.0.
+    A draw is a non-win — the agent failed to satisfy the win predicate
+    by the deadline — so it scores as a loss. The `outcome` STRING is
+    still emitted as "draw" so audit tooling can distinguish deadline
+    timeouts from active fail-condition triggers (the former usually
+    signals a scenario defect: missing/inert fail_condition or an
+    auto-`done` race).
 
     `agent_fn` may be a bare `agent_fn(render_state, Command) ->
     [Command]` callable, a `ModelAgent` bound method, or any
@@ -448,7 +454,7 @@ def run_level(
                 break
         if conceded:
             outcome = "loss"  # the agent chose to concede
-        adapter.signals.outcome = {"win": 1.0, "draw": 0.5, "loss": 0.0}[outcome]
+        adapter.signals.outcome = {"win": 1.0, "draw": 0.0, "loss": 0.0}[outcome]
         from .goal_tracker import turn_goal
 
         final_rs = adapter.render_state()

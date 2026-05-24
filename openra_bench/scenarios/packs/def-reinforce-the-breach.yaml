@@ -1,6 +1,5 @@
 # def-reinforce-the-breach — ACTION, reactive defense: shift the
-# mobile reserve to the lane that gets breached mid-episode
-# (Wave-12).
+# mobile reserve to the lane that gets breached mid-episode.
 #
 # The capability under test is REACTIVE RESERVE COMMITMENT. The
 # agent holds a multi-lane defence: a north lane and a south lane,
@@ -14,14 +13,9 @@
 # it before the line collapses.
 #
 # Real-world anchors:
-#   • Military "reinforce the breach" doctrine / reserve commitment:
-#     the general reserve is held uncommitted until the enemy's main
-#     effort localises; the instant a sector is breached the reserve
-#     is committed FORWARD to that sector to restore the line.
-#   • Incident surge response: an on-call response team is staged
-#     centrally; when one site escalates, the surge capacity is
-#     committed to THAT site — not held back, not sent to a quiet
-#     site.
+#   • Military "reinforce the breach" doctrine / reserve commitment.
+#   • Incident surge response: on-call team staged centrally; when
+#     one site escalates, surge to THAT site.
 #   • SC2 reactive defence: hold an army at a central position, then
 #     react to the opponent's attack by reinforcing the lane that is
 #     actually being hit.
@@ -35,70 +29,21 @@
 #     scheduled tick via `scheduled_events: spawn_actors`.
 #   • The enemy uses the `hunt` bot so each enemy unit advances on
 #     and engages the NEAREST agent unit — the two lanes are
-#     genuinely INDEPENDENT fights (a `rusher` bot would pool every
-#     band onto the agent centroid and collapse the multi-lane
-#     test; CLAUDE.md / def-pre-position-mobile-reserve).
+#     genuinely INDEPENDENT fights.
 #   • The win is a FORWARD-ZONE clause: `units_in_region_gte` at the
 #     SOUTH lane's intercept zone, requiring N tanks there. The
 #     2-tank south garrison alone cannot fill the zone — the
-#     reserve must reinforce it. A reserve held at the centre, or
-#     sent to the un-breached NORTH lane, never fills the south
-#     zone ⇒ LOSS. Plus an `own_units_gte` survival clause: a
-#     breach left un-reinforced overruns the south garrison ⇒ the
-#     survival clause busts too.
+#     reserve must reinforce it.
 #
 # Discrimination (four-policy bar — scripted, no model needed):
-#   • stall (observe-only): the reserve sits at the centre; the
-#     forward-zone clause is never satisfied AND the un-reinforced
-#     south garrison is overrun by the breach wave ⇒ LOSS (the
-#     `after_ticks` deadline is a backstop — no draw degeneracy).
-#   • reinforce-the-wrong-lane (commit the reserve to the NORTH
-#     lane): the south forward zone is left short ⇒ the
-#     `units_in_region_gte` clause fails ⇒ LOSS (medium/hard, where
-#     the zone needs the reserve's tanks; on easy the bar is looser
-#     — see the level notes).
-#   • brute (one attack_move straight east, ignore the lanes): the
-#     reserve drives off the breached lane's intercept zone ⇒ the
-#     forward-zone clause fails ⇒ LOSS.
-#   • intended reinforce-the-breach (read the mid-episode breach,
-#     shift the reserve FORWARD into the SOUTH lane's intercept
-#     zone): the forward-zone clause is satisfied AND the
-#     reinforced line holds ⇒ WIN.
-#
-# Engine facts used (CLAUDE.md / verified against the installed
-# openra_train wheel, 2026-05-20):
-#   • `scheduled_events: spawn_actors` injects fresh-id actors at a
-#     scheduled tick (Wave-9 feature; test_scheduled_events). The
-#     breach wave is the only way to make ONE lane heavier
-#     MID-episode — a t=0 placement cannot exercise "react to a
-#     breach that develops".
-#   • `hunt` bot: each enemy unit advances on and attacks the
-#     NEAREST agent unit, so the two lanes are independent fights;
-#     a far-off breach wave still advances (a `stance:3` actor only
-#     advances toward a VISIBLE enemy and would stall in fog).
-#   • `units_in_region_gte: {x, y, radius, n}` — the load-bearing
-#     forward-zone clause: it is pure geometry and does not depend
-#     on combat resolution, so the discrimination is deterministic.
-#   • Tick alignment (~90 ticks/turn): within_ticks ≤ 93+90·
-#     (max_turns−1); fail after_ticks = within_ticks+1 ⇒ a
-#     non-finisher is a real reachable LOSS, never a DRAW. The win
-#     also carries an `after_ticks: 720` GATE — the win cannot
-#     latch until the breach wave has developed (it spawns at tick
-#     450 and is fully in play by ~720), so a reserve that rushes
-#     the south zone BEFORE the breach cannot win prematurely. The
-#     win is purely positional (no conquest clause) and the far
-#     enemy `fact` is never destroyed, so the `after_ticks` win
-#     gate is safe from the engine's enemy-elimination auto-done
-#     (CLAUDE.md after_ticks/Conquest footgun does not apply).
-#   • A far inert enemy `fact` marker keeps the engine from
-#     auto-`done`ing on enemy-elimination before the win/fail
-#     evaluator runs (CLAUDE.md auto-done footgun).
-#   • Hard tier: two agent spawn_point groups round-robin the
-#     mobile reserve's start COLUMN (x=40 vs x=50 — both remain
-#     equidistant from the two lanes) so a memorised reserve cell
-#     cannot generalise; the centre-then-react DOCTRINE does. The
-#     garrisons and the breach wave (no spawn_point) place every
-#     seed.
+#   • stall (observe-only): reserve never moves → forward-zone
+#     clause never satisfied → LOSS.
+#   • reinforce-the-wrong-lane (commit reserve to NORTH lane): south
+#     forward zone is left short → LOSS (medium/hard).
+#   • brute (one attack_move straight east): reserve drives off the
+#     breached lane's intercept zone → LOSS.
+#   • intended reinforce-the-breach: shift the reserve FORWARD into
+#     the SOUTH lane's intercept zone → WIN.
 #
 # Validate (no model / no network):
 #   python3 -m pytest tests/test_def_reinforce_the_breach.py -q
@@ -140,10 +85,6 @@ base_map:
 
 base:
   agent: {faction: allies, cash: 0}
-  # `hunt`: each enemy unit advances on and engages the NEAREST
-  # agent unit, so the north and south lanes are genuinely
-  # independent fights (a `rusher` bot pools every band onto the
-  # agent centroid and collapses the multi-lane test).
   enemy: {faction: soviet, cash: 0, bot_type: hunt}
   tools: [observe, move_units, attack_unit, attack_move, stop]
   planning: true
@@ -154,34 +95,24 @@ levels:
   # ── EASY ────────────────────────────────────────────────────────
   # The bare reactive-reserve skill: REACT AT ALL. Two lanes, a
   # 4-tank reserve at the centre. The south lane is breached at tick
-  # 450 by an 8×e1 wave. The forward-zone bar is n=3 — the 2-tank
-  # south garrison plus ONE reinforcing reserve tank fills it. The
-  # discrimination at this tier is stall (reserve never moves ⇒ zone
-  # unfilled + garrison overrun ⇒ LOSS) vs reinforce (move the
-  # reserve south ⇒ WIN). Picking the WRONG lane is punished at
-  # medium; easy only tests that the agent reacts.
+  # 450 by an 8×e1 wave. The forward-zone bar is n=3.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # You hold a two-lane defence — a NORTH lane (y≈12) and a SOUTH lane
-    # (y≈28), each with a 2-tank garrison — plus a 4-tank mobile reserve
-    # held at the CENTRE (x≈44, y=20). At first both lanes face only a
-    # light probe. Mid-episode the SOUTH lane is BREACHED by a heavier
-    # wave. React: shift the mobile reserve FORWARD into the SOUTH lane to
-    # reinforce it — at least 3 tanks must be within radius 12 of the
-    # south intercept point (62, 28) at win time, you must keep at least 4
-    # tanks alive, and finish before tick 2400. Holding the reserve at the
-    # centre LOSES — the breach overruns the un-reinforced south garrison.
-    # Stalling LOSES.
     description: >
-      Two-lane defence — north (y≈12) and south (y≈28), each with a two-tank garrison — plus a four-tank reserve at the centre. Both lanes
-      face only a probe at first; mid-episode the SOUTH lane is breached.
-      Shift the reserve forward into the south lane: three tanks in the
-      (62,28) disc, four alive, within about 27 turns. Holding centre
-      loses to the breach.
+      Two-lane defence — a north lane (y≈12) and a south lane (y≈28),
+      each with a two-tank garrison — plus a four-tank reserve at the
+      centre. Both lanes face only a light probe at first; mid-episode
+      the SOUTH lane is breached by a heavier wave. Keep at least four
+      tanks alive and have at least three of them inside a forward
+      intercept disc around the south lane mouth at the deadline,
+      within about 27 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-reinforce-breach-easy-arena
+        width: 88
+        height: 40
+        cordon: 2
+        title: def-reinforce-the-breach easy 88x40
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         # NORTH lane garrison.
@@ -199,8 +130,7 @@ levels:
         - {type: e1, owner: enemy, position: [78, 12], stance: 3, count: 3}
         - {type: e1, owner: enemy, position: [78, 28], stance: 3, count: 3}
         # Far inert enemy marker — anti-DRAW.
-        - {type: fact, owner: enemy, position: [120, 20]}
-      # Breach wave — heavier wave injected on the SOUTH lane.
+        - {type: fact, owner: enemy, position: [84, 20]}
       scheduled_events:
         - tick: 450
           type: spawn_actors
@@ -208,10 +138,6 @@ levels:
             - {type: e1, owner: enemy, position: [78, 28], stance: 3, count: 8}
     win_condition:
       all_of:
-        # `after_ticks` gate: the win cannot latch until the breach
-        # wave has developed (it spawns at tick 450 and is fully in
-        # play by ~720) — so a reserve that rushes the zone before
-        # the breach cannot win prematurely.
         - {after_ticks: 720}
         - {units_in_region_gte: {x: 62, y: 28, radius: 12, n: 3}}
         - {own_units_gte: 4}
@@ -226,30 +152,23 @@ levels:
   # +1 controlled variable: REACT TO THE RIGHT LANE. The forward-
   # zone bar rises to n=4 — the 2-tank south garrison can no longer
   # fill it alone, and a reserve committed to the NORTH lane leaves
-  # the south zone two tanks short. Now reinforcing the WRONG lane
-  # LOSES, not just stalling. Same breach (south, tick 450, 8×e1),
-  # same clock.
+  # the south zone two tanks short.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # You hold a two-lane defence — a NORTH lane and a SOUTH lane, each
-    # with a 2-tank garrison — plus a 4-tank mobile reserve at the CENTRE.
-    # Mid-episode one lane is BREACHED by a heavier wave. React to the
-    # lane that is actually hit: shift the mobile reserve FORWARD into the
-    # BREACHED lane — at least 4 tanks must be within radius 12 of that
-    # lane's intercept point at win time, you must keep at least 4 tanks
-    # alive, and finish before tick 2400. Holding the reserve at the
-    # centre LOSES; committing it to the QUIET lane LOSES (the breached
-    # lane is left two tanks short); stalling LOSES.
     description: >
-      Same two-lane defence and central four-tank reserve. Mid-episode ONE
-      lane is breached by a heavier wave — react to whichever one. Shift
-      the reserve forward into the breached lane (four tanks in its
-      intercept disc), keep four tanks alive, within about 27 turns.
-      Committing to the quiet lane leaves the breach two tanks short.
+      Two-lane defence — north (y≈12) and south (y≈28), each with a
+      two-tank garrison — plus a four-tank reserve at the centre. Both
+      lanes face a light probe at first; mid-episode ONE lane is
+      breached by a heavier wave. Keep at least four tanks alive and
+      have at least four of them inside the breached lane's forward
+      intercept disc at the deadline, within about 27 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: def-reinforce-breach-medium-arena
+        width: 88
+        height: 40
+        cordon: 2
+        title: def-reinforce-the-breach medium 88x40
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: 2tnk, owner: agent, position: [30, 11], stance: 2}
@@ -262,8 +181,7 @@ levels:
         - {type: 2tnk, owner: agent, position: [45, 20], stance: 2}
         - {type: e1, owner: enemy, position: [78, 12], stance: 3, count: 3}
         - {type: e1, owner: enemy, position: [78, 28], stance: 3, count: 3}
-        - {type: fact, owner: enemy, position: [120, 20]}
-      # Breach wave — SOUTH lane, tick 450.
+        - {type: fact, owner: enemy, position: [84, 20]}
       scheduled_events:
         - tick: 450
           type: spawn_actors
@@ -271,10 +189,6 @@ levels:
             - {type: e1, owner: enemy, position: [78, 28], stance: 3, count: 8}
     win_condition:
       all_of:
-        # `after_ticks` gate: the win cannot latch until the breach
-        # wave has developed (it spawns at tick 450 and is fully in
-        # play by ~720) — so a reserve that rushes the zone before
-        # the breach cannot win prematurely.
         - {after_ticks: 720}
         - {units_in_region_gte: {x: 62, y: 28, radius: 12, n: 4}}
         - {own_units_gte: 4}
@@ -287,35 +201,26 @@ levels:
 
   # ── HARD ────────────────────────────────────────────────────────
   # +2 controlled variables vs medium:
-  #   1. Tighter deadline (~1900 ticks instead of ~2400) — the
-  #      reserve must be committed PROMPTLY; a dawdling shift misses
-  #      the clock.
+  #   1. Tighter deadline (~1900 ticks instead of ~2400).
   #   2. TWO agent spawn_point groups round-robin the mobile
   #      reserve's start COLUMN (x=40 vs x=50 — both equidistant
-  #      from the two lanes) so a memorised reserve cell cannot
-  #      generalise; the centre-then-react doctrine does. The
-  #      garrisons and the breach wave (no spawn_point) place every
-  #      seed.
+  #      from the two lanes).
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # You hold a two-lane defence — a NORTH lane and a SOUTH lane, each
-    # with a 2-tank garrison — plus a 4-tank mobile reserve at the CENTRE
-    # (its exact start column varies by seed). Mid- episode one lane is
-    # BREACHED by a heavier wave. React promptly: shift the mobile reserve
-    # FORWARD into the BREACHED lane — at least 4 tanks must be within
-    # radius 12 of that lane's intercept point at win time, you must keep
-    # at least 4 tanks alive, and finish before tick 1900 (a tight
-    # window). Holding the reserve at the centre LOSES; committing it to
-    # the QUIET lane LOSES; stalling LOSES.
     description: >
-      Same two-lane defence with a central reserve (start column varies by
-      seed). Mid-episode one lane is breached — react fast. Four tanks in
-      the breached lane's intercept disc, four alive, within about 22
-      turns (tight). Centre-hold, quiet-lane commit, and stall all lose.
+      Two-lane defence — north (y≈12) and south (y≈28) with two-tank
+      garrisons — plus a four-tank reserve at a seed-chosen central
+      column. Both lanes face a light probe; mid-episode one lane is
+      breached by a heavier wave. Keep at least four tanks alive and
+      have at least four of them inside the breached lane's forward
+      intercept disc at the deadline, within about 22 turns (tight).
     overrides:
+      base_map:
+        generator: arena
+        name: def-reinforce-breach-hard-arena
+        width: 88
+        height: 40
+        cordon: 2
+        title: def-reinforce-the-breach hard 88x40
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: 2tnk, owner: agent, position: [30, 11], stance: 2}
@@ -334,8 +239,7 @@ levels:
         - {type: 2tnk, owner: agent, position: [51, 20], stance: 2, spawn_point: 1}
         - {type: e1, owner: enemy, position: [78, 12], stance: 3, count: 3}
         - {type: e1, owner: enemy, position: [78, 28], stance: 3, count: 3}
-        - {type: fact, owner: enemy, position: [120, 20]}
-      # Breach wave — SOUTH lane, tick 450.
+        - {type: fact, owner: enemy, position: [84, 20]}
       scheduled_events:
         - tick: 450
           type: spawn_actors
@@ -343,10 +247,6 @@ levels:
             - {type: e1, owner: enemy, position: [78, 28], stance: 3, count: 8}
     win_condition:
       all_of:
-        # `after_ticks` gate: the win cannot latch until the breach
-        # wave has developed (it spawns at tick 450 and is fully in
-        # play by ~720) — so a reserve that rushes the zone before
-        # the breach cannot win prematurely.
         - {after_ticks: 720}
         - {units_in_region_gte: {x: 62, y: 28, radius: 12, n: 4}}
         - {own_units_gte: 4}

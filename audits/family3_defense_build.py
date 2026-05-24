@@ -1,0 +1,742 @@
+"""Builds audits/family3_defense.csv — Family-3 (Defense) manual audit.
+
+One row per (pack, level). Each briefing is SELF-CONTAINED in F1 officer
+style — the model sees one level at a time, so every briefing fully
+describes the mission framing, the forces given (with positions where
+they matter), and the objective from scratch. No "same as before" or
+"the same X" references.
+
+Structure per briefing: mission framing → what is given → target/objective.
+Red-Alert-specific terms (pillbox, stance, refinery, etc.) are explained
+inline so non-RA readers can follow.
+
+The map_fit column flags scenarios where the map is too large for the
+actual decision under test (turning the scenario into search-and-destroy
+instead of testing the advertised defense capability). Default: any pack
+on rush-hour-arena 128x40 hosting a <30-cell defense decision is
+large-trivial.
+
+Scope (22 packs × 3 levels = 66 rows):
+- 19 `def-*` / `defense-*` packs
+- 3 `build-defensive-*` packs (defense topology under build pressure)
+"""
+import csv
+from pathlib import Path
+
+OUT = Path(__file__).parent / 'family3_defense.csv'
+R = []
+
+
+def add(pack, level, cap, map_name, map_size, map_fit, tools, agent, enemy,
+        briefing, win, lose, max_turns, tick_budget,
+        posture='', posture_issue=''):
+    R.append(dict(
+        pack=pack, level=level, capability=cap, map_name=map_name,
+        map_size=map_size, map_fit=map_fit, tools=tools,
+        agent_force=agent, enemy_force=enemy,
+        briefing_RA=briefing, win_condition=win, lose_condition=lose,
+        max_turns=max_turns, tick_budget=tick_budget,
+        enemy_posture=posture, posture_issue=posture_issue,
+    ))
+
+
+# ── 1. def-bridge-chokepoint — chokepoint defense at narrow bridges
+P = 'def-bridge-chokepoint'; C = 'action'
+T = 'observe, move_units, attack_unit, attack_move, stop, set_stance'
+add(P, 'easy', C, 'bridges-arena 128x40', '128x40', 'large-trivial', T,
+    '6× rifle infantry defenders @(60-65,30) on HOLD-FIRE (will NOT shoot until ordered); 1× Construction Yard @(10,33) + Power Plant',
+    '6× rifle infantry attackers @(60-65,4) on Attack-Anything; far-east sentinel Construction Yard',
+    "Commander, this is a single-bridge chokepoint defence. A water band cuts the map east-to-west at y=18..21 with one bridge at x=62..65. Your Construction Yard sits far west at (10,33). Six riflemen are pre-staged just south of the centre bridge at (60-65, 30) on HOLD-FIRE — they will NOT engage even if shot at. Six enemy riflemen attack from the north over the same bridge. Flip your defenders to Defend stance and move them onto the bridge mouth before the attackers cross. Kill four, keep the Construction Yard, within about 30 turns.",
+    "≥4 kills AND Construction Yard standing, within 2700 ticks.",
+    "Construction Yard destroyed, or deadline (2701 ticks).",
+    35, 3153,
+    'attackers st3 (Attack-Anything), defenders st0 (HoldFire); intentional — stance flip is the test',
+    '')
+add(P, 'medium', C, 'bridges-arena 128x40', '128x40', 'large-trivial', T,
+    '12× rifle infantry defenders @(58-65,30-31) HOLD-FIRE; Construction Yard @(10,33); 3× Ore Refinery @(30,26)/(62,26)/(94,26)',
+    '18× rifle infantry attackers (6 per bridge) @(28-33/60-65/92-97, 4) st3',
+    "Commander, this is a three-bridge chokepoint defence. The water band at y=18..21 is crossed by three bridges at x=30, 62, 94. ONE Ore Refinery (your ore refinery) sits behind EACH bridge — if any bridge is uncontested, the attackers there destroy its refinery and you lose. Twelve defenders are centred at the middle bridge on HOLD-FIRE; you must split them three ways, flip stance, and intercept at ALL three bridges. Kill eight, keep all three refineries AND the Construction Yard, within about 35 turns.",
+    "≥8 kills AND all 3 refineries alive AND Construction Yard standing, within 3150 ticks.",
+    "Any refinery or the Construction Yard destroyed, or deadline (3151 ticks).",
+    40, 3603,
+    'attackers st3, defenders st0; intentional',
+    '')
+add(P, 'hard', C, 'bridges-arena 128x40', '128x40', 'large-trivial', T,
+    '15× rifle infantry defenders @(58-65,30-31) HOLD-FIRE; Construction Yard + 3 refineries (same as medium)',
+    '21× rifle infantry attackers (7 per bridge) @ same x bands, y=4, st3',
+    "Commander, this is a three-bridge chokepoint defence at heavier weight. Three bridges (x=30, 62, 94) cross the water at y=18..21; one Ore Refinery sits behind each. Fifteen defenders are centred on HOLD-FIRE. Twenty-one attackers (seven per bridge) charge from the north. Split into thirds, flip stance, and intercept at all three crossings before the budget bites. Kill twelve, keep all three refineries AND the yard, within about 40 turns.",
+    "≥12 kills AND all 3 refineries alive AND Construction Yard standing, within 3600 ticks.",
+    "Any refinery or the Construction Yard destroyed, or deadline (3601 ticks).",
+    45, 4053,
+    'attackers st3, defenders st0; intentional',
+    '')
+
+# ── 2. def-counter-battery — threat-prioritise the artillery
+P = 'def-counter-battery'; C = 'reasoning'
+T = 'observe, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'arena 112x40', '112x40', 'fit', T,
+    '4× medium tank @(10, 16/18/22/24) Return-Fire + 2× pillbox @(16,19)/(16,23) + Construction Yard @(20,21)',
+    '15× rifle infantry screen @(23/25/27, 15-23) on HoldFire + 2× artillery @(27, 20/22) on Defend (out-ranges your pillboxes); sentinel fact @(100,21)',
+    "Commander, this is a counter-battery strike. Your Construction Yard at (20,21) is ringed by two pillboxes (stationary anti-infantry turrets, range 5 cells) and four medium tanks stage just west at x=10. Fifteen enemy riflemen on hold-fire screen the centre at x=23-27; two long-range artillery pieces at x=27 are already shelling your yard from range 7 — your pillboxes cannot reach them. Drive the tanks STRAIGHT THROUGH the passive screen and destroy BOTH guns FIRST; grinding the screen while the artillery keeps firing loses the yard. Twelve kills, yard intact, within about 30 turns.",
+    "≥12 kills AND Construction Yard standing, within 2700 ticks.",
+    "Construction Yard destroyed, all tanks dead, or deadline (2701 ticks).",
+    30, 2703,
+    'screen st0 HoldFire, artillery st2 Defend (auto-fires on the in-range yard); intentional — passive screen ensures the doctrine test is target prioritisation, not screen-grind survivability',
+    '')
+add(P, 'medium', C, 'arena 112x40', '112x40', 'fit', T,
+    '6× medium tank @(10, 16/18/20/22/24/26) RF + 3× pillbox @(16,19/21/23) + Construction Yard @(20,21)',
+    '21× rifle infantry screen + 3× artillery @(27, 19/21/23) Defend',
+    "Commander, this is a counter-battery strike against a heavier battery. Your yard at (20,21) is ringed by three pillboxes; six medium tanks stage west at x=10. A deep 21-rifle screen on hold-fire backs three long-range artillery at x=27 that out-range your pillboxes and are shelling the yard. The three-gun battery razes the yard FASTER than the two-gun easy case. Drive the tanks through the screen and silence ALL THREE guns first; clean the screen afterwards. Fourteen kills, yard intact, within about 30 turns.",
+    "≥14 kills AND Construction Yard standing, within 2700 ticks.",
+    "Construction Yard destroyed, all tanks dead, or deadline (2701 ticks).",
+    30, 2703,
+    'screen st0, artillery st2; intentional',
+    '')
+add(P, 'hard', C, 'arena 112x40', '112x40', 'fit', T,
+    '6× 2tnk + 3× pillbox + Construction Yard staged NORTH (y≈14) or SOUTH (y≈28) by seed',
+    '21× rifle screen + 3× artillery matching the agent latitude, on st0/st2',
+    "Commander, this is a counter-battery strike with seed-rotated staging. Your yard, three pillboxes, and six medium tanks stage in the NORTH band (y=14) or SOUTH band (y=28) depending on seed — the whole base and the matching enemy formation flip together. Twenty-one rifles screen three long-range artillery pieces at your latitude; the guns are already shelling your yard from outside pillbox range. Same doctrine: drive through the passive screen, silence ALL THREE guns first, then sweep the rifles. Fourteen kills, yard intact, within about 30 turns.",
+    "≥14 kills AND Construction Yard standing, within 2700 ticks.",
+    "Construction Yard destroyed, all tanks dead, or deadline (2701 ticks).",
+    30, 2703,
+    'screen st0, artillery st2; intentional',
+    '')
+
+# ── 3. def-engineer-repair-under-fire — triage repair
+P = 'def-engineer-repair-under-fire'; C = 'action'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, set_stance, stop, repair'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Forward Ore Refinery @(10,8) + 6× rifle defenders @(12,10) HoldFire + pillbox @(14,16) (decoy lane) + Service Depot @(14,12); Construction Yard tucked safely @(40,36)',
+    '2× grenadiers + 3× rifle attackers @(10/12, 4) st3 closing on the forward refinery; sentinel fact @(120,20)',
+    "Commander, this is a disaster-recovery triage drill. Your refinery (ore refinery) is pushed forward at (10,8) and is taking focused grenade damage from a band of two grenadiers plus three riflemen closing from the north. Six rifle defenders stand next to the refinery on HOLD-FIRE — they will NOT engage on their own. A pillbox covers a different (south-east) lane and cannot reach the attack vector. Your Construction Yard is tucked safely at (40,36). Toggle REPAIR on the refinery so autorepair tops it up against the grenade salvos AND commit the defenders (an attack order auto-fires them en route even from HoldFire). Four kills, refinery AND yard standing, within about 32 turns.",
+    "Refinery AND Construction Yard standing AND ≥4 kills, within 2800 ticks.",
+    "Refinery or Construction Yard destroyed, or deadline (2801 ticks).",
+    50, 4503,
+    'attackers rusher bot st3; defenders st0 HoldFire intentional (the commit verb is the test)',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same forward refinery + 6× defenders HoldFire + decoy pillbox + Service Depot + safe Construction Yard',
+    '3× grenadiers + 4× rifle attackers @(10/12, 4) st3 — heavier attrition',
+    "Commander, this is a disaster-recovery triage drill with heavier attrition. Three grenadiers and four riflemen close on the same forward refinery (ore refinery) at (10,8). Six HoldFire defenders are pre-placed next to it; the pillbox covers an off-axis lane; the Construction Yard is tucked safely at (40,36). Toggle REPAIR on the refinery the moment damage shows AND commit the defenders to engage the band. Six kills, refinery AND yard standing, within about 30 turns. The grenadier chip rate beats the refinery's HP without repair; the kill bar is unmet without offensive commitment.",
+    "Refinery AND Construction Yard standing AND ≥6 kills, within 2700 ticks.",
+    "Refinery or Construction Yard destroyed, or deadline (2701 ticks).",
+    50, 4503,
+    'rusher st3; defenders st0 intentional',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Base mirrored across two spawn_point groups: NORTH (y=8) or SOUTH (y=32) base layout by seed',
+    'TWO attrition vectors: grenadier+rifle bands at y=2 AND y=38 (both always place); on-latitude band converges on the active refinery',
+    "Commander, this is a disaster-recovery triage drill with seed-rotated staging. Your base — forward refinery, six HoldFire defenders, off-axis pillbox, depot, safe Construction Yard — stages in either the NORTH (y=8) or SOUTH (y=32) band by seed. Two grenadier-led attrition vectors hit from opposite latitudes; the on-latitude band converges on your active refinery, the off-latitude band drifts inward later. Toggle REPAIR on the refinery as it bleeds AND commit defenders to whichever vector is live. Six kills, refinery AND yard standing, within about 30 turns.",
+    "Refinery AND Construction Yard standing AND ≥6 kills, within 2700 ticks.",
+    "Refinery or Construction Yard destroyed, or deadline (2701 ticks).",
+    50, 4503,
+    'rusher st3; defenders st0 intentional',
+    '')
+
+# ── 4. def-evacuation — abandon the doomed base, retreat east
+P = 'def-evacuation'; C = 'reasoning'
+T = 'observe, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'fit', T,
+    '5× medium tank @(10, 8-12) on Return-Fire at the north shoulder of the doomed base; Construction Yard + Ore Refinery @(10/13, 20)',
+    '2× heavy tank + 4× rocket infantry @(16-18, 18-22) on Attack-Anything (guard bot — holds post, leashes at ~18 cells); sentinel fact @(125,20)',
+    "Commander, this is a strategic evacuation. Your base at (10,20) — Construction Yard plus Ore Refinery — is being overrun by two heavy tanks and four anti-tank rocket soldiers; they're in firing range on turn 1 and the base WILL fall. You have five medium tanks staged at the north shoulder of the base at (10, 8-12). A safe muster zone is at (90,12) on the far east, well beyond the enemy's leash range. Don't try to hold — abandon the base on turn 1, run the tanks east along the north corridor to the safe disc. Three tanks inside radius 6 of (90,12), three still alive, within about 30 turns. Losing the base is NOT a fail; failing to evacuate is.",
+    "≥3 tanks inside (90,12) r=6 AND ≥3 tanks alive, within 2700 ticks.",
+    "Fewer than 1 tank alive, or deadline (2701 ticks).",
+    50, 4503,
+    'guard bot st3 (holds post + lunges within ~16, leashes past ~18); matches the briefing — the heavies don\'t chase the EVAC column past x≈35',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'fit', T,
+    '5× medium tank @(10, 4-8) on Return-Fire at the FAR-NORTH shoulder; base same fact+proc @(10/13,20)',
+    '3× heavy tank + 6× rocket infantry @(16-18, 18-22) guard bot st3',
+    "Commander, this is a strategic evacuation under heavier pressure. Same doomed base at (10,20), but the assault is heavier — three heavy tanks plus six rocket soldiers, already in firing range. Your five medium tanks stage at the far-NORTH shoulder (y=4..8) to clear the heavies' lunge reach. The safe zone moves further north to (90,6). The clock tightens to about 27 turns. A one- or two-turn delay leaves the column inside the leash and bleeds the survival cap. Three tanks in (90,6), three alive.",
+    "≥3 tanks inside (90,6) r=6 AND ≥3 tanks alive, within 2400 ticks.",
+    "Fewer than 1 tank alive, or deadline (2401 ticks).",
+    50, 4503,
+    'guard bot st3; intentional (matches briefing)',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'fit', T,
+    '5× medium tank staged FAR-NORTH (y=4..8) or FAR-SOUTH (y=32..36) by seed; same doomed base at (10,20)',
+    '3× heavy tank + 6× rocket infantry at the base (always places); off-latitude side has no assault but no safe zone bias either',
+    "Commander, this is a strategic evacuation with seed-rotated staging. The doomed western base at (10,20) is fixed — the assault always places. Your five medium tanks stage in either the FAR-NORTH (y≈6) or FAR-SOUTH (y≈34) band by seed; the matching safe zone is (90,6) or (90,34). Read your column's latitude and run to the matching disc. Three tanks in YOUR safe zone, three alive, within about 27 turns.",
+    "≥3 tanks inside the matching safe zone disc AND ≥3 tanks alive, within 2400 ticks.",
+    "Fewer than 1 tank alive, or deadline (2401 ticks).",
+    50, 4503,
+    'guard bot st3; intentional',
+    '')
+
+# ── 5. def-in-depth — two layers beat one thick wall (build-pbox)
+P = 'def-in-depth'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Construction Yard @(10,20) + Barracks + Power Plant + 1× rifle @(3,20) rear + pre-placed FRONT line 2× pillbox @(25, 19/21); $2400 cash',
+    '5× rifle + 1× rocket infantry @(110/112, 20) on Attack-Anything (massed rush); sentinel fact @(120,20)',
+    "Commander, this is a defence-in-depth construction drill. A massed rush of five rifles plus one rocket soldier drives straight at your Construction Yard. You inherit a front-line of two pillboxes at (25, 19/21) plus your base — Construction Yard, Barracks, Power Plant — and $2400 (exactly four pillboxes worth). Build TWO more pillboxes as a REAR LAYER at (15,20) so anything that punches through the front gets shredded by the rear. Keep the yard alive, within about 60 turns. A single thick wall (four pillboxes all at one x) has no depth and the massed rush eventually breaks through.",
+    "≥4 pillboxes built AND 2 in (25,20) r=4 AND 2 in (15,20) r=4 AND Construction Yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    110, 9903,
+    'rusher bot st3; matches briefing',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same pre-placed front line + base + $2400, tighter clock',
+    'Same 5×e1 + 1×e3 rusher band — same composition, less slack',
+    "Commander, this is a defence-in-depth construction drill with a tighter clock. Same massed rush — five rifles plus one rocket soldier — driving at your Construction Yard. Same inherited front line at (25, 19/21), same base, same $2400 budget. Build two pillboxes as a rear layer at (15,20) — the topology is identical but the deadline is shorter. Yard alive within about 50 turns.",
+    "≥4 pillboxes built AND 2 in (25,20) r=4 AND 2 in (15,20) r=4 AND Construction Yard standing, within 4500 ticks.",
+    "Construction Yard destroyed, or deadline (4501 ticks).",
+    110, 9903,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Pre-placed front line + base flip NORTH (y=14) / SOUTH (y=26) by seed; $2400',
+    'Same massed rush at y=20 — converges on whichever latitude the agent spawns at',
+    "Commander, this is a defence-in-depth construction drill with seed-rotated staging. The base — Construction Yard, Barracks, Power Plant, front-line pillbox pair — flips between NORTH (y=14) and SOUTH (y=26) by seed; the inherited front line at (25, fact_y) follows. Build the rear layer (2× pillbox at (15, fact_y)) at the SAME latitude as your fact. Yard alive within about 50 turns. A memorised 'always at y=20' build satisfies neither rear region — the latitude must follow the fact.",
+    "≥4 pillboxes built AND a 2/2 front/rear split at the matching latitude (y=14 OR y=26) AND yard standing, within 4500 ticks.",
+    "Construction Yard destroyed, or deadline (4501 ticks).",
+    110, 9903,
+    'rusher st3; matches briefing',
+    '')
+
+# ── 6. def-in-depth-vs-single — depth vs single wall, kill bar present
+P = 'def-in-depth-vs-single'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Construction Yard + Barracks + Power Plant + 3× rifle behind the base; $2400 (no pre-placed pillboxes — must build all 4)',
+    '6× rifle infantry @(60,20) st3 driving east-to-west; sentinel fact @(120,20)',
+    "Commander, this is a defence-in-depth construction drill — you build the WHOLE defence. A heavy rifle rush of six attackers charges your Construction Yard at (10,20). You have your base — yard, barracks, power plant — and three riflemen flanking the fact, plus $2400 (exactly four pillboxes at 600 each). Split the four pillboxes across TWO depth bands — 2 in the FRONT near (35,20), 2 in the REAR near (20,20) — so anything that breaks the front gets killed by the rear. Yard intact, four kills, within about 60 turns. One thick wall has no depth.",
+    "≥4 pillboxes built AND 2 in (35,20) r=4 AND 2 in (20,20) r=4 AND ≥4 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same base + 4× rifle defenders + $2400',
+    '8× rifle + 2× rocket infantry @(60-62, 20) st3 (heavier wave)',
+    "Commander, this is the defence-in-depth construction drill at heavier weight. Same yard at (10,20), but the rush now includes two rocket soldiers behind eight rifles. The $2400 still buys exactly four pillboxes; split 2-front near (35,20), 2-rear near (20,20). A single thick wall meets the count clause but lets the rockets-led punch through. Yard intact, seven kills, within about 60 turns.",
+    "≥4 pillboxes built AND 2 in (35,20) r=4 AND 2 in (20,20) r=4 AND ≥7 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Base flips NORTH (y=14) / SOUTH (y=26) by seed; $2400 for all 4 pillboxes',
+    'Same 8×e1 + 2×e3 wave at y=20 — converges on whichever latitude the agent spawns at',
+    "Commander, this is the defence-in-depth construction drill with seed-rotated staging. The Construction Yard flips between NORTH (y=14) and SOUTH (y=26) by seed; you must read fact_y from the observation and place both depth bands at that latitude. Build four pillboxes split 2-front near (35, fact_y), 2-rear near (20, fact_y). Yard alive, six kills, within about 60 turns. A 'build bands at y=20' default fails because the fact is never at y=20 on hard.",
+    "≥4 pillboxes built AND front/rear split at the matching latitude (y=14 OR y=26) AND ≥6 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+
+# ── 7. def-multi-direction — distributed defense across concurrent lanes
+P = 'def-multi-direction'; C = 'reasoning'
+T = 'observe, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'arena 128x40 (2 lanes)', '128x40', 'wide', T,
+    '4× medium tank @(62-63, 19-20) at central staging on Defend; Construction Yard @(64,20)',
+    '2× rifle infantry per lane — NORTH @(64,4) and SOUTH @(64,36) on Attack-Anything (hunt bot); walls force each band through a single chokepoint per lane',
+    "Commander, this is a distributed defence with TWO concurrent lanes. Your Construction Yard sits at the centre (64,20) with four medium tanks staged adjacent. Walls cut the map so the only NORTH approach funnels through (64,12) and the only SOUTH approach through (64,28). Two rifle rushes inbound — one from each lane — both converge on the yard. Split your tanks 2/2 between the two zones; concentrating on one side leaves the other open. Three kills, two tanks alive, yard intact, within about 30 turns.",
+    "≥3 kills AND ≥2 alive AND yard standing AND ≥1 tank in (64,12) r=5 AND ≥1 tank in (64,28) r=5, within 2700 ticks.",
+    "Construction Yard destroyed, fewer than 1 alive, or deadline (2701 ticks).",
+    50, 4503,
+    'enemy hunt bot st3; matches briefing — independent lanes',
+    '')
+add(P, 'medium', C, 'arena 128x40 (3 lanes)', '128x40', 'wide', T,
+    '6× medium tank @(62-63, 19-21) at central staging on Defend; Construction Yard @(64,20)',
+    '3× rifle per lane × 3 lanes — N (64,4), S (64,36), E (124,20); walls funnel each into one chokepoint',
+    "Commander, this is a distributed defence with THREE concurrent lanes. Same central yard with six tanks staging adjacent — but now three lanes converge: NORTH, SOUTH, and a third EAST lane. Each carries three rifles, total nine attackers. Walls funnel them through N=(64,12), S=(64,28), E=(108,20). Maintain a 2/2/2 split, keep losses to no more than three, kill six, hold three tanks alive and the yard standing, within about 30 turns.",
+    "≥6 kills AND ≥3 alive AND ≤3 lost AND ≥1 tank in each of (64,12) (64,28) (108,20) r=5 AND yard standing, within 2700 ticks.",
+    "Construction Yard destroyed, fewer than 1 alive, >3 lost, or deadline (2701 ticks).",
+    50, 4503,
+    'hunt st3; matches briefing',
+    '')
+add(P, 'hard', C, 'arena 128x40 (4 corner lanes)', '128x40', 'wide', T,
+    '8× medium tank at central staging, base latitude flips NORTH (y=14) or SOUTH (y=26) by seed',
+    '3× rifle per corner × 4 corners (NW/NE/SW/SE); walls split the arena so the four corner lanes are physically distinct',
+    "Commander, this is a distributed defence with FOUR concurrent corner lanes. The base — Construction Yard plus eight tanks — spawns NORTH (y=14) or SOUTH (y=26) by seed. Four rush lanes hit the four diagonal corners (NW, NE, SW, SE). Split the defenders 2/2/2/2 across the four forward zones at YOUR latitude; a memorised mid-map plan only wins one seed. Eight kills, three alive, loss cap three, yard intact, within about 30 turns.",
+    "≥8 kills AND ≥3 alive AND ≤3 lost AND ≥1 tank in each of the 4 corner zones at the matching latitude AND yard standing, within 2700 ticks.",
+    "Construction Yard destroyed, fewer than 1 alive, >3 lost, or deadline (2701 ticks).",
+    50, 4503,
+    'hunt st3; matches briefing',
+    '')
+
+# ── 8. def-position-expected-direction — fortify the announced axis
+P = 'def-position-expected-direction'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'def-pos-expected-east-easy-arena', '96x40', 'fit', T,
+    'Construction Yard @(12,20) + Barracks + Power Plant + 4× rifle defenders south of base; $2400; map fenced north and south so the only approach is the EAST corridor',
+    '3× rifle infantry @(84,20) on Attack-Anything (rusher bot); sentinel fact @(92,2)',
+    "Commander, this is a directional-commitment defence drill. Intel says the enemy will attack from the EAST. The map is fenced by water bands north and south of your base so the only approach is the east corridor — visible on your minimap. You start with a Construction Yard, Barracks, Power Plant, and four riflemen at (12,20), plus $2400 (exactly four pillboxes). Build THREE pillboxes in the EAST region near (24,20) — between your base and the threat. Pillboxes placed west of the base satisfy nothing. Yard alive, three defenders alive, within about 60 turns.",
+    "≥3 pillboxes built AND ≥3 in (24,20) r=5 AND yard standing AND ≥3 own units alive, within 5400 ticks.",
+    "Construction Yard destroyed, fewer than 1 own unit, or deadline (5401 ticks).",
+    66, 5943,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'medium', C, 'def-pos-expected-east-medium-arena', '96x40', 'fit', T,
+    'Same fenced layout + base + $2400',
+    '5× rifle + 1× rocket infantry @(84, 20/22) st3 — stronger eastern push',
+    "Commander, this is a directional-commitment defence drill with a stronger push. The map is still fenced north and south — only the east corridor is open. A stronger push (five rifles plus one rocket soldier) will charge through it. Pre-position three pillboxes at the mouth of the corridor near (24,20); a behind-the-base placement leaves the lane naked and the rocket soldier ploughs through. Yard alive, three defenders alive, within about 60 turns.",
+    "≥3 pillboxes built AND ≥3 in (24,20) r=5 AND yard standing AND ≥3 own units alive, within 5400 ticks.",
+    "Construction Yard destroyed, fewer than 1 own unit, or deadline (5401 ticks).",
+    66, 5943,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'arena 96x40 (open, no fence)', '96x40', 'fit', T,
+    'Base flips NORTH (centre (48,12), pillbox-region target y=6) or SOUTH (centre (48,28), target y=34) by seed; $2400',
+    'Rusher band hits from BOTH latitudes; only the on-latitude band converges on the active base in time',
+    "Commander, this is a directional-commitment defence drill on an OPEN arena with seed-varied threat. No fence — the threat axis is announced in the briefing AND must be read off your spawn position. You stage either NORTH (base centre (48,12)) or SOUTH (base centre (48,28)). The intel rotates with your spawn: a NORTH base means 'fortify NORTH' (pillbox triple near (48,6)); a SOUTH base means 'fortify SOUTH' (near (48,34)). A NORTH-base placement does NOT satisfy the SOUTH-base region. Yard alive, three defenders alive, within about 60 turns.",
+    "≥3 pillboxes built AND triple in the matching-latitude region AND yard standing AND ≥3 own units alive, within 5400 ticks.",
+    "Construction Yard destroyed, fewer than 1 own unit, or deadline (5401 ticks).",
+    66, 5943,
+    'rusher st3; matches briefing',
+    '')
+
+# ── 9. def-position-revealed-direction — scout the axis, then fortify
+P = 'def-position-revealed-direction'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, scout, stop'
+add(P, 'easy', C, 'def-position-revealed-direction-arena', '112x40', 'fit', T,
+    'Construction Yard + Barracks + Power Plant + Ore Refinery + 4× rifle defenders; $2400; map has revealed lane geometry but the exact rush axis is unknown until scouted',
+    '6× rifle inbound from a seed-chosen axis (north or south); rusher bot st3',
+    "Commander, this is an intel-driven adaptive defence drill. Your base has a Construction Yard plus Barracks, Power Plant, Refinery, four defenders, and $2400. The arena has multiple plausible approach lanes — scout your map and identify the actual axis the rush is using BEFORE you commit pillboxes. Once you've observed the inbound rush, build THREE pillboxes on that axis (the engine enforces a `then:` order: scout-then-build-then-kill). Three kills, yard alive, within about 40 turns.",
+    "Scout-first ordered chain: ≥3 pillboxes on the observed axis AND ≥3 kills AND yard standing, within 3600 ticks.",
+    "Construction Yard destroyed, or deadline (3601 ticks).",
+    66, 5943,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'medium', C, 'def-position-revealed-direction-arena', '112x40', 'fit', T,
+    'Same base + $2400',
+    'Heavier rush at the unknown axis; same scout-first requirement',
+    "Commander, this is an intel-driven adaptive defence drill at heavier weight. Same map, same base, same $2400. The inbound rush is heavier and the scout-first ordered chain is still enforced: observe the actual axis, THEN build three pillboxes on it, THEN engage. Three kills, yard alive, within about 40 turns.",
+    "Scout-first ordered chain: ≥3 pillboxes on the observed axis AND ≥3 kills AND yard standing, within 3600 ticks.",
+    "Construction Yard destroyed, or deadline (3601 ticks).",
+    66, 5943,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'def-position-revealed-direction-arena', '112x40', 'fit', T,
+    'Base flips by seed; same $2400 and scout-first requirement',
+    'Heavier rush from a seed-chosen axis; agent spawn rotates so a memorised axis fails',
+    "Commander, this is an intel-driven adaptive defence drill with seed-rotated staging. Base latitude flips by seed; the threat axis flips with it. Scout to reveal the actual rush axis, build three pillboxes there, then engage. Three kills, yard alive, within about 40 turns.",
+    "Scout-first ordered chain: ≥3 pillboxes on the matching observed axis AND ≥3 kills AND yard standing, within 3600 ticks.",
+    "Construction Yard destroyed, or deadline (3601 ticks).",
+    66, 5943,
+    'rusher st3; matches briefing',
+    '')
+
+# ── 10. def-pre-position-mobile-reserve — central reserve, react forward
+P = 'def-pre-position-mobile-reserve'; C = 'reasoning'
+T = 'observe, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    '4× medium tank @(40, 19-21) at the CENTRE on Defend; Construction Yard @(10,20)',
+    '6× rifle @(80,10) NORTH on Attack-Anything (hunt bot); sentinel fact @(120,20)',
+    "Commander, this is a reserve-commitment drill. Your Construction Yard sits at (10,20). Four medium tanks form a mobile reserve at the CENTRE of the engagement zone (40,20) — equidistant from both flanks. A rifle rush is inbound from the NORTH and will drive at your forces' centroid. Move the reserve FORWARD to intercept at the NORTH lane mouth; at least two tanks must be inside radius 10 of the (60,12) intercept point at win time. Four kills, one tank alive, within about 27 turns. Holding the reserve passively at the centre fails the forward-zone clause.",
+    "≥4 kills AND ≥1 tank alive AND ≥2 tanks in (60,12) r=10 AND yard standing, within 2400 ticks.",
+    "Construction Yard destroyed, all tanks dead, or deadline (2401 ticks).",
+    50, 4503,
+    'hunt st3; matches briefing',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    '6× medium tank at CENTRE (40, 19-21) on Defend; same yard',
+    'TWO simultaneous bands — N @(80,10), S @(80,30), 5× rifle each, hunt st3',
+    "Commander, this is a reserve-commitment drill with two flanks. Your yard at (10,20). Six medium tanks at the CENTRE (40,20). Two rush bands inbound — one NORTH at (80,10), one SOUTH at (80,30) — both driving at the centroid. Split or stagger the reserve so BOTH flanks see a tank: at least one in (60,14) r=12 AND at least one in (60,26) r=12. Six kills, two alive, yard intact, within about 27 turns. Centre-only or one-flank both fail the multi-zone clause.",
+    "≥6 kills AND ≥2 alive AND ≥1 tank in (60,14) r=12 AND ≥1 in (60,26) r=12 AND yard standing, within 2400 ticks.",
+    "Construction Yard destroyed, all tanks dead, or deadline (2401 ticks).",
+    50, 4503,
+    'hunt st3; matches briefing',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    '12× medium tank at a seed-chosen central column (x=40 or x=50) on Defend; yard @(10,20)',
+    'THREE rush directions — N (80,10), S (80,30), E (head-on y=20); loss cap units_lost_lte:2',
+    "Commander, this is a reserve-commitment drill with three flanks and a tight loss cap. Twelve tanks stage at a seed-chosen central column; three rush bands hit NORTH (y=10), CENTRE (y=20), and SOUTH (y=30). Push tanks to all three intercepts at once — (60,12), (65,20), (60,28). Six kills, two alive, lose no more than two tanks, yard intact, within about 27 turns. Sitting central or pre-committing to one flank fails the others.",
+    "≥6 kills AND ≥2 alive AND ≤2 lost AND ≥1 tank in each of (60,12) (65,20) (60,28) AND yard standing, within 2400 ticks.",
+    "Construction Yard destroyed, all tanks dead, >2 lost, or deadline (2401 ticks).",
+    50, 4503,
+    'hunt st3; matches briefing',
+    '')
+
+# ── 11. def-reinforce-the-breach — reactive reserve commitment
+P = 'def-reinforce-the-breach'; C = 'action'
+T = 'observe, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Construction Yard + 2× medium tank N garrison @(30,11-13) + 2× medium tank S garrison @(30,27-29) + 4× medium tank central reserve @(44-45, 19-21)',
+    'Initial light probe — 3× rifle per lane (N, S); at tick 450, an 8× rifle BREACH wave injects on the SOUTH lane',
+    "Commander, this is a reactive-reserve drill. Two-lane defence — NORTH (y≈12) and SOUTH (y≈28), each with a two-tank garrison — plus a four-tank reserve at the centre. Both lanes face only a light probe at first; mid-episode the SOUTH lane is breached by a heavier wave. Shift the reserve forward into the south lane: three tanks inside radius 12 of (62,28), four tanks still alive, within about 27 turns. Holding the centre loses to the breach.",
+    "After tick 720: ≥3 tanks in (62,28) r=12 AND ≥4 alive, within 2400 ticks.",
+    "Fewer than 1 tank alive, or deadline (2401 ticks).",
+    40, 3603,
+    'hunt st3 (matches briefing — independent lanes); scheduled_events spawn_actors at tick 450',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same defence layout',
+    'Same composition; same breach wave on SOUTH lane at tick 450',
+    "Commander, this is a reactive-reserve drill with a stricter intercept floor. Same two-lane defence (north and south, two-tank garrison each) and central four-tank reserve. Mid-episode ONE lane is breached by a heavier wave — react to whichever one. Shift the reserve forward into the breached lane (FOUR tanks in its intercept disc — the garrison alone can no longer fill the floor), four tanks alive, within about 27 turns. Committing to the quiet lane leaves the breach two tanks short.",
+    "After tick 720: ≥4 tanks in (62,28) r=12 AND ≥4 alive, within 2400 ticks.",
+    "Fewer than 1 tank alive, or deadline (2401 ticks).",
+    40, 3603,
+    'hunt st3; scheduled_events tick 450',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Reserve start column flips x=40 or x=50 by seed; garrisons fixed',
+    'Same breach wave on SOUTH lane at tick 450; tighter deadline',
+    "Commander, this is a reactive-reserve drill with seed-varied staging and a tight deadline. Same two-lane defence; reserve start column varies by seed. Mid-episode one lane is breached — react fast. Four tanks in the breached lane's intercept disc, four alive, within about 22 turns (tight). Centre-hold, quiet-lane commit, and stall all lose.",
+    "After tick 720: ≥4 tanks in (62,28) r=12 AND ≥4 alive, within 1900 ticks.",
+    "Fewer than 1 tank alive, or deadline (1901 ticks).",
+    30, 2703,
+    'hunt st3; scheduled_events tick 450',
+    '')
+
+# ── 12. def-retreat-and-rebuild — withdraw + redeploy MCV + build proc
+P = 'def-retreat-and-rebuild'; C = 'reasoning'
+T = 'observe, build, place_building, deploy, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'FORWARD base (mid-map): fact @(40,20) + proc @(44,20) + tent + 2× rifle defenders; SAFE zone (deep west): 1× MCV @(10,20) + Power Plant + 1× rifle garrison; $1600',
+    '4× rifle + 1× rocket infantry @(100/102, 20) st3 (rusher); sentinel fact @(125,20)',
+    "Commander, this is a strategic withdrawal drill. A rusher band — four rifles and one rocket soldier — closes on your FORWARD base at (40,20). The forward base CANNOT be held inside the deadline — the rocket alone razes the yard. A parked MCV waits at the deeper SAFE zone (10,20) beside a power plant. Retreat: let the forward base fall, deploy the MCV to spawn a new Construction Yard, and build an Ore Refinery (`proc`) inside the safe disc around (10,20). One unit alive, within about 50 turns.",
+    "Fact AND proc both in (10,20) r=8 AND ≥1 own unit alive, within 4500 ticks.",
+    "All Construction Yards destroyed, or deadline (4501 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same forward base + safe zone + $1600',
+    '6× rifle + 2× rocket infantry @(100/102, 20) st3 — heavier rush',
+    "Commander, this is a strategic withdrawal drill with a heavier band. Six rifles and two rocket soldiers overrun the forward base in roughly 15 turns of fire. Retreat: deploy your MCV at the deep safe zone (10,20) and build a refinery there. Yard and refinery in the safe disc, one unit alive, within about 50 turns.",
+    "Fact AND proc both in (10,20) r=8 AND ≥1 own unit alive, within 4500 ticks.",
+    "All Construction Yards destroyed, or deadline (4501 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Both forward base AND safe-zone MCV flip to seed-chosen latitude (NORTH y=14 or SOUTH y=26)',
+    'Rusher bands at BOTH latitudes (per CLAUDE.md enemy don\'t honour spawn_point); on-latitude band converges',
+    "Commander, this is a strategic withdrawal drill with seed-rotated staging. Your forward base and your deeper safe-zone MCV are both at a SEED-CHOSEN latitude (NORTH y=14 or SOUTH y=26). Rusher bands hit both latitudes; the forward base CANNOT be held. Retreat, deploy the MCV, and build a refinery — both inside the safe disc around YOUR matched safe zone (NORTH (10,14) OR SOUTH (10,26), radius 8). One unit alive, within about 50 turns.",
+    "Fact AND proc in the matching safe-zone disc AND ≥1 own unit alive, within 4500 ticks.",
+    "All Construction Yards destroyed, or deadline (4501 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+
+# ── 13. def-stance-mgmt-hold-then-attack — flip stance to engage
+P = 'def-stance-mgmt-hold-then-attack'; C = 'action'
+T = 'observe, move_units, attack_unit, attack_move, stop, set_stance'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Construction Yard @(10,20) + 4× medium tank @(35-36, 19-21) on HOLD-FIRE (stance:0 — will NOT fire even when shot at)',
+    '6× rifle infantry @(90,20) on Attack-Anything (rusher bot); sentinel fact @(108,20)',
+    "Commander, this is an ambush trigger-discipline drill. Four medium tanks are pre-staged at (35-36, 19-21) — a choke between the inbound rush and your Construction Yard at (10,20). Their orders are HOLD-FIRE — they will NOT engage on their own, even when shot at. Six riflemen rush from (90,20). Call `set_stance` to lift engagement authority (flip to Defend or Attack-Anything) so the tanks auto-engage at cannon range and wipe the rush before it reaches the base. Four kills, three tanks alive, yard intact, within about 50 turns.",
+    "Yard standing AND ≥4 kills AND ≥3 tanks alive, within 4500 ticks.",
+    "Construction Yard destroyed, all tanks dead, or deadline (4501 ticks).",
+    55, 4953,
+    'rusher st3 (matches); defenders st0 HoldFire intentional — stance flip is the test',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same defenders + yard',
+    '8× rifle infantry @(90,20) st3 — heavier rush',
+    "Commander, this is an ambush trigger-discipline drill at heavier weight. Same four medium tanks at (35-36, 19-21) on HOLD-FIRE; same yard at (10,20). Eight riflemen rush this time. Flip the tanks to a fire-active stance so they auto-engage before the rush reaches you. Five kills, three tanks alive, yard intact, within about 50 turns.",
+    "Yard standing AND ≥5 kills AND ≥3 tanks alive, within 4500 ticks.",
+    "Construction Yard destroyed, all tanks dead, or deadline (4501 ticks).",
+    55, 4953,
+    'rusher st3; defenders st0 intentional',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Defenders flip NORTH (y=18-20) or SOUTH (y=20-22) by seed; yard @(10,20)',
+    '8× rifle @(90,20) st3 — converges on whichever defender cluster is live',
+    "Commander, this is an ambush trigger-discipline drill with seed-rotated staging. Same four HoldFire tanks at (35-36) — but their y-band flips north or south by seed. Eight riflemen rush from (90,20). Read the cluster's actual latitude from the observation, flip stance, and engage. Five kills, three tanks alive, yard intact, within about 50 turns.",
+    "Yard standing AND ≥5 kills AND ≥3 tanks alive, within 4500 ticks.",
+    "Construction Yard destroyed, all tanks dead, or deadline (4501 ticks).",
+    55, 4953,
+    'rusher st3; defenders st0 intentional',
+    '')
+
+# ── 14. def-surprise-flank-react — intel says N, attack comes S
+P = 'def-surprise-flank-react'; C = 'reasoning'
+T = 'observe, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'arena (rocks-N)', '128x40', 'wide', T,
+    'Construction Yard @(20,20) (health 50%) + 2× pillbox PRE-BUILT on the NORTH face @(20/22, 14) (covers the announced threat axis) + 4× rifle defenders distributed around the yard on HOLD-FIRE',
+    'Initial NORTH lane EMPTY (intel said north but enemy bypassed). At tick 800, 4× rifle scheduled_events spawn SOUTH @(20,36) on st3; sentinel fact @(120,20)',
+    "Commander, this is a misdirection-aware defence drill. Intel says the enemy will attack from the NORTH; a rocky band on the north edge backs that up, and two pillboxes are pre-built to cover it. Your yard at (20,20) is already damaged to 50% HP, with four rifle defenders distributed around it on HOLD-FIRE. Mid-episode a rifle rush actually arrives from the SOUTH (the open, undefended flank). Detect the spawn signal, leave the wrong-axis pillboxes silent, and commit the four defenders SOUTH to intercept before they reach the yard. Four kills, two own units alive, yard intact, within about 50 turns.",
+    "Yard standing AND ≥4 kills AND ≥2 own units alive, within 4500 ticks.",
+    "Construction Yard destroyed, fewer than 1 own unit, or deadline (4501 ticks).",
+    50, 4503,
+    'rusher st3 spawned by scheduled_events at tick 800; matches briefing',
+    '')
+add(P, 'medium', C, 'arena (rocks-N)', '128x40', 'wide', T,
+    'Same pre-build + 4× defenders HoldFire + damaged yard',
+    'Two scheduled waves from SOUTH — tick 800 (4× rifle) AND tick 1400 (3× rifle); rusher st3',
+    "Commander, this is a misdirection-aware defence drill with two-wave SOUTH pressure. Same north-fortified base — pillboxes pre-built on the announced NORTH axis, four defenders on HoldFire, yard at 50% HP. Two south rushes: an initial wave mid-episode and a follow-up later. Detect the south axis, commit the defenders south, hold through both waves. Four kills, two own units alive, yard intact, within about 50 turns.",
+    "Yard standing AND ≥4 kills AND ≥2 own units alive, within 4500 ticks.",
+    "Construction Yard destroyed, fewer than 1 own unit, or deadline (4501 ticks).",
+    50, 4503,
+    'rusher st3 (scheduled_events at ticks 800 and 1400); matches briefing',
+    '')
+add(P, 'hard', C, 'arena (rocks-N)', '128x40', 'wide', T,
+    'Base flips between two locations @(20,20) or @(40,20) by seed; pre-built pillboxes follow; loss cap ≤2',
+    'Same two-wave south rush at tick 800 / 1400; rusher st3',
+    "Commander, this is a misdirection-aware defence drill with seed-rotated staging and a loss cap. Base location flips between (20,20) and (40,20) by seed; the pre-built north-facing pillboxes follow. Two south rushes hit (tick 800 + 1400). Detect, commit, and absorb both waves — losing more than two own units fails the cap. Four kills, two alive, ≤2 lost, yard intact, within about 50 turns.",
+    "Yard standing AND ≥4 kills AND ≥2 own units alive AND ≤2 lost, within 4500 ticks.",
+    "Construction Yard destroyed, fewer than 1 own unit, >2 lost, or deadline (4501 ticks).",
+    50, 4503,
+    'rusher st3 (scheduled_events tick 800/1400); matches briefing',
+    '')
+
+# ── 15. def-tower-line-vs-cluster — match topology to forcing geometry
+P = 'def-tower-line-vs-cluster'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'def-tower-lvsc-easy-arena (open)', '112x40', 'fit', T,
+    'Construction Yard @(10,20) + Barracks + Power Plant + 4× row-decoy rifles at (12, 4/12/28/36) HoldFire; $2400',
+    'Scheduled at tick 2000: 4 squads of 3× rifle each at (95, 4/12/28/36) — wide-front attack on four rows; sentinel fact @(108,20)',
+    "Commander, this is a defence-topology drill testing wide-front geometry. Four rifle squads (three each) advance west on four separate rows — y=4, 12, 28, 36 — each toward its own decoy rifleman on the same row at x=4. Your budget $2400 buys four pillboxes. Place one on each of the four attacker rows at x=60 so every squad walks into a pillbox's range. Clustering all four at the centre (y=20) leaves every row out of weapon range; the cluster kills nothing and the squads raze your yard. Eight kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND 1 in each of (60,4) (60,12) (60,28) (60,36) r=3 AND ≥8 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'scheduled wave st3 (rusher-like — converges on row decoys); matches briefing',
+    '')
+add(P, 'medium', C, 'def-tower-lvsc-medium-arena (chokepoint)', '112x40', 'fit', T,
+    'Same base + corner rifle + $2400; chokepoint arena with walls at x=60 leaving only y=18..22 passable',
+    '8× rifle + 2× rocket infantry @(95/97, 20) st3 funneling through the single 5-cell corridor',
+    "Commander, this is a defence-topology drill testing chokepoint geometry. A single 5-cell corridor at x=60, y=18..22 is the only way west. Ten attackers (eight rifles plus two rocket soldiers) must funnel through it to reach your yard at (10,20). Budget $2400 buys four pillboxes. Cluster all four inside the corridor so overlapping fire shreds the column at the choke. Spreading across rows the corridor doesn't reach is a wasted budget — and placement attempts on the wall water are rejected. Ten kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND ≥4 in (60,20) r=5 AND ≥10 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'attackers st3; matches briefing',
+    '')
+add(P, 'hard', C, 'arena 112x40 (open)', '112x40', 'fit', T,
+    'Same base + $2400; OPEN arena (no walls) so both topologies are physically buildable',
+    'TWO enemy spawn_point groups by seed: (0) concentrated thrust 9×e1+2×e3 stacked at (90,20); (1) wide-front 4 squads of 3×e1 at y=4/12/28/36',
+    "Commander, this is a defence-topology drill with seed-varied forcing geometry. The arena is open — both line and cluster are buildable. Enemy formation flips by seed: either a concentrated thrust through the centre (cluster wins) OR a wide-front spread across four rows (line wins). Read the spawn frame, then pick the topology that matches. Eight kills, yard intact, within about 70 turns.",
+    "≥4 pillboxes built AND topology matches the seeded geometry (cluster at (60,20) r=5 OR line at the four rows r=3 each) AND ≥8 kills AND yard standing, within 6300 ticks.",
+    "Construction Yard destroyed, or deadline (6301 ticks).",
+    70, 6303,
+    'enemy st3 (rusher-like); per-owner spawn_point on enemy side; matches briefing',
+    '')
+
+# ── 16. def-walls-vs-towers — passive obstacle vs active turret per tier
+P = 'def-walls-vs-towers'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'def-walls-vs-towers-easy-arena (open)', '112x48', 'fit', T,
+    'Construction Yard @(10,20) + Barracks + 2× Power Plant + 1× corner non-combatant rifle; $2400 (no pre-placed defences)',
+    'Scheduled at tick 1800: 8× rifle @(60,20) st3 frontal rush; sentinel fact @(108,20)',
+    "Commander, this is a defence-doctrine drill — towers, not walls. Eight riflemen will charge your Construction Yard from the east. Your $2400 buys either four ACTIVE pillboxes (range 5 cells, anti-infantry burst) or twelve INERT concrete walls. In the open the walls kill nothing and the rush walks around a thin barrier. Build four pillboxes wrapping the yard so their overlapping fire shreds the rush. Four kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND ≥4 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'scheduled wave st3 (rusher-like); matches briefing',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same yard + Barracks + 2× Power Plant + corner rifle; $2400',
+    '16× rifle + 4× rocket infantry funneling at the yard from the east — single lane horde',
+    "Commander, this is a defence-doctrine drill — walls plus a tower, not towers alone. A massive horde — sixteen riflemen plus four rocket soldiers — funnels at your yard from the east on a single lane. $2400 buys about twelve walls OR four pillboxes. Neither alone works: pure walls kill nothing, pure pillboxes leave the horde un-channelised. Build a wall belt that channels the horde to a tight pass, with a pillbox at the choke to shred the queue. Ten kills, yard intact, within about 60 turns.",
+    "≥1 pillbox built AND ≥6 walls built AND ≥10 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'horde st3; matches briefing',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Yard latitude flips NORTH (y=14) or SOUTH (y=26) by seed; $2400+',
+    'Heavy horde on the active latitude AND a separate probe on the opposite lane',
+    "Commander, this is a defence-doctrine drill with mixed approach. Your yard flips NORTH or SOUTH by seed. A heavy infantry horde hits your current lane AND a separate probe hits the opposite lane. Allocate budget across BOTH postures: wall+pillbox choke for the horde, flanking pillbox for the probe. Build at least the pillbox count, the wall belt, AND clear the kill quota. Yard intact, within about 60 turns.",
+    "Pillbox count + wall count met AND kill quota met AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'horde + probe st3; matches briefing',
+    '')
+
+# ── 17. def-while-building — concurrent defence + construction
+P = 'def-while-building'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, set_stance, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Construction Yard @(10,20) + Barracks + Power Plant + Ore Refinery + 4× medium tank @(14, 18-22) on HOLD-FIRE; cash for ~3 pbox',
+    '2× heavy tank @(45, 19/21) + 3× rifle @(47,20) st3 (Attack-Anything) already in play; sentinel fact @(120,20)',
+    "Commander, this is a defend-while-building drill. Two heavy tanks plus three riflemen are already attacking your base. Your four medium tanks at (14, 18-22) are on HOLD-FIRE — they won't engage on their own. Build THREE pillboxes AND command the tanks to attack the rush — every turn, in parallel — from turn one. Pausing the pillbox queue loses the production race; pausing the tank defence lets the yard fall. Four kills, yard intact, three pillboxes built, within about 60 turns.",
+    "≥3 pillboxes built AND yard standing AND ≥4 kills, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'attackers st3 already in play; defenders st0 HoldFire intentional',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same base + tanks HoldFire + cash',
+    '2× heavy tank + 6× rifle @(45/47, 19-21) st3 (heavier mix); no interrupts',
+    "Commander, this is a defend-while-building drill at heavier weight. Two heavy tanks plus six riflemen attack your base from turn one. Same four medium tanks on HOLD-FIRE. Build three pillboxes AND order the tanks to engage — both streams running in parallel from turn one. Seven kills, yard intact, three pillboxes built, within about 50 turns.",
+    "≥3 pillboxes built AND yard standing AND ≥7 kills, within 4500 ticks.",
+    "Construction Yard destroyed, or deadline (4501 ticks).",
+    60, 5403,
+    'attackers st3; defenders st0 intentional',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Base + HoldFire tanks flip NORTH (y=14) or SOUTH (y=26) by seed',
+    'Heavy mix attackers, st3 — converges on active latitude',
+    "Commander, this is a defend-while-building drill with seed-rotated staging. Base layout (yard, barracks, power, refinery, HoldFire tanks) flips NORTH or SOUTH by seed. Attackers are already in play and drive at the active centroid. Build three pillboxes AND engage the rush in parallel from turn one. Five kills, yard intact, three pillboxes built, within about 50 turns.",
+    "≥3 pillboxes built AND yard standing AND ≥5 kills, within 4500 ticks.",
+    "Construction Yard destroyed, or deadline (4501 ticks).",
+    60, 5403,
+    'attackers st3; defenders st0 intentional',
+    '')
+
+# ── 18. def-with-ambush — hold concealed positions, let the column pass
+P = 'def-with-ambush'; C = 'reasoning'
+T = 'observe, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Construction Yard @(10,20) + 1× fixing rifle at the choke @(15,20) Return-Fire + 4× medium tank in concealed L-ambush flanks @(40-41, 16) NORTH + @(40-41, 24) SOUTH on Defend',
+    '4× light tank + 4× rocket infantry + 4× rifle @(78/80/82, 20) on Attack-Anything (rusher bot); sentinel fact @(120,20)',
+    "Commander, this is a fog-ambush drill. Your Construction Yard sits at (10,20). A single rifleman at the choke (15,20) is the fixing element — it draws the enemy push down the lane. Four medium tanks form a concealed L-ambush, two NORTH of the lane at (40-41, 16) and two SOUTH at (40-41, 24), both on Defend orders. A heavy enemy column (light tanks, rocket soldiers, riflemen) charges from the east. HOLD the ambush positions — do NOT charge forward, do NOT pull onto the yard. The engine auto-engages on sight as the column passes through the crossfire. Six kills, yard intact, lose no more than two tanks, within about 27 turns.",
+    "≥6 kills AND yard standing AND ≤2 lost, within 2400 ticks.",
+    "Construction Yard destroyed, >2 lost, or deadline (2401 ticks).",
+    50, 4503,
+    'rusher st3; matches briefing — concealed defenders st2 fire on sight',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same ambush layout',
+    '5× light tank + 6× rocket + 5× rifle @(78/80/82, 20) st3 — heavier column; ≤3 loss cap',
+    "Commander, this is a fog-ambush drill at heavier weight. Same L-ambush layout: fixing rifle at the choke, four tanks concealed NORTH/SOUTH of the lane. The enemy column is now five light tanks, six rocket soldiers, five rifles. Hold the ambush positions and let the column pass through the crossfire. Eight kills, yard intact, lose no more than three tanks, within about 27 turns.",
+    "≥8 kills AND yard standing AND ≤3 lost, within 2400 ticks.",
+    "Construction Yard destroyed, >3 lost, or deadline (2401 ticks).",
+    50, 4503,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Ambush latitude flips NORTH (y=8) or SOUTH (y=32) by seed; ambush wings follow',
+    'Heavy column matching the agent latitude; enemy spawn_point used per side; ≤3 loss cap',
+    "Commander, this is a fog-ambush drill with seed-rotated staging. The ambush location flips NORTH (y=8) or SOUTH (y=32) by seed; both fixing rifle and the four ambush tanks follow. The enemy column matches your latitude. Hold the ambush positions and let them walk through. Eight kills, yard intact, lose no more than three tanks, within about 27 turns.",
+    "≥8 kills AND yard standing AND ≤3 lost, within 2400 ticks.",
+    "Construction Yard destroyed, >3 lost, or deadline (2401 ticks).",
+    50, 4503,
+    'rusher st3 with spawn_point; matches briefing',
+    '')
+
+# ── 19. defense-rush-survive — opening rush + sustained throughput
+P = 'defense-rush-survive'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Construction Yard @(10,20) + Barracks + Power Plant; cash (small base)',
+    '4× rifle infantry @(60,20) st3 (rusher — opening rush around turn 30); sentinel fact @(120,20)',
+    "Commander, this is an opening rush-defence drill. A four-rifle rush is bearing down on your Construction Yard at (10,20) in the first ~30 turns. You have your yard, a barracks, and a power plant. With your cash, you must BOTH build a pillbox covering the lane mouth AND train infantry from the barracks — all in parallel. Stalling, all-defence (only pillboxes, no force), all-economy (no static defence), and brute-army (no static defence) all lose. Four kills, three own units alive, ≥1 pillbox built, yard intact, within about 35 turns.",
+    "≥1 pillbox built AND ≥3 own units alive AND ≥4 kills, within 3199 ticks.",
+    "Construction Yard destroyed, or deadline (3200 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'medium', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Same base, same cash',
+    '6× rifle + 2× rocket infantry @(80/82, 20) st3 — heavier rush',
+    "Commander, this is an opening rush-defence drill with a heavier rush. Six riflemen and two rocket soldiers close on your yard in the first ~35 turns. Same yard, barracks, power plant. Build at least one pillbox covering the lane AND train a handful of defenders from the barracks, in parallel. Six kills, three own units alive, ≥1 pillbox, yard intact, within about 35 turns.",
+    "≥1 pillbox built AND ≥3 own units alive AND ≥6 kills, within 3199 ticks.",
+    "Construction Yard destroyed, or deadline (3200 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'rush-hour-arena', '128x40', 'large-trivial', T,
+    'Base flips NORTH (y=10) or SOUTH (y=30) by seed; cash for one pbox + a few defenders',
+    'Two rush bands — one at each candidate latitude, 5× rifle + 1× rocket per band, st3; loss cap ≤3',
+    "Commander, this is an opening rush-defence drill with seed-rotated staging and a loss cap. Base latitude flips NORTH or SOUTH by seed. Two rush bands incoming — one at each candidate latitude, only the on-latitude band converges in time. Build at least one pillbox AND train defenders in parallel; lose no more than three. Eight kills, three alive, yard intact, within about 35 turns.",
+    "≥1 pillbox built AND ≥3 alive AND ≥8 kills AND ≤3 lost, within 3199 ticks.",
+    "Construction Yard destroyed, >3 lost, or deadline (3200 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+
+# ── 20. build-defensive-skirt-corners — pillbox in every corner
+P = 'build-defensive-skirt-corners'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'arena 128x40 (open, corner-rush geometry)', '128x40', 'fit', T,
+    'Construction Yard centred + Barracks + Power Plant; $2400',
+    '~9 attackers split across 4 diagonal corners (NE/NW/SE/SW), st3 rusher — converge on the centre yard from all four corners concurrently',
+    "Commander, this is a defence-topology drill — pillbox in every corner. Your Construction Yard sits at the centre and a rifle rush converges CONCURRENTLY from all four diagonal corners (NE, NW, SE, SW). Your $2400 buys four pillboxes. Plant ONE pillbox in each of the four corner approaches so every diagonal axis has its own field of fire. Massing all four on one corner satisfies the count but the other three corner waves stride untouched into the yard. Nine kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND 1 in each of the 4 corner regions (radius 4 each) AND ≥9 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3 from all 4 corners; matches briefing',
+    '')
+add(P, 'medium', C, 'arena 128x40 (open)', '128x40', 'fit', T,
+    'Same base + $2400',
+    '~13 attackers split across 4 corners st3 — heavier convergence',
+    "Commander, this is a defence-topology drill at heavier weight — pillbox in every corner. Same central yard rushed concurrently from all four corners. Build four pillboxes, one per corner region. Thirteen kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND 1 in each of the 4 corner regions r=4 AND ≥13 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'arena 128x40 (open)', '128x40', 'fit', T,
+    'Base centre flips by seed (two candidate centre positions); $2400',
+    'Same four-corner convergence; corner anchor cells flip with the base',
+    "Commander, this is a defence-topology drill with seed-rotated staging. The base centre flips between two candidate positions by seed; the four corner regions follow. Build four pillboxes, one per corner region at the matching centre. Thirteen kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND 1 in each of the 4 corner regions at the matching centre AND ≥13 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+
+# ── 21. build-defensive-tower-cluster — wrap the high-value building
+P = 'build-defensive-tower-cluster'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'arena 128x40 (single-corridor)', '128x40', 'fit', T,
+    'Construction Yard @(10,20) + Barracks + Power Plant; $2400',
+    'Concentrated rush through a single narrow corridor at the yard; st3 rusher',
+    "Commander, this is a defence-topology drill — concentrated cluster wrapping the yard. Your Construction Yard at (10,20) is rushed through a single narrow corridor. Your $2400 buys four pillboxes. Build a TIGHT CLUSTER around the yard — at least three pillboxes inside a radius-4 disc of (10,20) — so their overlapping fire shreds the rush at the single point that matters. A thin pillbox LINE between the yard and the corridor mouth satisfies the count but cannot mass enough fire on the focused thrust. Three kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND ≥3 in (10,20) r=4 AND ≥3 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'medium', C, 'arena 128x40 (single-corridor)', '128x40', 'fit', T,
+    'Same base + $2400',
+    'Heavier rush through the same corridor; st3',
+    "Commander, this is a defence-topology drill — concentrated cluster at heavier weight. Same yard at (10,20) rushed through the same narrow corridor. Build four pillboxes tightly clustered around the yard, ≥3 inside radius 4. Five kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND ≥3 in (10,20) r=4 AND ≥5 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+add(P, 'hard', C, 'arena 128x40 (single-corridor)', '128x40', 'fit', T,
+    'Yard flips NORTH (y=14) or SOUTH (y=26) by seed; $2400',
+    'Same single-corridor rush at the matching latitude; st3',
+    "Commander, this is a defence-topology drill with seed-rotated staging. Yard latitude flips NORTH (y=14) or SOUTH (y=26); the cluster target follows. Build four pillboxes tightly clustered around the yard at the matching latitude — ≥3 inside radius 4 of (10, fact_y). Six kills, yard intact, within about 60 turns.",
+    "≥4 pillboxes built AND ≥3 in (10, fact_y) r=4 (matching latitude) AND ≥6 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'rusher st3; matches briefing',
+    '')
+
+# ── 22. build-defensive-tower-line — wide-front LINE
+P = 'build-defensive-tower-line'; C = 'reasoning'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, 'build-def-tower-line-easy-arena (wide-front)', '112x48', 'fit', T,
+    'Construction Yard @(10,20) + Barracks + Power Plant + corner non-combatant rifle; $1800',
+    'Scheduled at tick 1500: 6× rifle (2 per row × 3 rows) at (100, 8/20/32) st3 charging west on three lanes; sentinel fact @(108,20)',
+    "Commander, this is a wide-front defence-topology drill. A rifle rush charges across the full vertical width of the map — three lanes at y=8, y=20, and y=32 — toward your yard on the west. Budget $1800 buys exactly three pillboxes. Drop ONE on each of those three rows at x=60 so no lane is open. A cluster on the centre row leaves both flanks unguarded; a scatter near the base never meets the rush. Four kills, yard intact, within about 60 turns.",
+    "≥3 pillboxes built AND 1 each at (60,8) (60,20) (60,32) r=0.5 AND ≥4 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'scheduled wave st3 (rusher-like); matches briefing',
+    '')
+add(P, 'medium', C, 'build-def-tower-line-medium-arena (wide-front)', '112x48', 'fit', T,
+    'Same base + $3000',
+    'Scheduled at tick 2200: 10× rifle (2 per row × 5 rows) at (100, 4/12/20/28/36) st3',
+    "Commander, this is a wide-front defence-topology drill at heavier weight. Five lanes at y=4, 12, 20, 28, 36 spread across the full vertical front. Budget $3000 buys five pillboxes. One on each of those five rows at x=60; an easy-style three-rung line leaves two flank rows open. Seven kills, yard intact, within about 60 turns.",
+    "≥5 pillboxes built AND 1 each at (60, 4/12/20/28/36) r=0.5 AND ≥7 kills AND yard standing, within 5400 ticks.",
+    "Construction Yard destroyed, or deadline (5401 ticks).",
+    60, 5403,
+    'scheduled wave st3; matches briefing',
+    '')
+add(P, 'hard', C, 'build-def-tower-line-hard-arena (wide-front)', '112x48', 'fit', T,
+    'Base flips NORTH (y=12) or SOUTH (y=28) by seed; $4800 (= 8 pbox: 6 rungs + 2 rebuilds)',
+    'Two-wave attrition — wave 1 at tick 1800 (6× rifle on 6 rows: y=4/10/16/22/28/34), wave 2 at tick 3000 (same six rows)',
+    "Commander, this is a wide-front defence-topology drill with TWO-WAVE attrition. Six lanes at y=4, 10, 16, 22, 28, 34. Rush arrives in TWO waves — pillbox attrition is real; you must rebuild lost rungs between waves. Budget $4800 = six rungs plus two rebuilds. Your base flips NORTH (y=12) or SOUTH (y=28) by seed; the rungs at x=60 don't move. Eight kills, yard intact, within about 70 turns.",
+    "≥6 pillboxes built AND 1 each at (60, 4/10/16/22/28/34) r=0.5 AND ≥8 kills AND yard standing, within 6300 ticks.",
+    "Construction Yard destroyed, or deadline (6301 ticks).",
+    70, 6303,
+    'scheduled waves st3 at ticks 1800/3000; matches briefing',
+    '')
+
+# ── Emit CSV ────────────────────────────────────────────────────────
+def main():
+    fieldnames = [
+        'pack', 'level', 'capability', 'map_name', 'map_size',
+        'map_fit', 'tools', 'agent_force', 'enemy_force',
+        'enemy_posture', 'posture_issue', 'briefing_RA',
+        'win_condition', 'lose_condition', 'max_turns', 'tick_budget',
+    ]
+    with OUT.open('w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+        w.writeheader()
+        for row in R:
+            w.writerow({k: row.get(k, '') for k in fieldnames})
+    print(f"wrote {len(R)} rows to {OUT}")
+
+
+if __name__ == '__main__':
+    main()

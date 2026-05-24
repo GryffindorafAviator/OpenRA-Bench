@@ -54,7 +54,7 @@
 #     deadline → WIN.
 #
 # Why the spec works (engine combat sheet, per CLAUDE.md):
-#   • `pbox` (pillbox, anti-infantry base defence) costs 600cr; the
+#   • `pbox` (pillbox, anti-infantry base defence) costs 400cr; the
 #     Defense queue is SEPARATE from Infantry / Vehicle queues so
 #     parallel queueing is supported (engine: separate prod-queue
 #     per kind; `build('pbox')` tolerates a backlog).
@@ -90,9 +90,9 @@
 #     episode alive past full rusher elimination so the win/fail
 #     evaluator sees the terminal frame (no DRAW collapse on
 #     enemy-wipe auto-done).
-#   • Starting cash sized to fund exactly the 3-pbox bar (3×600
-#     = 1800) with zero slack. Spending on extras beyond pbox
-#     starves the bar.
+#   • Starting cash sized to fund the 3-pbox bar (3×400 = 1200) plus
+#     a small operating buffer. Spending on extras beyond pbox can
+#     still starve the bar depending on tier (see per-tier comments).
 
 meta:
   id: def-while-building
@@ -131,11 +131,20 @@ meta:
     - "ops triage during incident"
   author: "openra-bench"
 
+# Tailored 72×40 defense arena — shrunk from rush-hour-arena 128×40
+# per F3 §25 / F1 §10 map-resize rule. The decision-relevant geometry
+# (fact + base + HoldFire tank line + rush staging at x≈45-60) is
+# preserved 1:1; the 60+ cells of empty east traversal east of the
+# rush spawn cell are eliminated. The anti-DRAW enemy marker moves
+# from (120,20) to (65,20) (still off the rush axis so the rusher
+# bot keeps targeting the agent centroid).
 base_map:
   generator: arena
   name: def-while-building-arena
-  width: 128
+  width: 72
   height: 40
+  cordon: 2
+  title: Defend While Building 72x40
 
 base:
   agent: {faction: allies}
@@ -183,7 +192,8 @@ levels:
     # refinery (proc), barracks (tent), and power (powr) are pre-placed,
     # along with 3 medium tanks (2tnk) on HOLDFIRE — they will NOT engage
     # on their own; only an explicit attack_unit/attack_move order makes
-    # them fight. Build 3 pillboxes (pbox, 600cr each — budget 1800)
+    # them fight. Build 3 pillboxes (pbox, 400cr each — budget 1800
+    # funds 3 pbox at 1200cr + 600 residual)
     # CONCURRENTLY while commanding the 3 tanks to attack the rush.
     # Killing 3 enemy units, building 3 pbox, AND keeping the fact alive —
     # all before tick 5400 — wins. A serial 3-pbox build takes ~9-12
@@ -193,12 +203,15 @@ levels:
     # play that streams BOTH every turn — commanded tanks buying time
     # while the pbox cluster assembles — wins.
     description: >
-      An enemy rush — six rifles and two heavy tanks — is already closing
-      on your base; it reaches the yard in about four turns. Your four
-      medium tanks idle on HoldFire and will not engage until you order
-      them. Build three pillboxes ($1800) WHILE commanding the tanks to
-      fight. Four kills, three pillboxes built, yard intact, within about
-      60 turns. Serial play loses to the clock.
+      An enemy rush — three riflemen and two heavy tanks — is already
+      closing on your base at (10,20); the column is staged at x=45 and
+      reaches the yard in about four turns. Your base — yard, refinery,
+      barracks, power plant, four medium tanks at (14, 18-22) — is in
+      place; the medium tanks stand on HOLD-FIRE orders (they will not
+      engage on their own, even when shot at). $1800 covers exactly three
+      pillboxes (anti-infantry stationary turret, 600cr each — pillboxes
+      barely scratch heavy tanks). Four kills, three pillboxes built,
+      yard intact, within about 60 turns.
     starting_cash: 1800
     overrides:
       actors:
@@ -243,7 +256,7 @@ levels:
         # east keeps the episode alive past full rusher
         # elimination so the win/fail check fires (engine
         # auto-done on enemy-wipe otherwise collapses to DRAW).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [65, 20]}
     win_condition:
       all_of:
         - {building_count_gte: {type: pbox, n: 3}}
@@ -274,7 +287,8 @@ levels:
     # The full rush band — 2 heavy tanks + 6 rifle infantry — is already
     # attacking your base at (10,20). Your fact, proc, powr, tent, and 4
     # medium tanks (2tnk) on HOLDFIRE are pre-placed. Build 3 pillboxes
-    # (1800cr — 3 pbox at 600 each) CONCURRENTLY while commanding the
+    # (1800cr — 3 pbox at 400 each = 1200, 600 residual) CONCURRENTLY
+    # while commanding the
     # tanks to attack the rush. Kill ≥7 enemy units, build 3 pbox, AND
     # keep the fact alive — all before tick 4500. The pillbox is an ANTI-
     # INFANTRY defence and cannot kill the heavy tanks — only your medium
@@ -284,11 +298,14 @@ levels:
     # commanded tanks killing the armour while the pbox cluster assembles
     # to mop the infantry — wins.
     description: >
-      Two heavy tanks and six rifles attack the base now. Four medium
-      tanks idle on HoldFire — only you can authorise them. Build three
-      pillboxes while keeping the tanks fighting; pillboxes shred
-      infantry, only your tanks can kill the heavies. Seven kills, three
-      pillboxes, yard intact, within about 50 turns.
+      An enemy rush — six riflemen and two heavy tanks — is attacking
+      your base at (10,20); the column is staged at x=45 and the
+      composition is heavier than easy. Your base — yard, refinery,
+      barracks, power plant, four medium tanks at (14, 18-22) on HOLD-
+      FIRE — is in place. $1800 covers exactly three pillboxes
+      (anti-infantry, 600cr each — pillboxes barely scratch heavy
+      tanks). Seven kills, three pillboxes built, yard intact, within
+      about 50 turns.
     starting_cash: 1800
     overrides:
       actors:
@@ -311,7 +328,7 @@ levels:
         - {type: 3tnk, owner: enemy, position: [45, 19], stance: 3}
         - {type: 3tnk, owner: enemy, position: [45, 21], stance: 3}
         - {type: e1, owner: enemy, position: [47, 20], stance: 3, count: 6}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [65, 20]}
     win_condition:
       all_of:
         - {building_count_gte: {type: pbox, n: 3}}
@@ -344,8 +361,9 @@ levels:
     # The agent construction yard (fact) and its 4 HoldFire tank defenders
     # flip between NORTH (y=14) and SOUTH (y=26) per seed; the pbox
     # cluster must follow. A heavy rush (2 heavy tanks + 5 rifle infantry)
-    # converges on the active fact. Build 3 pillboxes (budget 1800cr = 3
-    # pbox at 600 each) CONCURRENTLY while commanding the tanks to attack
+    # converges on the active fact. Build 3 pillboxes (budget 1800cr funds
+    # 3 pbox at 400 each = 1200, 600 residual) CONCURRENTLY while
+    # commanding the tanks to attack
     # the rush. Kill ≥5 enemy units, build 3 pbox, AND keep the fact alive
     # — all before tick 4500. The pillbox is an anti-infantry defence and
     # cannot kill the heavy tanks — only your medium tanks can; a
@@ -353,11 +371,12 @@ levels:
     # pausing either stream loses; only concurrent streaming at the
     # correct latitude wins.
     description: >
-      Your yard and HoldFire tanks spawn in the NORTH (y=14) or SOUTH
-      (y=26) band by seed; a heavy rush converges on whichever is active.
-      Build three pillboxes at the active latitude WHILE commanding the
-      tanks to break the armour. Five kills, three pillboxes, yard intact,
-      within about 50 turns.
+      Your base — yard, refinery, barracks, power plant, four HOLD-FIRE
+      medium tanks — spawns in either the NORTH (y=14) or SOUTH (y=26)
+      band by seed. A rush — five riflemen and two heavy tanks — drives
+      at the live base (the rush converges on whichever latitude is
+      active). $1800 covers exactly three pillboxes. Five kills, three
+      pillboxes built, yard intact, within about 50 turns.
     starting_cash: 1800
     overrides:
       actors:
@@ -394,7 +413,7 @@ levels:
         - {type: 3tnk, owner: enemy, position: [60, 21], stance: 3}
         - {type: e1, owner: enemy, position: [62, 20], stance: 3, count: 5}
         # Anti-DRAW marker on the symmetry axis.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [65, 20]}
     win_condition:
       all_of:
         - {building_count_gte: {type: pbox, n: 3}}

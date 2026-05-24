@@ -18,23 +18,33 @@ A scenario is defective if any of the following hold:
    advertised capability (the "laziest play wins" inversion).
 2. `within_ticks` or `after_ticks` is set above the tick reachable
    within `max_turns`; the deadline never bites ⇒ the episode times
-   out as a **DRAW**, not a LOSS. The engine constant is
-   `DEFAULT_TICKS_PER_STEP = 30` (`openra-train/src/env.rs:33`), so a
-   non-interrupt-mode pack reaches `tick ≈ 30·max_turns`. Interrupt-
-   mode runs (any pack with a non-empty `interrupts:` block) advance
-   1–`max_ticks` ticks per turn (`max_ticks` defaults to 5 in the
-   bench call site, `openra_bench/eval_core.py`), so per-turn tick
-   advance is variable — read the actual value from
-   `info["ticks_advanced"]` instead of assuming it. The historical
-   "engine advances ~90 ticks per decision turn" estimate is wrong;
-   triaged in `docs/ENGINE_FOLLOWUPS_TRIAGE.md` finding #1.
+   out as a **DRAW**, not a LOSS. **Reachable max tick ≈
+   `93 + 90·(max_turns − 1)`** — the bench advances ~90 ticks per
+   decision turn in non-interrupt mode (the engine constant
+   `DEFAULT_TICKS_PER_STEP = 30` in `openra-train/src/env.rs:33` is
+   advanced 3× per `env.step()` via internal `process_frame` calls
+   in the bench's step path; net effect is ~90 ticks/turn). The
+   bench test suite enforces this formula via the
+   `test_timeout_reachable_inside_max_turns` helper used in 12+
+   pack tests (search for `93 + 90 * (max_turns`). Interrupt-mode
+   runs (any pack with a non-empty `interrupts:` block) advance
+   variable ticks per turn (`max_ticks` defaults to 5 in the bench
+   call site `openra_bench/eval_core.py`), so per-turn tick advance
+   is non-constant — read the actual value from
+   `info["ticks_advanced"]` instead of assuming it.
 3. There is no `fail_condition`, or it only triggers on full
    force-wipe; a stall / preserve / partial outcome silently draws.
 4. The intended capability is not solvable inside the declared budget
    (a scenario nobody can win is also defective).
 5. The engine auto-terminates on enemy-elimination before the win/fail
    is evaluated (mitigation: place an unarmed high-HP enemy `fact`
-   marker at the objective).
+   marker at the objective, OR declare
+   `termination.enemy_units_killed: false` to disable the auto-`done`
+   for that side; see the engine-fact note below). The mirror flag
+   `termination.agent_units_killed: false` keeps the run alive past an
+   agent-side wipe — load-bearing for forlorn-hope / suicide-charge
+   packs where the within_ticks fail clause must fire AFTER the strike
+   package dies.
 6. Actors are placed outside the map's playable bounds (engine
    panics).
 7. The pack is `UPGRADED` in `tests/test_hard_tier.py` but its hard
@@ -50,6 +60,30 @@ A scenario is defective if any of the following hold:
   the recurring defect classes the pass eliminated, and the
   predicate-idiom recipe (which predicate makes which capability
   load-bearing), plus engine footguns to avoid.
+- **`audits/EDIT_PRINCIPLES.md`** — Family-1 (combat micro) edit
+  conventions (§1-10). BINDING for every pack edit: self-contained
+  briefings, three-part officer-style structure, plain English with
+  RA terms inline-glossed, `map_fit` classification (`fit` / `wide`
+  / `large-trivial`), enemy-posture matches briefing doctrine, and
+  the §10 map-resizing rule (every `wide` / `large-trivial` pack
+  must be shrunk to a bespoke procedural arena, ≤15 cells empty
+  pre-engagement traversal).
+- **`audits/EDIT_PRINCIPLES_FAMILY2.md`** — Family-2 (economy)
+  additions (§11-17): functional harv→ore→proc→cash chain,
+  cash-constrained multi-path, wrong-strategy LOSS trap, refinery-
+  placement spatial reasoning, stall-LOSES (no auto-harvest
+  preemption), `not: {cash_gte: MAX+1}` upper-bound idiom, build-
+  prereq cross-check. INHERITS Family-1 §1-10 verbatim — including
+  the §10 map-shrink rule, which 16 F2 packs slipped through on
+  `rush-hour-arena`; do not let this happen on any future F2 pack.
+- **`audits/PRODUCTION_TECH_AUDIT.md`** — construction / unit
+  production / tech-tree correctness audit (cross-family). Every
+  pack with a `build` or `deploy` capability must satisfy: prereq
+  buildings present, faction match, affordability from
+  `starting_cash + projected_income`, build-time fits `max_turns`.
+  Cross-reference `audits/production_tech_audit.csv` before
+  editing; if the row's `issues` field is non-empty, FIX as part of
+  the edit.
 - **`openra_bench/scenarios/win_conditions.py`** — the predicate
   grammar. If you add a new predicate, you **must** also add a
   `_PHRASES` / `_REGION_PHRASES` translation in
@@ -63,22 +97,86 @@ A scenario is defective if any of the following hold:
   of every capability/predicate/bot combination. Browse with
   `git log --oneline --grep "no-cheat redesign"` and read the bodies.
 
+## Audit-doc workflow (binding for every pack edit)
+
+Before editing any scenario pack:
+
+1. Identify the pack's family (combat / economy / build / defense /
+   etc.) and whether its intended play requires `build` / `deploy`.
+2. Read the matching `EDIT_PRINCIPLES*.md` doc.
+3. Look up the pack's row in `audits/family<N>_*.csv` if present;
+   the `map_fit` field tells you whether a map shrink is needed.
+4. If the pack has a `build` or `deploy` axis, look up the row in
+   `audits/production_tech_audit.csv`; the `issues` field tells you
+   whether prereqs / cash / build-time are broken.
+5. Apply all flagged fixes in the same edit. Do NOT ship a pack
+   edit that leaves a CSV-flagged issue unresolved.
+6. If your edit changes a tech-tree-relevant field (new buildings
+   added, faction flipped, starting_cash changed), update the
+   CSV row.
+7. **If your edit changes a pack's `map_size` / `base_map` /
+   `starting_cash` / actor list, re-run the matching
+   `audits/family<N>_*_build.py` AND
+   `audits/production_tech_audit_build.py` in the same commit and
+   verify the regenerated CSV row matches your edit.** (Without this
+   step the audit doc points at a world that no longer exists — a
+   future agent following step 3 reads a stale `map_fit` /
+   `afford_at_start` row and may re-do work or lose trust in the
+   binding. P0.1 in the PR #30 review documented exactly this
+   failure mode.)
+
 ## Engine facts you must internalise
 
-- **Ticks/turn:** non-interrupt mode advances exactly
-  `DEFAULT_TICKS_PER_STEP = 30` ticks per `env.step()`
-  (`openra-train/src/env.rs:33`). Max tick at `max_turns` ≈
-  `30·max_turns`. Interrupt mode (`step_until_event`, used whenever
-  `interrupts:` is non-empty) advances 1–`max_ticks` ticks per turn
-  (variable; default `max_ticks = 5`) and breaks on the first signal
-  — read `info["ticks_advanced"]` rather than computing
-  arithmetically. Any `within_ticks` / `after_ticks` above the
-  reachable tick is **inert** (won't bite) ⇒ draw degeneracy.
+- **Ticks/turn:** non-interrupt mode advances ~90 ticks per
+  decision turn (the engine constant
+  `DEFAULT_TICKS_PER_STEP = 30` in `openra-train/src/env.rs:33` is
+  advanced 3× per `env.step()` via internal `process_frame` calls
+  in the bench's step path). **Reachable max tick ≈
+  `93 + 90·(max_turns − 1)`** — the bench test suite enforces this
+  formula via the `test_timeout_reachable_inside_max_turns` helper
+  used in 12+ pack tests (search for `93 + 90 * (max_turns`).
+  Interrupt mode (`step_until_event`, used whenever `interrupts:`
+  is non-empty) advances variable ticks per turn — read
+  `info["ticks_advanced"]` rather than computing arithmetically.
+  Any `within_ticks` / `after_ticks` above the reachable tick is
+  **inert** (won't bite) ⇒ draw degeneracy.
 - **Engine auto-done:** the engine sets `done=True` when all enemy
   actors are eliminated, or sometimes when an agent unit reaches an
   enemy-key location. Without a persistent enemy actor a win-by-reach
   scenario can end as DRAW. Put an unarmed high-HP enemy `fact`
-  marker at the objective.
+  marker at the objective, OR set
+  `termination.enemy_units_killed: false` (see next note).
+- **`termination.{agent,enemy}_units_killed` are now load-bearing
+  flags** (engine fix, pinned by
+  `OpenRA-Rust/openra-data/tests/test_scenario_termination_parse.rs`,
+  `OpenRA-Rust/openra-train/tests/env_termination_flags.rs`, and
+  `tests/test_termination_flags_python.py`). Historical footgun: the
+  flags were documented in `TerminationConfig` and on several pack
+  headers (`combat-suicide-charge-mission`, `strategy-dilemma`,
+  `strategy-twobody`, `rush-hour`, `mid-concede-vs-hold`,
+  `econ-deny-enemy-expansion`, `coord-diversionary-attack`) but had
+  no consumer — `oramap::parse_scenario_yaml` silently dropped the
+  `termination:` block, so the engine's `is_terminal` check always
+  auto-`done`d on either side's wipe. That collapsed sacrifice /
+  decoy / forlorn-hope packs to DRAW the moment the agent's last
+  unit died (the `within_ticks` fail clause never had a chance to
+  fire). Triaged in `audits/qwen9b_draws_and_medium_dip.md` (the
+  5-cell `combat-suicide-charge-mission` DRAW cluster). The parser
+  now reads the `termination:` block; the two gating flags surface on
+  `MapDef` as `terminate_on_{agent,enemy}_units_killed` (default
+  `true` ⇒ legacy behaviour) and `Env::is_terminal` gates the
+  corresponding wipe path behind them. A scenario opts out by
+  declaring the flag `false`:
+    * `termination.agent_units_killed: false` — keep the run alive
+      past an agent-side wipe (sacrifice anchor: lose the strike
+      package without ending the run, so a within_ticks fail clause
+      can score the post-wipe arrival).
+    * `termination.enemy_units_killed: false` — keep the run alive
+      past an enemy-side wipe (the proper fix instead of the
+      far-corner `fact` marker workaround for the auto-done race).
+  A surrendered agent is still defeated regardless of the flag
+  (`Command::Surrender` is an explicit player action, not the
+  units-killed auto-done).
 - **Own-unit `actor_type`** surfaces in `units_summary`
   (`unit_type_count_eq / _gte` work). Predicates relying on it are
   valid.
@@ -255,10 +353,10 @@ A scenario is defective if any of the following hold:
   `observe`/`stop` only — the freeze-and-panic signal. A replayed
   trajectory MUST come from the same `pack:level:seed` (engine actor
   ids are seed-deterministic).
-- **`pbox` costs 600** (not the 400 some old specs assumed);
-  defense and infantry are SEPARATE production queues so an
-  efficient policy queues `build('pbox')` and `build('e1')` in
-  parallel from turn 1.
+- **`pbox` costs 400** in the bench engine (verified against
+  `OpenRA-Rust/openra-sim/src/gamerules.rs`); defense and infantry
+  are SEPARATE production queues so an efficient policy queues
+  `build('pbox')` and `build('e1')` in parallel from turn 1.
 - **`pbox` is now an active direct-fire tower** (engine fix,
   pinned by `OpenRA-Rust/openra-sim/tests/test_pbox_fires.rs` +
   `tests/test_pbox_fires.py`). RA's `pbox` is an

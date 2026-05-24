@@ -4,12 +4,13 @@
 # allocation decision under time pressure: starting cash is exactly
 # enough for EITHER
 #
-#   (A) BUY 4× medium tanks (2tnk) NOW   — $850 × 4 = $3400 — OPEX,
-#       immediate combat capability from the pre-placed war factory;
+#   (A) BUY 4× medium tanks (2tnk) NOW   — $800 × 4 = $3200 ($200
+#       residual from $3400) — OPEX, immediate combat capability from
+#       the pre-placed war factory;
 #   (B) BUILD a SECOND war factory (weap) — $2000 — CAPEX, doubles
 #       per-turn tank production capacity over the LONG run, but at
-#       the cost of leaving no cash for an immediate force (residual
-#       $1400 ≈ 1 tank only).
+#       the cost of leaving only $1400 residual ≈ 1 tank for the
+#       immediate force.
 #
 # A rusher band is staged at the lane mouth from t=0 and charges the
 # agent fact (rusher targets the agent centroid). The timing is set so
@@ -49,7 +50,7 @@
 # stall / build-weap LOSS is reached as a real timeout / fact-loss).
 #
 # Engine facts used (CLAUDE.md / prompt_v2 codex):
-#   • 2tnk cost $850, prereqs `weap` + `fix` (allied service depot —
+#   • 2tnk cost $800, prereqs `weap` + `fix` (allied service depot —
 #     gamerules.rs tech gate; both pre-placed ⇒ buildable turn 1).
 #   • weap cost $2000, prereq `proc` (pre-placed ⇒ buildable turn 1).
 #   • `place_building` has no adjacency requirement (CLAUDE.md), so
@@ -110,13 +111,25 @@ meta:
     - "SC2 production: pump units now vs lay second factory"
   author: openra-bench
 
+# MAP — per-scenario bespoke arena (replaces the 128x40 rush-hour-arena).
+# The decision is local (spend cash from the pre-placed war factory) but
+# the rusher's 60-cell crawl from the lane mouth to the fact IS the
+# timing window — buying 4 tanks NOW intercepts before the fact dies;
+# building a second weap drains $2000 + a queue lockout, and the first
+# new tank fields too late. The 80x40 arena keeps that load-bearing
+# rush distance (base x=10 → rush x=70 = 60 cells, identical to the
+# old 128x40 layout) while trimming the empty east buffer past x=78.
+# Sentinel at x=78 holds the engine open past the last rusher death.
+# Cordon 2 ⇒ playable (2..76, 2..36).
 base_map:
   generator: arena
-  name: econ-buy-vs-build-decision-arena
-  width: 128
+  name: econ-buy-vs-build-80x40
+  width: 80
   height: 40
-# Exactly enough for EITHER 4× 2tnk ($850 × 4 = $3400) OR 1× weap
-# ($2000, with $1400 residual = 1 tank's worth). Spec: the cash
+  cordon: 2
+  title: Econ Buy-vs-Build Arena 80x40
+# $3400 covers EITHER 4× 2tnk ($800 × 4 = $3200, $200 residual) OR
+# 1× weap ($2000, $1400 residual = 1 tank + change). Spec: the cash
 # equates to a single coherent decision — buy 4 tanks OR build a
 # second factory. A mixed mini-spend (weap + 1 tank) underdelivers
 # on either axis.
@@ -178,19 +191,22 @@ levels:
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
     # A rusher band (4 rifle infantry) is charging your construction yard
-    # from the lane mouth. Your starting cash ($3400) is exactly enough
-    # for EITHER 4 medium tanks (build 2tnk × 4 from the pre-placed war
-    # factory at $850 each) OR a second war factory (build weap at $2000,
-    # leaving only $1400 = 1 tank). Spend on whichever wins the next 40
+    # from the lane mouth. Your starting cash ($3400) covers EITHER 4
+    # medium tanks (build 2tnk × 4 from the pre-placed war factory at
+    # $800 each = $3200, $200 residual) OR a second war factory (build
+    # weap at $2000, $1400 residual = 1 tank). Spend on whichever wins the next 40
     # turns — the rush is incoming NOW. Win when ≥3 enemy units are killed
     # AND your construction yard (fact) is still standing AND the clock
     # has not run out (tick ≤ 3600). Stall, build-the-second-factory-
     # first, or under-spend all fail.
     description: >
-      A four-rifle rush is charging your yard NOW. Your $3400 buys either
-      four medium tanks from the existing war factory OR one second war
-      factory plus a single tank. Pick the option that wins the next forty
-      turns. Three kills, yard intact, within about 17 turns.
+      Commander, this is a capex-vs-opex call under live rush pressure.
+      You hold a Construction Yard (fact), Ore Refinery (proc), Power
+      Plant (powr), War Factory (weap) and Service Depot (fix), no
+      units, and exactly $3400 in the bank. Four rifle infantry (e1)
+      are charging your yard from the lane mouth NOW. Within about 17
+      turns, kill at least three enemies and keep your Construction
+      Yard standing.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
@@ -209,7 +225,7 @@ levels:
         # engine auto-`done`s the moment the last rusher dies (the
         # rusher band is the only enemy "MustBeDestroyed" otherwise)
         # and the win/fail check never runs in the terminal frame.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [76, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 3}
@@ -244,18 +260,22 @@ levels:
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
     # A larger rusher band (5 rifle infantry + 1 rocket soldier) is
-    # charging your construction yard. Your starting cash ($3400) is
-    # exactly enough for EITHER 4 medium tanks (build 2tnk × 4 from the
-    # pre-placed war factory) OR a second war factory (build weap,
-    # residual $1400 = 1 tank). The rush is incoming NOW. Win when ≥5
+    # charging your construction yard. Your starting cash ($3400)
+    # covers EITHER 4 medium tanks (build 2tnk × 4 from the pre-placed
+    # war factory at $800 each = $3200) OR a second war factory
+    # (build weap at $2000, residual $1400 = 1 tank). The rush is
+    # incoming NOW. Win when ≥5
     # enemy units are killed AND your fact is still standing AND the clock
     # has not run out (tick ≤ 3600). Stall, build-the-second-factory-
     # first, or under-spend all fail.
     description: >
-      Same $3400 wallet, same buy-vs-build call — but the rush is now five
-      rifles plus one rocket soldier. A second factory leaves you with
-      $1400 (one tank) against an incoming wall; four tanks NOW is the
-      survival play. Four kills, yard intact, within about 17 turns.
+      Commander, this is a heavier capex-vs-opex call under live rush
+      pressure. You hold a Construction Yard (fact), Ore Refinery
+      (proc), Power Plant (powr), War Factory (weap) and Service Depot
+      (fix), no units, and exactly $3400 in the bank. Five rifle
+      infantry (e1) and one rocket soldier (e3) are charging your yard
+      from the lane mouth NOW. Within about 17 turns, kill at least
+      four enemies and keep your Construction Yard standing.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
@@ -268,7 +288,7 @@ levels:
         # eat the wave; build-weap-first chain produces ≤1 tank by
         # the time the rush arrives and the band overruns the fact.
         - {type: e1, owner: enemy, position: [70, 20], stance: 3, count: 5}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [76, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 4}
@@ -326,19 +346,23 @@ levels:
     # A rusher band (5 rifle infantry + 1 rocket soldier) is charging your
     # construction yard from the lane mouth — your base stages from a
     # seed-chosen latitude (north y=14 or south y=26), so a single
-    # memorised pre-pick cannot generalise. Your starting cash ($3400) is
-    # exactly enough for EITHER 4 medium tanks (build 2tnk × 4 from the
-    # pre-placed war factory) OR a second war factory (build weap,
-    # residual $1400 = 1 tank). The rush is incoming NOW. Win when ≥5
+    # memorised pre-pick cannot generalise. Your starting cash ($3400)
+    # covers EITHER 4 medium tanks (build 2tnk × 4 from the pre-placed
+    # war factory at $800 each = $3200) OR a second war factory (build
+    # weap at $2000, residual $1400 = 1 tank). The rush is incoming NOW.
+    # Win when ≥5
     # enemy units are killed AND your fact is still standing AND the clock
     # has not run out (tick ≤ 1649). Stall, build-second-factory-first, or
     # under-spend all fail.
     description: >
-      Same $3400 capex-vs-opex call, but your base spawns NORTH (y=14) or
-      SOUTH (y=26) by seed. A five-rifle plus one-rocket rush converges on
-      the live yard. Spend on whichever buys you survival now, not a
-      stronger economy later. Five kills, yard intact, within about 19
-      turns.
+      Commander, this is a capex-vs-opex call with seed-rotated base
+      latitude. You hold a Construction Yard (fact), Ore Refinery
+      (proc), Power Plant (powr), War Factory (weap) and Service Depot
+      (fix) at either the NORTH (y=14) or SOUTH (y=26) latitude — the
+      seed picks — with no combat units and exactly $3400 cash. Five
+      rifle infantry (e1) and one rocket soldier (e3) are charging your
+      live yard from the lane mouth NOW. Within about 19 turns, kill at
+      least five enemies and keep your Construction Yard standing.
     overrides:
       actors:
         # ── AGENT spawn 0 — NORTH base (y=14) ─────────────────────
@@ -377,8 +401,8 @@ levels:
         # duplicated per enemy spawn_point group (the per-owner
         # filter would otherwise drop the unmatched one), one on
         # each base latitude.
-        - {type: fact, owner: enemy, position: [120, 14], spawn_point: 0}
-        - {type: fact, owner: enemy, position: [120, 26], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [76, 14], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [76, 26], spawn_point: 1}
     win_condition:
       all_of:
         - {units_killed_gte: 5}

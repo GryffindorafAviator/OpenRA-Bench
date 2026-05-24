@@ -48,13 +48,12 @@ levels:
   easy:
     description: >
       Commander, this is an ordered patrol mission. You are given 2
-      medium tanks and 2 light tanks on the west edge. A three-stop
-      route through enemy territory has already been plotted: an
-      enemy Power Plant in the mid-south first, then an Ore Refinery
-      in the north, then a Construction Yard in the far south-east.
-      Drive your column through the route in order and do not let
-      the tanks sit idle between stops — issue the next move the
-      instant a unit reaches the previous stop.
+      medium tanks and 2 light tanks on the west edge, on hold-fire
+      orders. A three-stop ordered route through enemy territory has
+      been plotted: an enemy Power Plant in the mid-south first, then
+      an Ore Refinery in the north, then a Construction Yard in the
+      far south-east. The waypoints must be visited in that order
+      within 2400 ticks.
     overrides:
       base_map:
         generator: arena
@@ -94,11 +93,12 @@ levels:
     description: >
       Commander, this is a two-column ordered patrol. You are given
       one north column (2 medium tanks + 1 light tank) and one south
-      column (2 light tanks + 1 jeep). Each column has its own
-      ordered route: the north column runs north→south→north, the
-      south column runs south→north→south. Each waypoint is an
-      enemy building. Drive both columns in parallel, do not halt
-      between stops, and hold losses to one or fewer.
+      column (2 light tanks + 1 jeep), all on hold-fire orders. Each
+      column has its own ordered route, each waypoint marked by an
+      enemy building. The north column's route runs
+      north→south→north; the south column's route runs
+      south→north→south. Both ordered routes must be completed
+      within 3000 ticks, holding losses to one or fewer.
     overrides:
       base_map:
         generator: arena
@@ -161,13 +161,13 @@ levels:
       Commander, this is a long-range ordered patrol on a large 80x48
       map. You are given two columns of 6 units each (2 medium tanks
       + 2 light tanks + 2 jeeps), one deployed far north and one far
-      south. Each column must run a four-stop ordered route across
-      the map, with stops labelled north, centre, east, and far
-      corner. Coordinates are NOT given — each waypoint is an enemy
-      building hidden in fog; scout toward the labelled direction
-      and you will be interrupted the instant a unit spots one,
-      revealing its exact location. Drive both routes in parallel
-      and hold losses to one or fewer.
+      south, all on hold-fire orders. Each column must run a four-stop
+      ordered route, with stops labelled by relative direction
+      (north, centre, east, far corner). Coordinates are NOT given —
+      each waypoint is an enemy building hidden in fog. When a unit
+      sights one, an interrupt will reveal its exact location. Both
+      ordered routes must be completed within 5000 ticks, holding
+      losses to one or fewer.
     overrides:
       base_map:
         generator: arena
@@ -219,11 +219,22 @@ levels:
               - {x: 40, y: 8,  label: "the NORTH-CENTRE — mid map left-to-right, northern band"}
               - {x: 62, y: 38, label: "the EAST side — eastern third, southern band"}
               - {x: 72, y: 8,  label: "the far NORTH-EAST corner — extreme east, extreme north"}
-        - {within_ticks: 6000}
+        # Triage finding (all 4 hard seeds DRAW): the pack inherits
+        # `interrupts:` from the base via enemy_building_spotted, so
+        # the engine advances 1-`max_ticks` ticks per turn (variable;
+        # default max_ticks=5 in run_level → ~85 ticks/turn empirically
+        # at this map size). With max_turns=70 the engine reaches only
+        # ~tick 5928, well below the old `after_ticks: 6001` — the
+        # deadline never bit, every hard-seed non-win was a DRAW
+        # rather than the LOSS the no-cheat bar requires (CLAUDE.md
+        # rule #2). Lowering within_ticks 6000 -> 5000 and after_ticks
+        # 6001 -> 5001 makes the deadline reachable inside the existing
+        # 70-turn budget so a stall genuinely LOSES.
+        - {within_ticks: 5000}
         - {units_lost_lte: 1}
     fail_condition:
       any_of:
-        - {after_ticks: 6001}
+        - {after_ticks: 5001}
         - {not: {units_lost_lte: 1}}
         - {not: {own_units_gte: 1}}
     max_turns: 70

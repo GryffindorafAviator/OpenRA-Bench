@@ -87,14 +87,24 @@ def _agg(scores: list) -> dict:
         ),
         # Win-speed: averaged over WINS only (0 when there are none) so
         # it compares how decisively a model wins, not diluted by losses.
+        # We exclude wins whose `speed`/`win_turns` were missing in a
+        # journal (legacy resumed runs pre-`f9c9c46`): `_shim` fills
+        # those with 0.0 as a sentinel for "unknown", and a real win
+        # always has speed > 0. Including the sentinel zeros would
+        # spuriously inflate the speed gap between fresh and resumed
+        # evals (P1.5 / P1.6 in PR #30 review).
         "win_speed_mean": round(
-            statistics.fmean([s.speed for s in scores if s.outcome == "win"]), 4
-        ) if any(s.outcome == "win" for s in scores) else 0.0,
+            statistics.fmean(
+                [s.speed for s in scores
+                 if s.outcome == "win" and s.speed > 0]
+            ), 4
+        ) if any(s.outcome == "win" and s.speed > 0 for s in scores) else 0.0,
         "win_turns_mean": round(
             statistics.fmean(
-                [s.win_turns for s in scores if s.outcome == "win"]
+                [s.win_turns for s in scores
+                 if s.outcome == "win" and s.win_turns > 0]
             ), 2
-        ) if any(s.outcome == "win" for s in scores) else 0.0,
+        ) if any(s.outcome == "win" and s.win_turns > 0 for s in scores) else 0.0,
         "weakest_link_hist": dict(Counter(s.weakest_link for s in scores)),
     }
 
@@ -427,6 +437,8 @@ def evaluate(
             "objective_progress": res.objective_progress,
             "reward_vector": res.reward_vector,
             "turns": res.turns,
+            "speed": sc.speed,
+            "win_turns": sc.win_turns,
             "notes": sc.notes,
             "passivity": hstats.get("passivity") if hstats else None,
             "handoff": hstats,
@@ -580,9 +592,23 @@ class _ScoreShim:
     action: float
     weakest_link: str
     dimensions: dict
+    speed: float
+    win_turns: int
 
 
 def _shim(r: dict):
+    """Reconstruct a `_ScoreShim` from a journal row.
+
+    For a row written by the live journal-writing path (post commit
+    `f9c9c46`) every aggregated field is present. For LEGACY journal
+    rows written before that fix, the `speed`/`composite`/`win_turns`/
+    perception-reasoning-action subscores can be absent — we fill
+    them with 0.0 as a sentinel for "unknown". `_agg` then EXCLUDES
+    zero-speed wins from `win_speed_mean` / `win_turns_mean` so the
+    sentinel does not pull the win-speed gap toward zero (P1.5 / P1.6
+    in PR #30 review). The trinary outcome string is the only legacy
+    field we trust unconditionally.
+    """
     sc = r.get("_sc")
     if sc is not None:
         return sc
@@ -594,6 +620,8 @@ def _shim(r: dict):
         action=r.get("action", 0.0),
         weakest_link=r.get("weakest_link", "n/a"),
         dimensions={"objective": r.get("objective_progress", 0.0)},
+        speed=r.get("speed", 0.0),
+        win_turns=r.get("win_turns", r.get("turns", 0)),
     )
 
 

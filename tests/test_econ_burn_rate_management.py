@@ -157,7 +157,7 @@ def _reset_lean():
 
 def _run(level, policy, seed=1):
     c = compile_level(load_pack(PACK), level)
-    assert c.map_supported, "rush-hour-arena terrain must be present"
+    assert c.map_supported, "bespoke 56x40 arena terrain must be present"
     return c, run_level(c, policy, seed=seed)
 
 
@@ -307,13 +307,13 @@ def test_hard_has_two_seed_driven_spawn_groups():
 
 
 def test_in_bounds_actors_on_every_level():
-    """rush-hour-arena playable bounds ≈ x:2..126, y:2..38."""
+    """Bespoke 56x40 arena (cordon 2) playable bounds: x:2..52, y:2..36."""
     pack = load_pack(PACK)
     for lvl in LEVELS:
         c = compile_level(pack, lvl)
         for a in c.scenario.actors:
             x, y = a.position
-            assert 2 <= x <= 126 and 2 <= y <= 38, (
+            assert 2 <= x <= 52 and 2 <= y <= 36, (
                 f"{lvl}: actor {a.type} at ({x},{y}) out of bounds"
             )
 
