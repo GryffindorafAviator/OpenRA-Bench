@@ -250,6 +250,16 @@ levels:
   # 8 tanks split N/S by seed. Full-strength wall: 9 rocket front
   # rank + 4 back rank + 7 rifle shield. Both groups must come around
   # the funnel and hit the line from both sides at once.
+  #
+  # 2026-05-23 audit (Qwen-9B deep-dive medium-vs-hard inversion):
+  # the prior hard survival floor own_units_gte:3 (allowing up to 5
+  # tank losses out of 8) was structurally LOOSER than medium's
+  # own_units_gte:3 out of 4 — the floor relaxed as the headcount
+  # escalated, making hard paradoxically easier on the survival
+  # constraint. Tighten the hard floor to own_units_gte:6 (matches
+  # medium's 75% survival ratio: 3/4 medium = 6/8 hard) so the
+  # escalation is monotonic — a brute frontal/funnel play that loses
+  # 3+ tanks on hard now busts the cap as it does on medium.
   hard:
     description: >
       Commander, this is a flank-attack mission with two attacking
@@ -258,7 +268,9 @@ levels:
       13 rocket infantry in two rows backed by 7 rifle infantry —
       inside a water-walled funnel. The funnel is a kill zone. Both
       groups must come around the open ground above and below the
-      water and hit the wall from the sides at the same time.
+      water and hit the wall from the sides at the same time. Keep at
+      least six of your eight tanks alive — losing more than two busts
+      the survival cap.
     overrides:
       base_map:
         generator: arena
@@ -318,10 +330,16 @@ levels:
     win_condition:
       all_of:
         - {units_killed_gte: 5}
-        - {own_units_gte: 3}
+        # 2026-05-23 audit (Qwen-9B medium-vs-hard inversion fix):
+        # tightened 3 → 6. Hard has 8 tanks (vs medium's 4), so the
+        # medium 75%-survival ratio (3 of 4) maps to 6 of 8 on hard.
+        # The prior own_units_gte:3 (allowing 5 losses out of 8) was
+        # structurally LOOSER than medium's 3 of 4 — escalation
+        # non-monotonic on the survival constraint.
+        - {own_units_gte: 6}
         - {within_ticks: 3000}
     fail_condition:
       any_of:
         - {after_ticks: 3001}
-        - {not: {own_units_gte: 3}}
+        - {not: {own_units_gte: 6}}
     max_turns: 51

@@ -106,18 +106,27 @@ def test_predicates_medium_four_kill_three_survive_bar():
     assert 3001 <= 93 + 90 * (c.max_turns - 1)
 
 
-def test_predicates_hard_five_kill_three_survive_bar():
+def test_predicates_hard_five_kill_six_survive_bar():
+    """Hard tier: 8-tank force (split N/S), survival floor own_units_gte:6
+    (tightened from 3 → 6 on 2026-05-23 per Qwen-9B medium-vs-hard
+    inversion fix — keeps the 75% survival ratio monotonic across tiers:
+    medium 3/4 = hard 6/8 = 75%)."""
     c = compile_level(load_pack(PACK_PATH), "hard")
-    tanks4_n = [(4, 14), (4, 15), (4, 16), (4, 17)]
+    tanks8 = [(4, 14), (4, 15), (4, 16), (4, 17),
+              (6, 14), (6, 15), (6, 16), (6, 17)]
+    tanks6 = tanks8[:6]
+    tanks5 = tanks8[:5]
 
-    # Intended: 5 kills, ≥3 alive, in time → WIN
-    assert evaluate(c.win_condition, _ctx(tanks4_n, tick=3000, killed=5, lost=0))
-    # 2 tanks remaining → predicate fails
-    assert not evaluate(
-        c.win_condition, _ctx(tanks4_n[:2], tick=3000, killed=5, lost=2)
-    )
+    # Intended: 5 kills, all 8 alive, in time → WIN
+    assert evaluate(c.win_condition, _ctx(tanks8, tick=3000, killed=5, lost=0))
+    # 6 alive, 2 lost → still WIN (the floor is ≥6)
+    assert evaluate(c.win_condition, _ctx(tanks6, tick=3000, killed=5, lost=2))
+    # 5 tanks remaining → predicate fails (need ≥6)
+    assert not evaluate(c.win_condition, _ctx(tanks5, tick=3000, killed=5, lost=3))
+    # 5 tanks remaining → fail clause fires (not own_units_gte:6)
+    assert evaluate(c.fail_condition, _ctx(tanks5, tick=3000, killed=5, lost=3))
     # Past deadline → real loss, reachable
-    assert evaluate(c.fail_condition, _ctx(tanks4_n, tick=3002, killed=0, lost=0))
+    assert evaluate(c.fail_condition, _ctx(tanks8, tick=3002, killed=0, lost=0))
     assert 3001 <= 93 + 90 * (c.max_turns - 1), (
         "hard after_ticks 3001 must be reachable within max_turns"
     )
