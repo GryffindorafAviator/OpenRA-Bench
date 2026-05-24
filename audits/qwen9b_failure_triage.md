@@ -1,179 +1,131 @@
-# Qwen 9B failure triage — easy/medium wins, hard losses
-
-Source: `data/runs/family1-qwen9b/playback/_journal__Qwen_Qwen3.5-9B.jsonl`
-(159 lines / ~150 of 174 cells complete at audit time; remaining cells are
-hard seeds still trickling in).
-Model: `Qwen/Qwen3.5-9B` (one repeat per cell, vision modality).
+# Qwen 9B Failure Triage — easy/medium-win-but-hard-loss
 
 ## Scope
 
-Candidates: packs where the model won at least one of easy/medium AND
-had at least one hard seed in {loss, draw, error}. Of 29 packs in the
-journal, **12 packs (41%)** matched the "ladder breaks at hard" pattern.
-The remaining 17 packs either won hard cleanly (e.g.
-`combat-harass-aggro-commit` 4/4) or lost at every tier (uniformly hard
-packs that are outside this triage's scope).
+Family 1, 29 packs × {easy, medium, hard×4 seeds} = 174 target cells
+(journal has 177 lines after retries). Source:
+`data/runs/family1-qwen9b/playback/_journal__Qwen_Qwen3.5-9B.jsonl`.
+
+Filter applied: pack wins easy OR medium AND has >=3 of 4 hard seeds
+NOT winning (loss or draw). **6 packs match.**
 
 ## Bucket histogram
 
-| Bucket            | Count | Packs                                                                                                                                                       |
-|-------------------|------:|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| OUR-CONFIG (pure) |     2 | `action-multiunit-coordination`, `combat-vehicle-vs-infantry-counter`                                                                                       |
-| MIXED CONFIG+MODEL|     3 | `combat-formation-tank-wedge`, `combat-tank-vs-tank-engagement`, `harass-response-preserve`                                                                 |
-| MODEL-STRATEGY    |     7 | `action-sequenced-execution`, `combat-attack-from-behind-fog`, `combat-divide-and-conquer`, `combat-prevent-retreat`, `combat-protect-vip-escort`, `combat-skirmish-then-disengage`, `combat-target-priority-highvalue` |
-| INCONCLUSIVE      |     0 |                                                                                                                                                             |
+| Bucket          | Count |
+|-----------------|-------|
+| MODEL strategy  | 4     |
+| CONFIG defect   | 2     |
+| Inconclusive    | 0     |
 
-Net: **~2 packs need a config fix outright**, **3 packs would benefit
-from a tick-budget bump**, **7 packs are sound** and discriminate real
-model weaknesses (passivity, brute-rushing, ignored doctrine).
+Sub-bucket breakdown:
 
-## Top CONFIG defects (ranked by hard-seed loss count caused)
+| Subbucket                                         | Count |
+|---------------------------------------------------|-------|
+| A.1 idle/passivity                                | 1 (with A.2) |
+| A.2 wrong tactic (chase, brute, dispersal)        | 4 |
+| A.4 ran short on tight clock                      | 1 (with A.2) |
+| B.1 tick budget inert under interrupt-mode turns  | 1 |
+| B.4 fail-clause mistriggered on briefing-doctrine | 1 |
 
-### 1. `combat-vehicle-vs-infantry-counter` — fail clause punishes the scripted doctrine (B.4, 4 hard losses)
+## Top CONFIG defects to fix (ranked by hard-seed loss count)
 
-`fail_condition.any_of: [..., {not: {own_units_gte: 1}}]` paired with a
-scenario that ships only ONE pre-spawn unit (a scout jeep) and instructs
-the model to "scout with the jeep to verify they carry no anti-tank
-threats." Every hard seed: the jeep walks toward the centre cluster as
-briefed, takes fire, drops to 0 HP, and the game ends in `loss` at
-turn ~4-5 with ~$1951 still in the build queue and a full base intact.
+### 1. combat-vehicle-vs-infantry-counter — `not own_units_gte:1` punishes the scout
 
-- Seed 1: turn 4, tick 363, jeep at HP 0.066 → episode end loss.
-- The fact / barracks / war factory / service depot are all standing
-  (`has_building:fact` was still SAT in the goal at episode end).
+- **Hard-tier non-wins: 4/4 LOSS**, every loss at turn 4-5 (tick 273-363
+  of 5400 budget — agent never even reaches turn 6).
+- Brief says "scout with the jeep to verify they carry no anti-tank
+  threats". Model follows brief. Jeep ends turn 4 at HP 6.7% in the
+  12-strong fogged cluster, dies turn 5. The fail clause `not
+  own_units_gte:1` fires the instant the scout dies — `own_units_gte`
+  counts mobile units only, so the agent's 5 base buildings + $1951 +
+  in-flight Build orders don't save it.
+- Easy survives (8 enemies → scout can retreat). Hard's 12 enemies + fog
+  make scout survival a gamble the brief mandates the model take.
+- **Fix:** drop `not own_units_gte:1` from the fail clause (or replace
+  with `not has_building:fact`). The pack's other fail clauses
+  (`after_ticks: 5401`, `not has_building:fact`) already cover stall and
+  base-wipe; the `own_units` clause exists to prevent suicide-rush but
+  in practice traps the scenario's own scripted doctrine.
 
-**Fix options:**
-- (a) Pre-spawn a single garrison unit (e.g. one `2tnk` or two `e1`)
-  alongside the jeep so a scout death doesn't drop `own_units` to 0.
-- (b) Replace `not own_units_gte:1` with `not has_building:fact` alone —
-  the win clause already gates on `has_building:fact`, and a base-alive
-  scenario should not LOSE just because the only scout dies.
+### 2. action-sequenced-execution — interrupt-mode max_turns under-reaches the deadline
 
-### 2. `action-multiunit-coordination` — tick budget not scaled for the perception cost added on hard (B.1, 2 hard losses)
+- **Hard-tier non-wins: 4/4 DRAW** (CLAUDE.md rule #2 violation:
+  non-completion must be a real LOSS, never a DRAW).
+- Pack uses `interrupts.enemy_building_spotted: true`. Under interrupt
+  mode the engine advances 1-`max_ticks` ticks per turn (variable),
+  not the standard 30. With `max_turns=70` the agent hits turn 70 at
+  tick ~5400-5500, well below the `after_ticks: 6001` fail threshold.
+- hard:1 ended at tick 5388 with obj_progress 0.5 (neither waypoint
+  sequence satisfied); hard:2 at tick 5508 with one of two waypoint
+  sequences satisfied (B sat=True, A cur=None). None of the 4 seeds
+  triggered the `after_ticks` fail.
+- **Fix:** raise `max_turns` to ~100 OR drop `within_ticks` to 5000 and
+  `after_ticks` to 5001 so the deadline actually fires within the
+  available turn budget. Converts today's degenerate DRAW into the real
+  LOSS the no-cheat bar demands.
 
-Hard and medium both use `within_ticks: 2800` on the same map and same
-unit composition. Hard's only delta is `objective_coords: relative` +
-`enemy_building_spotted` interrupts — i.e. the model has to SCOUT for
-buildings whose coords are hidden. That scout cost burns 1-2 turns per
-landmark but the deadline stays flat.
+### 3. harass-response-preserve — `units_lost_lte:0` is a knife-edge (CONFIG-adjacent)
 
-Decisive trace — **hard seed 3**: at turn 32 / tick 2853, ALL THREE
-`units_in_region_gte` clauses are satisfied AND `units_lost_lte:2`
-holds (0 lost). The model literally completed the objective, but
-`within_ticks:2800` had already burst by 53 ticks (~1 turn). Hard
-seed 4 fails the same way.
-
-**Fix:** raise hard `within_ticks` to ~3300 and `max_turns` to 42 (a
-~17% headroom that mirrors the fogged-search overhead). Easy/medium
-remain unchanged.
-
-### 3. `combat-formation-tank-wedge` (seed 4 only) — close-miss deadline (B.1, 1 hard loss)
-
-Hard seed 4: model reached the (46,20) staging region with 4 units
-alive, but burst `within_ticks: 4500` by 33 ticks (cur=4533 at the
-end). One additional turn would have closed the kill quota
-(units_killed_gte:4 was at 0).
-
-This pack also has a separate MODEL failure (seed 2: 3 units lost to
-brute-rush) so the right action is a small CONFIG bump to ~4800 ticks
-to absorb seed-to-seed variance, while accepting that the brute-rush
-seed is a genuine model failure.
-
-### 4. `combat-tank-vs-tank-engagement` — `max_turns: 15` is the tightest budget in any candidate pack (B.1, contributing to 3 hard losses)
-
-Hard seed 2: killed 2/3 enemies at the max-turns deadline with all 3
-own tanks alive — only burst `within_ticks:1200` by 63 ticks. The
-model wasted 2 of 16 turns on `Observe`, which under interrupt mode
-costs ~160 ticks. With seeds 3 & 4 also losing on attrition, the 15-
-turn / 1200-tick budget feels load-bearing in the wrong direction —
-seed 1 won so the capability IS reachable, but the margin is below
-the model's noise floor.
-
-**Fix:** bump `max_turns: 15 → 20` and `within_ticks: 1200 → 1500`.
-
-### 5. `harass-response-preserve` — `units_lost_lte: 0` is the harshest fail floor in the suite (B.4, 3 hard losses)
-
-The hard tier requires `units_lost_lte: 0` — zero deaths permitted.
-Seed 1 trace: model AttackMoved at turn 3, lost 2 infantry, immediate
-fail. The briefing says "preserve" so the model IS supposed to avoid
-combat, but a knife-edge zero-loss floor means even competent
-positioning can lose to RNG.
-
-**Fix:** loosen to `units_lost_lte: 1`. The doctrine is still
-"preserve" (one casualty is still a costly mission) and the win-cond
-still demands 3 kills + base intact, but the model gets a one-error
-buffer.
+- **Hard-tier non-wins: 4/4 LOSS** at turn 4 / tick 273 — instantly,
+  with `units_lost=2`.
+- Hard tier escalates from cap 2 (easy) -> cap 1 (medium) -> cap 0
+  (hard). 3 simultaneous probes vs 5 stance:0 HoldFire defenders with
+  no `set_stance` tool exposed leaves no error budget for a single
+  micro slip. Model's failure mode (chase east) is documented as
+  intended-to-lose; the pack is technically sound, but bumping
+  `units_lost_lte` from 0->1 on hard preserves the bar (every cheat
+  policy still loses with 1 casualty allowed) while giving competent
+  models recovery room.
+- Triage classifies the trace evidence as MODEL.A.2 (model is
+  chasing east on every seed), but the pack design itself is brittle.
+- **Soft recommendation:** consider loosening hard cap to 1 if all
+  wrong-doctrine plays still lose there.
 
 ## Top MODEL-strategy patterns
 
-### 1. Passivity / Observe-stall (A.1) — 2 packs, both with VIP-survival or kill-quota gates
+### 1. Passivity / freeze under pressure (A.1)
+- combat-skirmish-then-disengage hard:1 (28.6% observe) and hard:2
+  (62.5% observe — 5 of 8 turns were observe-only).
+- combat-divide-and-conquer hard:4 (45.8% observe — 11 of 24 turns).
+- Pattern: when the engagement is novel or contested, the model
+  defaults to observing.
 
-- `combat-protect-vip-escort` seed 3: **9 Observes / 20 turns (45%)**;
-  the model freezes from turn 16 onward while the escort harvester
-  takes fire and dies at turn 19. This is the textbook "freeze when
-  the pressure shows up" failure.
-- `combat-target-priority-highvalue` seed 1: **10 Observes / 18 turns
-  (56%)**, 1 kill of 15 required. The model never commits to a
-  target-priority engagement.
+### 2. Brute-rush instead of doctrine (A.2)
+- combat-divide-and-conquer: brief warns "middle corridor's choke
+  gets cooked"; model walks frontally on seeds 1/2/4 anyway.
+- combat-skirmish-then-disengage: brief says "drive east, gun down
+  three, then pull back into the recovery disc". Model AttackMoves
+  east and never disengages.
+- harass-response-preserve medium/hard: brief says "do NOT chase east"
+  in bold pack design; model chases east anyway.
 
-These two packs are SOUND — they are discriminating exactly the
-weakness the names advertise.
+### 3. Tight-clock turn-management waste (A.4)
+- combat-tank-vs-tank-engagement hard:2/3/4: all three losses end
+  3-63 ticks past the 1200-tick deadline with 2/3 kills. Model issued
+  10-11 MoveUnits and only 2 AttackUnits per episode — repositioned
+  instead of focus-firing. Seed 1 won with 4 AttackUnit, 3 kills at
+  tick 1038.
 
-### 2. Ignored doctrine / brute-rush (A.2) — 6 packs
+### 4. Multi-route coordination collapse (A.2)
+- action-sequenced-execution hard:1/2: 142-153 MoveUnit commands
+  spread across two parallel waypoint sequences A and B. Model often
+  satisfies one but not both (hard:2: B satisfied, A not).
 
-The most common pattern: the briefing prescribes a flanking, splitting,
-kiting, or holding doctrine and the model issues a frontal `AttackMove`
-or `MoveUnits` straight through the enemy centre.
+### 5. Scout over-commit (A.2)
+- combat-vehicle-vs-infantry-counter (also flagged as CONFIG above):
+  model drives the scout deep into a 12-strong fogged cluster on
+  every hard seed and never retreats. This is partially the brief's
+  fault for saying "scout to verify" without a "retreat after first
+  contact" qualifier.
 
-- `combat-attack-from-behind-fog` s3: drove all 4 units along y=24 (the
-  centre lane the brief explicitly says to AVOID).
-- `combat-divide-and-conquer` s1: killed 8/9 but lost 2 of 4 starters
-  to frontal pressure when a split would have kept losses to 0-1.
-- `combat-skirmish-then-disengage` s1: 8 `AttackMove` commands, lost all
-  4 units, 0 kills, never executed the "disengage" half.
-- `combat-prevent-retreat` s2: 17 `AttackMove` sweeps for 1 kill — the
-  doctrine demands a chokepoint hold, not a sweep.
-- `action-sequenced-execution` hard (all 4 seeds draw): the model issued
-  153 MoveUnits orders over 70 turns with extensive backtracking (e.g.
-  target_x=15,y=15 after a scout) and only completed 1 of the 2 routes
-  before the max_turns hit; 37 of 156 actions were warned (24% format
-  churn).
-- `harass-response-preserve` seeds 1-4: attack-moved into combat
-  instead of preserving (this overlaps with the CONFIG concern above).
+## Notes
 
-### 3. Close-miss after correct intent (A.4) — 1 pack
-
-- `combat-tank-vs-tank-engagement` s2: model executed the engagement
-  correctly (3 tanks alive, 2 enemies killed) but ran out of turns
-  before landing the third kill. Sits on the boundary between MODEL
-  pacing and CONFIG headroom — see Top CONFIG #4.
-
-## Summary
-
-- **12 candidate packs** analysed across hard tier (~44 hard episodes).
-- **5 packs** need CONFIG attention (2 outright, 3 light tick-budget
-  bumps); the other 7 packs correctly discriminate model weakness.
-- The biggest single source of "false losses" is
-  `combat-vehicle-vs-infantry-counter`'s `not own_units_gte:1` fail
-  clause firing on the scripted scout death (4/4 hard seeds lost on
-  this same trigger).
-- The dominant MODEL pattern is **doctrine-ignored brute-rush** (6 of
-  7 MODEL-bucket packs), not raw passivity — Qwen 9B reads the
-  briefing well enough at easy but defaults to frontal `AttackMove` /
-  bulk `MoveUnits` at hard when the routes are fogged or the
-  composition is asymmetric.
-- Passivity (`Observe` >40%) is concentrated in the two
-  "preservation" packs (`protect-vip-escort`, `target-priority-highvalue`)
-  — these packs are SOUND and exposing a real model weakness.
-
-## Methodology notes
-
-- Outcome matrix built from `_journal__Qwen_Qwen3.5-9B.jsonl`.
-- For each candidate pack: read `manifest.json` + `turns.jsonl` for the
-  first non-winning hard seed (priority loss > draw > error), and
-  compared against the winning easy seed trace from the same pack.
-- Goal-tree leaves (`current` vs `target` vs `satisfied`) from the
-  final turn pinpointed which predicate flipped to fail; this
-  distinguished "deadline burst" (within_ticks) from "attrition fail"
-  (not own_units_gte:N) from "kill quota not met" (units_killed_gte:N).
-- No engine, YAML, or test edits were made — pure trace analysis.
+- All candidate seed traces examined used the `vision` perception
+  modality (default). No `-clear` cells inspected.
+- 23 of 29 family-1 packs do NOT match the candidate filter — most
+  win or lose uniformly across tiers. The 6 packs in scope here are
+  exactly the easy->hard cliff packs.
+- `rush-hour` returned only 2 of 4 hard seeds (seeds 1 and 3 missing
+  from the journal); both seeds present were wins, so it is not a
+  candidate. Worth a re-run for completeness but does not affect
+  this triage.

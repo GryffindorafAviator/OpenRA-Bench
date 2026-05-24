@@ -50,6 +50,30 @@ A scenario is defective if any of the following hold:
   the recurring defect classes the pass eliminated, and the
   predicate-idiom recipe (which predicate makes which capability
   load-bearing), plus engine footguns to avoid.
+- **`audits/EDIT_PRINCIPLES.md`** — Family-1 (combat micro) edit
+  conventions (§1-10). BINDING for every pack edit: self-contained
+  briefings, three-part officer-style structure, plain English with
+  RA terms inline-glossed, `map_fit` classification (`fit` / `wide`
+  / `large-trivial`), enemy-posture matches briefing doctrine, and
+  the §10 map-resizing rule (every `wide` / `large-trivial` pack
+  must be shrunk to a bespoke procedural arena, ≤15 cells empty
+  pre-engagement traversal).
+- **`audits/EDIT_PRINCIPLES_FAMILY2.md`** — Family-2 (economy)
+  additions (§11-17): functional harv→ore→proc→cash chain,
+  cash-constrained multi-path, wrong-strategy LOSS trap, refinery-
+  placement spatial reasoning, stall-LOSES (no auto-harvest
+  preemption), `not: {cash_gte: MAX+1}` upper-bound idiom, build-
+  prereq cross-check. INHERITS Family-1 §1-10 verbatim — including
+  the §10 map-shrink rule, which 16 F2 packs slipped through on
+  `rush-hour-arena`; do not let this happen on any future F2 pack.
+- **`audits/PRODUCTION_TECH_AUDIT.md`** — construction / unit
+  production / tech-tree correctness audit (cross-family). Every
+  pack with a `build` or `deploy` capability must satisfy: prereq
+  buildings present, faction match, affordability from
+  `starting_cash + projected_income`, build-time fits `max_turns`.
+  Cross-reference `audits/production_tech_audit.csv` before
+  editing; if the row's `issues` field is non-empty, FIX as part of
+  the edit.
 - **`openra_bench/scenarios/win_conditions.py`** — the predicate
   grammar. If you add a new predicate, you **must** also add a
   `_PHRASES` / `_REGION_PHRASES` translation in
@@ -62,6 +86,24 @@ A scenario is defective if any of the following hold:
 - **The 21 no-cheat-redesign commits on `main`** are worked examples
   of every capability/predicate/bot combination. Browse with
   `git log --oneline --grep "no-cheat redesign"` and read the bodies.
+
+## Audit-doc workflow (binding for every pack edit)
+
+Before editing any scenario pack:
+
+1. Identify the pack's family (combat / economy / build / defense /
+   etc.) and whether its intended play requires `build` / `deploy`.
+2. Read the matching `EDIT_PRINCIPLES*.md` doc.
+3. Look up the pack's row in `audits/family<N>_*.csv` if present;
+   the `map_fit` field tells you whether a map shrink is needed.
+4. If the pack has a `build` or `deploy` axis, look up the row in
+   `audits/production_tech_audit.csv`; the `issues` field tells you
+   whether prereqs / cash / build-time are broken.
+5. Apply all flagged fixes in the same edit. Do NOT ship a pack
+   edit that leaves a CSV-flagged issue unresolved.
+6. If your edit changes a tech-tree-relevant field (new buildings
+   added, faction flipped, starting_cash changed), update the
+   CSV row.
 
 ## Engine facts you must internalise
 
