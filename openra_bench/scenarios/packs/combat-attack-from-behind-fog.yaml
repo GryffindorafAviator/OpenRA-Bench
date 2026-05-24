@@ -1,6 +1,6 @@
-# combat-attack-from-behind-fog — Bypass a defensive line via a far
-# off-axis lane (fog / out-of-vision) and strike the undefended HQ
-# from behind. A frontal attack on the line loses; the fog flank wins.
+# combat-attack-from-behind-fog — Bypass a defensive line via an
+# off-axis fog lane and strike the undefended HQ from behind. A
+# frontal attack on the line loses; the fog flank wins.
 #
 # Wave-8 REASONING seed (capability: reasoning).
 #
@@ -13,41 +13,34 @@
 #     where he is — Sun Tzu / Liddell Hart indirect approach).
 #   - "Fog warfare": the defender's static line cannot fire on what
 #     it cannot see and cannot reach. The far latitudes of the map
-#     (y=2 / y=38) are well outside the line's range AND outside the
+#     (y=2 / y=37) are well outside the line's range AND outside the
 #     line's vision; a strike force that travels via those lanes
 #     emerges BEHIND the line, on an undefended axis to the HQ.
 #
-# Mechanism (engine-load-bearing physics, verified design):
-#   - The enemy defensive line stands at x=50, spanning y=15..25:
-#     a stack of pillboxes (pbox — anti-infantry but range ~6 and
-#     high HP, plus an ATTACK envelope that pressures any vehicle
-#     in range) interleaved with rocket-infantry (e3, Dragon
-#     launcher, range ~5). The line "faces west": every weapon
-#     covers the engagement axis y=18..22 from x≈45..56.
+# Mechanism (engine-load-bearing physics):
+#   - The enemy defensive line stands at x=24, vertically spanning
+#     the engagement band: a stack of pillboxes (pbox — anti-infantry
+#     range ~6) interleaved with rocket-infantry (e3, Dragon launcher,
+#     range ~5). The line "faces west": every weapon covers the
+#     engagement axis y=18..22 from x≈19..30.
 #   - All defenders are stance:2 (Defend — auto-fire in range, no
-#     chase) so the line stays POSTED. Tanks that enter range of
-#     the y=15..25 latitude band take concentrated focused fire
-#     from MULTIPLE pbox+e3 simultaneously and die before clearing.
+#     chase) so the line stays POSTED. Tanks that enter range of the
+#     y=15..25 latitude band take concentrated focused fire from
+#     MULTIPLE pbox+e3 simultaneously and die before clearing.
 #   - The agent's 4× 2tnk strike force stages at the WEST edge
-#     (x=6, near y=20). The OBJECTIVE is an unarmed enemy fact at
-#     (100,20) — behind the line — undefended (no garrison).
-#   - The FOG flank lanes: y=2 (north edge) and y=38 (south edge).
-#     A tank at y=2 is Manhattan-distance ≥13 from the nearest
-#     line defender at (50,15) — well outside every defender's
-#     range (pbox ~6, e3 Dragon ~5). The line never fires on the
-#     flanker. The flanker drives east along y=2 unimpeded, past
-#     x=50, then turns south to descend on the fact at (100,20).
-#   - Frontal attack along y=18..22 puts the lead tank inside the
-#     range envelopes of 4+ defenders simultaneously: pbox(50,18),
-#     pbox(50,22), e3(50,19), e3(50,20), e3(50,21) all in range
-#     from x≈45..55. Concentrated fire pressures the survival bar
-#     and (more decisively) the column never clears the line in
-#     time to raze the fact before the deadline.
+#     (x=4, near y=20). The OBJECTIVE is an unarmed enemy fact at
+#     (48,20) — behind the line — undefended (no garrison).
+#   - The FOG flank lanes: y=2..5 (north edge) and y=35..37 (south
+#     edge). A tank at y=3 is Manhattan-distance ≥12+ from the
+#     nearest line defender — well outside every defender's range
+#     (pbox ~6, e3 Dragon ~5). The line never fires on the flanker.
+#     The flanker drives east along y=3 unimpeded, past x=24, then
+#     turns south to descend on the fact at (48,20).
 #
 # Discrimination bar (four script-policy proxies in the test file):
 #   • stall (only observe)              → LOSS. The line never
 #     advances (stance:2 + no agent in range) so the fact at
-#     (100,20) is never approached → after_ticks LOSS.
+#     (48,20) is never approached → after_ticks LOSS.
 #   • brute attack_move east (y=20)     → LOSS. Column marches
 #     down the engagement axis into the line's kill envelope; the
 #     column stalls inside Dragon+pbox range while the fact
@@ -56,91 +49,58 @@
 #   • frontal-charge (move east on y=20 + attack nearest defender)
 #                                       → LOSS. Same head-on
 #     geometry; engagements pin the tanks AT the line; even if a
-#     tank survives, the fact at x=100 is still 50 cells away with
+#     tank survives, the fact at x=48 is still 24 cells away with
 #     turns burned.
-#   • intended fog-flank (move strike force to y=2 or y=38, drive
-#     east past x=100, descend onto the fact)
+#   • intended fog-flank (move strike force to y=3 or y=37, drive
+#     east past x=48, descend onto the fact)
 #                                       → WIN. Line never fires on
 #     the flanker (out of range), fact is unguarded, raze in time.
 #
 # Engine guardrails (per CLAUDE.md / SCENARIO_REVIEW_CHECKLIST.md):
-#   - Map: per-tier custom arena (128 × 40, cordon 2 ⇒ playable
-#     x in [2..125], y in [2..37]) generated via mapgen's `arena`
-#     generator with WATER obstacle clusters that physically
-#     reinforce the design:
-#       * easy   — `combat-attack-from-behind-fog-easy`: ONE obvious
-#                  fog lane at y=2..5 (north). Middle band y=6..14
-#                  walled off across x=10..85 so a flanker MUST use
-#                  the north corridor. South half y=26..37 walled
-#                  off across x=10..125 so south flank is impossible.
-#       * medium — `combat-attack-from-behind-fog-medium`: TWO fog
-#                  lanes (north y=2..5 + south y=35..37). Mid-bands
-#                  y=6..14 and y=26..34 walled off across x=10..85
-#                  so neither lane can be "shortened" inside the
-#                  line's range envelope.
-#       * hard   — `combat-attack-from-behind-fog-hard`: BOTH lanes
-#                  open, but the agent stages NORTH or SOUTH per
-#                  seed (spawn_point round-robin) so the relevant
-#                  flank latitude flips per seed. Symmetric walls
-#                  y=6..13 (x=10..85) and y=27..34 (x=10..85) keep
-#                  each lane the only viable bypass for its spawn.
-#     Strike force at x=6 (west); line at x=50; fact at (100,20).
-#     East descent windows x=86..125 stay clear in the bands so the
-#     flanker can drop from the corridor to y=20 to raze the fact.
+#   - Map: single shared 64×40 arena (cordon 2 ⇒ playable
+#     x in [2..61], y in [2..37]). Strike force at x=4 (west);
+#     line at x=24; fact at (48,20). All three tiers share the
+#     same arena — per-tier line composition and (on hard)
+#     seed-rotated spawn corridors are the varying levers.
+#   - Single explicit mpspawn at (4,20) per Wave-13 footgun #6
+#     (the default 4-corner mpspawns rotate per seed and offset
+#     pre-placed coordinates).
 #   - Win predicate uses `enemy_key_buildings_destroyed_in_region`
-#     scoped to {x:100,y:20,radius:6,types:[fact]} so a stray kill
-#     on the SENTINEL fact (far west or far corner) doesn't satisfy
-#     the win. AND `own_units_gte:2` so suicidal frontals (any 1-
-#     tank survivor that incidentally reaches the fact) cannot
-#     bypass the survival bar.
+#     scoped to {x:48,y:20,radius:6,types:[fact]} so a stray kill
+#     on the SENTINEL fact (far corner) doesn't satisfy the win.
+#     AND `own_units_gte:2` so suicidal frontals (any 1-tank
+#     survivor) cannot bypass the survival bar.
 #   - SENTINEL: persistent unarmed enemy fact at the FAR corner of
-#     the map (125,4) — keeps the engine alive past the moment the
+#     the map (61,4) — keeps the engine alive past the moment the
 #     objective fact falls so the win evaluator sees the terminal
 #     frame (no DRAW collapse on enemy-key-building wipe). The
 #     sentinel is well outside any intended-play tank path.
-#   - All deadlines (after_ticks 4501 / 5401) are reachable within
-#     the declared max_turns ⇒ no draw degeneracy. Nominal 90 ticks/
-#     turn upper bound (tick ≤ 93 + 90·(max_turns − 1)) is comfortably
-#     above the deadlines. The per-turn tick rate is shortened under
-#     interrupt-mode (step_until_event returns early on event ⇒ ~75-
-#     85 ticks/turn observed). max_turns budgets are sized so the
-#     deadlines fire RELIABLY even on the slow-tick worst case:
-#     easy 72 turns × 75 ticks/turn floor = 5400; medium/hard 60 ×
-#     75 = 4500 — both pass the after_ticks fail clause inside the
-#     budget for a stalled / brute / over-frontal policy.
+#   - All deadlines fit inside max_turns at the ~64 ticks/turn
+#     interrupt-mode rate (verified per test).
 #   - Defender stance:2 (Defend = auto-fire in range, no chase) is
 #     critical: stance:3 would have the line CHASE the flanker
-#     across the map and collapse the discrimination; stance:1
-#     ReturnFire would only fire on the tank that SHOT a defender
-#     (so a flanker that never engages the line takes no fire
-#     anyway — the discrimination would still hold but be less
-#     load-bearing as a "facing west" frontal concentration).
+#     across the map and collapse the discrimination.
 #   - The objective fact is UNDEFENDED — no garrison, no shield.
 #     This is structural: the doctrine is "strike where the enemy
 #     isn't". A defended fact would change the test to a different
 #     capability (force concentration vs. surprise attack).
-#   - Per CLAUDE.md, (50,20) is a known "silent-fail" placement
-#     cell for some clusters; the line uses (50, 15..25) spanning
-#     y=15..25 with pbox cells at y=15,18,22,25 and e3 at
-#     y=16,17,19,20,21,23,24 — verified individually-placeable
-#     cells (similar to combat-flanking-attack at y=18..22).
 
 meta:
   id: combat-attack-from-behind-fog
   title: 'Reasoning — Attack from Behind via a Fog-Bypass of the Frontal Line'
   capability: reasoning
   real_world_meaning: >
-    Four medium tanks (medium tank) at the west edge face a tight vertical
-    wall of pillboxes (pillbox) and anti-tank rocket soldiers (rocket soldier) at
-    x=50, spanning y=15..25 and facing west. The objective is an
-    UNDEFENDED enemy construction yard at (100,20) — behind
-    the line. Charging head-on along y=18..22 puts the lead tank
-    inside the kill envelope of 4+ defenders simultaneously and the
-    column never clears the line in time to raze the construction yard. The
-    winning play is the FOG FLANK: route the strike force to the
-    far north (y=2) or far south (y=38) — well outside the line's
-    range AND vision — drive east past the line's longitude, then
-    turn inward to descend on the construction yard from BEHIND. Same enemy,
+    Four medium tanks (2tnk) at the west edge face a tight vertical
+    wall of pillboxes (pbox) and anti-tank rocket soldiers (e3) at
+    x=24, spanning the engagement band and facing west. The objective
+    is an UNDEFENDED enemy construction yard (fact) at (48,20) —
+    behind the line. Charging head-on along y=18..22 puts the lead
+    tank inside the kill envelope of multiple defenders simultaneously
+    and the column never clears the line in time to raze the fact.
+    The winning play is the FOG FLANK: route the strike force to the
+    far north (y=2..5) or far south (y=35..37) — well outside the
+    line's range AND vision — drive east past the line's longitude,
+    then turn inward to descend on the fact from BEHIND. Same enemy,
     same forces, but the route of approach controls whether the
     line's prepared fields of fire can engage at all.
   robotics_analogue: >
@@ -157,7 +117,15 @@ meta:
     - "fog warfare"
   author: openra-bench
 
-base_map: rush-hour-arena
+# Single 64x40 arena shared by all three tiers (audit-tight).
+base_map:
+  generator: arena
+  name: combat-attack-from-behind-fog-arena
+  width: 64
+  height: 40
+  cordon: 2
+  spawns: [[4, 20]]
+  title: 'Attack-From-Behind-Fog Arena 64x40'
 
 base:
   agent: {faction: allies, cash: 0}
@@ -177,304 +145,146 @@ base:
 
 levels:
   # ── EASY ────────────────────────────────────────────────────────────
-  # Bare fog-flank skill: LIGHT line (3× e3 only, no pbox) so a
-  # determined frontal can squeak through but loses the SPEED bar
-  # (fact at x=100 is far from x=50; the column burns turns
-  # engaging the line). Stall LOSES (line is stance:2, never
-  # advances; fact never razed). Fog flank cleanly WINS.
+  # Bare fog-flank skill: LIGHT line (3× e3 only, no pbox). Stall
+  # LOSES (line is stance:2, never advances; fact never razed).
+  # Fog flank cleanly WINS.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four medium tanks (2tnk) stage at the west edge (x=6, y=18..21).
-    # A LIGHT vertical line of THREE anti-tank rocket soldiers (e3,
-    # Dragon launcher, range ~5) stands at x=50, y=19..21, facing
-    # west (stance:2 — auto-fire in range, no chase). Behind the
-    # line, an UNDEFENDED enemy construction yard (fact) sits at
-    # (100,20). Charging head-on (east along y=20) puts the lead
-    # tank in range of all three e3 and the column burns turns
-    # reducing the line — the fact at x=100 is still 50 cells away
-    # with the deadline closing. The winning play is the FOG FLANK
-    # — route the strike force to the far north (y=2) or far south
-    # (y=38), well outside the line's range, drive east past x=80,
-    # then turn inward to descend on the fact at (100,20). Win
-    # when the fact at (100,20) is destroyed AND ≥2 of your tanks
-    # survive, before tick 5400. Stalling LOSES (fact never
-    # destroyed); frontal-charge LOSES on the clock.
     description: >
-      Four medium tanks stage at the west edge. A thin line of three anti-tank rocket soldiers covers the middle longitude, and the enemy
-      construction yard sits undefended at (100,20) behind them. A frontal
-      charge melts under their fire. Sweep around the line via the north
-      or south fringe, then strike the yard with at least two tanks intact
-      within about 60 turns.
+      Commander, this is a flanking strike against an undefended enemy
+      Construction Yard. You are given 4 medium tanks on the west edge.
+      A thin anti-tank line — 3 rocket infantry — covers the central
+      corridor at x=24. Driving head-on through the corridor will burn
+      the clock without reaching the yard at (48,20) behind the line.
+      A clear NORTH fog lane runs above the central walls; take it,
+      swing east past the line's longitude, then turn south to destroy
+      the yard. Keep at least 3 tanks alive within about 60 turns.
     overrides:
-      # EASY MAP — one obvious fog corridor (north y=2..5). The middle
-      # band y=6..14 is walled off across x=10..85 so the flanker can
-      # only slip past the line via the north lane. The south half is
-      # walled off entirely so south flank is impossible (the easy
-      # tier teaches the single-corridor recognition). East descent
-      # window x=86..125 (y=6..14) stays clear so the flanker drops
-      # from y=5 to y=20 to raze the fact at (100,20).
-      base_map:
-        generator: arena
-        name: combat-attack-from-behind-fog-easy
-        width: 128
-        height: 40
-        cordon: 2
-        title: 'Attack-From-Behind-Fog — Easy (North Lane Only)'
-        obstacles:
-          # North middle wall — closes y=6..14 across x=10..85.
-          # West strip x=2..9 stays clear so tanks at x=6 can climb
-          # from y=18 to the fog corridor at y=2..5.
-          - {x: 10, y: 6,  w: 76, h: 9}
-          # South wall — closes y=26..37 across x=10..125. West strip
-          # x=2..9 stays clear (cordon-side connector).
-          - {x: 10, y: 26, w: 116, h: 12}
       actors:
-        # STRIKE FORCE — 4 medium tanks stacked at the west edge,
-        # stance:1 ReturnFire so they only engage when ordered.
-        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
-        # LIGHT LINE — 3× e3 at x=50, y=19..21 facing west.
-        # stance:2 Defend (auto-fire in range, no chase).
-        - {type: e3, owner: enemy, position: [50, 19], stance: 2}
-        - {type: e3, owner: enemy, position: [50, 20], stance: 2}
-        - {type: e3, owner: enemy, position: [50, 21], stance: 2}
-        # OBJECTIVE — undefended enemy fact at (100,20).
-        - {type: fact, owner: enemy, position: [100, 20]}
+        # STRIKE FORCE — 4 medium tanks at the west edge, stance:1
+        # ReturnFire so they only engage when ordered.
+        - {type: 2tnk, owner: agent, position: [4, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 21], stance: 1}
+        # LIGHT LINE — 3× e3 at x=24, y=19..21 facing west.
+        - {type: e3, owner: enemy, position: [24, 19], stance: 2}
+        - {type: e3, owner: enemy, position: [24, 20], stance: 2}
+        - {type: e3, owner: enemy, position: [24, 21], stance: 2}
+        # OBJECTIVE — undefended enemy fact at (48,20).
+        - {type: fact, owner: enemy, position: [48, 20]}
         # SENTINEL — far-corner unarmed fact, keeps the engine
         # alive past objective-fact destruction so the win
         # evaluator sees the terminal frame.
-        - {type: fact, owner: enemy, position: [125, 4]}
+        - {type: fact, owner: enemy, position: [60, 4]}
     win_condition:
       all_of:
         - enemy_key_buildings_destroyed_in_region:
-            {x: 100, y: 20, radius: 6, types: [fact]}
-        - {own_units_gte: 2}
-        - {within_ticks: 5400}
+            {x: 48, y: 20, radius: 6, types: [fact]}
+        - {own_units_gte: 3}
+        - {within_ticks: 4000}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
-        - {not: {own_units_gte: 2}}
+        - {after_ticks: 4001}
+        - {not: {own_units_gte: 3}}
     max_turns: 72
 
   # ── MEDIUM ──────────────────────────────────────────────────────────
-  # +1 controlled variable vs easy: the line grows to FIVE e3 PLUS
-  # TWO pbox bookends (heavy line spanning y=15..25, x=50). The
-  # deadline tightens to within_ticks 4500 (max_turns 51). Frontal
-  # decisively LOSES: 7-element line with overlapping pbox+e3 kill
-  # envelope at x=45..56, y=15..25 destroys ≥3 tanks before the
-  # column clears (busting own_units_gte:2) AND/OR burns ALL turns
-  # without reaching x=100. The intended fog-flank (y=2 or y=38)
-  # wins comfortably: the line never fires on the flanker (Manhattan
-  # ≥13 to the nearest defender from y=2 or y=38).
+  # 2 pbox bookends + 5 e3 core. Frontal decisively LOSES.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four medium tanks (2tnk) stage at the west edge (x=6, y=18..21).
-    # A HEAVY defensive line stands at x=50, y=15..25, facing west
-    # (stance:2 — auto-fire in range, no chase): TWO pillboxes
-    # (pbox, range ~6) bookend FIVE anti-tank rocket soldiers (e3,
-    # Dragon range ~5). Behind the line, an UNDEFENDED enemy
-    # construction yard (fact) sits at (100,20). Charging head-on
-    # (east along y=18..22) puts the lead tank inside the
-    # overlapping kill envelopes of 4+ defenders simultaneously;
-    # concentrated fire destroys the column before it clears.
-    # The winning play is the FOG FLANK — route the strike force
-    # WELL off-axis to the far north (y=2) or far south (y=38),
-    # drive east past the line's longitude (x=50), then turn
-    # inward to descend on the fact at (100,20) from behind. Win
-    # when the fact at (100,20) is destroyed AND ≥2 of your tanks
-    # survive, before tick 4500. Stall, brute attack_move east,
-    # and any frontal charge all LOSE.
     description: >
-      Four medium tanks face a heavier wall at x=50 — two pillboxes
-      flanking five anti-tank rocket soldiers, all facing west. Driving
-      straight east cooks the column in overlapping kill envelopes. Loop
-      wide to the far north or south, slip past x=50, then turn in on the
-      undefended yard at (100,20). Two tanks must survive, within about 50
-      turns.
+      Commander, this is a flanking strike against an undefended enemy
+      Construction Yard. You are given 4 medium tanks on the west edge.
+      A heavy line covers the central corridor at x=24 — 2 pillboxes
+      (stationary defensive turrets) flanking 5 rocket infantry. A
+      head-on push cooks the column in overlapping kill envelopes.
+      Open fog lanes run above (north) and below (south) the central
+      walls. Take one of them, drive east past the line's longitude,
+      then turn in to destroy the yard at (48,20). Keep at least 3
+      tanks alive within about 50 turns.
     overrides:
-      # MEDIUM MAP — TWO fog corridors (north y=2..5 + south y=35..37).
-      # Mid-bands y=6..14 and y=26..34 walled off across x=10..85 so
-      # neither lane can be "shortened" by cutting close to the line
-      # (cutting at y=10 or y=30 would put the tank inside pbox+e3
-      # range). East descent windows x=86..125 stay clear in BOTH
-      # bands so the flanker can drop from y=5 OR climb from y=37
-      # back to y=20 to raze the fact at (100,20).
-      base_map:
-        generator: arena
-        name: combat-attack-from-behind-fog-medium
-        width: 128
-        height: 40
-        cordon: 2
-        title: 'Attack-From-Behind-Fog — Medium (Two Fog Lanes)'
-        obstacles:
-          # North middle wall — closes y=6..14 across x=10..85.
-          - {x: 10, y: 6,  w: 76, h: 9}
-          # South middle wall — closes y=26..34 across x=10..85.
-          - {x: 10, y: 26, w: 76, h: 9}
       actors:
-        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
-        # HEAVY LINE at x=50, y=15..25 — pbox bookends + 5× e3
-        # core. stance:2 (Defend = auto-fire in range, no chase).
-        # Frontal at y=18..22 sits inside pbox+e3 range; flanker
-        # at y=2 or y=38 is out of range of every defender.
-        - {type: pbox, owner: enemy, position: [50, 15]}
-        - {type: e3,   owner: enemy, position: [50, 17], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 19], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 20], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 21], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 23], stance: 2}
-        - {type: pbox, owner: enemy, position: [50, 25]}
-        # OBJECTIVE — undefended enemy fact at (100,20).
-        - {type: fact, owner: enemy, position: [100, 20]}
-        # SENTINEL — far-corner unarmed fact (engine auto-done
-        # preempt).
-        - {type: fact, owner: enemy, position: [125, 4]}
+        - {type: 2tnk, owner: agent, position: [4, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 21], stance: 1}
+        # HEAVY LINE at x=24, y=15..25 — pbox bookends + 5× e3 core.
+        - {type: pbox, owner: enemy, position: [24, 15]}
+        - {type: e3,   owner: enemy, position: [24, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 19], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 23], stance: 2}
+        - {type: pbox, owner: enemy, position: [24, 25]}
+        # OBJECTIVE — undefended enemy fact at (48,20).
+        - {type: fact, owner: enemy, position: [48, 20]}
+        # SENTINEL — far-corner unarmed fact.
+        - {type: fact, owner: enemy, position: [60, 4]}
     win_condition:
       all_of:
         - enemy_key_buildings_destroyed_in_region:
-            {x: 100, y: 20, radius: 6, types: [fact]}
-        - {own_units_gte: 2}
-        - {within_ticks: 4500}
+            {x: 48, y: 20, radius: 6, types: [fact]}
+        - {own_units_gte: 3}
+        - {within_ticks: 3500}
     fail_condition:
       any_of:
-        - {after_ticks: 4501}
-        - {not: {own_units_gte: 2}}
-    # max_turns sized so that the after_ticks 4501 deadline RELIABLY
-    # fires inside the budget even when interrupts (enemy_unit_spotted
-    # / own_unit_destroyed) shorten the per-turn tick advance via
-    # step_until_event (~75-85 ticks/turn observed under interrupt
-    # mode vs the 90-tick nominal). 60 turns × 75 ticks/turn floor =
-    # 4500 ticks → after_ticks:4501 is reachable even on the slow
-    # tick-rate worst case.
+        - {after_ticks: 3501}
+        - {not: {own_units_gte: 3}}
     max_turns: 60
 
   # ── HARD ────────────────────────────────────────────────────────────
-  # +2 controlled variables vs medium:
-  #   1. Even denser line — THREE pbox + SEVEN e3 spanning y=15..25
-  #      (full coverage, no gaps in the frontal kill envelope from
-  #      x≈45..56, y=15..25). Frontal is hopeless.
-  #   2. TWO agent spawn_point groups (NORTH staging y=14..17 OR
-  #      SOUTH staging y=23..26) round-robined by seed so the fog-
-  #      flank latitude flips per seed — a memorised "always flank
-  #      via the north" opening cannot generalise. The line is
-  #      symmetric across y=20 so either spawn faces an equivalent
-  #      fog-flank decision (NORTH spawn → fog via y=2; SOUTH spawn
-  #      → fog via y=38).
+  # 3 pbox + 8 e3 dense wall y=15..25. Agent stages NORTH (y=14..17)
+  # or SOUTH (y=23..26) per seed (spawn_point round-robin). Symmetric
+  # across y=20 so either spawn faces an equivalent fog-flank decision.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four medium tanks (2tnk) stage at ONE of two west-edge
-    # corridors (NORTH y=14..17 OR SOUTH y=23..26, chosen by seed,
-    # anti-memorisation). A dense vertical wall stands at x=50,
-    # y=15..25, facing west (stance:2 — auto-fire in range, no
-    # chase): THREE pillboxes (pbox) interleaved with SEVEN anti-
-    # tank rocket soldiers (e3, Dragon launcher, range ~5). Behind
-    # the wall, an UNDEFENDED enemy construction yard (fact) sits
-    # at (100,20). Any frontal charge along y=14..26 enters the
-    # overlapping kill envelope of the entire 10-defender wall;
-    # concentrated fire destroys the column before it clears.
-    # The winning play is the FOG FLANK — route the strike force
-    # to the far north (y=2 from the NORTH spawn) or far south
-    # (y=38 from the SOUTH spawn), drive east past x=80, then
-    # turn inward to descend on the fact at (100,20). Win when
-    # the fact at (100,20) is destroyed AND ≥2 of your tanks
-    # survive, before tick 4500. Stall, brute attack_move east,
-    # and any frontal head-on charge all LOSE.
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Same task as medium with a denser wall (three pillboxes plus seven
-    # rocket soldiers at x=50). Your tanks stage in the north or south
-    # corridor depending on seed. Destroy the enemy yard at (100,20) with
-    # at least two tanks surviving, within about 54 turns.
     description: >
-      A dense wall of three pillboxes and seven rocket soldiers blocks the
-      middle longitude, and your tanks stage in the north or south
-      corridor depending on seed. A head-on charge dies in the crossfire.
-      Fly wide around the wall, drive east past x=80, then descend on the
-      enemy yard at (100,20) with at least two tanks surviving, within
-      about 50 turns.
+      Commander, this is a flanking strike against an undefended enemy
+      Construction Yard. You are given 4 medium tanks staged in either
+      the north corridor (y=14..17) or the south corridor (y=23..26)
+      depending on seed. A dense wall — 3 pillboxes interleaved with
+      8 rocket infantry — covers the central corridor at x=24. A
+      head-on charge dies in the crossfire. Loop wide via your nearest
+      fog lane (north y=2..5 if you staged north, south y=35..37 if
+      you staged south), drive east past the line, then turn in to
+      destroy the enemy yard at (48,20). Keep at least 3 tanks alive
+      within about 50 turns.
     overrides:
-      # HARD MAP — BOTH fog corridors open (north y=2..5 + south
-      # y=35..37), but the agent stages NORTH (y=14..17) or SOUTH
-      # (y=23..26) per seed (spawn_point round-robin) so the
-      # appropriate flank latitude flips per seed. Symmetric walls
-      # y=6..13 and y=27..34 across x=10..85 keep each lane the
-      # only viable bypass (no shortcut at y=10 or y=30 inside the
-      # 10-defender wall's kill envelope). East descent windows
-      # x=86..125 stay clear in BOTH bands so either flanker can
-      # descend/climb back to y=20 to raze the fact at (100,20).
-      base_map:
-        generator: arena
-        name: combat-attack-from-behind-fog-hard
-        width: 128
-        height: 40
-        cordon: 2
-        title: 'Attack-From-Behind-Fog — Hard (Spawn-Varied Flank)'
-        obstacles:
-          # North middle wall — closes y=6..13 across x=10..85. y=14
-          # stays clear so the NORTH staging corridor (y=14..17) is
-          # not isolated from the west connector x=2..9.
-          - {x: 10, y: 6,  w: 76, h: 8}
-          # South middle wall — closes y=27..34 across x=10..85. y=26
-          # stays clear so the SOUTH staging corridor (y=23..26) is
-          # not isolated from the west connector x=2..9.
-          - {x: 10, y: 27, w: 76, h: 8}
       actors:
         # spawn_point 0 — NORTH staging corridor (y=14..17). Fog
-        # flank latitude from this spawn is y=2 (north edge).
-        - {type: 2tnk, owner: agent, position: [6, 14], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [6, 15], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [6, 16], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [6, 17], stance: 1, spawn_point: 0}
+        # flank latitude from this spawn is y=2..5 (north edge).
+        - {type: 2tnk, owner: agent, position: [4, 14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 15], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 16], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 17], stance: 1, spawn_point: 0}
         # spawn_point 1 — SOUTH staging corridor (y=23..26). Fog
-        # flank latitude from this spawn is y=38 (south edge).
-        - {type: 2tnk, owner: agent, position: [6, 23], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [6, 24], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [6, 25], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, spawn_point: 1}
-        # DENSE LINE at x=50, y=15..25 — 3× pbox + 7× e3, no gaps
-        # in the frontal kill envelope. stance:2 (Defend = auto-
-        # fire in range, no chase). Symmetric across y=20 so either
-        # spawn faces the same fog-flank decision (flipped axis).
-        - {type: pbox, owner: enemy, position: [50, 15]}
-        - {type: e3,   owner: enemy, position: [50, 16], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 17], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 18], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 19], stance: 2}
-        - {type: pbox, owner: enemy, position: [50, 20]}
-        - {type: e3,   owner: enemy, position: [50, 21], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 22], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 23], stance: 2}
-        - {type: e3,   owner: enemy, position: [50, 24], stance: 2}
-        - {type: pbox, owner: enemy, position: [50, 25]}
-        # OBJECTIVE — undefended enemy fact at (100,20).
-        - {type: fact, owner: enemy, position: [100, 20]}
-        # SENTINEL — far-corner unarmed fact (engine auto-done
-        # preempt).
-        - {type: fact, owner: enemy, position: [125, 4]}
+        # flank latitude from this spawn is y=35..37 (south edge).
+        - {type: 2tnk, owner: agent, position: [4, 23], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 24], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 25], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 26], stance: 1, spawn_point: 1}
+        # DENSE LINE at x=24, y=15..25 — 3× pbox + 8× e3.
+        - {type: pbox, owner: enemy, position: [24, 15]}
+        - {type: e3,   owner: enemy, position: [24, 16], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 19], stance: 2}
+        - {type: pbox, owner: enemy, position: [24, 20]}
+        - {type: e3,   owner: enemy, position: [24, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 22], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 23], stance: 2}
+        - {type: e3,   owner: enemy, position: [24, 24], stance: 2}
+        - {type: pbox, owner: enemy, position: [24, 25]}
+        # OBJECTIVE — undefended enemy fact at (48,20).
+        - {type: fact, owner: enemy, position: [48, 20]}
+        # SENTINEL — far-corner unarmed fact.
+        - {type: fact, owner: enemy, position: [60, 4]}
     win_condition:
       all_of:
         - enemy_key_buildings_destroyed_in_region:
-            {x: 100, y: 20, radius: 6, types: [fact]}
-        - {own_units_gte: 2}
-        - {within_ticks: 4500}
+            {x: 48, y: 20, radius: 6, types: [fact]}
+        - {own_units_gte: 3}
+        - {within_ticks: 3500}
     fail_condition:
       any_of:
-        - {after_ticks: 4501}
-        - {not: {own_units_gte: 2}}
+        - {after_ticks: 3501}
+        - {not: {own_units_gte: 3}}
     max_turns: 60

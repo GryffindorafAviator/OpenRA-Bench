@@ -1,36 +1,40 @@
 # Validate: python -m openra_bench.scenarios.validate packs/action-multiunit-coordination.yaml
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
-# ACTION focus: the plan is trivial and stated outright — "split the force,
-# put >=2 units in EACH region before the deadline". The hard part is
-# EXECUTION: serialized one-group-at-a-time control (visit A, then B, then
-# C) takes ~30+ turns to tour the map and BLOWS the binding tick deadline;
-# only genuine parallel dispatch (all groups moving at once, ~17-20 turns)
-# makes it. The split is enforced by units_in_region_gte (not reach_region,
-# which one touring unit could satisfy). Missing the deadline is a LOSS,
-# not a draw.
+# ACTION focus: the plan is trivial and stated outright — "split the
+# force, put >=2 units in EACH region before the deadline". The hard
+# part is EXECUTION: serialized one-group-at-a-time control (visit A,
+# then B, then C) takes too long to tour the map and BLOWS the binding
+# tick deadline; only genuine parallel dispatch (all groups moving at
+# once) makes it. The split is enforced by units_in_region_gte (not
+# reach_region, which one touring unit could satisfy). Missing the
+# deadline is a real LOSS, not a draw.
 
 meta:
   id: action-multiunit-coordination
   title: 'Multi-Squad Coordination — Drive Several Groups to Different Objectives at Once'
   capability: action
   real_world_meaning: >
-    Multi-region task allocation under a shared deadline is not a planning
-    problem here — the split is obvious. It tests whether the controller can
-    actually drive several effector groups in parallel instead of completing
-    one objective then the next, which serialized control fails to do in
-    time.
+    Multi-region task allocation under a shared deadline is not a
+    planning problem here — the split is obvious. It tests whether the
+    controller can actually drive several effector groups in parallel
+    instead of completing one objective then the next, which serialized
+    control fails to do in time.
   robotics_analogue: >
-    Coordinated multi-robot fleet dispatch: a logistics swarm must place
-    distinct sub-teams at separate depots within one delivery window;
-    one-at-a-time control blows the schedule.
-  benchmark_anchor:
-    - "robotics multi-agent coordination"
-    - "SC2 unit micro"
-    - "multi-robot fleet dispatch"
+    Coordinated multi-robot fleet dispatch: a logistics swarm must
+    place distinct sub-teams at separate depots within one delivery
+    window; one-at-a-time control blows the schedule.
   author: "openra-bench"
 
-base_map: rush-hour-arena
+# Single 48x40 arena shared by all three tiers (audit-tight).
+base_map:
+  generator: arena
+  name: action-multiunit-coordination-arena
+  width: 48
+  height: 40
+  cordon: 2
+  spawns: [[4, 6]]
+  title: 'Multi-Squad Coordination Arena 48x40'
 
 base:
   agent: {faction: allies}
@@ -38,50 +42,36 @@ base:
   tools: [move_units, attack_unit, stop]
   planning: true
   termination: {max_ticks: 8000}
-  actors:
-    # Two agent groups in the spawn corner (x < 25) that must be split
-    # and driven to separate regions at the same time. `stance: 0`
-    # (HoldFire) is load-bearing: after the engine movement fixes a
-    # default-stance unit auto-HUNTS the nearest visible enemy
-    # (stance:3 AttackAnything path), so an idle/observe-only policy
-    # would self-deliver the force across the map, destroy the
-    # marker buildings and trigger an enemy-elimination auto-`done`
-    # DRAW before the timeout fail can bite (and risk a
-    # laziest-play-wins inversion). HoldFire units only move when
-    # the agent explicitly orders `move_units`, so a stall is a real
-    # reachable timeout LOSS and the split capability stays
-    # load-bearing.
-    - {type: 2tnk, owner: agent, position: [5, 6],  count: 3, stance: 0}
-    - {type: 1tnk, owner: agent, position: [7, 10], count: 3, stance: 0}
-    # Static enemy buildings mark the destination regions.
-    - {type: fact, owner: enemy, position: [110, 6]}
-    - {type: proc, owner: enemy, position: [110, 33]}
+  actors: []   # every level supplies its own actors via overrides.
 
 levels:
+  # ── EASY ── Two regions (NE + SE). 6 units split into two groups.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Two regions, 6 units. Put >=2 units in EACH region (NE ~110,6 and
-    # SE ~110,33) before tick 2400. One direct parallel dispatch makes
-    # it (~17-20 turns); touring both with one column does not. Lose if
-    # the deadline passes or the force is wiped.
     description: >
-      Split your six tanks into two columns and put at least two units
-      into EACH of the north-east and south-east enemy regions within
-      about 27 turns. Losing the whole force, or missing the deadline,
-      is a loss.
-    overrides: {}
+      Commander, this is a parallel strike mission. You are given a
+      tank column on the west edge: 3 medium tanks and 3 light tanks.
+      Two enemy buildings sit on the far east of the map — a
+      Construction Yard at the north-east corner and an Ore Refinery
+      at the south-east. Split your force into two groups and hit
+      both at the same time, because a one-at-a-time push will not
+      beat the clock.
+    overrides:
+      actors:
+        # Two agent groups in the spawn corner that must be split.
+        # `stance: 0` (HoldFire) is load-bearing: default-stance
+        # units auto-HUNT the nearest visible enemy, so an
+        # idle/observe-only policy would self-deliver the force
+        # across the map, trigger enemy-elimination auto-`done`, and
+        # collapse to a DRAW before the timeout LOSS can bite.
+        - {type: 2tnk, owner: agent, position: [4, 6],  count: 3, stance: 0}
+        - {type: 1tnk, owner: agent, position: [6, 10], count: 3, stance: 0}
+        # Static enemy buildings mark the destination regions.
+        - {type: fact, owner: enemy, position: [44, 4]}   # NE corner
+        - {type: proc, owner: enemy, position: [44, 34]}  # SE corner
     win_condition:
       all_of:
-        - {units_in_region_gte: {x: 110, y: 6,  radius: 8, n: 2}}
-        - {units_in_region_gte: {x: 110, y: 33, radius: 8, n: 2}}
-        # within_ticks 2200 / after_ticks 2201: the engine ends this
-        # level's episode at tick ~2343, so the timeout fail clause
-        # must bite BELOW that — 2401 was inert (the episode ended
-        # before it fired, collapsing a stall to a DRAW). The intended
-        # parallel split still wins by ~tick 1500, well inside 2200.
+        - {units_in_region_gte: {x: 44, y: 4,  radius: 6, n: 2}}
+        - {units_in_region_gte: {x: 44, y: 34, radius: 6, n: 2}}
         - {within_ticks: 2200}
     fail_condition:
       any_of:
@@ -89,47 +79,37 @@ levels:
         - {after_ticks: 2201}
     max_turns: 30
 
+  # ── MEDIUM ── Three dispersed regions (NE + SE + SW). 8 units.
+  # Attrition cap. Enemy pickets contest the eastern lanes.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Three DISPERSED regions, 8 units, attrition cap. Put >=2 units in
-    # EACH of: NE corner (115,6), bottom-left (20,36), SE corner
-    # (115,34) before tick 2800, losing <=2. The regions are in three
-    # different directions — a single eastward column cannot reach the
-    # bottom-left one — so this needs genuine multi-vector dispatch,
-    # not one fanned-out march. Enemy infantry contest the two eastern
-    # lanes; the bottom-left route is clear.
     description: >
-      Eight units in your spawn corner, three drop zones in three different
-      directions: NE (115,6), SE (115,34), and SW (20,36). Park at least two
-      units in each disc within about 32 turns, losing no more than two on
-      the way. Enemy rifles contest the eastern lanes; only true parallel
-      dispatch beats the clock.
+      Commander, this is a three-front parallel strike mission. You
+      are given 3 medium tanks, 3 light tanks, and 2 jeeps on the
+      west side. Three enemy buildings must be reached at the same
+      time: a Construction Yard in the north-east, an Ore Refinery
+      in the south-east, and a Power Plant in the south-west. Small
+      rifle-infantry pickets sit in the middle of the map. Split
+      your force into three groups, drive in parallel, and hold
+      losses to no more than two.
     overrides:
       actors:
-        # `stance: 0` (HoldFire) on every agent unit — see the base
-        # `actors` note: a default-stance unit auto-hunts after the
-        # engine movement fixes, self-delivering the force and
-        # collapsing a stall to an auto-`done` DRAW.
-        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3, stance: 0}
-        - {type: 1tnk, owner: agent, position: [7, 10], count: 3, stance: 0}
-        # Jeeps staged at y=24 (south of centre) so the SE-bound
-        # column does NOT route past the NE picket at y=8 — at y=14
-        # the fragile jeeps were attrited to death before reaching
-        # the SE region, making the 3/3/2 split unsolvable.
-        - {type: jeep, owner: agent, position: [5, 24], count: 2, stance: 0}
-        - {type: fact, owner: enemy, position: [115, 6]}    # NE corner
-        - {type: proc, owner: enemy, position: [115, 34]}   # SE corner
-        - {type: powr, owner: enemy, position: [20, 36]}     # bottom-left
-        - {type: e1,   owner: enemy, position: [60, 8],  stance: 2, count: 2}
-        - {type: e1,   owner: enemy, position: [60, 31], stance: 2, count: 2}
+        - {type: 2tnk, owner: agent, position: [4, 6],  count: 3, stance: 0}
+        - {type: 1tnk, owner: agent, position: [6, 10], count: 3, stance: 0}
+        # Jeeps staged at y=24 (south of centre) so the SW-bound
+        # column does NOT route past the NE picket.
+        - {type: jeep, owner: agent, position: [4, 24], count: 2, stance: 0}
+        # Destination buildings.
+        - {type: fact, owner: enemy, position: [44, 4]}    # NE
+        - {type: proc, owner: enemy, position: [44, 34]}   # SE
+        - {type: powr, owner: enemy, position: [12, 36]}   # SW
+        # Mid-map pickets (contesting the east lanes).
+        - {type: e1,   owner: enemy, position: [24, 6],  stance: 2, count: 2}
+        - {type: e1,   owner: enemy, position: [24, 32], stance: 2, count: 2}
     win_condition:
       all_of:
-        - {units_in_region_gte: {x: 115, y: 6,  radius: 7, n: 2}}
-        - {units_in_region_gte: {x: 20,  y: 36, radius: 7, n: 2}}
-        - {units_in_region_gte: {x: 115, y: 34, radius: 7, n: 2}}
+        - {units_in_region_gte: {x: 44, y: 4,  radius: 6, n: 2}}
+        - {units_in_region_gte: {x: 12, y: 36, radius: 6, n: 2}}
+        - {units_in_region_gte: {x: 44, y: 34, radius: 6, n: 2}}
         - {within_ticks: 2800}
         - {units_lost_lte: 2}
     fail_condition:
@@ -138,68 +118,42 @@ levels:
         - {after_ticks: 2801}
     max_turns: 36
 
+  # ── HARD ── Identical to medium except coordinates are HIDDEN.
+  # objective_coords:relative names the enemy building TYPE in each
+  # direction instead of (x,y). enemy_building_spotted interrupts
+  # re-prompt the agent the instant a unit sights a marker, revealing
+  # that building's exact position.
   hard:
-    # Identical setup to MEDIUM (same regions, same enemy pickets, same
-    # deadline + attrition). The ONLY changed variable is disclosure:
-    # objective_coords:relative names the enemy building TYPE in each
-    # direction instead of (x,y). The buildings start in fog, so the
-    # model must SCOUT toward each direction; enemy_building_spotted
-    # interrupts re-prompt it the instant a unit sights a marker,
-    # revealing that building's exact position — the corrective
-    # feedback loop that makes coordinate-blind grounding solvable. A
-    # hard failure attributes to spatial grounding, not extra combat.
     objective_coords: relative
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Three dispersed regions, 8 units, attrition cap — you are NOT
-    # given coordinates. Each target region is marked by a specific
-    # enemy building, hidden in fog until you scout it. Put >=2 units
-    # next to EACH of: the enemy Construction Yard in the NORTH-EAST,
-    # the enemy Power Plant in the SOUTH-WEST (bottom-left), and the
-    # enemy Ore Refinery in the SOUTH-EAST, before tick 2800, losing
-    # <=2. Push a group toward each direction and KEEP ADVANCING — do
-    # not stop at a guessed spot. The instant a unit spots a target
-    # building you will be interrupted and shown its exact location;
-    # then converge >=2 units on it. The three lie in three different
-    # directions; a single eastward column cannot reach the south-west
-    # one, so this needs genuine multi-vector dispatch. Enemy infantry
-    # contest the two eastern lanes; the south-west route is clear.
     description: >
-      No coordinates given. Push columns toward the north-east,
-      south-east, and south-west to scout for the enemy Construction
-      Yard, Ore Refinery, and Power Plant. Put two units beside each
-      within about 31 turns, losing no more than two.
+      Commander, this is a three-front parallel strike mission with no
+      coordinates given. You are given 3 medium tanks, 3 light tanks,
+      and 2 jeeps on the west side. Three enemy buildings must be
+      reached at the same time, each labelled on your map by direction
+      only: an enemy Construction Yard in the north-east, an enemy
+      Power Plant in the south-west, and an enemy Ore Refinery in the
+      south-east. Push columns toward each direction to scout for
+      them; the instant a unit spots a target you will be interrupted
+      and shown its exact location. Hold losses to no more than two.
     overrides:
       interrupts:
-        # Re-prompt the moment a unit sights a marker building — gives
-        # the coordinate-blind agent the position feedback it needs.
         enemy_building_spotted: true
       actors:
-        # `stance: 0` (HoldFire) on every agent unit — see the base
-        # `actors` note: a default-stance unit auto-hunts after the
-        # engine movement fixes, self-delivering the force and
-        # collapsing a stall to an auto-`done` DRAW.
-        - {type: 2tnk, owner: agent, position: [5, 6],  count: 3, stance: 0}
-        - {type: 1tnk, owner: agent, position: [7, 10], count: 3, stance: 0}
-        # Jeeps staged at y=24 (south of centre) so the SE-bound
-        # column does NOT route past the NE picket at y=8 — at y=14
-        # the fragile jeeps were attrited to death before reaching
-        # the SE region, making the 3/3/2 split unsolvable.
-        - {type: jeep, owner: agent, position: [5, 24], count: 2, stance: 0}
-        - {type: fact, owner: enemy, position: [115, 6]}    # NE corner
-        - {type: proc, owner: enemy, position: [115, 34]}   # SE corner
-        - {type: powr, owner: enemy, position: [20, 36]}     # bottom-left
-        - {type: e1,   owner: enemy, position: [60, 8],  stance: 2, count: 2}
-        - {type: e1,   owner: enemy, position: [60, 31], stance: 2, count: 2}
+        - {type: 2tnk, owner: agent, position: [4, 6],  count: 3, stance: 0}
+        - {type: 1tnk, owner: agent, position: [6, 10], count: 3, stance: 0}
+        - {type: jeep, owner: agent, position: [4, 24], count: 2, stance: 0}
+        - {type: fact, owner: enemy, position: [44, 4]}
+        - {type: proc, owner: enemy, position: [44, 34]}
+        - {type: powr, owner: enemy, position: [12, 36]}
+        - {type: e1,   owner: enemy, position: [24, 6],  stance: 2, count: 2}
+        - {type: e1,   owner: enemy, position: [24, 32], stance: 2, count: 2}
     win_condition:
       all_of:
-        - {units_in_region_gte: {x: 115, y: 6,  radius: 7, n: 2,
+        - {units_in_region_gte: {x: 44, y: 4,  radius: 6, n: 2,
             label: "the enemy Construction Yard (fact) in the NORTH-EAST"}}
-        - {units_in_region_gte: {x: 20,  y: 36, radius: 7, n: 2,
+        - {units_in_region_gte: {x: 12, y: 36, radius: 6, n: 2,
             label: "the enemy Power Plant (powr) in the SOUTH-WEST (bottom-left)"}}
-        - {units_in_region_gte: {x: 115, y: 34, radius: 7, n: 2,
+        - {units_in_region_gte: {x: 44, y: 34, radius: 6, n: 2,
             label: "the enemy Ore Refinery (proc) in the SOUTH-EAST"}}
         - {within_ticks: 2800}
         - {units_lost_lte: 2}

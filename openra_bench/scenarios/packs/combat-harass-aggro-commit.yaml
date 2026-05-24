@@ -1,37 +1,37 @@
 # combat-harass-aggro-commit — AGGRO variant of the harvester-harass
 # triple: fight THROUGH the defender for the higher kill score.
 #
-# Real-world: SC2 aggressive worker raid where the raiders commit to
-# killing both workers AND the on-post defender; military forward
-# attrition warfare (accept losses for the higher-impact target).
-#
-# Discrimination (the four script-policy bar):
-#   • stall (observe only): raiders idle west, never engage; kill bar
-#     unmet → after_ticks LOSS.
-#   • retreat-only (move raiders back to spawn): no engagement, kill
-#     bar unmet → after_ticks LOSS. The defender is non-mobile (no
-#     bot, stance:2 — auto-fires in range but holds post) so it never
-#     follows; retreat is safe but scoreless.
-#   • attack-harv-only-ignore-defender: raiders rush the harvs while
-#     standing inside the defender 3tnk's range; the 3tnk (heavier
-#     than 2tnk) picks off raiders one by one. Kill ratio collapses
-#     before the kill bar is met → not own_units_gte:1 (force wiped)
-#     OR within_ticks busted → LOSS.
-#   • intended focus-defender-then-harv: concentrate the 3 raiders'
-#     fire on the 3tnk first (3-vs-1, tank-on-tank trade favours the
-#     concentrating side); after the defender falls, mop up the now
-#     undefended harvs. ≥1 raider survives, kill bar met → WIN.
+# 2026-05-23 audit (Family-1 #9): map shrunk from rush-hour-arena
+# (128x40) to a tailored 56x40 arena. The decision under test is the
+# threat-priority commit (focus the defender first, then mop up the
+# harvesters) — on the old map ~70 cells of empty drive separated the
+# raiders' staging from the harvester cluster, turning every probe of
+# the doctrine into a search-and-approach. The 56x40 arena keeps the
+# same engagement geometry: raiders at x=4, defender(s) at x=36 on the
+# centroid latitude, harvester cluster at x=40-44 around the proc.
+# Briefing rewritten in plain English per audits/EDIT_PRINCIPLES.md.
 #
 # Family: AGGRO node of the harvester-harass triple.
-#   • TURTLE — covered by `mid-economy-under-fire` (you defend YOUR
+#   - TURTLE — covered by `mid-economy-under-fire` (you defend YOUR
 #     harvesters against an incoming raider).
-#   • BALANCED — `combat-harass-balanced-hit-and-run` (hit-and-run
-#     with retreats; not yet authored).
-#   • AGGRO — THIS pack (commit and kill everything).
-# The three packs share the same harvester-economy frame seen from
-# three different doctrinal vantage points (defender / skirmisher /
-# attritioneer); the win predicate is what makes each doctrine the
-# load-bearing one.
+#   - BALANCED — `combat-harass-balanced-hit-and-run` (hit-and-run
+#     with retreats).
+#   - AGGRO — THIS pack (commit and kill everything).
+#
+# Discrimination (the four script-policy bar — unchanged):
+#   - stall (observe only): raiders never engage; kill bar unmet ->
+#     after_ticks LOSS.
+#   - retreat-only: drive raiders back to spawn. The defender is
+#     stance:2 with no bot (holds post) so retreat is safe but
+#     scoreless -> after_ticks LOSS.
+#   - attack-harv-only-ignore-defender: raiders rush the harvs while
+#     standing inside the defender 3tnk's range; the 3tnk picks them
+#     off one by one. Kill ratio collapses before the kill bar is met
+#     -> own_units_gte:1 trips OR within_ticks busts -> LOSS.
+#   - intended focus-defender-then-harv: concentrate the raiders' fire
+#     on the 3tnk first (3-vs-1 tank trade favours the attacker), then
+#     mop up the now undefended harvs. >=1 raider survives, kill bar
+#     met -> WIN.
 
 meta:
   id: combat-harass-aggro-commit
@@ -60,26 +60,18 @@ meta:
     - "guerrilla raids with kill-everything objective"
   author: openra-bench
 
-# ENGINE NOTES (verified 2026-05-19 with scripted run_level smoke):
-# - Map: rush-hour-arena (128 × 40). Raiders stage at the west edge
-#   (x~6..10), the harv+defender cluster sits centre-east (x~75..82).
-# - Defender 3tnk owner:enemy stance:2 (Defend) — auto-fires in range,
-#   does NOT chase past leash. No bot is declared (`bot_type: ''`),
-#   so the defender holds its post; this guarantees the "retreat-
-#   only" policy is safe but scoreless (no kills → bar unmet → LOSS).
-# - Enemy proc + far enemy fact: proc is MustBeDestroyed too, but the
-#   agent's kill targets (3 harvs + 1 tank) are units, not buildings,
-#   so the proc and the far fact survive and prevent engine auto-done
-#   from collapsing the run to DRAW. The far enemy fact is the safety
-#   net in case the agent accidentally engages buildings.
-# - 2tnk (allies medium) vs 3tnk (soviet heavy) ≈ 1.6:1 HP ratio. A
-#   3-vs-1 tank focus trade kills the 3tnk after the raiders take ~1
-#   tank of damage spread across the group; ≥1 raider survives to
-#   finish the harvs. Attack-harvs-ignore-defender: the 3tnk picks
-#   off raiders at range while they target the (slow, fragile) harvs.
-
-base_map: rush-hour-arena
-starting_cash: 0
+# Tailored 56x40 open arena: cordon-only (no interior obstacles) so
+# the engagement geometry is pure unit-on-unit. Same shape as the
+# legacy rush-hour-arena layout (west-staging vs centre-east cluster)
+# but shrunk to remove the empty pre-engagement drive.
+base_map:
+  generator: arena
+  name: combat-harass-aggro-arena
+  width: 56
+  height: 40
+  cordon: 2
+  spawns: [[4, 20]]
+  title: Combat Harass Aggro Arena 56x40
 
 base:
   agent: {faction: allies, cash: 0}
@@ -95,44 +87,35 @@ levels:
   # Forgiving force ratio — even the attack-harv-only policy may
   # squeak by here on luck. Stall and retreat-only still LOSE.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four medium tank raiders stage at the west edge (x=6, y=18..22). A
-    # cluster of enemy harvesters works the ore patch around their
-    # refinery (`proc` at 80,20), defended by a single heavy tank
-    # stationed on-post. Aggressive doctrine: COMMIT — focus your raiders'
-    # fire on the defender first (3-vs-1 favours the attacker), then mop
-    # up the harvesters. Stalling or pure retreat misses the kill bar (you
-    # must destroy ≥3 of the enemy: the defender + both harvesters).
-    # Attacking harvesters while standing inside the defender's range lets
-    # it pick off your raiders one by one. Win when 3 enemy units are
-    # killed AND at least 1 raider survives, before tick 4500.
     description: >
-      Four medium tanks at the western edge face an enemy refinery at
-      (80,20) with two harvesters working it under a single heavy-tank
-      guard. Commit four-on-one against the heavy first, then mop up the
-      harvesters — three kills total. Engaging the harvesters while inside
-      the heavy's range lets it pick raiders off. One tank must survive,
-      within about 50 turns.
+      Commander, this is an aggressive raid against an enemy economy.
+      You are given 4 medium tanks on the west edge (x=4). An enemy
+      Ore Refinery (proc) sits at (40,20) with 2 harvesters (unarmed
+      ore-collector trucks) working the patch around it. A single
+      heavy tank (heavier than yours; out-trades a medium tank
+      one-on-one) stands guard at (36,20). Three of your tanks
+      shooting the guard at once still win the trade — focus your
+      fire on the heavy first, then sweep the harvesters. Charging
+      the harvesters while the heavy is alive lets it pick you off.
+      Score 3 kills (the guard plus both harvesters) with at least
+      1 tank surviving, within about 50 turns.
     overrides:
       actors:
         # Raider strike force — 4 medium tanks at the west edge.
-        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 22], stance: 1}
         - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
-        - {type: 2tnk, owner: agent, position: [8, 20], stance: 1}
-        # Enemy harv cluster around the proc at (80,20).
-        - {type: harv, owner: enemy, position: [78, 19]}
-        - {type: harv, owner: enemy, position: [82, 21]}
+        # Enemy harv cluster around the proc at (40,20).
+        - {type: harv, owner: enemy, position: [38, 19]}
+        - {type: harv, owner: enemy, position: [42, 21]}
         # The lone defender, on-post just west of the cluster.
-        - {type: 3tnk, owner: enemy, position: [75, 20], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [36, 20], stance: 2}
         # Enemy refinery (the thematic anchor — not a kill target).
-        - {type: proc, owner: enemy, position: [80, 20]}
+        - {type: proc, owner: enemy, position: [40, 20]}
         # Far persistent enemy marker: prevents engine auto-done if
         # the agent accidentally engages the proc.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [52, 4]}
     win_condition:
       all_of:
         - {units_killed_gte: 3}
@@ -150,42 +133,31 @@ levels:
   # LOSES (the 3tnk has time to whittle the raiders before they
   # outscore the kill bar). Intended focus-defender-first WINS.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Three medium tank raiders stage at the west edge (x=6, y=18..22). A
-    # cluster of three enemy harvesters works the ore patch around their
-    # refinery (`proc` at 80,20), defended by a single heavy tank
-    # stationed on-post (3tnk at 75,20). Aggressive doctrine: COMMIT —
-    # concentrate your three raiders' fire on the defender first (3-vs-1
-    # tank trade favours the attacker), then mop up the three harvesters.
-    # Stalling or pure retreat misses the kill bar (you must destroy ≥4 of
-    # the enemy: the defender + all three harvesters). Attacking
-    # harvesters while standing inside the defender's range lets it pick
-    # off your raiders one by one. Win when 4 enemy units are killed AND
-    # at least 1 raider survives, before tick 4500.
     description: >
-      Three medium-tank raiders face an enemy refinery defended by one
-      heavy tank and worked by three harvesters. Concentrate fire on the
-      heavy first — three-on-one favours you — then clean up the
-      harvesters. Four kills, one raider surviving, within about 50 turns.
-      Splitting fire or attacking workers under the heavy's gun trades
-      raiders you can't spare.
+      Commander, this is an aggressive raid against an enemy economy.
+      You are given 3 medium tanks on the west edge (x=4). An enemy
+      Ore Refinery (proc) sits at (40,20) with 3 harvesters working
+      the patch. A single heavy tank stands guard at (36,20) — it
+      out-trades a medium tank one-on-one, but three of yours firing
+      together still beat it. Focus all three on the guard first, then
+      sweep the harvesters. Splitting fire or attacking the workers
+      while the heavy is alive trades raiders you cannot spare. Score
+      4 kills (the guard plus all three harvesters), one tank
+      surviving, within about 50 turns.
     overrides:
       actors:
         # Raider strike force — 3 medium tanks at the west edge.
-        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1}
-        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
-        # Three enemy harvs around the proc at (80,20).
-        - {type: harv, owner: enemy, position: [78, 19]}
-        - {type: harv, owner: enemy, position: [82, 21]}
-        - {type: harv, owner: enemy, position: [82, 18]}
+        - {type: 2tnk, owner: agent, position: [4, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 20], stance: 1}
+        - {type: 2tnk, owner: agent, position: [4, 22], stance: 1}
+        # Three enemy harvs around the proc at (40,20).
+        - {type: harv, owner: enemy, position: [38, 19]}
+        - {type: harv, owner: enemy, position: [42, 21]}
+        - {type: harv, owner: enemy, position: [42, 18]}
         # The lone defender, on-post just west of the cluster.
-        - {type: 3tnk, owner: enemy, position: [75, 20], stance: 2}
-        - {type: proc, owner: enemy, position: [80, 20]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: 3tnk, owner: enemy, position: [36, 20], stance: 2}
+        - {type: proc, owner: enemy, position: [40, 20]}
+        - {type: fact, owner: enemy, position: [52, 4]}
     win_condition:
       all_of:
         - {units_killed_gte: 4}
@@ -208,50 +180,39 @@ levels:
   #      the engagement geometry varies per seed. Enemy garrison is
   #      symmetric — both spawns face an equivalent puzzle.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Three medium tank raiders stage at one of two west-edge corridors
-    # (north y~10..14 OR south y~26..30, chosen by seed, anti-
-    # memorisation). A cluster of four enemy harvesters works the ore
-    # patch around their refinery (`proc` at 80,20), defended by TWO heavy
-    # tanks on-post (one north, one south of the proc). Aggressive
-    # doctrine: COMMIT — concentrate the raiders' fire on ONE defender at
-    # a time, then the second, then mop up the four harvesters. Stalling
-    # or pure retreat misses the kill bar (≥6 enemy units: 2 defenders + 4
-    # harvs). Splitting raider fire across both defenders simultaneously,
-    # or attacking harvesters while standing inside defender range, lets
-    # the two 3tnks pick off your raiders. Win when 6 enemy units are
-    # killed AND at least 1 raider survives, before tick 4500.
     description: >
-      Three raiders stage in the north or south corridor by seed; the
-      enemy refinery is guarded by two heavy tanks and worked by four
-      harvesters. Focus fire on one defender at a time, then the second,
-      then sweep the workers. Six kills, one raider alive, within about 50
-      turns — splitting fire across both heavies lets them grind you down.
+      Commander, this is an aggressive raid against an enemy economy.
+      You are given 3 medium tanks staged in the north corridor
+      (y=10..14) or the south corridor (y=26..30) depending on seed.
+      An enemy Ore Refinery sits at (40,20) with 4 harvesters working
+      the patch and TWO heavy tanks on guard — one north at (36,16),
+      one south at (36,24). Each heavy out-trades a medium tank
+      one-on-one. Focus all three of your tanks on ONE guard at a
+      time, then the second, then sweep the four harvesters.
+      Splitting fire across both heavies lets them grind you down.
+      Six kills, one raider surviving, within about 50 turns.
     overrides:
       actors:
         # spawn_point 0 — NORTH staging corridor (y=10..14)
-        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [6, 14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 10], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 12], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 14], stance: 1, spawn_point: 0}
         # spawn_point 1 — SOUTH staging corridor (y=26..30)
-        - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 26], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 28], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 30], stance: 1, spawn_point: 1}
         # Four enemy harvs around the proc — two north, two south.
-        - {type: harv, owner: enemy, position: [78, 17]}
-        - {type: harv, owner: enemy, position: [82, 18]}
-        - {type: harv, owner: enemy, position: [78, 23]}
-        - {type: harv, owner: enemy, position: [82, 22]}
+        - {type: harv, owner: enemy, position: [38, 17]}
+        - {type: harv, owner: enemy, position: [42, 18]}
+        - {type: harv, owner: enemy, position: [38, 23]}
+        - {type: harv, owner: enemy, position: [42, 22]}
         # Two defenders — one north, one south of the proc (the
         # garrison is symmetric across the y-axis so either spawn
         # group faces equivalent geometry to the engagement).
-        - {type: 3tnk, owner: enemy, position: [75, 16], stance: 2}
-        - {type: 3tnk, owner: enemy, position: [75, 24], stance: 2}
-        - {type: proc, owner: enemy, position: [80, 20]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: 3tnk, owner: enemy, position: [36, 16], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [36, 24], stance: 2}
+        - {type: proc, owner: enemy, position: [40, 20]}
+        - {type: fact, owner: enemy, position: [52, 4]}
     win_condition:
       all_of:
         - {units_killed_gte: 6}

@@ -84,6 +84,29 @@ def _units_to_render_list(
     return out
 
 
+def _resource_cells_from_spatial(
+    spatial: Any, spatial_shape: Any, explored: set[tuple[int, int]] | None = None
+) -> list[dict[str, int]]:
+    try:
+        h, w, c = (int(v) for v in spatial_shape)
+    except (TypeError, ValueError):
+        return []
+    if c <= 5 or h <= 0 or w <= 0 or not spatial:
+        return []
+    out: list[dict[str, int]] = []
+    for y in range(h):
+        row = y * w * c
+        for x in range(w):
+            if explored is not None and (x, y) not in explored:
+                continue
+            try:
+                if float(spatial[row + x * c + 5]) > 0:
+                    out.append({"cell_x": x, "cell_y": y})
+            except (IndexError, TypeError, ValueError):
+                return out
+    return out
+
+
 @dataclass
 class EpisodeSignals:
     """Cumulative + per-step signals derived from Rust obs deltas.
@@ -392,6 +415,11 @@ class RustObsAdapter:
             "spatial": self._raw.get("spatial", []) or [],
             "spatial_shape": tuple(
                 self._raw.get("spatial_shape", (0, 0, 0)) or (0, 0, 0)
+            ),
+            "resource_cells": _resource_cells_from_spatial(
+                self._raw.get("spatial", []) or [],
+                self._raw.get("spatial_shape", (0, 0, 0)) or (0, 0, 0),
+                self._explored,
             ),
             # Raw obs + playable bounds so the vendored training
             # minimap_v2.render (consumes unit_positions/enemy_positions/

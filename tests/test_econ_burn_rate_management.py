@@ -117,7 +117,7 @@ def _tank_only(rs, C):
     """Use the pre-placed tanks WITHOUT building anything more.
     Harvest income lifts cash above MAX while kills clear the bar →
     LOSS on the upper-cash bound on EVERY tier (easy ≤ 1800; medium
-    ≤ 1500; hard ≤ 1800). This is the "save while attacking" play —
+    ≤ 1500; hard ≤ 1499). This is the "save while attacking" play —
     the BURN-RATE teeth catch it."""
     units = rs.get("units_summary", []) or []
     harvs = [u for u in units if u.get("type") == "harv"]

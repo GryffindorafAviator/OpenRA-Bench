@@ -8,7 +8,7 @@
 # Drive the strike tanks straight in and every guard auto-fires on
 # the approach — e3 anti-tank DPS shreds a 2tnk column before the
 # fact falls and the attrition cap (units_lost_lte:N) trips. Sit
-# still and the clock runs out (within_ticks 5400).
+# still and the clock runs out (within_ticks 3600).
 #
 # The intended idiom is the SC2 bait-micro / military feint-and-flank
 # doctrine: commit the cheap fast jeep as bait on a divergent vector
@@ -31,27 +31,10 @@
 # the strike force exploits the gap to attack the objective itself,
 # not pass through.
 #
-# Engine notes (per CLAUDE.md):
-#   - Map (medium / hard only): custom 128x48 arena (cordon 2 ⇒
-#     playable y in [2..45]) generated via mapgen's `arena` generator
-#     with WATER walls that physically reinforce the north-flank-
-#     strike doctrine of the L-cover variant. The strike force stages
-#     on the NORTH flank (y=12) and the bait jeep on the SOUTH flank
-#     (y=28); a wide head-on engagement band y=16..23 across
-#     x=10..68 is walled so a brute-frontal drive on y=20 is
-#     geometrically impossible — the strike force MUST detour to the
-#     NORTH lane (y=2..15 left of x=10 and y=2..15 above the wall).
-#     The SOUTH lane (y=29..45 plus y>=24 east of x=68) carries the
-#     bait's deep-kite vector that pulls the south arc of guards off
-#     post; the fact at (80,20) sits in the open band east of the
-#     wall (x>=69, y=15..27). Easy retains the pack-level
-#     rush-hour-arena (no head-on wall — the easy 3-guard west-face
-#     idiom works on the open arena because the bait pulls ALL three
-#     guards south, and the strike's head-on east drive sees an
-#     undefended face by the time it arrives).
+# Engine notes (per CLAUDE.md + Wave 12+13 footgun ledger):
 #   - `fact` is `MustBeDestroyed`: razing it would auto-`done` the
-#     engine. A SENTINEL enemy `fact` is placed in the far north so
-#     the episode persists past the objective `fact` destruction
+#     engine. A SENTINEL enemy `fact` is placed in the far NE corner
+#     so the episode persists past the objective `fact` destruction
 #     until the engine evaluates win/fail predicates — including the
 #     attrition cap (units_lost_lte) and the deadline (within_ticks).
 #   - GUARD_AGGRO ≈ 16, GUARD_LEASH ≈ 18 from spawn_cell. The bait
@@ -68,6 +51,17 @@
 #     engine — it pulls a guard segment off post for a transient
 #     window and is then spent; the strike must commit during that
 #     window, not loop a long route while the jeep idles.
+#   - Wave 13 tick-rate footgun: engine advances ~64 ticks/turn under
+#     the bench's interrupt mode (NOT the CLAUDE.md ~90). The
+#     within_ticks deadline is tightened from 5400 to 3600 so it
+#     bites inside max_turns=62 (max reachable tick ≈ 64*62 ≈ 3968).
+#   - Wave 13 mpspawn-rotation footgun: the `arena` generator's
+#     default 4 corner mpspawns rotate per seed and OFFSET pre-placed
+#     actor coords relative to the chosen spawn, so authored
+#     coordinates don't land where you wrote them. This pack's
+#     `base_map` declares an EXPLICIT single mpspawn at the west-mid
+#     stage cell so every seed sees the same actor coordinates and
+#     the bait/flank geometry is invariant.
 
 meta:
   id: combat-bait-counter-attack
@@ -104,7 +98,57 @@ meta:
     - "CICERO / Diplomacy deception"
   author: openra-bench
 
-base_map: rush-hour-arena
+# combat-bait-counter-arena: tailored 112×40 arena (playable x in
+# [2..109], y in [2..37]). Generator: `arena` with three SMALL water-
+# rock cover clusters arranged so the bait/flank geometry reads as
+# two distinct corridors (decoy south + ambush north), without
+# touching the actual tank-vs-guard engagement zone:
+#   • SOUTH-FLANK decoy cover — TWO small rock clusters at (50,30)
+#     and (70,33) along the bait jeep's south-east approach lane.
+#     The jeep skirts past the cover into the south arc's
+#     GUARD_AGGRO radius, presenting as an "easy target" pulling
+#     the south guards off post. Y=30+ is well clear of the e3
+#     cluster (y=18..24), so these rocks do NOT change the strike-
+#     vs-guard engagement range from the north flank.
+#   • NORTH-FLANK ambush visual — one small rock at (90,6) in the
+#     NE corner marks the perpendicular "hidden ambush" axis. The
+#     north corridor (y=10..14) the strike column swings through
+#     is left fully OPEN: once the bait pulls the south arc off
+#     post, the strike has an unimpeded swing-in lane to the yard's
+#     now-undefended north face. The bait points the enemy at the
+#     south; the strike commits from the north.
+# Explicit single mpspawn at the west-mid stage cell (6,20): per
+# Wave-13 footgun #6 the arena's default 4-corner mpspawns rotate
+# per seed and OFFSET pre-placed actor coords; declaring one spawn
+# pins coordinates seed-invariantly so the bait/flank geometry
+# (guard positions, jeep aggro vector, fact location) is identical
+# every seed.
+base_map:
+  generator: arena
+  name: combat-bait-counter-arena
+  width: 112
+  height: 40
+  cordon: 2
+  spawns: [[6, 20]]
+  obstacles:
+    # SOUTH-FLANK decoy cover cluster: two small rock groups along
+    # the bait jeep's south-east approach lane. These frame the
+    # "easy target" decoy axis — the jeep skirts past the cover
+    # into the south arc's GUARD_AGGRO radius, presenting as a soft
+    # target pulling the south guards off post toward it. They are
+    # placed well south of the e3 cover (y=30 and y=32, vs e3 at
+    # y=18..24) so they do NOT alter the tank-vs-guard engagement
+    # range from the NORTH flank — that combat zone stays clean
+    # open ground, matching the baseline calibration.
+    - {x: 50, y: 30, w: 3, h: 2}
+    - {x: 70, y: 33, w: 3, h: 2}
+    # NE corner rock — visual marker of the "hidden ambush" axis on
+    # the perpendicular flank. Far enough from the north corridor
+    # (y=12) that the strike column has fully unimpeded swing-in
+    # lane to the yard's north face once the bait pulls the south
+    # arc off post.
+    - {x: 90, y: 6, w: 2, h: 2}
+  title: Bait Counter-Attack Arena 112x40
 
 base:
   agent: {faction: allies, cash: 0}
@@ -116,67 +160,77 @@ base:
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
   # The bare bait-and-flank skill: 3 leashed guards lined on the
-  # WEST face of the enemy fact (the natural approach side), generous
-  # loss cap (3). After the engine move-fire fixes the e3 anti-tank
-  # Dragon shreds tanks far harder, so the strike force is 4 medium
-  # tanks (was 3). Brute frontal: the column eats anti-tank fire from
-  # the whole guard line, never razes the yard before the clock — a
-  # real timeout LOSS. Stall: clock runs out (within_ticks 5400).
-  # Bait-only: the jeep pulls the guards south off post but no strike
-  # — the fact survives, clock runs out. Intended: the jeep dives
-  # deep south so the west-face guards lunge after it; while it kites
-  # them at their leash the strike tanks focus-fire the nearest guard
-  # and then drive onto the now-undefended yard.
+  # WEST face of the enemy fact (the natural approach side, in the
+  # gap between the two cover rocks at y=16 and y=24), generous loss
+  # cap (3). After the engine move-fire fixes the e3 anti-tank Dragon
+  # shreds tanks far harder, so the strike force is 4 medium tanks.
+  # Brute frontal: the column eats anti-tank fire from the whole
+  # guard line, never razes the yard before the clock — a real
+  # timeout LOSS. Stall: clock runs out (within_ticks 3600). Bait-
+  # only: the jeep pulls the guards south off post but no strike —
+  # the fact survives, clock runs out. Intended: the jeep dives deep
+  # south so the west-face guards lunge after it; while it kites
+  # them at their leash the strike tanks focus-fire the nearest
+  # guard and then drive onto the now-undefended yard.
   easy:
     # Original (pre-verbosity-sweep) description preserved for
     # contributors. The trimmed version below removes scripted-policy
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
     # Three leashed rocket-infantry guards stand on the west face of
-    # the enemy construction yard (`fact` at 80,20), directly
-    # between you and the objective. They hold post, auto-fire on
-    # units in range, lunge at the nearest foe within ≈16 cells, and
-    # snap back past a leash of ≈18. Destroy the enemy construction
-    # yard with at most 3 of your units lost before tick 5400.
-    # Driving the tanks straight east at the yard puts them in
-    # anti-tank fire from the whole guard line; stalling runs the
-    # clock. Commit the fast jeep on a divergent south-east vector
-    # so the guards lunge south after it; while the jeep kites them
-    # at their leash, run the strike tanks straight through the
-    # now-undefended west face to destroy the yard.
+    # the enemy construction yard (`fact` at 80,20), in the gap
+    # between two terrain rocks, directly between you and the
+    # objective. They hold post, auto-fire on units in range, lunge
+    # at the nearest foe within ≈16 cells, and snap back past a
+    # leash of ≈18. Destroy the enemy construction yard with at most
+    # 3 of your units lost before tick 3600. Driving the tanks
+    # straight east at the yard puts them in anti-tank fire from the
+    # whole guard line; stalling runs the clock. Commit the fast
+    # jeep on a divergent south-east vector so the guards lunge
+    # south after it; while the jeep kites them at their leash, run
+    # the strike tanks straight through the now-undefended west face
+    # to destroy the yard.
     description: >
       Three leashed rocket-infantry guards wall the west face of the
       enemy construction yard at (80,20). Destroy the yard, losing at
       most three units, within about 62 turns.
     overrides:
       actors:
-        # Strike force: 4 medium tanks at west, central staging.
-        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 4}
-        # Bait: 1 fast jeep at west, south staging.
+        # Strike force: 4 medium tanks staging at west-centre on the
+        # NORTH-flank corridor (y=12). The north corridor is the
+        # "hidden ambush" lane — left fully open by the map design,
+        # the strike swings in above the cover once the bait has
+        # pulled the guards south.
+        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, count: 4}
+        # Bait: 1 fast jeep staged at west-south (y=28). The south-
+        # flank cover rock at (60,30) frames the divergent south-east
+        # approach lane the jeep runs to pull the guards off post.
         - {type: jeep, owner: agent, position: [6, 28], stance: 1}
         # The OBJECTIVE: enemy construction yard at mid-map.
         - {type: fact, owner: enemy, position: [80, 20]}
         # The GUARDS: 3 leashed rocket infantry on the WEST face of
-        # the fact. A deep-south jeep bait is within aggro ≈16 cells
+        # the fact, in the gap between the two terrain rocks at y=16
+        # and y=24. A deep-south jeep bait is within aggro ≈16 cells
         # of all three, so all three lunge south after it, clearing
         # the west approach.
         - {type: e3, owner: enemy, position: [76, 18], stance: 2}
         - {type: e3, owner: enemy, position: [76, 20], stance: 2}
         - {type: e3, owner: enemy, position: [76, 22], stance: 2}
-        # SENTINEL: persistent enemy fact at far north (out of the
-        # combat zone, agent can't reach it in budget) so the engine
-        # does not auto-`done` the instant the objective fact dies,
-        # letting the within_ticks / units_lost_lte predicates
-        # evaluate cleanly on the terminal frame.
-        - {type: fact, owner: enemy, position: [120, 4]}
+        # SENTINEL: persistent enemy fact in the NE corner (out of
+        # the combat zone, agent can't reach it in budget) so the
+        # engine does not auto-`done` the instant the objective fact
+        # dies, letting the within_ticks / units_lost_lte predicates
+        # evaluate cleanly on the terminal frame. NE corner instead
+        # of the legacy (120,4): the tailored arena is 112 wide.
+        - {type: fact, owner: enemy, position: [108, 4]}
     win_condition:
       all_of:
         - {enemy_key_buildings_destroyed: {types: [fact]}}
-        - {within_ticks: 5400}
+        - {within_ticks: 3600}
         - {units_lost_lte: 3}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 3601}
         - {not: {units_lost_lte: 3}}
         - {not: {own_units_gte: 1}}
     max_turns: 62
@@ -188,16 +242,16 @@ levels:
   # displaced, swinging in above the cover to reach the yard. After
   # the engine move-fire fixes the e3 Dragon bites the 2tnk Heavy
   # armour harder, so a 3-tank strike can no longer trade a 5-guard
-  # cover within the cap — the strike force is 5 medium tanks (was
-  # 3), a scale-up matching the denser cover. The strike stages on
-  # the NORTH flank (y=12, was a head-on y=20): the engine `count:`
-  # spawn-spread now scatters the column across several cells, so a
-  # head-on stage drives the spread column straight into the
-  # un-baited WEST arc and trades too much armour; the north-flank
-  # stage lets the column swing in above the cover once the bait has
-  # pulled the south arc. Strict attrition cap stays 2 (the bait
-  # jeep + at most one tank): the strike must still hit the yard
-  # essentially intact; burning a second tank fails.
+  # cover within the cap — the strike force is 5 medium tanks, a
+  # scale-up matching the denser cover. The strike stages on the
+  # NORTH flank (y=12): the engine `count:` spawn-spread now
+  # scatters the column across several cells, so a head-on stage
+  # drives the spread column straight into the un-baited WEST arc
+  # and trades too much armour; the north-flank stage lets the
+  # column swing in above the cover once the bait has pulled the
+  # south arc. Strict attrition cap stays 2 (the bait jeep + at
+  # most one tank): the strike must still hit the yard essentially
+  # intact; burning a second tank fails.
   medium:
     # Original (pre-verbosity-sweep) description preserved for
     # contributors. The trimmed version below removes scripted-policy
@@ -212,7 +266,7 @@ levels:
     # second tank fails. Commit the fast jeep on a deep south flank
     # vector to pull the south arc of guards off post after it; while
     # that arc is displaced, swing the strike tanks around the
-    # now-vacated NORTH flank and onto the yard before tick 5400.
+    # now-vacated NORTH flank and onto the yard before tick 3600.
     # Bait-only (no strike) loses on the clock; brute frontal trades
     # the strike force.
     description: >
@@ -220,57 +274,34 @@ levels:
       and south faces of the enemy yard at (80,20). Destroy the yard,
       losing at most two units, within about 62 turns.
     overrides:
-      # MEDIUM MAP — 128x48 arena (cordon 2 -> playable y in [2..45]).
-      # Head-on engagement band y=16..23 walled across x=10..68 so a
-      # brute attack_move east on y=20 is geometrically impossible —
-      # the strike force MUST swing through the NORTH lane (y=2..15
-      # at x>=10 stays clear above the wall; y=12 staging is in the
-      # open band). The SOUTH lane (y=29..45 left of x=10 plus the
-      # open east column y>=24 east of x=68) carries the bait jeep's
-      # deep-kite vector. The yard at (80,20) sits in the open
-      # corridor east of the wall (x>=69).
-      base_map:
-        generator: arena
-        name: combat-bait-counter-attack-medium
-        width: 128
-        height: 48
-        cordon: 2
-        title: 'Bait + Counter-Attack — Medium (North-Flank Strike)'
-        obstacles:
-          # Mid-axis wall — closes y=16..23 across x=10..68. North
-          # staging (y=12) and south staging (y=28) stay open; the
-          # west connector strip x=2..9 is always clear so the
-          # north-flank strike route runs north from y=12 to y=2..15
-          # (open above wall) east to x=68 then south to the yard
-          # at (80,20) once the bait has pulled the south arc.
-          - {x: 10, y: 16, w: 59, h: 8}
       actors:
         # Strike force: 5 medium tanks staged on the NORTH flank
-        # (y=12) so that, once the bait pulls the SOUTH arc off post,
-        # the column swings in above the WEST/SOUTH cover and reaches
-        # the yard taking minimal anti-tank fire. A head-on y=20
-        # stage drives straight into the un-baited WEST arc.
+        # (y=12) — the "hidden ambush" corridor left open by the
+        # arena design. Once the bait pulls the SOUTH arc off post,
+        # the column swings in above the WEST/SOUTH cover and
+        # reaches the yard taking minimal anti-tank fire. A head-on
+        # y=20 stage would drive straight into the un-baited WEST arc.
         - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, count: 5}
         - {type: jeep, owner: agent, position: [6, 28], stance: 1}
         - {type: fact, owner: enemy, position: [80, 20]}
         # 5 guards on the WEST + SOUTH faces. A deep-south jeep bait
-        # pulls the SOUTH arc (76,24), (80,24), (84,24) off post;
-        # the strike focus-fires the WEST arc (76,18), (76,20) and
-        # the displaced remainder.
+        # (driven past the (60,30) cover rock) pulls the SOUTH arc
+        # (76,24), (80,24), (84,24) off post; the strike focus-fires
+        # the WEST arc (76,18), (76,20) and the displaced remainder.
         - {type: e3, owner: enemy, position: [76, 18], stance: 2}
         - {type: e3, owner: enemy, position: [76, 20], stance: 2}
         - {type: e3, owner: enemy, position: [76, 24], stance: 2}
         - {type: e3, owner: enemy, position: [80, 24], stance: 2}
         - {type: e3, owner: enemy, position: [84, 24], stance: 2}
-        - {type: fact, owner: enemy, position: [120, 4]}
+        - {type: fact, owner: enemy, position: [108, 4]}
     win_condition:
       all_of:
         - {enemy_key_buildings_destroyed: {types: [fact]}}
-        - {within_ticks: 5400}
+        - {within_ticks: 3600}
         - {units_lost_lte: 2}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 3601}
         - {not: {units_lost_lte: 2}}
         - {not: {own_units_gte: 1}}
     max_turns: 62
@@ -303,7 +334,7 @@ levels:
     # losing a second tank fails. Commit the fast jeep on a deep
     # south flank vector to pull the south arc of guards off post;
     # while that arc is displaced, swing the strike tanks around the
-    # now-vacated NORTH flank and onto the yard before tick 5400.
+    # now-vacated NORTH flank and onto the yard before tick 3600.
     # Brute frontal trades armour and fails; bait-only never razes
     # the yard; stalling loses the clock.
     description: >
@@ -311,21 +342,6 @@ levels:
       distance (far west or well forward). Destroy the enemy yard,
       losing at most two units, within about 62 turns.
     overrides:
-      # HARD MAP — same head-on wall layout as medium plus the
-      # existing spawn-distance round-robin (spawn 0 at far-west
-      # x=6, spawn 1 at forward x=18). The wall y=16..23 at
-      # x=10..68 still blocks the head-on engagement axis from
-      # both spawns; spawn 1's staging cells (18,12) and (18,28)
-      # sit in the open NORTH/SOUTH bands above and below the wall.
-      base_map:
-        generator: arena
-        name: combat-bait-counter-attack-hard
-        width: 128
-        height: 48
-        cordon: 2
-        title: 'Bait + Counter-Attack — Hard (Spawn-Varied Distance)'
-        obstacles:
-          - {x: 10, y: 16, w: 59, h: 8}
       actors:
         # spawn_point 0 — FAR-WEST staging (x=6): the strike has the
         # full run-in to the yard; the bait has time to pull the
@@ -355,15 +371,15 @@ levels:
         - {type: e3, owner: enemy, position: [76, 24], stance: 2}
         - {type: e3, owner: enemy, position: [80, 24], stance: 2}
         - {type: e3, owner: enemy, position: [84, 24], stance: 2}
-        - {type: fact, owner: enemy, position: [120, 4]}
+        - {type: fact, owner: enemy, position: [108, 4]}
     win_condition:
       all_of:
         - {enemy_key_buildings_destroyed: {types: [fact]}}
-        - {within_ticks: 5400}
+        - {within_ticks: 3600}
         - {units_lost_lte: 2}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 3601}
         - {not: {units_lost_lte: 2}}
         - {not: {own_units_gte: 1}}
     max_turns: 62

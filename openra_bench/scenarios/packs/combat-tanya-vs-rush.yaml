@@ -18,15 +18,34 @@
 #     e1 rush faster than they can dent her 150k HP. ≥4 kills AND
 #     tanya alive → WIN.
 #
-# Why the spec works (verified against the engine combat sheet):
-#   • tanya HP 150000 = 3x e1; e1 M1Carbine damage 1000 per shot,
-#     reload 20 ticks → 4 e1 dump ~200 dps total at point blank.
-#     Tanya pistol: damage 5000, reload 10 → 500 dps; she ends an
-#     e1 in 10 ticks then the next, clearing 4 e1 in ~40-60 ticks
-#     while taking ~200·60/90 ≈ 130 hp of damage — survives easy.
-#   • A stance:0 (HoldFire) tanya never auto-fires even when shot;
-#     she's a sandbag. The discrimination is whether the policy
-#     actively engages the rush or stalls.
+# Why the spec works (verified against the engine combat sheet
+# from `unit_codex` — vendored C# RA YAML):
+#   • Tanya is the Allied `E7` actor: HP 10000, weapon Colt45 (10000
+#     damage × reload 7 ticks × range 7c0 — one-shots an e1 at point
+#     blank, fires faster than e1 reloads).
+#   • A scenario `type: tanya` resolves to E7 via the engine alias
+#     installed in `gamerules::GameRules::from_ruleset` (so the bench
+#     can keep using the canonical name "tanya" without diverging
+#     from the C# YAML actor id). Without the alias, "tanya" had no
+#     ruleset entry and the engine spawned her weaponless with the
+#     fallback "default" 100-dps weapon — the original
+#     unsolvable-doctrine root cause.
+#   • e1 carries M1Carbine (PRIMARY): 1000 dmg × Versus None:150% =
+#     1500 effective per shot × reload 20 ticks = 75 dps per e1. (The
+#     C# yaml also lists `Armament@GARRISONED: Vulcan` for use inside
+#     APC/pillbox cargo; `from_ruleset` now filters GARRISONED so a
+#     non-garrisoned e1 fires its real PRIMARY weapon, NOT the
+#     stronger garrison weapon — pinned by
+#     `openra-sim/tests/test_tanya_alias.rs`.)
+#   • The discrimination is "actively engage with set_stance + attack
+#     orders" vs "stall / blind attack-move without stance flip".
+#     A stance:0 Tanya never fires even when shot; a brute attack_move
+#     east without a stance flip walks into the enemies and stands
+#     idle (HoldFire blocks auto-engage). The intended policy issues
+#     `set_stance(tanya, 2)` (Defend — auto-fires on the closest in-
+#     range enemy without abandoning post to hunt the persistent fact
+#     marker) AND explicit `attack_unit(tanya, e1)` per turn so each
+#     reload cycle picks a fresh target the moment the previous dies.
 
 meta:
   id: combat-tanya-vs-rush
@@ -52,7 +71,19 @@ meta:
     - "asymmetric high-value asset doctrine"
   author: openra-bench
 
-base_map: rush-hour-arena
+# Tailored 32×40 arena (cordon 2 ⇒ playable x in [2..29], y in
+# [2..37]). The rush engagement happens in a tiny localised area
+# (Tanya at (12,20) vs e1 cluster at (16..19, 20)); a 128-cell map
+# leaves most of the arena as empty padding. Explicit single mpspawn
+# pins coordinates seed-invariantly (Wave-13 mpspawn-rotation footgun).
+base_map:
+  generator: arena
+  name: combat-tanya-vs-rush-arena
+  width: 32
+  height: 40
+  cordon: 2
+  spawns: [[4, 20]]
+  title: 'Combat Tanya vs Rush Arena 32x40'
 starting_cash: 0
 
 base:
@@ -89,28 +120,32 @@ levels:
     # dies. Win when ≥4 enemy units are killed AND tanya is still alive,
     # before tick 2700.
     description: >
-      A lone Tanya commando stands at (60,20) on HoldFire. Four Soviet
-      riflemen rush from the east on attack-anything stance. Tanya's
-      pistol shreds them at point-blank, but only if you give the order —
-      observe and she dies. Issue an attack and kill all four, keeping her
-      alive, within about 30 turns.
+      Commander, this is a hero engagement. You are given Tanya at
+      (12,20) — an elite commando: fast, tough, with a pistol that
+      one-shots riflemen. She starts on hold-fire (she will NOT engage
+      even if shot at). The enemy rushes from the east on
+      attack-anything stance: 4 riflemen in a line at x=16-19, y=20.
+      Lift Tanya's hold-fire order and attack the riflemen — at
+      point-blank her pistol cuts down all four faster than they can
+      dent her 150k HP. Sitting idle lets them surround her and she
+      dies. Four kills, Tanya alive, within about 30 turns.
     overrides:
       actors:
         # Tanya — stance:0 HoldFire so a stall policy (or a blind
         # auto-engage) does NOT win for free. The capability is
         # active engagement.
-        - {type: tanya, owner: agent, position: [60, 20], stance: 0}
+        - {type: tanya, owner: agent, position: [12, 20], stance: 0}
         # Four e1 rushers — stance:3 AttackAnything, so they advance
         # toward tanya and open fire on contact (no need for the
         # enemy to be ordered; they deliver themselves).
-        - {type: e1, owner: enemy, position: [64, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [65, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [66, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [67, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [16, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [17, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [18, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [19, 20], stance: 3}
         # Far persistent enemy marker — prevents engine auto-done
         # when the rush is wiped so the win/fail evaluator sees the
         # terminal frame (no DRAW collapse).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [28, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 4}
@@ -123,39 +158,53 @@ levels:
     max_turns: 30
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 axis: bigger rush (6 e1 in two ranks), wider opening fan.
-  # The kill bar tightens to 6. Same hero-engagement decision; the
-  # bigger pack is a real DPS test — a tanya who delays her first
-  # shot by a turn or two takes meaningful damage before clearing.
+  # +1 axis: bigger rush (6 e1 total), but split into TWO WAVES via
+  # scheduled_events so Tanya's hero engagement is a real DPS test:
+  # she clears wave A (3 e1), recovers a few ticks while wave B walks
+  # in from off-map, then clears wave B (3 more e1). A stall policy
+  # lets wave A overwhelm her at the start; a brute-but-late commit
+  # bleeds too much HP on wave A and dies to wave B; the intended
+  # policy stance-flips + attacks each e1 at point-blank, finishing
+  # each in one Colt45 shot (10000 dmg ≥ e1 HP 5000).
+  #
+  # Why two waves (not 6 stacked): 6 e1 firing M1Carbine (1500 eff
+  # dmg per shot, reload 20) at Tanya HP 10000 dump ~9000 dmg in the
+  # ENGAGE tick before she can return fire — she'd be 1-shot. A wave
+  # of 3 deals ~4500 dmg in the same window, leaving ~5500 HP for
+  # her to clear them and prep for wave B.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # A single Allied Tanya commando stands at (60,20) on hold-fire
-    # stance. A rush of SIX Soviet rifle infantry (e1) advances from two
-    # close ranks at the east (front rank x=64, rear rank x=65) on attack-
-    # anything stance. Issue attack_move (or attack_unit on each e1) and
-    # tanya kills the whole pack; observe and she dies. Win when ≥6 enemy
-    # units are killed AND tanya is still alive, before tick 2700.
     description: >
-      Tanya holds at (60,20) on HoldFire. Six rifles rush from two tight
-      ranks at the east. Give her the order — attack_move or attack each
-      in turn — and she'll cut down the whole pack at close range. Observe
-      and she's overwhelmed. Six kills, Tanya alive, within about 30
-      turns.
+      Commander, this is a hero engagement against a denser rush. You
+      are given Tanya at (12,20) — an elite commando: fast, tough,
+      with a pistol that one-shots riflemen. She starts on hold-fire
+      (she will NOT engage even if shot at). The enemy rushes from
+      the east in two waves on attack-anything stance: wave A of 3
+      riflemen at (16, 19-21) NOW, and a SECOND wave of 3 more
+      riflemen appears at (20, 19-21) about 4 turns in. Lift Tanya's
+      hold-fire order and attack each rifleman at point-blank — her
+      Colt45 one-shots them. Sitting idle lets wave A gang up on her.
+      Six kills, Tanya alive, within about 30 turns.
     overrides:
       actors:
-        - {type: tanya, owner: agent, position: [60, 20], stance: 0}
-        # Front rank — three e1 across y=19..21 at x=64.
-        - {type: e1, owner: enemy, position: [64, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [64, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [64, 21], stance: 3}
-        # Rear rank — three more e1 across y=19..21 at x=65.
-        - {type: e1, owner: enemy, position: [65, 19], stance: 3}
-        - {type: e1, owner: enemy, position: [65, 20], stance: 3}
-        - {type: e1, owner: enemy, position: [65, 21], stance: 3}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: tanya, owner: agent, position: [12, 20], stance: 0}
+        # Wave A — three e1 in a single rank at x=16, y=19..21 (the
+        # initial engagement). Single rank (not 2×3 block) keeps
+        # simultaneous DPS on Tanya at ~4500 dmg/shot-cycle, leaving
+        # her ~5500 HP to clear them with Colt45.
+        - {type: e1, owner: enemy, position: [16, 19], stance: 3}
+        - {type: e1, owner: enemy, position: [16, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [16, 21], stance: 3}
+        - {type: fact, owner: enemy, position: [28, 20]}
+      # Wave B — 3 more e1 inject mid-episode (after ~3.3 turns ≈ 300
+      # ticks) so Tanya has time to clear wave A first. They spawn
+      # close to the original cluster zone (x=20) and walk in.
+      scheduled_events:
+        - tick: 300
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [20, 19], stance: 3}
+            - {type: e1, owner: enemy, position: [20, 20], stance: 3}
+            - {type: e1, owner: enemy, position: [20, 21], stance: 3}
     win_condition:
       all_of:
         - {units_killed_gte: 6}
@@ -168,53 +217,57 @@ levels:
     max_turns: 30
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # +1 axis: rush spawns from one of two seed-driven corridors
-  # (north y=15..17 OR south y=23..25) so tanya cannot pre-aim;
-  # the policy has to read the spawn direction and commit. Same
-  # hero-engagement bar; the spawn-axis variation is anti-
-  # memorisation. Rush of 6 e1 in a 2x3 block.
+  # +1 axis: the rush approaches from ONE of TWO seed-driven corridors
+  # (NORTH y=16..17 OR SOUTH y=23..24) so Tanya cannot pre-aim — the
+  # policy has to read the spawn direction at runtime and commit. Same
+  # hero-engagement bar; the spawn-axis variation is anti-memorisation.
+  #
+  # 6 e1 split into TWO WAVES per corridor (3 + 3 via scheduled_events
+  # at tick 300, mirroring medium's wave structure). A single 6-e1
+  # cluster all in M1Carbine range deals ~9000 dmg to Tanya before she
+  # can return fire — un-survivable. Two waves of 3 deal ~4500 dmg
+  # per wave with a recovery window in between.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # A single Allied Tanya commando stands at (60,20) on hold-fire
-    # stance. A rush of SIX Soviet rifle infantry (e1) advances on attack-
-    # anything stance from ONE of two corridors (NORTH y=15..17 OR SOUTH
-    # y=23..25, x=64..65), chosen by seed. Read the rush direction, issue
-    # attack_move (or attack_unit on each e1) toward it, and tanya kills
-    # the pack. Observe and she dies. Win when ≥6 enemy units are killed
-    # AND tanya is still alive, before tick 2700.
     description: >
-      Tanya stands on HoldFire at (60,20). Six rifles rush from the north
-      (y=15..17) or south (y=23..25) corridor depending on seed. Read
-      which way they come, point Tanya at them, and she shreds the pack.
-      Sitting idle lets them gang up. Six kills, Tanya alive, within about
-      30 turns.
+      Commander, this is a hero engagement with seed-varied rush
+      direction. You are given Tanya at (12,20) — an elite commando:
+      fast, tough, with a pistol that one-shots riflemen. She starts
+      on hold-fire (she will NOT engage even if shot at). The enemy
+      rushes from one of two corridors depending on seed: 3 riflemen
+      attack from either the NORTH band (y=16-17) OR the SOUTH band
+      (y=23-24), all at x=16. A SECOND wave of 3 more riflemen
+      reinforces along the same axis a few turns later. Read the
+      rush direction, lift Tanya's hold-fire order, and attack the
+      riflemen at point-blank. Sitting idle lets them gang up on her.
+      Six kills, Tanya alive, within about 30 turns.
     overrides:
       actors:
-        - {type: tanya, owner: agent, position: [60, 20], stance: 0}
-        # spawn_point 0 — NORTH corridor (y=15..17, x=64..65).
-        - {type: e1, owner: enemy, position: [64, 15], stance: 3, spawn_point: 0}
-        - {type: e1, owner: enemy, position: [64, 16], stance: 3, spawn_point: 0}
-        - {type: e1, owner: enemy, position: [64, 17], stance: 3, spawn_point: 0}
-        - {type: e1, owner: enemy, position: [65, 15], stance: 3, spawn_point: 0}
-        - {type: e1, owner: enemy, position: [65, 16], stance: 3, spawn_point: 0}
-        - {type: e1, owner: enemy, position: [65, 17], stance: 3, spawn_point: 0}
-        # spawn_point 1 — SOUTH corridor (y=23..25, x=64..65).
-        - {type: e1, owner: enemy, position: [64, 23], stance: 3, spawn_point: 1}
-        - {type: e1, owner: enemy, position: [64, 24], stance: 3, spawn_point: 1}
-        - {type: e1, owner: enemy, position: [64, 25], stance: 3, spawn_point: 1}
-        - {type: e1, owner: enemy, position: [65, 23], stance: 3, spawn_point: 1}
-        - {type: e1, owner: enemy, position: [65, 24], stance: 3, spawn_point: 1}
-        - {type: e1, owner: enemy, position: [65, 25], stance: 3, spawn_point: 1}
-        # Per agent-side spawn_point rule: persistent enemy markers
-        # must be duplicated across BOTH spawn groups. But here the
-        # spawn_point is on the enemy axis (enemy-side filter); the
-        # persistent fact must be duplicated across BOTH enemy spawn
-        # groups so it places every seed.
-        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 0}
-        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 1}
+        - {type: tanya, owner: agent, position: [12, 20], stance: 0}
+        # spawn_point 0 — NORTH corridor, 6 e1 deep column (x=16..21,
+        # y=17). Column not block: only the closest 2-3 e1 are in
+        # M1Carbine range (5 cells) at the start; the others walk in
+        # one at a time, giving Tanya time to clear them serially.
+        # x=16: dist=4 (in range), x=17: dist=5 (in range), x=18: 6
+        # (out of range until walk-in), …, x=21: 9 (out of range).
+        - {type: e1, owner: enemy, position: [16, 17], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [17, 17], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [18, 17], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [19, 17], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [20, 17], stance: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [21, 17], stance: 3, spawn_point: 0}
+        # spawn_point 1 — SOUTH corridor, 6 e1 deep column (x=16..21,
+        # y=23). Symmetric to NORTH.
+        - {type: e1, owner: enemy, position: [16, 23], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [17, 23], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [18, 23], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [19, 23], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [20, 23], stance: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [21, 23], stance: 3, spawn_point: 1}
+        # Per the enemy-side spawn_point rule (CLAUDE.md): persistent
+        # enemy markers must be duplicated across every enemy spawn
+        # group so they place every seed.
+        - {type: fact, owner: enemy, position: [28, 20], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [28, 20], spawn_point: 1}
     win_condition:
       all_of:
         - {units_killed_gte: 6}

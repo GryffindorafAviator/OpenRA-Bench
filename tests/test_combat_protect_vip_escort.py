@@ -82,11 +82,11 @@ def _ctx(*, units=(), tick=1000, kills=0, lost=0):
     )
 
 
-def _harv_at(x=100, y=20):
+def _harv_at(x=130, y=20):
     return {"cell_x": x, "cell_y": y, "type": "harv", "id": "9001"}
 
 
-def _tank_at(i, x=100, y=20):
+def _tank_at(i, x=130, y=20):
     return {"cell_x": x, "cell_y": y, "type": "2tnk", "id": str(2000 + i)}
 
 
@@ -96,12 +96,12 @@ def test_win_requires_harv_in_east_region_and_alive(lvl):
     # VIP in region, alive, in time → WIN.
     assert evaluate(
         c.win_condition,
-        _ctx(units=[_harv_at(100, 20), _tank_at(0, 99, 20)], tick=2000),
+        _ctx(units=[_harv_at(130, 20), _tank_at(0, 129, 20)], tick=2000),
     )
     # Tanks arrive but VIP didn't → not a WIN (VIP missing).
     assert not evaluate(
         c.win_condition,
-        _ctx(units=[_tank_at(0, 100, 20), _tank_at(1, 100, 21)], tick=2000),
+        _ctx(units=[_tank_at(0, 130, 20), _tank_at(1, 130, 21)], tick=2000),
     )
     # VIP elsewhere on the map → not a WIN (not in region).
     assert not evaluate(
@@ -111,7 +111,7 @@ def test_win_requires_harv_in_east_region_and_alive(lvl):
     # VIP in region but past the deadline → not a WIN.
     assert not evaluate(
         c.win_condition,
-        _ctx(units=[_harv_at(100, 20)], tick=4600),
+        _ctx(units=[_harv_at(130, 20)], tick=5500),
     )
 
 
@@ -121,7 +121,7 @@ def test_fail_clauses_are_reachable_losses(lvl):
     # Past deadline → fail (the VIP is still in the west).
     assert evaluate(
         c.fail_condition,
-        _ctx(units=[_harv_at(8, 20)], tick=4600),
+        _ctx(units=[_harv_at(6, 20)], tick=5500),
     )
     # VIP killed (no harv left, even if escorts survive) → fail.
     assert evaluate(
@@ -133,17 +133,17 @@ def test_fail_clauses_are_reachable_losses(lvl):
 
 
 def test_timeout_reachable_inside_max_turns():
-    """No draw degeneracy: after_ticks 4501 ≤ 93 + 90·(max_turns-1)."""
+    """No draw degeneracy: after_ticks 5401 ≤ 93 + 90·(max_turns-1)."""
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
         max_tick = 93 + 90 * (c.max_turns - 1)
-        assert 4501 <= max_tick, (
-            f"{lvl}: after_ticks 4501 > max reachable tick {max_tick} "
+        assert 5401 <= max_tick, (
+            f"{lvl}: after_ticks 5401 > max reachable tick {max_tick} "
             f"(max_turns={c.max_turns}); deadline never bites"
         )
-        assert 4500 <= max_tick, (
-            f"{lvl}: within_ticks 4500 > max reachable tick {max_tick}"
+        assert 5400 <= max_tick, (
+            f"{lvl}: within_ticks 5400 > max reachable tick {max_tick}"
         )
 
 
@@ -347,7 +347,7 @@ def _vip_alone(rs, Command):
     cmds = []
     for u in units:
         if str(u.get("type", "")).lower() == "harv":
-            cmds.append(Command.move_units([str(u["id"])], 100, 20))
+            cmds.append(Command.move_units([str(u["id"])], 130, 20))
         else:
             cmds.append(Command.stop([str(u["id"])]))
     return cmds
@@ -363,7 +363,7 @@ def _vip_leads_charge(rs, Command):
         return [Command.observe()]
     cmds = []
     for u in units:
-        cmds.append(Command.move_units([str(u["id"])], 100, 20))
+        cmds.append(Command.move_units([str(u["id"])], 130, 20))
     return cmds
 
 
@@ -411,14 +411,14 @@ def _intended_escort_clears_path(rs, Command):
                 Command.attack_unit([str(t["id"])], str(enemies[0]["id"]))
             )
         else:
-            cmds.append(Command.attack_move([str(t["id"])], 100, 20))
+            cmds.append(Command.attack_move([str(t["id"])], 130, 20))
 
     if h is not None:
         rear_x = min((t["cell_x"] for t in tanks), default=0)
-        if tanks and rear_x >= 82 and not enemies:
-            # Route confirmed clear and the escort is through —
-            # sprint the VIP across.
-            cmds.append(Command.move_units([str(h["id"])], 100, 20))
+        if tanks and rear_x >= 110 and not enemies:
+            # Route confirmed clear and the escort is through the
+            # second ambush band — sprint the VIP across.
+            cmds.append(Command.move_units([str(h["id"])], 130, 20))
         else:
             # Hold the VIP at the staging zone.
             cmds.append(Command.stop([str(h["id"])]))

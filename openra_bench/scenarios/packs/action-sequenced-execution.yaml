@@ -2,18 +2,14 @@
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
 # ACTION focus: the ordered route is GIVEN — the model must EXECUTE it
-# faithfully, in order, without idling or skipping. Order is enforced by
-# the stateful `waypoint_sequence` predicate (latched, monotonic): Wk+1
-# only counts after Wk was reached, so a beeline-to-final or an idle can
-# never satisfy it. The within_ticks budget is the non-stalling teeth;
-# overrun / attrition-bust / wipe are real LOSSES (no draw degeneracy).
-# Each waypoint is marked by an enemy building (a visible landmark; on
-# hard they are fogged and revealed by the enemy_building_spotted
+# faithfully, in order, without idling or skipping. Order is enforced
+# by the stateful `waypoint_sequence` predicate (latched, monotonic):
+# Wk+1 only counts after Wk was reached, so a beeline-to-final or an
+# idle can never satisfy it. The within_ticks budget is the non-
+# stalling teeth; overrun / attrition-bust / wipe are real LOSSES.
+# Each waypoint is marked by an enemy building (a visible landmark;
+# on hard they are fogged and revealed by the enemy_building_spotted
 # interrupt, so the route must genuinely be scouted).
-#
-# Tick budget note: the engine advances ~90 ticks per decision turn
-# (tick ≈ 93 + 90·(turn-1)). Every `fail after_ticks K` is set so K is
-# reachable within max_turns — otherwise a staller would draw, not lose.
 
 meta:
   id: action-sequenced-execution
@@ -23,16 +19,13 @@ meta:
     The route is already planned; the open problem is faithful,
     non-stalling execution of an ORDERED objective sequence — reaching
     each waypoint in turn and issuing the next move the instant a leg
-    completes, rather than idling, re-deliberating, skipping a waypoint,
-    or rushing straight to the end.
+    completes, rather than idling, re-deliberating, skipping a
+    waypoint, or rushing straight to the end.
   robotics_analogue: >
-    Manipulator / mobile-base task sequencing: a robot must hit a fixed
-    ORDERED set of stations (pick → transit → place) within a cycle-time
-    budget; pausing, reordering, or skipping a station misses the takt.
-  benchmark_anchor:
-    - "BFCL tool fidelity"
-    - "robotics task sequencing"
-    - "procedural waypoint execution"
+    Manipulator / mobile-base task sequencing: a robot must hit a
+    fixed ORDERED set of stations (pick → transit → place) within a
+    cycle-time budget; pausing, reordering, or skipping a station
+    misses the takt.
   author: "openra-bench"
 
 base_map: rush-hour-arena
@@ -43,43 +36,45 @@ base:
   tools: [move_units, attack_unit, stop]
   planning: true
   termination: {max_ticks: 8000}
-  actors:
-    - {type: 2tnk, owner: agent, stance: 0, position: [5, 8], count: 2}
+  actors: []
 
 levels:
-  # ── EASY ── one column, ONE ordered 3-waypoint route, clear lanes,
-  # generous budget. Tests pure "go in the given order, don't idle."
+  # ── EASY ── one column, ONE ordered 3-waypoint route on a 48x32
+  # arena. Tests pure "go in the given order, don't idle."
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Execute ONE given route IN ORDER: waypoint W1 (mid-south, marked
-    # by an enemy Power Plant) → W2 (north, enemy Ore Refinery) → W3 /
-    # final (far SE, enemy Construction Yard). You must reach them in
-    # that order — rushing straight to the final does NOT count. Keep
-    # the column moving: arrive within the time budget or you lose.
     description: >
-      Visit three waypoints IN ORDER: enemy Power Plant (mid-south), then
-      Ore Refinery (north), then Construction Yard (far south-east).
-      Skipping or reordering does not count. Arrive within about 27
-      turns or you lose.
+      Commander, this is an ordered patrol mission. You are given 2
+      medium tanks and 2 light tanks on the west edge. A three-stop
+      route through enemy territory has already been plotted: an
+      enemy Power Plant in the mid-south first, then an Ore Refinery
+      in the north, then a Construction Yard in the far south-east.
+      Drive your column through the route in order and do not let
+      the tanks sit idle between stops — issue the next move the
+      instant a unit reaches the previous stop.
     overrides:
+      base_map:
+        generator: arena
+        name: action-sequenced-execution-arena-easy
+        width: 48
+        height: 32
+        cordon: 2
+        spawns: [[4, 8]]
+        title: 'Sequenced Execution Arena 48x32 (Easy)'
       actors:
-        - {type: 2tnk, owner: agent, stance: 0, position: [5, 8],  count: 2}
-        - {type: 1tnk, owner: agent, stance: 0, position: [7, 12], count: 2}
-        - {type: powr, owner: enemy, position: [40, 30]}   # W1
-        - {type: proc, owner: enemy, position: [95, 9]}     # W2
-        - {type: fact, owner: enemy, position: [118, 33]}   # W3 / final
+        - {type: 2tnk, owner: agent, stance: 0, position: [4, 8],  count: 2}
+        - {type: 1tnk, owner: agent, stance: 0, position: [6, 12], count: 2}
+        - {type: powr, owner: enemy, position: [16, 24]}   # W1
+        - {type: proc, owner: enemy, position: [32, 6]}    # W2
+        - {type: fact, owner: enemy, position: [44, 28]}   # W3 / final
     win_condition:
       all_of:
         - waypoint_sequence:
             id: R
-            radius: 7
+            radius: 6
             points:
-              - {x: 40,  y: 30}
-              - {x: 95,  y: 9}
-              - {x: 118, y: 33}
+              - {x: 16, y: 24}
+              - {x: 32, y: 6}
+              - {x: 44, y: 28}
         - {within_ticks: 2400}
     fail_condition:
       any_of:
@@ -87,61 +82,61 @@ levels:
         - {not: {own_units_gte: 1}}
     max_turns: 30
 
-  # ── MEDIUM ── TWO independent ordered routes, BOTH required. They
-  # cross at mid-map, so one column cannot serve both and serial
-  # execution (finish route N, then route S) overruns the budget —
-  # only a genuine two-column parallel split clears it. Attrition cap.
+  # ── MEDIUM ── TWO independent ordered routes on a 48x40 arena.
+  # The routes cross at mid-map, so one column cannot serve both and
+  # serial execution overruns the budget — only a genuine two-column
+  # parallel split clears it. Attrition cap of 1.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # TWO given routes that must BOTH be completed, each IN ORDER.
-    # Route N: N1 (W, enemy Power Plant) → N2 (mid-SOUTH, enemy Ore
-    # Refinery) → N3 (far-E NORTH, enemy Construction Yard). Route S:
-    # S1 (W-south, enemy Radar Dome) → S2 (mid-NORTH, enemy Power
-    # Plant) → S3 (far-E SOUTH, enemy Ore Refinery). The two routes
-    # cross in the middle: split into two columns and run them in
-    # parallel — doing one fully then the other overruns the clock.
-    # Lose ≤1 unit; arrive within budget or lose.
     description: >
-      Run TWO three-waypoint routes IN ORDER, both required. Routes cross
-      at mid-map; split into two columns. Each waypoint is an enemy
-      building. Arrive within about 34 turns and lose at most one unit.
+      Commander, this is a two-column ordered patrol. You are given
+      one north column (2 medium tanks + 1 light tank) and one south
+      column (2 light tanks + 1 jeep). Each column has its own
+      ordered route: the north column runs north→south→north, the
+      south column runs south→north→south. Each waypoint is an
+      enemy building. Drive both columns in parallel, do not halt
+      between stops, and hold losses to one or fewer.
     overrides:
+      base_map:
+        generator: arena
+        name: action-sequenced-execution-arena-medium
+        width: 48
+        height: 40
+        cordon: 2
+        spawns: [[4, 8]]
+        title: 'Sequenced Execution Arena 48x40 (Medium)'
       actors:
-        # Northern staging cluster
-        - {type: 2tnk, owner: agent, stance: 0, position: [5, 8],  count: 2}
-        - {type: 1tnk, owner: agent, stance: 0, position: [7, 10]}
-        # Southern staging cluster
-        - {type: 1tnk, owner: agent, stance: 0, position: [5, 30], count: 2}
-        - {type: jeep, owner: agent, stance: 0, position: [7, 32]}
-        # Route N markers
-        - {type: powr, owner: enemy, position: [45, 8]}     # N1
-        - {type: proc, owner: enemy, position: [90, 32]}    # N2
-        - {type: fact, owner: enemy, position: [120, 8]}    # N3
-        # Route S markers
-        - {type: dome, owner: enemy, position: [45, 32]}    # S1
-        - {type: powr, owner: enemy, position: [90, 8]}     # S2
-        - {type: proc, owner: enemy, position: [120, 32]}   # S3
-        # Contested centre where the routes cross
-        - {type: e1, owner: enemy, position: [88, 20], stance: 2, count: 2}
+        # North column.
+        - {type: 2tnk, owner: agent, stance: 0, position: [4, 8],  count: 2}
+        - {type: 1tnk, owner: agent, stance: 0, position: [6, 10]}
+        # South column.
+        - {type: 1tnk, owner: agent, stance: 0, position: [4, 32], count: 2}
+        - {type: jeep, owner: agent, stance: 0, position: [6, 30]}
+        # Route N markers (N1 NW, N2 mid-SOUTH, N3 far-E NORTH).
+        - {type: powr, owner: enemy, position: [16, 8]}    # N1
+        - {type: proc, owner: enemy, position: [32, 32]}   # N2
+        - {type: fact, owner: enemy, position: [44, 8]}    # N3
+        # Route S markers (S1 SW, S2 mid-NORTH, S3 far-E SOUTH).
+        - {type: dome, owner: enemy, position: [16, 32]}   # S1
+        - {type: powr, owner: enemy, position: [32, 8]}    # S2
+        - {type: proc, owner: enemy, position: [44, 32]}   # S3
+        # Mid-screen pickets at the cross point.
+        - {type: e1, owner: enemy, position: [28, 20], stance: 2, count: 2}
     win_condition:
       all_of:
         - waypoint_sequence:
             id: N
-            radius: 7
+            radius: 6
             points:
-              - {x: 45,  y: 8}
-              - {x: 90,  y: 32}
-              - {x: 120, y: 8}
+              - {x: 16, y: 8}
+              - {x: 32, y: 32}
+              - {x: 44, y: 8}
         - waypoint_sequence:
             id: S
-            radius: 7
+            radius: 6
             points:
-              - {x: 45,  y: 32}
-              - {x: 90,  y: 8}
-              - {x: 120, y: 32}
+              - {x: 16, y: 32}
+              - {x: 32, y: 8}
+              - {x: 44, y: 32}
         - {within_ticks: 3000}
         - {units_lost_lte: 1}
     fail_condition:
@@ -151,81 +146,75 @@ levels:
         - {not: {own_units_gte: 1}}
     max_turns: 36
 
-  # ── HARD ── TWO ordered 4-waypoint serpentine routes on the larger
-  # scout-arena, given only by RELATIVE compass direction (no
-  # coordinates). The marker buildings start fogged; the
+  # ── HARD ── TWO ordered 4-waypoint serpentine routes on a larger
+  # 80x48 fogged arena, given only by RELATIVE compass direction
+  # (no coordinates). The marker buildings start fogged; the
   # enemy_building_spotted interrupt re-prompts the instant a unit
-  # sights one, revealing its position — the agent must genuinely
-  # SCOUT each leg in the right direction, then converge in order.
-  # Seed picks the staging corner. Strict budget + attrition.
+  # sights one. Seed picks the staging corner (NORTH or SOUTH).
   hard:
     objective_coords: relative
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # TWO given routes across a large arena, each four ordered
-    # waypoints, described ONLY by direction — you are NOT given
-    # coordinates. Each waypoint is an enemy building hidden in fog:
-    # scout toward the stated direction and you will be interrupted the
-    # instant a unit sights the marker, revealing it; then move on to
-    # it and continue the route IN ORDER. Both routes must be completed
-    # (split into two columns and run them together). Keep advancing —
-    # idling, skipping, or doing one route then the other overruns the
-    # clock. Lose ≤1 unit.
     description: >
-      TWO four-waypoint routes across a large fogged arena, described only
-      by compass direction. Each waypoint is a hidden enemy building.
-      Split into two columns; run both IN ORDER. Arrive within about 67
-      turns and lose at most one unit.
+      Commander, this is a long-range ordered patrol on a large 80x48
+      map. You are given two columns of 6 units each (2 medium tanks
+      + 2 light tanks + 2 jeeps), one deployed far north and one far
+      south. Each column must run a four-stop ordered route across
+      the map, with stops labelled north, centre, east, and far
+      corner. Coordinates are NOT given — each waypoint is an enemy
+      building hidden in fog; scout toward the labelled direction
+      and you will be interrupted the instant a unit spots one,
+      revealing its exact location. Drive both routes in parallel
+      and hold losses to one or fewer.
     overrides:
-      # Larger arena for real fog scouting across dispersed enemy bases
-      # (rush-hour-arena 128x40 is too cramped). Generated on demand via
-      # the bench map generator (mapgen) — surfaced for YAML use.
-      base_map: {generator: arena, name: scout-arena,
-                 width: 176, height: 80, cordon: 4}
+      base_map:
+        generator: arena
+        name: action-sequenced-execution-arena-hard
+        width: 80
+        height: 48
+        cordon: 2
+        spawns: [[10, 10]]
+        title: 'Sequenced Execution Arena 80x48 (Hard)'
       interrupts:
         enemy_building_spotted: true
       actors:
-        # spawn_point 0 — north-west staging (seed may pick this)
+        # spawn_point 0 — north-west staging.
         - {type: 2tnk, owner: agent, stance: 0, position: [10, 10], count: 2, spawn_point: 0}
         - {type: 1tnk, owner: agent, stance: 0, position: [12, 14], count: 2, spawn_point: 0}
         - {type: jeep, owner: agent, stance: 0, position: [10, 18], count: 2, spawn_point: 0}
-        # spawn_point 1 — south-west staging (same two routes to run)
-        - {type: 2tnk, owner: agent, stance: 0, position: [10, 62], count: 2, spawn_point: 1}
-        - {type: 1tnk, owner: agent, stance: 0, position: [12, 58], count: 2, spawn_point: 1}
-        - {type: jeep, owner: agent, stance: 0, position: [10, 54], count: 2, spawn_point: 1}
-        # Route A markers (dispersed enemy bases, fogged)
-        - {type: powr, owner: enemy, position: [40, 14]}    # A1 far NW
-        - {type: proc, owner: enemy, position: [90, 60]}    # A2 S-centre
-        - {type: dome, owner: enemy, position: [140, 18]}   # A3 E-mid north
-        - {type: fact, owner: enemy, position: [160, 64]}   # A4 far SE
-        # Route B markers
-        - {type: dome, owner: enemy, position: [40, 62]}    # B1 far SW
-        - {type: powr, owner: enemy, position: [90, 12]}    # B2 N-centre
-        - {type: proc, owner: enemy, position: [140, 58]}   # B3 E-mid south
-        - {type: fact, owner: enemy, position: [160, 12]}   # B4 far NE
-        # Light contest along the way
-        - {type: e1, owner: enemy, position: [88, 36], stance: 2, count: 2}
-        - {type: e3, owner: enemy, position: [138, 38], stance: 2, count: 2}
+        # spawn_point 1 — south-west staging.
+        - {type: 2tnk, owner: agent, stance: 0, position: [10, 38], count: 2, spawn_point: 1}
+        - {type: 1tnk, owner: agent, stance: 0, position: [12, 34], count: 2, spawn_point: 1}
+        - {type: jeep, owner: agent, stance: 0, position: [10, 30], count: 2, spawn_point: 1}
+        # Route A markers (dispersed enemy bases, fogged).
+        - {type: powr, owner: enemy, position: [20, 8]}    # A1 NW
+        - {type: proc, owner: enemy, position: [40, 38]}   # A2 S-centre
+        - {type: dome, owner: enemy, position: [62, 10]}   # A3 E-mid north
+        - {type: fact, owner: enemy, position: [72, 40]}   # A4 far SE
+        # Route B markers.
+        - {type: dome, owner: enemy, position: [20, 40]}   # B1 SW
+        - {type: powr, owner: enemy, position: [40, 8]}    # B2 N-centre
+        - {type: proc, owner: enemy, position: [62, 38]}   # B3 E-mid south
+        - {type: fact, owner: enemy, position: [72, 8]}    # B4 far NE
+        # Light contest along the cross.
+        - {type: e1, owner: enemy, position: [42, 24], stance: 2, count: 2}
+        - {type: e3, owner: enemy, position: [56, 24], stance: 2, count: 2}
     win_condition:
       all_of:
         - waypoint_sequence:
             id: A
-            radius: 7
+            radius: 6
             points:
-              - {x: 40,  y: 14, label: "the far NORTH-WEST — search the western ~quarter of the map, in the northern ~third"}
-              - {x: 90,  y: 60, label: "the SOUTH-CENTRE — mid map left-to-right, in the southern ~quarter"}
-              - {x: 140, y: 18, label: "the EAST side — the eastern ~quarter, in the northern ~third"}
-              - {x: 160, y: 64, label: "the far SOUTH-EAST corner — extreme east, extreme south"}
+              - {x: 20, y: 8,  label: "the far NORTH-WEST — western edge, northern band"}
+              - {x: 40, y: 38, label: "the SOUTH-CENTRE — mid map left-to-right, southern band"}
+              - {x: 62, y: 10, label: "the EAST side — eastern third, northern band"}
+              - {x: 72, y: 40, label: "the far SOUTH-EAST corner — extreme east, extreme south"}
         - waypoint_sequence:
             id: B
-            radius: 7
+            radius: 6
             points:
-              - {x: 40,  y: 62, label: "the far SOUTH-WEST — the western ~quarter, in the southern ~third"}
-              - {x: 90,  y: 12, label: "the NORTH-CENTRE — mid map left-to-right, in the northern ~quarter"}
-              - {x: 140, y: 58, label: "the EAST side — the eastern ~quarter, in the southern ~third"}
-              - {x: 160, y: 12, label: "the far NORTH-EAST corner — extreme east, extreme north"}
+              - {x: 20, y: 40, label: "the far SOUTH-WEST — western edge, southern band"}
+              - {x: 40, y: 8,  label: "the NORTH-CENTRE — mid map left-to-right, northern band"}
+              - {x: 62, y: 38, label: "the EAST side — eastern third, southern band"}
+              - {x: 72, y: 8,  label: "the far NORTH-EAST corner — extreme east, extreme north"}
         - {within_ticks: 6000}
         - {units_lost_lte: 1}
     fail_condition:

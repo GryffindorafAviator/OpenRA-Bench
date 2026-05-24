@@ -138,8 +138,14 @@ def test_hard_predicates():
     c = compile_level(load_pack(PACK_PATH), "hard")
     # Intended focus: kills 3, 3 alive, within tight tick budget → WIN
     assert evaluate(c.win_condition, _ctx(units=_alive(3), tick=900, kills=3, lost=0))
-    # 1 survivor (own_units_gte:1) with full kill bar → WIN
-    assert evaluate(c.win_condition, _ctx(units=_alive(1), tick=900, kills=3, lost=2))
+    # 2 survivors (own_units_gte:2) with full kill bar → WIN
+    assert evaluate(c.win_condition, _ctx(units=_alive(2), tick=900, kills=3, lost=1))
+    # 1 survivor (cap busted on hard) → not a win
+    assert not evaluate(c.win_condition, _ctx(units=_alive(1), tick=900, kills=3, lost=2))
+    # And the fail clause trips when own_units_gte:2 fails (this is
+    # the load-bearing fix that turns the SOUTH-spawn brute drive-in
+    # from a DRAW into a real LOSS).
+    assert evaluate(c.fail_condition, _ctx(units=_alive(1), tick=900, kills=3, lost=2))
     # Kill bar unmet → not a win
     assert not evaluate(c.win_condition, _ctx(units=_alive(3), tick=900, kills=2, lost=0))
     # Outside tight tick budget (kills met but slow) → not a win
@@ -336,8 +342,9 @@ def test_brute_attack_move_loses(level, seed):
     """Brute attack_move into the centre crosses through the 3-tank
     crossfire and force-wipes the agent strike force on EASY (3 of 3
     lost) ⇒ LOSS via not own_units_gte:1; on MEDIUM (2 lost) ⇒ LOSS
-    via not own_units_gte:2; on HARD (1-3 lost, but timing slow) ⇒
-    LOSS via the tight within_ticks 1200 + force-wipe."""
+    via not own_units_gte:2; on HARD (2-3 lost) ⇒ LOSS via not
+    own_units_gte:2 (the SOUTH-spawn variant leaves 1 survivor with
+    only 1 kill — kill bar unmet AND survival cap busted)."""
     pytest.importorskip("openra_train")
     from openra_bench.eval_core import run_level
 
