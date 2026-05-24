@@ -197,14 +197,14 @@ def _intended_factory():
         cmds = []
         for uid, cx, cy in harvs_info:
             uid_s = str(uid)
+            # Issue ONE harvest order per harv targeting the patch
+            # cell (idempotent — re-issuing each turn cancels the
+            # previous order and leaves the harv mid-step). Using a
+            # one-shot guard via `state["harv_moved"]` keeps the
+            # order count low so the auto-cycle is allowed to run.
             if uid_s not in state["harv_moved"]:
-                cmds.append(
-                    Command.move_units([uid_s], target_x=px, target_y=py)
-                )
-                if abs(cx - px) <= 3 and abs(cy - py) <= 3:
-                    state["harv_moved"].add(uid_s)
-            else:
                 cmds.append(Command.harvest([uid_s], px, py))
+                state["harv_moved"].add(uid_s)
         return cmds if cmds else [Command.observe()]
 
     return policy
