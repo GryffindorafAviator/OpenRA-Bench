@@ -45,9 +45,15 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      - name: Build + install openra_train wheel
+      # `maturin develop` requires a virtualenv. CI uses the runner's
+      # system Python via setup-python@v5 — no venv. Build the wheel
+      # explicitly and install via pip into the same Python env.
+      - name: Build openra_train wheel
         working-directory: OpenRA-Rust/openra-train
-        run: maturin develop --release
+        run: maturin build --release --out dist
+
+      - name: Install openra_train wheel
+        run: pip install --force-reinstall OpenRA-Rust/openra-train/dist/openra_train-*.whl
 
       - name: Verify engine wheel loaded
         run: python -c "import openra_train; print('engine OK:', openra_train.__file__)"
