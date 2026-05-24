@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "site"))
 
+import generate as _generate_mod
 from generate import (
     _annotator_hints_en,
     _annotator_hints_zh,
@@ -21,6 +22,26 @@ from generate import (
     build_scenario,
     generate,
 )
+
+
+@pytest.fixture
+def _mock_translate(monkeypatch):
+    """Short-circuit the live Google Translate HTTP call.
+
+    `site/generate.py::_google_translate_zh` hits
+    `translate.googleapis.com` via urllib for every non-prefix line —
+    on sandboxed CI (no network egress) this hangs the dry-run / full-
+    coverage pipeline tests. Returning the input unchanged is enough
+    for the coverage tests (they only check non-emptiness and counts):
+    canonical "WIN WHEN:" / "YOU LOSE IF:" prefix translation already
+    runs deterministically in `_translate_line_zh` without the network,
+    so the ZH output stays non-empty even with this passthrough.
+    """
+    monkeypatch.setattr(
+        _generate_mod, "_google_translate_zh", lambda text: text
+    )
+    # also reset the module-level cache to avoid leaking real values
+    monkeypatch.setattr(_generate_mod, "_translate_cache", {})
 
 
 class TestBilingualGeneration:
@@ -110,7 +131,7 @@ class TestBuildScenario:
 class TestGeneratePipeline:
     """Full pipeline dry-run."""
 
-    def test_dry_run_returns_stats(self):
+    def test_dry_run_returns_stats(self, _mock_translate):
         stats = generate(dry_run=True)
         assert stats["total"] > 100
         assert stats["english_instructions"] == stats["total"]
@@ -124,7 +145,7 @@ class TestCoverageInvariant:
     == scenarios_covered_by_tests
     """
 
-    def test_all_active_packs_generate_successfully(self):
+    def test_all_active_packs_generate_successfully(self, _mock_translate):
         from openra_bench.game_knowledge import objective_brief
         from openra_bench.scenarios import discover_packs
 
@@ -136,7 +157,7 @@ class TestCoverageInvariant:
 
         assert len(generated) == len(packs)
 
-    def test_all_have_en_instructions(self):
+    def test_all_have_en_instructions(self, _mock_translate):
         from openra_bench.game_knowledge import objective_brief
         from openra_bench.scenarios import discover_packs
 
@@ -148,7 +169,7 @@ class TestCoverageInvariant:
                 missing.append(p.meta.id)
         assert missing == [], f"Missing EN instructions: {missing}"
 
-    def test_all_have_zh_instructions(self):
+    def test_all_have_zh_instructions(self, _mock_translate):
         from openra_bench.game_knowledge import objective_brief
         from openra_bench.scenarios import discover_packs
 
