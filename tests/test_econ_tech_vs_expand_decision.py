@@ -45,24 +45,12 @@ PACK = PACKS_DIR / "econ-tech-vs-expand-decision.yaml"
 LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
 
-# Near ore patches per spawn (flat for easy/medium; both spawn pairs
-# for hard — a harvester is routed to its nearest).
-MINES_FLAT = [(22, 18), (22, 22)]
-MINES_HARD = [(22, 10), (22, 14), (22, 28), (22, 32)]
-
-
-# ── scripted policies ───────────────────────────────────────────────
-
-
-def _harvest_all(rs, C, mines):
-    cmds = []
-    for h in [u for u in (rs.get("units_summary") or []) if u.get("type") == "harv"]:
-        mx, my = min(
-            mines,
-            key=lambda m: (m[0] - h["cell_x"]) ** 2 + (m[1] - h["cell_y"]) ** 2,
-        )
-        cmds.append(C.harvest([str(h["id"])], mx, my))
-    return cmds
+# Engine auto-harvest handles income: a harv adjacent to a proc with
+# an ore patch nearby will autonomously mine without explicit harvest
+# orders. Issuing explicit `harvest` commands at the same cell as a
+# `mine` neutral building blocks pathing (the harv collides). Our
+# policies therefore omit explicit harvest commands and let the
+# engine's auto-harvest hook drive throughput.
 
 
 def _stall(rs, C):
@@ -71,52 +59,40 @@ def _stall(rs, C):
     return [C.observe()]
 
 
-def _make_tech(mines):
+def _tech(rs, C):
     """Build the SECOND war factory — the non-revenue TECH option.
     The $2000 sink craters the economy → the EV bar is never
     reached → LOSS."""
-
-    def p(rs, C):
-        cmds = _harvest_all(rs, C, mines)
-        own = rs.get("own_buildings") or []
-        nweap = sum(1 for b in own if b.get("type") == "weap")
-        prod = [
-            x.get("item") for x in (rs.get("production") or []) if isinstance(x, dict)
-        ]
-        if nweap < 2:
-            if "weap" not in prod:
-                cmds.append(C.build("weap"))
-            fy = 20
-            for b in own:
-                if b.get("type") == "fact":
-                    fy = b["cell_y"]
-            cmds.append(C.place_building("weap", 24, fy))
-        return cmds if cmds else [C.observe()]
-
-    return p
+    own = rs.get("own_buildings") or []
+    nweap = sum(1 for b in own if b.get("type") == "weap")
+    prod = [
+        x.get("item") for x in (rs.get("production") or []) if isinstance(x, dict)
+    ]
+    fy = 20
+    for b in own:
+        if b.get("type") == "fact":
+            fy = b["cell_y"]
+            break
+    cmds = []
+    if nweap < 2:
+        if "weap" not in prod:
+            cmds.append(C.build("weap"))
+        cmds.append(C.place_building("weap", 24, fy))
+    return cmds if cmds else [C.observe()]
 
 
-def _make_expand(mines):
+def _expand(rs, C):
     """The intended capability — buy the SECOND harvester EARLY so
     the doubled gathering income compounds past the EV bar."""
-
-    def p(rs, C):
-        cmds = _harvest_all(rs, C, mines)
-        nharv = sum(
-            1 for u in (rs.get("units_summary") or []) if u.get("type") == "harv"
-        )
-        prod = [
-            x.get("item") for x in (rs.get("production") or []) if isinstance(x, dict)
-        ]
-        if nharv < 2 and "harv" not in prod:
-            cmds.append(C.build("harv"))
-        return cmds if cmds else [C.observe()]
-
-    return p
-
-
-def _mines_for(level):
-    return MINES_HARD if level == "hard" else MINES_FLAT
+    nharv = sum(
+        1 for u in (rs.get("units_summary") or []) if u.get("type") == "harv"
+    )
+    prod = [
+        x.get("item") for x in (rs.get("production") or []) if isinstance(x, dict)
+    ]
+    if nharv < 2 and "harv" not in prod:
+        return [C.build("harv")]
+    return [C.observe()]
 
 
 # ── structural tests ────────────────────────────────────────────────
@@ -240,11 +216,11 @@ def _ctx(*, tick=0, ev=0, has_fact=True, has_proc=True):
 def test_predicates_enforce_economy_target():
     c = compile_level(load_pack(PACK), "easy")
     # EV at bar, fact + proc alive, in time → WIN
-    assert evaluate(c.win_condition, _ctx(tick=2000, ev=5200))
+    assert evaluate(c.win_condition, _ctx(tick=2000, ev=7000))
     # EV under bar → not win
-    assert not evaluate(c.win_condition, _ctx(tick=2000, ev=5199))
+    assert not evaluate(c.win_condition, _ctx(tick=2000, ev=6999))
     # EV at bar but past deadline → not win
-    assert not evaluate(c.win_condition, _ctx(tick=2702, ev=6000))
+    assert not evaluate(c.win_condition, _ctx(tick=2702, ev=8000))
     # Past after_ticks → fail
     assert evaluate(c.fail_condition, _ctx(tick=2701, ev=0))
     # fact destroyed → fail
@@ -273,7 +249,7 @@ def test_build_tech_loses_every_tier_and_seed(level, seed):
     """Sinking the budget into the second war factory craters the
     economy → the EV bar is never reached → LOSS."""
     c = compile_level(load_pack(PACK), level)
-    r = run_level(c, _make_tech(_mines_for(level)), seed=seed)
+    r = run_level(c, _tech, seed=seed)
     assert r.outcome == "loss", (
         f"{level}/seed{seed}: build-tech must LOSE; got {r.outcome} "
         f"EV={r.signals.cash + r.signals.resources} tick={r.signals.game_tick}"
@@ -286,7 +262,7 @@ def test_expand_wins_every_tier_and_seed(level, seed):
     """The intended capability — buy the second harvester early — the
     doubled income compounds past the EV bar. WINS every tier/seed."""
     c = compile_level(load_pack(PACK), level)
-    r = run_level(c, _make_expand(_mines_for(level)), seed=seed)
+    r = run_level(c, _expand, seed=seed)
     assert r.outcome == "win", (
         f"{level}/seed{seed}: EXPAND must WIN; got {r.outcome} "
         f"EV={r.signals.cash + r.signals.resources} tick={r.signals.game_tick}"
@@ -295,6 +271,6 @@ def test_expand_wins_every_tier_and_seed(level, seed):
 
 def test_expand_run_is_deterministic_per_seed():
     c = compile_level(load_pack(PACK), "medium")
-    a = run_level(c, _make_expand(MINES_FLAT), seed=2)
-    b = run_level(c, _make_expand(MINES_FLAT), seed=2)
+    a = run_level(c, _expand, seed=2)
+    b = run_level(c, _expand, seed=2)
     assert (a.outcome, a.turns) == (b.outcome, b.turns)
