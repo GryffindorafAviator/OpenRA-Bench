@@ -142,7 +142,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
   </div>
   <div class="queue-controls">
     <label>Annotator</label>
-    <input type="number" id="queue-annotator" min="0" value="0" onchange="saveQueueConfig()">
+    <input type="number" id="queue-annotator" min="1" value="1" onchange="saveQueueConfig()">
     <label>of</label>
     <input type="number" id="queue-total" min="1" value="5" onchange="saveQueueConfig()">
     <label>Round</label>
@@ -247,7 +247,7 @@ const CAPS=["perception","reasoning","action","adversarial"];
 
 let scenarios=[], filtered=[], currentIdx=-1, currentLang="en", currentDiff="easy";
 let activeCaps=new Set(CAPS);
-let progress={}, humanEvalQueue=[], queueConfig={annotator:0,total:5,round:1};
+let progress={}, humanEvalQueue=[], queueConfig={annotator:1,total:5,round:1,base:1};
 const QUEUE_ROUNDS=5, QUEUE_ROUND_SIZE=20;
 
 // ── Data loading ──
@@ -348,22 +348,27 @@ function scenarioOrdinal(id){
   return uniqueScenarioIds().indexOf(id);
 }
 function readQueueConfig(){
-  try{queueConfig={...queueConfig,...JSON.parse(localStorage.getItem("openra-human-eval-config")||"{}")} }catch(e){}
+  try{
+    const saved=JSON.parse(localStorage.getItem("openra-human-eval-config")||"{}");
+    if(saved.base!==1&&saved.annotator!=null)saved.annotator=(parseInt(saved.annotator)||0)+1;
+    queueConfig={...queueConfig,...saved,base:1};
+  }catch(e){}
   const a=document.getElementById("queue-annotator");
   const t=document.getElementById("queue-total");
   const r=document.getElementById("queue-round");
   queueConfig.total=Math.max(1,parseInt(queueConfig.total)||5);
-  queueConfig.annotator=Math.max(0,Math.min(queueConfig.total-1,parseInt(queueConfig.annotator)||0));
+  queueConfig.annotator=Math.max(1,Math.min(queueConfig.total,parseInt(queueConfig.annotator)||1));
   queueConfig.round=Math.max(1,parseInt(queueConfig.round)||1);
   queueConfig.round=Math.min(queueConfig.round,QUEUE_ROUNDS);
   if(a)a.value=queueConfig.annotator;
   if(t)t.value=queueConfig.total;
+  if(a)a.max=queueConfig.total;
   if(r){r.value=queueConfig.round;r.max=QUEUE_ROUNDS;}
 }
 function saveQueueConfig(){
   const total=Math.max(1,parseInt(document.getElementById("queue-total").value)||5);
-  const annotator=Math.max(0,Math.min(total-1,parseInt(document.getElementById("queue-annotator").value)||0));
-  queueConfig={annotator,total,round:Math.max(1,parseInt(document.getElementById("queue-round").value)||1)};
+  const annotator=Math.max(1,Math.min(total,parseInt(document.getElementById("queue-annotator").value)||1));
+  queueConfig={annotator,total,base:1,round:Math.max(1,parseInt(document.getElementById("queue-round").value)||1)};
   queueConfig.round=Math.min(queueConfig.round,QUEUE_ROUNDS);
   localStorage.setItem("openra-human-eval-config",JSON.stringify(queueConfig));
   readQueueConfig();
@@ -383,14 +388,14 @@ function assignedRoundScenarioIds(annotator,total,round){
 }
 function buildHumanEvalQueue(){
   readQueueConfig();
-  humanEvalQueue=assignedRoundScenarioIds(queueConfig.annotator,queueConfig.total,queueConfig.round);
+  humanEvalQueue=assignedRoundScenarioIds(queueConfig.annotator-1,queueConfig.total,queueConfig.round);
   localStorage.setItem("openra-human-eval-queue",JSON.stringify(humanEvalQueue));
 }
 function ensureHumanEvalQueue(){
   readQueueConfig();
   try{humanEvalQueue=JSON.parse(localStorage.getItem("openra-human-eval-queue")||"[]");}
   catch(e){humanEvalQueue=[];}
-  const expected=assignedRoundScenarioIds(queueConfig.annotator,queueConfig.total,queueConfig.round);
+  const expected=assignedRoundScenarioIds(queueConfig.annotator-1,queueConfig.total,queueConfig.round);
   const same=humanEvalQueue.length===expected.length&&humanEvalQueue.every((id,i)=>id===expected[i]);
   if(!same)buildHumanEvalQueue();
 }
