@@ -185,6 +185,11 @@ UPGRADED = [
     # Family-11 — defense-then-counter (offensive enemy from t=0)
     # with seed-rotated NORTH/SOUTH agent base on hard.
     "f11-defense-then-counter",
+    # Family-11 reactive-idiom pack: scheduled_events.destroy_actors
+    # wipes a production building mid-episode; agent must rebuild.
+    # Hard tier seed-rotates NORTH/SOUTH base and adds a second
+    # attrition event at tick 2000.
+    "f11-rebuild-after-attrition",
     "mfb-tech-base-vs-economy-base",
     "combat-harass-balanced-hit-and-run",
     "tech-aggro-all-in",
