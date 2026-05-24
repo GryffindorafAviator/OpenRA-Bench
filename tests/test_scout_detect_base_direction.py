@@ -74,8 +74,8 @@ LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
 
 # Corner anchors (mirror the pack).
-NE = (110, 8)
-SE = (110, 32)
+NE = (68, 8)
+SE = (68, 32)
 
 
 # ── scenario-shape invariants ─────────────────────────────────────────
@@ -239,7 +239,7 @@ def test_hard_has_mid_lane_picket_curtain():
     curtain = [
         a for a in c.scenario.actors
         if a.owner == "enemy" and a.type == "e3"
-        and a.position[0] == 85 and 14 <= a.position[1] <= 26
+        and a.position[0] == 50 and 14 <= a.position[1] <= 26
     ]
     assert len(curtain) >= 5, f"hard curtain has only {len(curtain)} e3"
 
@@ -304,9 +304,9 @@ def scout_but_no_commit(rs, C):
     if jeeps:
         state.sent = True
         if len(jeeps) >= 1:
-            cmds.append(C.move_units([str(jeeps[0]["id"])], target_x=108, target_y=8))
+            cmds.append(C.move_units([str(jeeps[0]["id"])], target_x=66, target_y=8))
         if len(jeeps) >= 2:
-            cmds.append(C.move_units([str(jeeps[1]["id"])], target_x=108, target_y=32))
+            cmds.append(C.move_units([str(jeeps[1]["id"])], target_x=66, target_y=32))
     if not cmds:
         cmds.append(C.observe())
     return cmds
@@ -373,11 +373,11 @@ def make_intended():
         if state["turn"] == 1 and jeeps:
             if len(jeeps) >= 1:
                 cmds.append(C.move_units(
-                    [str(jeeps[0]["id"])], target_x=108, target_y=8,
+                    [str(jeeps[0]["id"])], target_x=66, target_y=8,
                 ))
             if len(jeeps) >= 2:
                 cmds.append(C.move_units(
-                    [str(jeeps[1]["id"])], target_x=108, target_y=32,
+                    [str(jeeps[1]["id"])], target_x=66, target_y=32,
                 ))
         if tanks and state["turn"] >= 2:
             tids = [str(t["id"]) for t in tanks]
