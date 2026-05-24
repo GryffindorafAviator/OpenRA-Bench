@@ -1,0 +1,1034 @@
+"""Builds audits/family9_tempo_strategy.csv — Family-9 (Tempo /
+Time-pressure / Strategy / Adversarial) manual audit.
+
+One row per (pack, level). Self-contained briefings per F1 §1-10
++ F2 §18 leak-discipline + F9 §53-§60. Authored 2026-05-24 on
+branch pr13-revised.
+
+Per F9 audit CSV contract:
+  pack, level, capability, map_name, map_size, map_fit, tools,
+  agent_force, enemy_force, enemy_posture, posture_issue,
+  briefing_RA, win_condition, lose_condition, max_turns, tick_budget,
+  wrong_strategy_loss
+
+map_fit values: fit / wide / wide-justified / large-trivial.
+wide-justified is F9-new: the wide canvas IS the test
+(two-body, multi-base, opposing-corner expansion).
+"""
+import csv
+from pathlib import Path
+
+OUT = Path(__file__).parent / 'family9_tempo_strategy.csv'
+R = []
+
+def add(pack, level, cap, map_name, map_size, map_fit, tools,
+        agent, enemy, posture, posture_issue,
+        briefing, win, lose, max_turns, tick_budget,
+        wrong_strategy_loss):
+    R.append(dict(
+        pack=pack, level=level, capability=cap, map_name=map_name,
+        map_size=map_size, map_fit=map_fit, tools=tools,
+        agent_force=agent, enemy_force=enemy,
+        enemy_posture=posture, posture_issue=posture_issue,
+        briefing_RA=briefing, win_condition=win, lose_condition=lose,
+        max_turns=max_turns, tick_budget=tick_budget,
+        wrong_strategy_loss=wrong_strategy_loss,
+    ))
+
+# ════════════════════════════════════════════════════════════════════
+#  TEMPO / TIME-PRESSURE PACKS (tp-* + tempo-*)
+# ════════════════════════════════════════════════════════════════════
+
+# ── tp-decision-under-clock ─────────────────────────────────────────
+# Two enemy yards at opposite corners; one light, one heavy; scout
+# briefly with jeeps then commit the tank column to the soft target.
+# Hard tier flips light/heavy per ENEMY spawn_point group.
+P='tp-decision-under-clock'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, attack_move, stop_units'
+POST='turtle (each garrison holds its corner, returns fire only)'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    '4× medium tank @(6,17-23) + 2× jeep @(8,12)/(8,28) + Construction Yard @(10,20); cash 0',
+    'NE Construction Yard @(116,6) + 2× rifle infantry picket; SE Construction Yard @(116,34) + 3× heavy tank + 2× rocket infantry garrison',
+    POST,'',
+    'Commander, this is a quick-decision-under-clock task. You are given 4 medium tanks and 2 fast jeep scouts on the west edge with your Construction Yard behind them; no cash, no build phase. Two enemy Construction Yards stand at the far corners — one at the north-east (116,6) and one at the south-east (116,34). One corner is lightly held by a couple of riflemen; the other has a 3-heavy-tank plus 2-rocket-soldier garrison that out-trades your column head-on. You will NOT know in advance which corner is soft. Raze either enemy yard within about 37 turns with at least 2 of your own units still alive.',
+    'Raze either enemy Construction Yard, ≥2 of your units alive, within 3300 ticks.',
+    'Construction Yard lost, fewer than 2 own units alive, or deadline (3301 ticks).',
+    40, 3603,
+    'Commit-blind to the heavy corner wipes the column below the 2-survivor floor; stall on observe never razes a yard; over-scout (hold the tanks at base until certain) busts the clock.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    '4× medium tank @(6,17-23) + 2× jeep @(8,12)/(8,28) + Construction Yard @(10,20); cash 0',
+    'NE Construction Yard @(116,6) + 3× heavy tank + 2× rocket infantry garrison; SE Construction Yard @(116,34) + 2× rifle picket (corners SWAPPED vs easy)',
+    POST,'',
+    'Commander, this is a quick-decision-under-clock task on a tighter clock. You are given 4 medium tanks and 2 jeep scouts on the west edge with your Construction Yard behind; no cash, no build phase. Two enemy yards stand at the far corners — one north-east (116,6), one south-east (116,34). One corner is lightly held by riflemen; the other carries a 3-heavy-tank plus 2-rocket-soldier garrison. Which is which is NOT given. Raze either yard within about 33 turns with at least 2 of your units alive. The clock will not tolerate the column sitting at base until you are certain.',
+    'Raze either enemy Construction Yard, ≥2 own units alive, within 2900 ticks.',
+    'Construction Yard lost, fewer than 2 own units alive, or deadline (2901 ticks).',
+    35, 3153,
+    'Memorising "attack NE" from easy now charges the heavy garrison and loses the survivor floor; holding the column at base until certain busts the 2900-tick clock.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    '4× medium tank @(6,17-23) + 2× jeep @(8,12)/(8,28) + Construction Yard @(10,20); cash 0; identical every seed',
+    'Two ENEMY spawn_point groups — group 0: NE light / SE heavy; group 1: NE heavy / SE light. Light = 2× e1 picket; heavy = 3× 3tnk + 2× e3 garrison',
+    POST,'',
+    'Commander, this is a quick-decision-under-clock task with the soft and heavy corners flipping per seed. You are given 4 medium tanks and 2 jeep scouts on the west edge with your Construction Yard behind; no cash, no build phase. Two enemy yards stand at the far corners — north-east (116,6) and south-east (116,34). One is held by a couple of riflemen, the other by 3 heavy tanks plus 2 rocket soldiers — but which corner is soft CHANGES per seed. Raze either yard within about 33 turns, ≥2 of your units alive.',
+    'Raze either enemy Construction Yard, ≥2 own units alive, within 2900 ticks.',
+    'Construction Yard lost, fewer than 2 own units alive, or deadline (2901 ticks).',
+    35, 3153,
+    'A fixed always-NE or always-SE plan loses on half the seeds (the heavy half wipes the column); dithering at base busts the clock.')
+
+# ── tp-pressure-procedural ─────────────────────────────────────────
+# Tool allow-list discipline + stance escalation: attack_unit/attack_move
+# are forbidden tools; the only sanctioned kill path is set_stance to
+# AttackAnything so the engine's hunt path drives the tanks.
+P='tp-pressure-procedural'; C='action'; M='rush-hour-arena'; SZ='128x40'
+T='observe, move_units, set_stance, stop (attack_unit & attack_move FORBIDDEN)'
+POST='passive (every enemy stance:0 HoldFire — never fires)'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    '4× medium tank @(10,19-21)/(11,20) on ReturnFire + Construction Yard @(5,20)',
+    '4× rifle infantry scattered @(40,16)/(48,24)/(56,14)/(64,26) HoldFire + enemy Construction Yard @(120,20) anti-draw anchor',
+    POST,'',
+    'Commander, this is a procedural-pressure drill. You are given 4 medium tanks on ReturnFire stance at the west and your Construction Yard. Four enemy rifle infantry sit scattered across the eastern half on hold-fire orders — they will NOT engage you. Your tool allow-list omits the direct attack verbs (attack_unit and attack_move are forbidden — issuing one is an instant fail). Score 4 kills within about 30 turns with your Construction Yard standing.',
+    '≥4 kills AND Construction Yard standing, within 2700 ticks; tool_violations == 0.',
+    'Forbidden tool called, Construction Yard lost, or deadline (2701 ticks).',
+    31, 2793,
+    'Calling attack_unit/attack_move is an instant FAIL; leaving the tanks on ReturnFire with the enemy on HoldFire means no fire is ever exchanged → 0 kills → clock LOSS.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    '4× medium tank @(10,19-21)/(11,20) on ReturnFire + Construction Yard',
+    '3× rifle infantry + 1× light tank @(40,16)/(48,24)/(56,14)/(64,26) HoldFire + enemy Construction Yard',
+    POST,'',
+    'Commander, this is a procedural-pressure drill with a mixed enemy band. You are given 4 medium tanks on ReturnFire at the west and your Construction Yard. Three rifle infantry and one light tank sit passive in the east on hold-fire orders. Your tool allow-list omits the direct attack verbs (attack_unit and attack_move are forbidden — issuing one is an instant fail). Score 4 kills within about 30 turns, Construction Yard standing.',
+    '≥4 kills AND Construction Yard standing, within 2700 ticks; tool_violations == 0.',
+    'Forbidden tool called, Construction Yard lost, or deadline (2701 ticks).',
+    31, 2793,
+    'Forbidden attack verbs trigger instant fail; ReturnFire vs HoldFire is a no-engagement deadlock so a stall yields 0 kills.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    '4× medium tank ReturnFire spawn-rotated NORTH (y=14-16) or SOUTH (y=24-26) by seed + Construction Yard duplicated under both groups',
+    '3× rifle + 1× light tank passive @(40,18)/(48,22)/(56,16)/(64,24) + enemy Construction Yard',
+    POST,'',
+    'Commander, this is a procedural-pressure drill with seed-rotated staging. You are given 4 medium tanks on ReturnFire stance at the western edge, staged in either a north band (y≈15) or south band (y≈25) depending on seed, plus your Construction Yard. Three rifle infantry and one light tank wait passive in the east on hold-fire orders. Your tool allow-list omits the direct attack verbs (attack_unit and attack_move are forbidden — issuing one is an instant fail). Score 4 kills within about 30 turns, Construction Yard standing.',
+    '≥4 kills AND Construction Yard standing, within 2700 ticks; tool_violations == 0.',
+    'Forbidden tool called, Construction Yard lost, or deadline (2701 ticks).',
+    31, 2793,
+    'A memorised hunt vector mis-aligns from the other latitude; only the doctrine (flip to AttackAnything) generalises.')
+
+# ── tp-rush-multi-objective ────────────────────────────────────────
+# Two enemy yards at NE and SE corners; agent stages as TWO sub-groups
+# (north+south). Win = raze BOTH within tight clock; serialising fails.
+P='tp-rush-multi-objective'; C='action'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, attack_move, stop_units'
+POST='turtle (each garrison holds its corner, no roaming)'
+add(P,'easy',C,M,SZ,'wide-justified',T,
+    'NORTH sub-group 2× medium tank + 1× jeep @(6-8,10-12), SOUTH sub-group 2× medium tank + 1× jeep @(6-8,28-30), Construction Yard @(10,20)',
+    'Two enemy yards (24%-health pre-damaged) — NE @(115,8) + 1× rifle picket; SE @(115,32) + 1× rifle picket',
+    POST,'',
+    'Commander, this is a parallel two-objective rush. You are given two strike sub-groups on opposite latitudes — a north pair (2 medium tanks + 1 jeep around y=11) and a south pair (2 medium tanks + 1 jeep around y=29) — plus your Construction Yard at the centre. Two enemy yards stand at the corners: north-east (115,8) and south-east (115,32), each held by a single rifleman. Both yards must fall within about 23 turns. The clock will not fit a one-after-the-other sequence.',
+    'Raze BOTH the NE (115,8) and SE (115,32) enemy yards, within 2000 ticks.',
+    'One or both yards still standing at deadline (2001 ticks).',
+    26, 2343,
+    'Serialising the rushes (one sub-group rolling NE, then south after) busts the 2000-tick clock; razing only one yard satisfies neither of the two AND-clauses.')
+add(P,'medium',C,M,SZ,'wide-justified',T,
+    'Same north+south sub-groups (2× 2tnk + jeep each) + Construction Yard',
+    'NE yard @(115,8) + rifle picket; SE yard @(115,32) + rifle picket',
+    POST,'',
+    'Commander, this is a parallel two-objective rush on a tighter clock. You are given two strike sub-groups on opposite latitudes — a north pair (2 medium tanks + 1 jeep around y=11) and a south pair (2 medium tanks + 1 jeep around y=29) — plus your Construction Yard. Two enemy yards stand at the corners: north-east (115,8) and south-east (115,32), each lightly held by one rifleman. Both yards must fall within about 22 turns.',
+    'Raze BOTH the NE (115,8) and SE (115,32) enemy yards, within 1900 ticks.',
+    'One or both yards still standing at deadline (1901 ticks).',
+    23, 2073,
+    'A serial rush (raze NE first, then drive south to SE) lands ~tick 2400; only parallel dispatch lands inside the 1900 clock.')
+add(P,'hard',C,M,SZ,'wide-justified',T,
+    'AGENT spawn_point rotation — sub-groups stage north-shifted (sp0) or south-shifted (sp1) by seed; same 2×2tnk + jeep × 2 sub-groups per spawn',
+    'NE yard @(115,8) + rifle picket; SE yard @(115,32) + rifle picket — FIXED objectives every seed',
+    POST,'',
+    'Commander, this is a parallel two-objective rush with seed-rotated staging. You are given two strike sub-groups (2 medium tanks + 1 jeep each) on opposite latitudes near the west edge — exact rows shift by seed. Two enemy yards stand at the fixed corners: north-east (115,8) and south-east (115,32), each lightly held. Both yards must fall within about 22 turns.',
+    'Raze BOTH the NE (115,8) and SE (115,32) enemy yards, within 1900 ticks.',
+    'One or both yards still standing at deadline (1901 ticks).',
+    23, 2073,
+    'A memorised dispatch (always send the y=11 group NE, the y=29 group SE) mis-targets when the spawn shifts; serialising busts the 1900 clock either way.')
+
+# ── tp-rush-objective-very-fast ────────────────────────────────────
+# Single direct rush — tight clock, one yard, mild garrison; speedrun.
+P='tp-rush-objective-very-fast'; C='action'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, attack_move, stop_units'
+POST='turtle (2× e1 picket holds the yard, no roaming)'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    '3× medium tank @(6,18-22) + Construction Yard @(10,20)',
+    'Enemy Construction Yard @(115,20) + 2× rifle picket @(112,20)/(118,20)',
+    POST,'',
+    'Commander, this is a single-objective speedrun. You are given 3 medium tanks at the west edge and your Construction Yard behind them. One enemy Construction Yard stands at the far east (115,20), held by a pair of riflemen. Raze it within about 40 turns. The clock tolerates a modest detour but not stalling.',
+    'Raze the enemy Construction Yard at (115,20), within 3600 ticks.',
+    'Yard still standing at deadline (3601 ticks).',
+    40, 3603,
+    'Stalling (observe-only) yields no raze → clock LOSS.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    '3× medium tank @(6,18-22) + Construction Yard',
+    'Enemy Construction Yard @(115,20) + 2× rifle picket',
+    POST,'',
+    'Commander, this is a single-objective speedrun on a tight clock. You are given 3 medium tanks at the west edge and your Construction Yard behind them. One enemy Construction Yard stands at the far east (115,20), held by a pair of riflemen. Raze it within about 33 turns.',
+    'Raze the enemy Construction Yard at (115,20), within 2900 ticks.',
+    'Yard still standing at deadline (2901 ticks).',
+    33, 2973,
+    'A long detour or unit wandering pads ~500 ticks and misses the 2900 clock.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    '3× medium tank seed-rotated NORTH (y=8-12) or SOUTH (y=28-32) + Construction Yard',
+    'Enemy Construction Yard @(115,20) + 2× rifle picket — FIXED every seed',
+    POST,'',
+    'Commander, this is a single-objective speedrun from a seed-rotated staging. You are given 3 medium tanks staged in either a north band (y≈10) or south band (y≈30) at the west edge, plus your Construction Yard. One enemy yard stands at the fixed centre-east (115,20), held by 2 riflemen. Raze it within about 33 turns.',
+    'Raze the enemy Construction Yard at (115,20), within 2900 ticks.',
+    'Yard still standing at deadline (2901 ticks).',
+    33, 2973,
+    'A memorised "drive east on y=20" mis-targets from both north and south spawns; detours bust the clock either way.')
+
+# ── tp-survive-and-grow ────────────────────────────────────────────
+# Concurrent: harvest cash, build 3 more tanks, defend against
+# rolling hunt-bot raid bands.
+P='tp-survive-and-grow'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='observe, build, place_building, harvest, move_units, attack_unit, attack_move, set_stance, stop'
+POST='hunt (light raid bands actively pursue agent centroid)'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    'Full base @(5-12,17-23): fact + proc + powr + tent + weap + fix + harv @(15,20) + 2× medium tank @(16,19/21); cash 1500',
+    'Light raid bands (3-4× e1 + 0-1× e3) on hunt bot, staged east — periodic probes against the base',
+    POST,'',
+    'Commander, this is a survive-and-grow drill. You hold a full Allied base — Construction Yard, Ore Refinery, Power Plant, Allied Barracks, War Factory, Service Depot — with one harvester on a west ore patch and two medium tanks pre-positioned. Cash $1500. Light raid bands probe in from the east at regular intervals on hunt orders. Reach economy value $2400, finish with at least 5 medium tanks alive AND your Construction Yard standing, within about 60 turns.',
+    'Economy value ≥2400, ≥5 medium tanks alive, Construction Yard standing, within 5400 ticks.',
+    'Construction Yard lost, or deadline (5401 ticks).',
+    60, 5403,
+    'Pure-defence (no extra tank production) leaves the army shy of 5 and economy short of 2400; pure-grow (no screen) loses the yard to the raids.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    'Same full base + harv + 2× medium tank; cash 1500',
+    'Heavier sustained raids (4-5× e1 + 1-2× e3) on hunt bot',
+    POST,'',
+    'Commander, this is a survive-and-grow drill against sustained raids. You hold a full Allied base — Construction Yard, Ore Refinery, Power Plant, Allied Barracks, War Factory, Service Depot — with one harvester and two medium tanks. Cash $1500. Heavier raid bands probe in from the east at regular intervals on hunt orders. Reach economy value $3000, finish with ≥5 medium tanks alive AND your Construction Yard standing, within about 60 turns.',
+    'Economy value ≥3000, ≥5 medium tanks alive, Construction Yard standing, within 5400 ticks.',
+    'Construction Yard lost, or deadline (5401 ticks).',
+    60, 5403,
+    'Defend-only cannot reach $3000 economy floor; un-screened production loses the yard to the heavier bands.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    'Full base spawn-rotated NORTH (y=11-17) or SOUTH (y=23-29) by seed; same composition',
+    'Raid bands staged at BOTH latitudes; bands converge on the live base — hunt bot',
+    POST,'',
+    'Commander, this is a survive-and-grow drill from a seed-rotated base latitude. You hold a full Allied base with one harvester and two medium tanks — the base sits in either the north corridor (y≈14) or south corridor (y≈26) depending on seed. Cash $1500. Raid bands stage at both latitudes and the live ones converge on whichever base is yours. Reach economy value $3000, finish with ≥5 medium tanks alive AND your Construction Yard standing, within about 60 turns.',
+    'Economy value ≥3000, ≥5 medium tanks alive, Construction Yard standing, within 5400 ticks.',
+    'Construction Yard lost, or deadline (5401 ticks).',
+    60, 5403,
+    'A memorised defence cell aligned to one latitude fails on the other; un-screened production loses the yard regardless of latitude.')
+
+# ── tp-survive-and-strike-at-window ────────────────────────────────
+# Survive a pre-window (no kills allowed) then strike inside a window.
+# Uses `then:` win chain. Premature kill = instant fail.
+P='tp-survive-and-strike-at-window'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, attack_move, stop_units'
+POST='turtle (central cluster holds position, returns fire only)'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    '4× medium tank column @(8-10,18-22), Construction Yard, Ore Refinery; cash 0',
+    'Central enemy cluster — pre-placed e1 + e3 garrison (rough centre)',
+    POST,'',
+    'Commander, this is a wait-then-strike drill. You are given 4 medium tanks at the west and your base (Construction Yard + Ore Refinery). One enemy cluster sits at the centre. Two ordered phases: until tick 1200 NO kills are allowed (any kill is an instant fail); after tick 1200 destroy at least 3 enemy units before tick 4200. Finish with all 4 tanks alive at the gate. Within about 47 turns.',
+    'No kill before tick 1200 AND ≥3 kills before 4200, all 4 tanks alive at the gate (tick 1200), within 4200 ticks.',
+    'Any pre-gate kill, 4-tank floor unmet at gate, or deadline (4201 ticks).',
+    50, 4503,
+    'Pushing the column before tick 1200 triggers the premature-kill fail; idling past tick 4200 misses the within window.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    '4× medium tank + base; cash 0',
+    'Slightly larger central cluster',
+    POST,'',
+    'Commander, this is a wait-then-strike drill with tighter pacing. You are given 4 medium tanks at the west and your base. One enemy cluster sits at the centre. Two ordered phases: until tick 1500 NO kills are allowed (any kill is an instant fail); after tick 1500 destroy at least 4 enemy units before tick 3600. Finish with all 4 tanks alive at the gate. Within about 40 turns.',
+    'No kill before tick 1500 AND ≥4 kills before 3600, all 4 tanks alive at gate, within 3600 ticks.',
+    'Any pre-gate kill, 4-tank floor unmet, or deadline (3601 ticks).',
+    45, 4053,
+    'Premature kill fails the chain; a column not pre-positioned near the engagement zone misses the narrower 1500-3600 strike band.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    'AGENT spawn_point — 4× medium tank column NORTH (y=10-14) or SOUTH (y=26-30); base duplicated under both groups',
+    'Central enemy cluster — pre-placed e1/e3 garrison',
+    POST,'',
+    'Commander, this is a wait-then-strike drill from seed-rotated staging. You are given 4 medium tanks staged in either a north band (y≈12) or south band (y≈28) at the west edge, plus your base. One enemy cluster sits at the centre. Two ordered phases: until tick 1800 NO kills are allowed (any kill is an instant fail); after tick 1800 destroy at least 4 enemy units before tick 3300. All 4 tanks alive at the gate. Within about 37 turns.',
+    'No kill before tick 1800 AND ≥4 kills before 3300, all 4 tanks alive at gate, within 3300 ticks.',
+    'Any pre-gate kill, 4-tank floor unmet, or deadline (3301 ticks).',
+    42, 3783,
+    'Pre-1800 push trips the premature fail; post-1800 column unable to reach the central cluster in 1500 ticks busts the within window.')
+
+# ── tp-survive-n-turns ─────────────────────────────────────────────
+# Pure survival under scheduled wave injection. Hold yard + 4 units
+# past the gate tick.
+P='tp-survive-n-turns'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, attack_move, stop'
+POST='rusher (waves charge agent base on injection)'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    '6× medium tank cluster @(14-16,18-22), Construction Yard @(12,20), Power Plant',
+    'Opening rifle wave + 2× scheduled-event reinforcement waves (rusher bot)',
+    POST,'',
+    'Commander, this is a hold-the-line drill. You are given 6 medium tanks in a tight cluster around your Construction Yard and Power Plant at the west. Rifle waves charge in from the east — one opening wave plus two reinforcement pulses on a schedule. Past tick 2700 you must still own the Construction Yard AND hold ≥4 of your medium tanks alive. Within about 40 turns.',
+    '≥4 own units alive AND Construction Yard standing AT tick 2700+, within 3600 ticks.',
+    'Construction Yard lost before gate, fewer than 4 own units alive at gate, or deadline (3601 ticks).',
+    45, 4053,
+    'Charging out of the cluster lets the waves pick off tanks one-at-a-time below the 4-floor; idling lets the chip damage take the yard.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    '6× medium tank cluster, Construction Yard, Power Plant',
+    'Opening wave + 4× scheduled reinforcement pulses (rusher bot)',
+    POST,'',
+    'Commander, this is a hold-the-line drill against sustained pressure. You are given 6 medium tanks in a tight cluster around your Construction Yard and Power Plant at the west. Five rifle pulses charge in across the game — one opening plus four reinforcements on a schedule. Past tick 3600 you must still own the Construction Yard AND hold ≥4 tanks alive. Within about 50 turns.',
+    '≥4 own units alive AND Construction Yard standing AT tick 3600+, within 4500 ticks.',
+    'Construction Yard lost, fewer than 4 own units alive at gate, or deadline (4501 ticks).',
+    55, 4953,
+    'Charging out spreads the cluster and lets later pulses overwhelm splinters; idling allows cumulative chip damage to drop the yard before tick 3600.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    '6× medium tank cluster spawn-rotated NORTH (y=10-14) or SOUTH (y=26-30), Construction Yard + Power Plant duplicated under both groups',
+    'Opening wave + 5× scheduled reinforcement pulses converging on the live base latitude (rusher bot)',
+    POST,'',
+    'Commander, this is a hold-the-line drill from seed-rotated base latitude. You are given 6 medium tanks in a tight cluster around your Construction Yard and Power Plant, either in a north band (y≈12) or south band (y≈28). Rifle waves charge along the central lane all game — one opening plus five reinforcements on a schedule. Past tick 4500 you must still own the Construction Yard AND hold ≥4 tanks alive. Within about 60 turns.',
+    '≥4 own units alive AND Construction Yard standing AT tick 4500+, within 5400 ticks.',
+    'Construction Yard lost, fewer than 4 own units alive at gate, or deadline (5401 ticks).',
+    65, 5853,
+    'A memorised hold cell aligned to one latitude leaves the other base unscreened; charging the column splits the cluster and gives the rusher waves a path to the yard.')
+
+# ── tempo-double-window ────────────────────────────────────────────
+# Pulsed strike: hit A, pull back to a lull safe-point, then push to B.
+# `waypoint_sequence` win predicate enforces order.
+P='tempo-double-window'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, attack_move, stop'
+POST='static (clusters stance:2; no roaming)'
+add(P,'easy',C,M,SZ,'wide-justified',T,
+    '4× medium tank + 2× light tank @(6,20-22) on ReturnFire',
+    'Cluster A 4× e1 @(33-37,18-22) at (35,20); Cluster B 4× e1 @(103-107,18-22) at (105,20)',
+    POST,'',
+    'Commander, this is a pulsed two-strike sequence. You are given 4 medium tanks and 2 light tanks at the west on ReturnFire. Two enemy clusters sit on the central latitude — Cluster A at (35,20) and Cluster B at (105,20), 4 riflemen each. Strike A first, hold off through the lull window (Window 2 opens after tick 3000), then push on to Cluster B. Order matters: A → safe-point at (55,36) → B. Score 7 kills with at most 4 losses, within about 50 turns.',
+    '≥7 kills AND waypoints {(35,20), (55,36), (105,20)} hit in order AND ≤4 losses, within 4500 ticks. Strike of B latches only after tick 3000.',
+    'More than 4 lost, waypoints out of order, or deadline (4501 ticks).',
+    52, 4683,
+    'Continuous attack through the centre between clusters skips the lull waypoint and the win never latches; rushing B before tick 3000 misses the timed window.')
+add(P,'medium',C,M,SZ,'wide-justified',T,
+    '4× medium tank + 2× light tank @(6,20-22) on ReturnFire',
+    'Same clusters A/B + 1× Tesla coil guarding the through-route narrow point',
+    POST,'',
+    'Commander, this is a pulsed two-strike sequence with a Tesla coil (high-damage electric turret) covering the centre between the clusters. You are given 4 medium tanks and 2 light tanks at the west on ReturnFire. Cluster A sits at (35,20), Cluster B at (105,20), 4 riflemen each. The Tesla coil shreds anything that crosses the centre at the wrong latitude. Strike A first, hold through the lull (Window 2 opens after tick 3000), then push to Cluster B. Order: A → safe-point at (55,36) → B. Score 7 kills with at most 4 losses, within about 50 turns.',
+    '≥7 kills AND waypoints {A, (55,36), B} hit in order AND ≤4 losses, within 4500 ticks; B latches only after tick 3000.',
+    'More than 4 lost, waypoints out of order, or deadline (4501 ticks).',
+    52, 4683,
+    'Pushing between the clusters runs the column past the Tesla coil and bleeds past the 4-loss cap; skipping the safe-point fails the ordered sequence.')
+add(P,'hard',C,M,SZ,'wide-justified',T,
+    '4× 2tnk + 2× 1tnk spawn-rotated NORTH (y=10-12) or SOUTH (y=28-30) by seed',
+    'Clusters A/B + 2× Tesla coils bracketing the through-route',
+    POST,'',
+    'Commander, this is a pulsed two-strike sequence with two Tesla coils (high-damage electric turrets) bracketing the centre. You are given 4 medium tanks and 2 light tanks staged in either a north band (y≈11) or south band (y≈29) by seed. Cluster A sits at (35,20), Cluster B at (105,20). The Tesla coils widen the lethal corridor between the clusters. Strike A, hold through the lull (Window 2 opens after tick 3000), then push to B. Order: A → safe-point at (55,36) → B. Score 7 kills with at most 2 losses, within about 50 turns.',
+    '≥7 kills AND waypoints in order AND ≤2 losses, within 4500 ticks; B latches after tick 3000.',
+    'More than 2 lost, waypoints out of order, or deadline (4501 ticks).',
+    52, 4683,
+    'Running the column past the two Teslas blows the tighter 2-loss cap; skipping the safe-point fails the ordered sequence regardless of spawn latitude.')
+
+# ── tempo-strike-window ────────────────────────────────────────────
+# Single survive-then-strike window (one `after_ticks` gate + one
+# `within_ticks` close). Pre-window kill = instant fail.
+P='tempo-strike-window'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, stop_units'
+POST='static (target band stance:2; no roaming)'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    'Medium tank column at west + Construction Yard (composition per pack default)',
+    'Centre/east enemy band staged for the strike window',
+    POST,'',
+    'Commander, this is a single-window strike drill. You are given a tank column at the west and your Construction Yard. An enemy band sits east of the centre. Hold all engagement until after tick 2000 (no more than 1 pre-window kill is tolerated, but the intended discipline is zero); after tick 2000 destroy at least 4 enemies before tick 4200 with at most 3 losses. Within about 48 turns.',
+    '≥4 kills AND ≤3 losses, within 4200 ticks, latching only after tick 2000.',
+    'No own units alive, or deadline (4201 ticks).',
+    48, 4323,
+    'Pre-1999 push triggers the early-engagement fail; a late finish past 4200 misses the close-out window.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    'Tank column at west + Construction Yard',
+    'Centre/east enemy band, narrower strike window',
+    POST,'',
+    'Commander, this is a single-window strike drill with tighter pacing. You are given a tank column at the west and your Construction Yard. An enemy band sits east of the centre. Hold engagement until after tick 1800 (no pre-window kills); after tick 1800 destroy at least 5 enemies before tick 3600, losing at most 2. Within about 58 turns.',
+    '≥5 kills AND ≤2 losses, within 3600 ticks, latching after tick 1800.',
+    'No own units alive, or deadline (3601 ticks).',
+    52, 4683,
+    'Pre-1800 push fails the gate; pre-positioning during the lull is required to fit the narrower 1800-3600 strike band.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    'Tank column at west + Construction Yard',
+    'Centre/east enemy band, narrowest strike window + premature_action latch',
+    POST,'',
+    'Commander, this is an aggressive lull-then-burst strike. You are given a tank column at the west and your Construction Yard. An enemy band sits east of the centre. NO engagement at all before tick 1500 — any kill is an instant fail; after tick 1500 destroy at least 6 enemies before tick 3000 with at most 1 loss. Within about 56 turns.',
+    '≥6 kills AND ≤1 loss, within 3000 ticks, latching after tick 1500; premature-kill fail latches if any kill before tick 1499.',
+    'Premature kill, no own units alive, or deadline (3001 ticks).',
+    56, 5043,
+    'Any pre-1500 kill is instant fail; only an agent that used the lull to assemble at a launch point can hit 6 kills inside the 1500-3000 window.')
+
+# ════════════════════════════════════════════════════════════════════
+#  STRATEGY DILEMMA / TRILEMMA / TWO-BODY / GAUNTLET
+# ════════════════════════════════════════════════════════════════════
+
+# ── strategy-dilemma ───────────────────────────────────────────────
+# Forcing route choice: direct lane is lethal cluster, northern flank
+# is lightly held. Win = raze fact+proc within clock + (medium/hard)
+# loss cap.
+P='strategy-dilemma'; C='reasoning'; M='singles-dilemma'; SZ='128x40 (bounds 100x36)'
+T='move_units, attack_unit, attack_move, stop'
+POST='static (central cluster stance:2; pickets hold)'
+LEAK_S='LEAK: "take the safer route", "take the northern flank" — directly names the answer route.'
+add(P,'easy',C,M,SZ,'wide',T,
+    'Tank/infantry strike force at the west edge (per pack default)',
+    'Central cluster — 2× pillbox + 1× Tesla coil + 4× rifle infantry — blocks the direct west-to-east lane; lighter pickets on northern flank; rear enemy Construction Yard + Ore Refinery (the objective)',
+    POST,LEAK_S,
+    'Commander, this is a base-raze mission against a central kill-zone. You are given a tank-and-infantry strike force at the west edge. The enemy economic core is at the east — Construction Yard plus Ore Refinery. A heavy central cluster — 2 pillboxes, 1 Tesla coil (high-damage electric turret), 4 riflemen — bracketed across the direct lane shreds anything that drives straight through it. The northern flank past the cluster is lightly held by pickets. Raze both the Construction Yard and the Ore Refinery within about 50 turns.',
+    'Raze enemy Construction Yard AND Ore Refinery, within 4500 ticks.',
+    'Within window unmet (deadline at 4501 ticks).',
+    55, 5043,
+    'Driving the column through the central cluster gets shredded; stalling lets the deadline pass.')
+add(P,'medium',C,M,SZ,'wide',T,
+    'Tank/infantry strike force, tighter loss budget',
+    'Same central cluster + rear yard+refinery',
+    POST,LEAK_S,
+    'Commander, this is a base-raze mission with a tighter clock and a hard loss cap. You are given a tank-and-infantry strike force at the west edge. The enemy economic core (Construction Yard + Ore Refinery) sits at the east. A heavy central cluster of 2 pillboxes, 1 Tesla coil and 4 riflemen brackets the direct lane. Raze both the yard and the refinery within about 40 turns, with at most 7 total losses.',
+    'Raze yard AND refinery, ≤7 losses, within 3600 ticks.',
+    'More than 7 lost, or deadline (3601 ticks).',
+    45, 4053,
+    'Brawling through the central cluster blows the 7-loss cap even if the column reaches the base; stalling misses the 3600 clock.')
+add(P,'hard',C,M,SZ,'wide',T,
+    'Strike force, tightest cap',
+    'Central pillbox+Tesla+rocket-soldier cluster + rear yard+refinery',
+    POST,LEAK_S,
+    'Commander, this is a base-raze mission with the tightest pacing of the pack. You are given a tank-and-infantry strike force at the west edge. The enemy economic core (Construction Yard + Ore Refinery) sits at the east. A central cluster of 2 pillboxes, 1 Tesla coil and rocket soldiers brackets the direct lane. Raze yard and refinery within about 30 turns with at most 5 total losses.',
+    'Raze yard AND refinery, ≤5 losses, within 2700 ticks.',
+    'More than 5 lost, or deadline (2701 ticks).',
+    35, 3153,
+    'The direct lane is unsurvivable inside the 5-loss cap; stalling busts the clock.')
+
+# ── strategy-gauntlet ──────────────────────────────────────────────
+# Single defended corridor + forward picket; clear the gate then raze.
+P='strategy-gauntlet'; C='reasoning'; M='singles-gauntlet'; SZ='128x40 (bounds 100x36)'
+T='move_units, attack_unit, attack_move, stop'
+POST='static garrison + forward picket (stance:2)'
+add(P,'easy',C,M,SZ,'wide',T,
+    'Tank column strike force at west',
+    'Single defended corridor → enemy base ring (Construction Yard + Ore Refinery) + forward picket screening the base ring',
+    POST,'',
+    'Commander, this is a defended-corridor raze. You are given a tank-column strike force at the west. One defended corridor leads east to the enemy base ring (Construction Yard + Ore Refinery), with a forward picket screening the ring. A reckless all-in dies on the picket; chasing strays bleeds the column. Raze the Construction Yard and the Ore Refinery within about 89 turns with no more than 12 total losses.',
+    'Raze yard AND refinery, ≤12 losses, within 8000 ticks.',
+    'More than 12 lost, no own units alive, or deadline (8001 ticks).',
+    90, 8103,
+    'All-in into the picket bleeds past 12; chasing every stray rifleman wastes the army on non-objective targets.')
+add(P,'medium',C,M,SZ,'wide',T,
+    'Tank column strike force',
+    'Same defended corridor + screening picket + rear yard+refinery',
+    POST,'',
+    'Commander, this is a defended-corridor raze with a tighter loss cap. You are given a tank-column strike force at the west. The corridor leads east to the enemy base ring (Construction Yard + Ore Refinery), with a forward picket screening it. Raze yard and refinery within about 89 turns, no more than 9 total losses.',
+    'Raze yard AND refinery, ≤9 losses, within 8000 ticks.',
+    'More than 9 lost, no own units alive, or deadline (8001 ticks).',
+    90, 8103,
+    'Sloppy attrition through the picket exceeds 9 losses; ignoring the picket leaves it kiting the column on the way out.')
+add(P,'hard',C,M,SZ,'wide',T,
+    'Tank column strike force',
+    'Same corridor + picket + yard+refinery',
+    POST,'',
+    'Commander, this is a defended-corridor raze with the same attrition cap as medium but a tight clock. You are given a tank-column strike force at the west. The corridor leads east to the enemy base ring (Construction Yard + Ore Refinery), with a forward picket screening it. Raze yard and refinery within about 50 turns, no more than 9 losses.',
+    'Raze yard AND refinery, ≤9 losses, within 4500 ticks.',
+    'More than 9 lost, no own units alive, or deadline (4501 ticks).',
+    55, 5043,
+    'A leisurely clear of every picket blows the 4500 clock; an unscreened all-in blows the 9-loss cap.')
+
+# ── strategy-trilemma ──────────────────────────────────────────────
+# Three CAPEX arms; cash funds one. Hard seeds rotate composition.
+P='strategy-trilemma'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='observe, build, place_building, harvest, move_units, attack_unit, stop'
+POST='hunt (a harassing band tests survival)'
+LEAK_T='LEAK: arm names "EXPAND/TECH/ARMY" spelled out as verbs — the briefing names the three winning policies directly.'
+add(P,'easy',C,M,SZ,'wide',T,
+    'Full Allied base + scout; cash 3000',
+    'Hunt-bot harasser band (rifles+light armour) pressures the base',
+    POST,LEAK_T,
+    'Commander, this is a forced-choice CAPEX drill. You hold a full Allied base with a scout; cash $3000. A hunt-bot harasser band probes from the centre. Three winning options are open — build a 2nd Ore Refinery in the target zone near (60,20), OR build a War Factory, OR train ≥12 rifle infantry AND score at least one kill. Cash funds any one path with slack but cannot complete two. Win within about 60 turns.',
+    'ANY of: 2nd refinery at (60,20) ($1400) OR build War Factory ($2000) OR 12 rifles + 1 kill ($1200) — within 5400 ticks.',
+    'No arm complete, or deadline (5401 ticks).',
+    60, 5403,
+    'Hedging (a little of each) leaves no arm complete and all three clauses unsatisfied.')
+add(P,'medium',C,M,SZ,'wide',T,
+    'Full Allied base + scout; cash 2400',
+    'Hunt-bot harasser band',
+    POST,LEAK_T,
+    'Commander, this is a forced-choice CAPEX drill with a tighter budget. You hold a full Allied base with a scout; cash $2400 — enough for precisely one complete path. The three options: 2nd Ore Refinery near (60,20), War Factory, or 12 rifles + 1 kill. Hunt-bot harassers pressure the base. Win within about 50 turns.',
+    'ANY of: refinery@(60,20) OR War Factory OR 12 rifles + 1 kill — within 4500 ticks.',
+    'No arm complete, or deadline (4501 ticks).',
+    50, 4503,
+    'Hedging leaves all arms shy; the tight $2400 budget will not stretch to two partial buys before the clock.')
+add(P,'hard',C,M,SZ,'wide',T,
+    'Full Allied base + scout — spawn-rotated; cash 2200',
+    'Hunt-bot harasser doubled pressure',
+    POST,LEAK_T,
+    'Commander, this is a forced-choice CAPEX drill with the harasser doubled and a near-exact budget. You hold a full Allied base with a scout; cash $2200. A doubled hunt-bot harasser pressures the base. Three options: place Ore Refinery in the target zone, train 12 rifles + 1 kill, or hold the War Factory online. Lose at most 3 units. Win within about 40 turns.',
+    'ANY of: refinery in target zone OR War Factory online OR 12 rifles + 1 kill, ≤3 losses, within 3600 ticks.',
+    'More than 3 lost, no arm complete, or deadline (3601 ticks).',
+    40, 3603,
+    'Any hedge leaves no arm complete inside $2200; the doubled harasser eats slack from any non-committed split.')
+
+# ── strategy-twobody ───────────────────────────────────────────────
+# Two enemy bases on opposing edges; one army cannot reach both.
+# Wide canvas is the test — wide-justified.
+P='strategy-twobody'; C='action'; M='singles-twobody'; SZ='128x40 (bounds 100x24)'
+T='move_units, attack_unit, attack_move, stop'
+POST='static (each base ring stance:2; map centre is lethal turret wall)'
+add(P,'easy',C,M,SZ,'wide-justified',T,
+    'TWO tank/infantry squads — one each on the WEST edge near (6,*) and EAST edge near (94,*) — set against the two opposing bases',
+    'TWO enemy bases — WEST near (24,20) and EAST near (78,20) — each with Construction Yard + Ore Refinery + small tank garrison; lethal turret wall at map centre',
+    POST,'',
+    'Commander, this is a two-body raze. You command two squads starting on OPPOSITE edges of the arena. Two enemy bases stand — one at the west near (24,20), one at the east near (78,20) — each holding a Construction Yard plus Ore Refinery and a small tank garrison. The map centre is a lethal turret wall — a single squad cannot cross it in time to reach the far base. Raze the Construction Yard AND Ore Refinery at BOTH bases within about 95 turns.',
+    'Raze yard+refinery at BOTH WEST (24,20) and EAST (78,20) bases, within 8500 ticks.',
+    'Either base unrazed, or deadline (8501 ticks).',
+    100, 9003,
+    'A single-squad attempt cannot reach the far base inside 8500 ticks; serialising (raze one then march to the other) blows the clock.')
+add(P,'medium',C,M,SZ,'wide-justified',T,
+    'TWO squads opposing edges, loss cap',
+    'Same two bases + turret wall',
+    POST,'',
+    'Commander, this is a two-body raze under a loss cap. You command two squads starting on opposite edges. Two enemy bases stand — WEST near (24,20) and EAST near (78,20), each with Construction Yard + Ore Refinery + garrison. The map centre is a lethal turret wall. Raze yard+refinery at BOTH bases within about 72 turns, no more than 10 total losses.',
+    'Raze yard+refinery at BOTH bases, ≤10 losses, within 6500 ticks.',
+    'More than 10 lost, either base unrazed, or deadline (6501 ticks).',
+    90, 8103,
+    'Sloppy combat by either squad blows 10-loss cap; serialised attacks blow the 6500 clock.')
+add(P,'hard',C,M,SZ,'wide-justified',T,
+    'TWO squads opposing edges, strict cap + tight clock',
+    'Same two bases + turret wall',
+    POST,'',
+    'Commander, this is a two-body raze on the tightest clock. You command two squads on opposing edges. Two enemy bases — WEST (24,20) and EAST (78,20) — each with yard+refinery+garrison. The centre is a lethal turret wall. Raze yard+refinery at BOTH bases within about 56 turns under strict attrition.',
+    'Raze yard+refinery at BOTH bases, within 5000 ticks (strict attrition implied by clock).',
+    'Either base unrazed, or deadline (5001 ticks).',
+    80, 7203,
+    'Any serialised attempt or a single-squad-style approach blows both the clock and the attrition cap.')
+
+# ════════════════════════════════════════════════════════════════════
+#  ADVERSARIAL / RPS
+# ════════════════════════════════════════════════════════════════════
+
+# ── adv-asymmetric-weaker-must-win ────────────────────────────────
+# Outnumbered by a heavy tank that out-trades head-on; only flank works.
+P='adv-asymmetric-weaker-must-win'; C='reasoning'; M='adv-asymmetric-weaker-must-win-arena'; SZ='128x40'
+T='move_units, attack_unit, attack_move, stop'
+POST='guard (enemy garrison holds post, lunges within ~16 cells, returns past leash ~18)'
+add(P,'easy',C,M,SZ,'wide',T,
+    '2× medium tank @(8,20-22) on ReturnFire + Construction Yard @(4,20)',
+    '2× rifle infantry @(78-80,20) — no heavy tank on easy',
+    POST,'',
+    'Commander, this is an underdog engagement on the centre-east lane. You are given 2 medium tanks on the y=20 lane and your Construction Yard behind. The enemy is 2 rifle infantry at the east-centre cluster — no heavy backup on this tier. Kill both riflemen and keep at least 1 medium tank alive AND your Construction Yard standing, within about 60 turns.',
+    '≥2 kills AND ≥1 own unit alive AND Construction Yard standing, within 5400 ticks.',
+    'Construction Yard destroyed, no own units alive, or deadline (5401 ticks).',
+    61, 5493,
+    'Stalling on observe never kills; the head-on route works on easy because no heavy is present, but a careless drive into the cluster can still lose the survivor floor.')
+add(P,'medium',C,M,SZ,'wide',T,
+    '2× medium tank @(8,10)/(8,12) staged OFF-AXIS on the north corridor + Construction Yard @(4,20)',
+    '4× rifle infantry wall @(74-76,18-22) + 1× heavy tank behind the wall (out-trades a medium tank one-on-one)',
+    POST,'',
+    'Commander, this is an underdog engagement against a defended cluster. You are given 2 medium tanks staged on the north corridor (off the centre lane) and your Construction Yard at (4,20). The enemy is 4 rifle infantry walling the centre-east cluster, with 1 heavy tank holding post behind them — the heavy out-trades a medium tank head-on. Kill all 4 riflemen and keep at least 1 medium tank alive AND your Construction Yard standing, within about 60 turns.',
+    '≥4 kills AND ≥1 own unit alive AND Construction Yard standing, within 5400 ticks.',
+    'Construction Yard destroyed, no own units alive, or deadline (5401 ticks).',
+    61, 5493,
+    'A y=20 head-on charge into the cluster gets traded down by the heavy; ignoring the rifles to chase the heavy leaves the cluster walling itself.')
+add(P,'hard',C,M,SZ,'wide',T,
+    '2× medium tank spawn-rotated NORTH (y=11-13) or SOUTH (y=27-29) by seed + Construction Yard @(4,20)',
+    'Same 4× rifle wall + 1× heavy tank cluster',
+    POST,'',
+    'Commander, this is an underdog engagement from a seed-rotated corridor on a tight clock. You are given 2 medium tanks staged in either the north corridor (y≈12) or south corridor (y≈28) by seed, plus your Construction Yard at (4,20). The enemy is 4 rifle infantry walling the east-centre cluster with 1 heavy tank behind them — the heavy out-trades a medium tank head-on. Kill 4 riflemen and keep at least 1 medium tank alive AND your Construction Yard standing, within about 50 turns.',
+    '≥4 kills AND ≥1 own unit alive AND Construction Yard standing, within 4500 ticks.',
+    'Construction Yard destroyed, no own units alive, or deadline (4501 ticks).',
+    51, 4593,
+    'Head-on charges from either corridor get out-traded by the heavy; a memorised approach from one corridor mis-aligns against the other seed.')
+
+# ── adv-rps-counter-pick ─────────────────────────────────────────
+# Scout, build the matching counter, kill the rotation. Hard tier
+# rotates archetype per ENEMY spawn_point group.
+P='adv-rps-counter-pick'; C='reasoning'; M='adv-rps-counter-pick-arena'; SZ='128x40'
+T='build, place_building, move_units, attack_unit, attack_move, stop'
+POST='guard (enemy garrison holds, lunges within ~16, returns past ~18)'
+add(P,'easy',C,M,SZ,'wide',T,
+    'Full Allied base @(10-16,18-24): fact+proc+powr+tent+weap+fix + 2× jeep @(16,20-22); cash 2550',
+    '8× rifle infantry swarm at centre — fixed archetype, visible on easy',
+    POST,'',
+    'Commander, this is a counter-pick drill. You hold a full Allied base — Construction Yard, Ore Refinery, Power Plant, Allied Barracks, War Factory, Service Depot — with 2 jeeps and cash $2550. The enemy is a rifle-infantry swarm at centre-east (8 strong). Pick the matching counter from the production menus and kill at least 6 enemy units within about 60 turns, Construction Yard standing.',
+    '≥6 kills AND Construction Yard standing, within 5400 ticks.',
+    'Construction Yard destroyed, or deadline (5401 ticks).',
+    61, 5493,
+    'A hedged build (a little of every counter) leaves no counter at the required head-count; stalling lets the swarm chip the yard.')
+add(P,'medium',C,M,SZ,'wide',T,
+    'Full Allied base + 2× jeep scout; cash 2550',
+    'Centre garrison in fog — archetype unknown until scouted',
+    POST,'',
+    'Commander, this is a counter-pick drill under fog. You hold a full Allied base with 2 jeeps and cash $2550. The enemy is a centre-east garrison hidden in fog — the archetype is not given. Scout with a jeep first to read the composition, then commit the budget to the matching counter. Kill at least 8 enemy units within about 60 turns, Construction Yard standing.',
+    '≥8 kills AND Construction Yard standing, within 5400 ticks.',
+    'Construction Yard destroyed, or deadline (5401 ticks).',
+    61, 5493,
+    'Pre-picking the counter before scouting wins only half the time on average; hedging splits the cash across counters none of which complete.')
+add(P,'hard',C,M,SZ,'wide',T,
+    'Full Allied base (no spawn_point — identical every seed); cash 2550',
+    'ENEMY spawn_point rotation — archetype flips per seed (rifle swarm, heavy tanks, or rocket soldiers); persistent sentinel anchored per group',
+    POST,'',
+    'Commander, this is a counter-pick drill with the enemy archetype rotating per seed. You hold a full Allied base with cash $2550. The centre-east enemy is one of three archetypes — rifle swarm, heavy tanks, or rocket soldiers — and which one CHANGES per seed. Scout the centre first, then commit the budget to the matching counter. Kill at least 5 enemy units within about 60 turns, Construction Yard standing.',
+    '≥5 kills AND Construction Yard standing, within 5400 ticks.',
+    'Construction Yard destroyed, or deadline (5401 ticks).',
+    61, 5493,
+    'A memorised "always build counter X" plan loses on seeds where the archetype rotates against it; hedging across counters completes none.')
+
+# ── adversarial-duel ─────────────────────────────────────────────
+# Scripted "duel" — capability tag is `adversarial` but the opponent
+# is scripted (no step_1v1 wiring). Flag in posture_issue.
+P='adversarial-duel'; C='adversarial'; M='adversarial-duel-arena'; SZ='64x40'
+T='move_units, attack_unit, stop'
+POST='static (enemy stance:2; no bot)'
+ISSUE_DUEL='Capability tag adversarial but opponent is scripted; the engine `step_1v1` channel is the true adversarial wiring — consider tagging "action" until 1v1 wiring lands.'
+add(P,'easy',C,M,SZ,'fit',T,
+    '2× medium tank + 2× light tank (count:2 each) @(6,19-22) on HoldFire',
+    '3× rifle infantry close east',
+    POST,ISSUE_DUEL,
+    'Commander, this is a close-engagement duel. You are given 2 medium tanks and 2 light tanks at the west on hold-fire orders. Three enemy rifle infantry sit a short move east. Destroy all 3 enemies within about 30 turns and keep at least one of your own alive.',
+    '≥3 kills, within 2400 ticks.',
+    'No own units alive, or deadline (2401 ticks).',
+    30, 2703,
+    'Stalling on observe yields no kills; head-on works on easy because the enemy has no armour.')
+add(P,'medium',C,M,SZ,'fit',T,
+    '2× medium tank + 1× light tank + 1× jeep (composition per pack)',
+    'Enemy rifle squad + 1× light tank backing',
+    POST,ISSUE_DUEL,
+    'Commander, this is a close-engagement duel with light enemy armour. You are given a mixed tank group at the west. The enemy is a rifle squad backed by 1 light tank. Concentrate fire to win the trade; destroy enough enemies within about 40 turns to satisfy the kill bar with at least one own unit alive.',
+    '≥(per pack kill bar) AND own units alive, within 3000 ticks.',
+    'No own units alive, or deadline (3001 ticks).',
+    40, 3603,
+    'Splitting fire across rifles and armour trades the own column down without finishing the kill bar.')
+add(P,'hard',C,M,SZ,'fit',T,
+    'Mixed tank group spawn-rotated NORTH (sp0) or SOUTH (sp1) by seed',
+    'Outnumbering enemy + loss cap',
+    POST,ISSUE_DUEL,
+    'Commander, this is an outnumbered close engagement with a loss cap. You are given a mixed tank group on a seed-chosen corner. The enemy is numerically superior. Win the close fight inside the loss cap, within about 45 turns.',
+    'Per-pack kill bar AND loss cap satisfied, within 4000 ticks.',
+    'Loss cap exceeded, no own units alive, or deadline (4001 ticks).',
+    50, 4503,
+    'Attrition trades lose the cap; a memorised approach from one corner mis-aligns against the other seed.')
+
+# ════════════════════════════════════════════════════════════════════
+#  ART OF WAR
+# ════════════════════════════════════════════════════════════════════
+
+# ── artofwar-indirect-approach ──────────────────────────────────
+# Frontal rocket wall blocks the lane; flanking is the only survivable
+# route. Briefing must NOT name "flank" as a verb.
+P='artofwar-indirect-approach'; C='reasoning'; M='artofwar-indirect-approach-arena'; SZ='128x40'
+T='move_units, attack_unit, stop'
+POST='static (rocket-infantry wall stance:2; lethal in the lane)'
+add(P,'easy',C,M,SZ,'wide',T,
+    '3× light tank @(6,20) on ReturnFire',
+    'Rocket-infantry wall blocking the direct east lane at mid-band; objective region near (112,20)',
+    POST,'',
+    'Commander, this is a transit task across contested ground. You are given 3 light tanks at the west on ReturnFire. A rocket-infantry wall blocks the direct east lane at the mid-band — anything crossing the wall head-on dies to its volley. The objective is a region near (112,20). Land at least 3 tanks inside radius-6 of (112,20) within about 59 turns, losing at most 1 unit.',
+    '≥3 tanks within radius-6 of (112,20), ≤1 loss, within 4000 ticks.',
+    'More than 1 lost, or deadline (4001 ticks).',
+    60, 5403,
+    'Crossing the wall head-on is fatal — the loss cap goes immediately; stalling busts the clock.')
+add(P,'medium',C,M,SZ,'wide',T,
+    '3× light tank @(6,20) on ReturnFire',
+    'Longer rocket-infantry wall (7+ e3 @x=26-50)',
+    POST,'',
+    'Commander, this is a transit task across a longer contested wall. You are given 3 light tanks at the west on ReturnFire. A long rocket-infantry wall blocks the direct east lane. The objective is a region near (112,20). Land at least 3 tanks inside radius-6 of (112,20) within about 65 turns, ZERO losses.',
+    '≥3 tanks within radius-6 of (112,20), 0 losses, within 4600 ticks.',
+    'Any loss, or deadline (4601 ticks).',
+    66, 5943,
+    'Any unit crossing the wall axis takes a rocket and busts the 0-loss cap; a stall misses the 4600 clock.')
+add(P,'hard',C,M,SZ,'wide',T,
+    '3× light tank spawn-rotated NORTH (y=10±2) or SOUTH (y=*) by seed',
+    'Densest rocket-infantry wall',
+    POST,'',
+    'Commander, this is a transit task across the densest wall, staged from a seed-chosen latitude. You are given 3 light tanks at the west, staged in either a north band or south band by seed. A densely-packed rocket-infantry wall spans the mid-band. The objective is a region near (112,20). Land all 3 tanks inside radius-6 of (112,20) within about 69 turns, ZERO losses.',
+    '≥3 tanks within radius-6 of (112,20), 0 losses, within 5000 ticks.',
+    'Any loss, or deadline (5001 ticks).',
+    70, 6303,
+    'Any tank on the lane axis dies; a memorised route works on one latitude but not the other seed.')
+
+# ── artofwar-lure-the-tiger ─────────────────────────────────────
+# Leashed guard-bot defender lunges + snaps back. Decoy pulls the
+# guard off post for the main force.
+P='artofwar-lure-the-tiger'; C='reasoning'; M='artofwar-lure-the-tiger-arena'; SZ='128x40'
+T='move_units, attack_unit, stop'
+POST='guard (rocket-infantry defenders hold post, lunge at any enemy within ~16, snap back past ~18)'
+add(P,'easy',C,M,SZ,'wide',T,
+    '3× medium tank + 2× jeep at west',
+    'Leashed rocket-infantry wall — each guard lunges then snaps back; objective near (112,20)',
+    POST,'',
+    'Commander, this is a transit task past leashed defenders. You are given 3 medium tanks and 2 jeeps at the west. A leashed rocket-infantry wall covers the lane — each defender holds its post but LUNGES at any enemy within about 16 cells, then SNAPS BACK past about 18. The objective is a region near (112,20). Land at least 3 tanks inside radius-6 of (112,20) within about 65 turns, losing at most 2 units.',
+    '≥3 tanks within radius-6 of (112,20), ≤2 losses, within 5800 ticks.',
+    'More than 2 lost, or deadline (5801 ticks).',
+    66, 5943,
+    'Driving the whole force through the leash band loses past the 2-cap; ignoring the leash mechanic (treating them as stationary) gets the lead tank lunged and shredded.')
+add(P,'medium',C,M,SZ,'wide',T,
+    '3× medium tank + 2× jeep at west',
+    'Denser leashed rocket-infantry wall (7+ e3 spaced along y=6-26)',
+    POST,'',
+    'Commander, this is a transit task past a denser leashed wall. You are given 3 medium tanks and 2 jeeps at the west. The rocket-infantry wall is denser — multiple guards across the lane each lunge within about 16 cells and snap back past about 18. The objective is a region near (112,20). Land at least 3 tanks inside radius-6 of (112,20) within about 75 turns, losing at most 2 units.',
+    '≥3 tanks within radius-6 of (112,20), ≤2 losses, within 6600 ticks.',
+    'More than 2 lost, or deadline (6601 ticks).',
+    76, 6843,
+    'Pushing the column straight through the denser wall busts the 2-loss cap; stalling busts the 6600 clock.')
+add(P,'hard',C,M,SZ,'wide',T,
+    '3× medium tank + 2× jeep spawn-rotated NORTH (y≈10) or SOUTH (y≈30) by seed',
+    'Densest leashed guard wall',
+    POST,'',
+    'Commander, this is a transit task past the densest leashed wall, staged from a seed-chosen latitude. You are given 3 medium tanks and 2 jeeps at the west in either a north band (y≈10) or south band (y≈30). The leashed rocket-infantry wall is at its densest. The objective is a region near (112,20). Land at least 3 tanks inside radius-6 of (112,20) within about 82 turns, ≤2 losses.',
+    '≥3 tanks within radius-6 of (112,20), ≤2 losses, within 7400 ticks.',
+    'More than 2 lost, or deadline (7401 ticks).',
+    84, 7563,
+    'A memorised route fails on the other spawn latitude; ignoring the leash gets the lead tank attacked off post.')
+
+# ── artofwar-sequenced-citadel ──────────────────────────────────
+# Ordered waypoint chain A→B→C with timing windows. Skipping order
+# loses; missing the citadel window loses.
+P='artofwar-sequenced-citadel'; C='reasoning'; M='artofwar-sequenced-citadel-arena'; SZ='128x40'
+T='move_units, attack_unit, stop'
+POST='static (light pickets stance:2; no roaming)'
+add(P,'easy',C,M,SZ,'wide',T,
+    '3× medium tank at west',
+    'Light pickets contesting the chain route + citadel at (110,20)',
+    POST,'',
+    'Commander, this is an ordered waypoint task with a terminal timed window. You are given 3 medium tanks at the west. Three waypoints, in order: A (mid-west, around (35,20)), B (north-centre, around (70,12)), and the citadel C at (110,20). C only counts after about turn 13 (tick 1100) and before about turn 26 (tick 2300). Light pickets contest the route. Visit A → B → C in order inside the timed window.',
+    'Waypoints A → B → C visited in order, C latches after tick 1100 and within 2300 ticks.',
+    'Wrong order, C reached too early or too late, or deadline (2301 ticks).',
+    30, 2703,
+    'Rushing C before tick 1100 leaves the prerequisite window unlatched; visiting B before A breaks the order.')
+add(P,'medium',C,M,SZ,'wide',T,
+    '3× medium tank at west',
+    'Light pickets + tighter terminal window',
+    POST,'',
+    'Commander, this is the same ordered waypoint task with a longer prerequisite hold and a tighter terminal window. You are given 3 medium tanks at the west. Visit A → B → C in order; C only counts after about turn 15 (tick 1300) and before tick 2300. Light pickets contest the route.',
+    'A → B → C in order, C latches after tick 1300 and within 2300 ticks.',
+    'Wrong order, C too early or too late, or deadline (2301 ticks).',
+    30, 2703,
+    'Pre-1300 arrival at C fails the gate; the narrower 1300-2300 strike band leaves no margin for a slow B leg.')
+add(P,'hard',C,M,SZ,'wide',T,
+    '3× medium tank spawn-rotated NORTH (y=12) or SOUTH (y=30) by seed',
+    'Pickets at multiple points + 4-point chain + citadel @(110,20)',
+    POST,'',
+    'Commander, this is a four-point ordered chain from a seed-chosen latitude with a loss cap. You are given 3 medium tanks at the west, staged in either a north (y≈12) or south (y≈30) band by seed. Visit four ordered waypoints culminating in the citadel at (110,20); C only counts after about turn 16 (tick 1400) and before tick 2300. Light pickets at multiple points contest the route. Seize the citadel with the force near-intact inside the band.',
+    'Four-point chain visited in order, terminal latches after tick 1400 within 2300 ticks, loss cap (per pack) satisfied.',
+    'Wrong order, terminal too early or too late, loss cap exceeded, or deadline (2301 ticks).',
+    32, 2883,
+    'Pre-1400 terminal arrival fails the gate; a memorised route mis-aligns to the other latitude.')
+
+# ════════════════════════════════════════════════════════════════════
+#  RISK / FRONTIER COMMIT
+# ════════════════════════════════════════════════════════════════════
+
+# ── risk-blockade-bypass ──────────────────────────────────────────
+# Heavy central garrison vs longer-but-light detour. Loss cap teeth.
+P='risk-blockade-bypass'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, stop_units'
+POST='static (heavy central garrison stance:2; lighter pickets on detour)'
+LEAK_R='LEAK: "Pick the survivable route" / "the northern detour past a light picket costs ~600 extra ticks" — names the detour by direction and quantifies the trade.'
+add(P,'easy',C,M,SZ,'wide',T,
+    'Tank/jeep strike force at west on AttackAnything',
+    'Heavy central garrison around (46-57, 20-22) that out-trades head-on; lighter picket on the north detour around (55,5); objective near (110,20)',
+    POST,LEAK_R,
+    'Commander, this is a contested-transit task with a heavy central garrison. You are given a tank-and-jeep strike force at the west on AttackAnything stance. A heavy garrison sits across the centre at (46-57, 20-22) that out-trades you head-on. The objective is a region near (110,20). A lighter picket sits on a longer northern detour around (55,5). Reach the objective within about 39 turns, losing no more than 4 units.',
+    'Reach region radius-6 of (110,20), ≤4 losses, within 3500 ticks.',
+    'More than 4 lost, or deadline (3501 ticks).',
+    40, 3603,
+    'Pushing or even probing the central garrison bleeds past the 4-loss cap before arrival; stalling busts the clock.')
+add(P,'medium',C,M,SZ,'wide',T,
+    'Tank/jeep strike force at west',
+    'Same heavy garrison + lighter north picket',
+    POST,LEAK_R,
+    'Commander, this is a contested-transit task with a brutal loss cap. You are given a tank-and-jeep strike force at the west. The heavy central garrison out-trades you head-on. The lighter picket sits on a longer northern detour. The objective is near (110,20). Reach it within about 32 turns, losing no more than 2 units.',
+    'Reach region radius-6 of (110,20), ≤2 losses, within 2800 ticks.',
+    'More than 2 lost, or deadline (2801 ticks).',
+    32, 2883,
+    'The corridor route guarantees you blow the 2-loss cap; dithering near the corridor before bouncing burns ticks.')
+add(P,'hard',C,M,SZ,'wide',T,
+    '2× medium tank + 2× light tank + 2× jeep on AttackAnything at west',
+    'Lighter central garrison (4× e3 + 1× gun + 5× e1) + obstacles on both flanks',
+    POST,LEAK_R,
+    'Commander, this is a contested-transit task with the brutal cap. You are given 2 medium tanks, 2 light tanks and 2 jeeps at the west on AttackAnything. The central garrison is lighter (4 rocket soldiers, 1 gun turret, 5 riflemen) but both flanks are contested. The objective is region radius-6 of (110,20). Reach it within about 27 turns, losing no more than 1 unit.',
+    'Reach region radius-6 of (110,20), ≤1 loss, within 2400 ticks.',
+    'More than 1 lost, or deadline (2401 ticks).',
+    28, 2523,
+    'Any clumsy route trades enough for the 1-loss cap; the wrong detour blocks the clock.')
+
+# ── reasoning-frontier-commit ────────────────────────────────────
+# Multiple candidate regions, one carries the real survivor; decoys
+# distract. Tight clock = exactly one trip.
+P='reasoning-frontier-commit'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, stop_units'
+POST='passive decoys (stance:0); one hostile cluster on hard'
+LEAK_F='LEAK: "Drive straight to the NE corner — detouring through SE overruns the clock" / "The real building is in the NE." — directly names the answer corner.'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    '1× jeep @(6,6)',
+    '2× passive decoy unit cluster in SE + a survivor-marker building in NE corner',
+    POST,LEAK_F,
+    'Commander, this is a fast frontier-commit task. You are given 1 jeep at the north-west. Two candidate regions and one decoy: a passive enemy unit cluster sits in the south-east; the real survivor marker is a building in the far-NE corner. Only the NE building counts toward the win. Find and visit the survivor within about 11 turns.',
+    'Reach the NE survivor building within 950 ticks.',
+    'Not reached by deadline (951 ticks).',
+    14, 1263,
+    'Sweeping both candidates or detouring through SE overruns the 950 clock; the decoy region does NOT satisfy the building-based win.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    '1× jeep @(6,6)',
+    '2× decoy passive clusters (SE corner + mid-south edge) + survivor-marker building in NE',
+    POST,LEAK_F,
+    'Commander, this is a fast frontier-commit task with multiple decoys. You are given 1 jeep at the north-west. Three candidate regions, two decoys: passive enemy clusters in the far-SE and on the mid-south edge; the real survivor marker is a building in the far-NE corner. The clock permits exactly one decisive trip. Within about 10 turns.',
+    'Reach the NE survivor building within 880 ticks.',
+    'Not reached by deadline (881 ticks).',
+    14, 1263,
+    'Any multi-candidate sweep busts the 880 clock; the decoy regions do not satisfy the win.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    '1× jeep spawn-rotated NW (6,6) or SW (6,33) by seed',
+    '2× decoy clusters (one hostile in SE), survivor-marker building in seed-NE',
+    POST,LEAK_F,
+    'Commander, this is a fast frontier-commit task with a hostile decoy and ZERO losses allowed. You are given 1 jeep at a seed-chosen corner (NW or SW). The SE decoy is a HOSTILE rocket-soldier cluster — careless routing kills the scout. The real survivor marker is a building in the NE. The clock permits exactly one decisive trip and any loss fails the win. Within about 12 turns.',
+    'Reach the NE survivor building, 0 losses, within 1050 ticks.',
+    'Any loss, not reached by deadline (1051 ticks).',
+    15, 1353,
+    'Routing through the hostile SE decoy kills the scout; sweeping every candidate busts the 1050 clock; a memorised path mis-aligns from the other corner spawn.')
+
+# ── reasoning-risk-route ─────────────────────────────────────────
+# Edge-detour vs lethal direct lane; zero-loss cap forces the safe seam.
+P='reasoning-risk-route'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='move_units, attack_unit, stop_units'
+POST='guard (rocket-infantry wall holds post)'
+LEAK_RR='LEAK: "Take the long way — climb to y≤3 or drop to y≥37 to slip around the wall." — names the answer seams by coordinate band.'
+add(P,'easy',C,M,SZ,'wide',T,
+    '1× jeep at west on the y=20 lane',
+    'Rocket-infantry wall blocking the direct east lane in the mid-band; objective at (120,20)',
+    POST,LEAK_RR,
+    'Commander, this is a contested-route transit with a zero-loss cap. You are given 1 jeep at the west. A rocket-infantry wall blocks the direct east lane in the mid-band — anything on the lane axis dies in its volley. The objective is region radius-7 of (120,20). Reach it with ZERO losses within about 30 turns.',
+    'Reach region radius-7 of (120,20), 0 losses, within 2700 ticks.',
+    'Any loss, or deadline (2701 ticks).',
+    32, 2883,
+    'The direct lane kills the jeep; a stall busts the clock.')
+add(P,'medium',C,M,SZ,'wide',T,
+    '1× jeep at west',
+    'Central wall + bottom edge guarded',
+    POST,LEAK_RR,
+    'Commander, this is a contested-route transit with both edges contested. You are given 1 jeep at the west. The direct east lane is lethal, AND the bottom edge is now also guarded. The objective is at (120,20). Reach it with zero losses within about 35 turns.',
+    'Reach (120,20) radius-7, 0 losses, within 3100 ticks.',
+    'Any loss, or deadline (3101 ticks).',
+    36, 3243,
+    'The short lane kills, the bottom detour kills, dithering busts the 3100 clock.')
+add(P,'hard',C,M,SZ,'wide',T,
+    '1× jeep at west',
+    'Central wall + bottom edge blocked + defended pocket on top edge near x=100',
+    POST,LEAK_RR,
+    'Commander, this is a contested-route transit with all three primary corridors contested. You are given 1 jeep at the west. The bottom edge is fully blocked, the top has a defended pocket near x=100, and the centre wall is lethal. The objective is region radius-7 of (122,20). Reach it with zero losses within about 37 turns.',
+    'Reach (122,20) radius-7, 0 losses, within 3300 ticks.',
+    'Any loss, or deadline (3301 ticks).',
+    40, 3603,
+    'Any single-edge approach hits a guard band; threading the safe seam is the only path that fits the clock.')
+
+# ════════════════════════════════════════════════════════════════════
+#  EXPANSION
+# ════════════════════════════════════════════════════════════════════
+
+# ── expansion-aggro-3-base-greedy ────────────────────────────────
+# Multi-MCV deploy across distant corner regions. Wide canvas is the
+# test — wide-justified.
+P='expansion-aggro-3-base-greedy'; C='reasoning'; M='expansion-aggro-3-base-greedy-arena'; SZ='192x80'
+T='observe, deploy, build, place_building, harvest, move_units, stop'
+POST_PAT='patrol (light Soviet patrols loiter at corners but can\'t catch a prompt deploy)'
+add(P,'easy',C,M,SZ,'wide-justified',T,
+    '2× MCV pre-positioned at NE (165,15) and SE (165,65) — no starter base; cash 0',
+    'Light Soviet patrols near each candidate region',
+    'no bot on easy','',
+    'Commander, this is a multi-deploy logistics task. You are given 2 MCVs (Mobile Construction Vehicles — deploy them in place to create a Construction Yard) already inside their designated eastern regions — NE near (165,15) and SE near (165,65). No cash, no build phase. Deploy each MCV in place within about 60 turns. Two Construction Yards, one at each target region.',
+    '≥1 yard inside the NE target region AND ≥1 yard inside the SE target region, within 5400 ticks.',
+    'One or both regions yardless at deadline (5401 ticks).',
+    65, 5853,
+    'Holding either MCV in reserve forfeits a region; moving an MCV out of its region first wastes ticks.')
+add(P,'medium',C,M,SZ,'wide-justified',T,
+    '3× MCV cluster at NW staging — no starter base; cash 0',
+    'Light Soviet patrols loiter near each candidate (NE, E, SE)',
+    POST_PAT,'',
+    'Commander, this is a multi-deploy logistics task with three MCVs and three targets. You are given 3 MCVs clustered at the north-west staging — no starter base. Drive each MCV to a distinct eastern region — NE (165,15), E (165,40), SE (165,65) — and deploy in place. Light Soviet patrols loiter but cannot catch a prompt commit. Three Construction Yards, one per region, within about 60 turns.',
+    '≥1 yard inside each of NE, E, SE target regions, within 5400 ticks.',
+    'Any region yardless at deadline (5401 ticks).',
+    65, 5853,
+    'Holding any MCV back loses a region; routing all three through one corridor lets the patrols catch the lagging MCVs.')
+add(P,'hard',C,M,SZ,'wide-justified',T,
+    '3× MCV cluster at NW or SW staging by seed — no starter base; cash 0',
+    'Doubled patrols near every target',
+    POST_PAT,'',
+    'Commander, this is a multi-deploy logistics task from a seed-rotated staging corner. You are given 3 MCVs clustered at the north-west or south-west by seed — no starter base. Three target regions — NE, E, SE. Read each MCV\'s actual position and assign it to whichever target it can reach fastest. Doubled patrols sit near every target. Three yards, one per region, within about 54 turns.',
+    '≥1 yard inside each of NE, E, SE target regions, within 4800 ticks.',
+    'Any region yardless at deadline (4801 ticks).',
+    60, 5403,
+    'Holding any MCV back loses a region; a memorised "always send MCV#1 to NE" mis-assigns when the staging shifts; doubled patrols catch lagging MCVs.')
+
+# ── expansion-balanced-2-base-defended ──────────────────────────
+# NW starter base + spare MCV; deploy at target + defend; build pbox.
+P='expansion-balanced-2-base-defended'; C='reasoning'; M='rush-hour-arena'; SZ='160x60 (per overrides)'
+T='observe, deploy, build, place_building, move_units, attack_unit, stop'
+POST_E='patrol (light patrol oscillates between NW and candidate regions)'
+add(P,'easy',C,M,SZ,'wide-justified',T,
+    'NW base: fact+tent+powr @(15-18,20-23) + 1× MCV @ map centre; cash 1500',
+    'Light patrol oscillates near the eastern candidate',
+    POST_E,'',
+    'Commander, this is an expand-and-fortify task. You hold a north-west starter base — Construction Yard, Allied Barracks, Power Plant — with one spare MCV (Mobile Construction Vehicle — deploy to create a yard) parked at the map centre, plus cash $1500. Drive the MCV east to (130,15) and deploy. Build at least one pillbox (stationary defensive turret) somewhere across your bases and train at least three rifle infantry. A light patrol oscillates near the new candidate. Two yards (one at the eastern target), one pillbox, three units alive, within about 60 turns.',
+    '≥2 facts, ≥1 pbox, ≥3 own units alive, within 5400 ticks.',
+    'NW yard lost, or deadline (5401 ticks).',
+    65, 5853,
+    'Holding the spare MCV in reserve loses the second yard; ignoring the defence lets the patrol chip the NW yard.')
+add(P,'medium',C,M,SZ,'wide-justified',T,
+    'NW base + spare MCV @ centre; cash 1500',
+    'Patrol near NW chips the starter if undefended',
+    POST_E,'',
+    'Commander, this is an expand-and-fortify task with patrols pressuring BOTH bases. You hold a NW starter base and one spare MCV at the map centre; cash $1500. Deploy the spare MCV at the eastern target near (130,15). Build TWO pillboxes — patrols chip both bases. Train three rifle infantry. Two yards, two pillboxes, three units alive, within about 60 turns.',
+    '≥2 facts, ≥2 pbox, ≥3 own units alive, within 5400 ticks.',
+    'NW or NE yard lost, or deadline (5401 ticks).',
+    60, 5403,
+    'Skimping on either base\'s defence lets the patrol chip that yard; failing to deploy the spare MCV leaves the second-yard clause unsatisfied.')
+add(P,'hard',C,M,SZ,'wide-justified',T,
+    'NW starter base + spare MCV; MCV column varies by seed; cash 2500',
+    'Doubled patrols + TWO candidate eastern regions (NE 130,15 and SE 130,45)',
+    POST_E,'',
+    'Commander, this is an expand-and-fortify task with the candidate region varying by seed. You hold a NW starter base and one spare MCV; cash $2500. Two candidate eastern regions — NE (130,15) and SE (130,45). Drive the MCV to whichever is nearer and deploy. Doubled patrols pressure both bases and both candidates. Two yards, three pillboxes, four units alive, within about 54 turns.',
+    '≥2 facts, ≥3 pbox, ≥4 own units alive, within 4800 ticks.',
+    'Either yard lost, or deadline (4801 ticks).',
+    60, 5403,
+    'Sending the MCV to the farther candidate burns ~600 ticks and misses the 4800 close-out; under-defending either base loses a yard to the doubled patrol.')
+
+# ── expansion-turtle-1-base-fortified ──────────────────────────
+# 1-base fortify-in-place; no MCV; build pbox + gun against hunt waves.
+P='expansion-turtle-1-base-fortified'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='observe, build, place_building, move_units, attack_unit, stop'
+POST_TURTLE='hunt (hunt-bot raid band actively seeks the agent base)'
+add(P,'easy',C,M,SZ,'wide',T,
+    'Pre-placed base: fact (16,20) + tent + 2× powr + proc + harv; cash 6500',
+    '4× rifle hunt band incoming',
+    POST_TURTLE,'',
+    'Commander, this is a fortify-in-place task. You hold a pre-placed Allied base — Construction Yard, Allied Barracks, two Power Plants, Ore Refinery and one harvester — with cash $6500. No MCV, no expansion. A 4-rifle hunt band advances on your base. Build three pillboxes AND one gun turret (the War Factory is the gun turret\'s prerequisite, so build that too). Three own units alive, Construction Yard intact, within about 60 turns.',
+    '≥3 pbox, ≥1 gun, ≥3 own units alive, Construction Yard standing, within 5400 ticks.',
+    'Yard lost, fewer than 3 own units alive, or deadline (5401 ticks).',
+    62, 5583,
+    'Pure-army (no pbox/gun) gets ground down by the hunt band; over-tech (skip pbox) leaves the yard exposed; ignoring the gun-turret prerequisite (War Factory) blocks the gun build.')
+add(P,'medium',C,M,SZ,'wide',T,
+    'Pre-placed base + 4× powr (heavier power draw); cash 8500',
+    '6× rifle + 2× rocket-soldier hunt band',
+    POST_TURTLE,'',
+    'Commander, this is a fortify-in-place task with a heavier wave and power constraint. You hold a pre-placed Allied base with four Power Plants (the intended fortification draws more power than two plants supply); cash $8500. Six rifle and two rocket-soldier attackers advance. Build SIX pillboxes AND two gun turrets. Three units alive, yard intact, within about 60 turns.',
+    '≥6 pbox, ≥2 gun, ≥3 own units alive, Construction Yard standing, within 5400 ticks.',
+    'Yard lost, power-negative throttles production, fewer than 3 own units, or deadline (5401 ticks).',
+    62, 5583,
+    'Pure-army gets ground down; over-tech leaves the yard exposed; a power-negative base throttles defence production and the wave breaks through.')
+add(P,'hard',C,M,SZ,'wide',T,
+    'Single base spawn-rotated NORTH (y=12) or SOUTH (y=28); same composition; cash 9500',
+    'Symmetric hunt bands arrive regardless of base latitude',
+    POST_TURTLE,'',
+    'Commander, this is a fortify-in-place task with the base latitude flipping by seed. You hold a single Allied base at either the north band (y≈12) or south band (y≈28); cash $9500. Symmetric hunt bands arrive regardless of which latitude is live. Build eight pillboxes AND two gun turrets. Three units alive, yard intact, within about 60 turns.',
+    '≥8 pbox, ≥2 gun, ≥3 own units alive, Construction Yard standing, within 5400 ticks.',
+    'Yard lost, fewer than 3 own units, or deadline (5401 ticks).',
+    62, 5583,
+    'A memorised pbox layout aligned to one latitude fails on the flipped seed; pure-army or pure-tech still loses by yard.')
+
+# ════════════════════════════════════════════════════════════════════
+#  MID-GAME SWITCH
+# ════════════════════════════════════════════════════════════════════
+
+# ── mid-concede-vs-hold ─────────────────────────────────────────
+# Two-base triage — one salvageable, one not.
+P='mid-concede-vs-hold'; C='reasoning'; M='mid-concede-arena'; SZ='160x60'
+T='observe, move_units, attack_unit, attack_move, set_stance, stop'
+POST_HUNT='hunt (scripted hunt hits BOTH bases simultaneously; EAST push much heavier)'
+LEAK_M='LEAK: "consolidate the flex squad on the lighter WEST side, let EAST fall" — directly names the salvage side and the concede side.'
+add(P,'easy',C,M,SZ,'wide-justified',T,
+    'TWO bases — WEST (24,20) and EAST (78,20) — each Construction Yard + Ore Refinery + small tank garrison; flex squad at centre',
+    'Hunt waves at both bases simultaneously, EAST push much heavier than WEST',
+    POST_HUNT,LEAK_M,
+    'Commander, this is a two-base triage. You hold two bases — one at the WEST (24,20) and one at the EAST (78,20), each with a Construction Yard plus Ore Refinery and a small tank garrison — with a flex squad parked at the map centre. A scripted hunt hits BOTH bases at the same time, but the EAST push is much heavier than the WEST. You CANNOT save both. Keep yard AND refinery alive at one base through the late survival band (tick 3000-5400), within about 60 turns.',
+    'Yard+refinery alive at one base, latches in the band tick 3000-5400.',
+    'Both bases razed before band, or deadline (5401 ticks).',
+    65, 5853,
+    'Splitting the flex squad between both bases lets the heavier east push break through anyway; doing nothing loses both bases before tick 3000.')
+add(P,'medium',C,M,SZ,'wide-justified',T,
+    'Same two bases + flex squad; tighter clock',
+    'Heavier EAST push, ground for any split',
+    POST_HUNT,LEAK_M,
+    'Commander, this is the same two-base triage with a heavier EAST push. You hold two bases — WEST (24,20) and EAST (78,20) — each with Construction Yard, Ore Refinery, small tank garrison, plus a flex squad at the centre. The EAST push grows heavier; any split or oscillation loses both. Keep yard AND refinery alive at one base through tick 3000-5400.',
+    'Yard+refinery alive at one base, latches in band 3000-5400.',
+    'Both bases razed, or deadline (5401 ticks).',
+    60, 5403,
+    'Oscillating between bases loses both; splitting the flex squad lets the heavier push break through; doing nothing loses both before the band.')
+add(P,'hard',C,M,SZ,'wide-justified',T,
+    'Same two bases + flex squad with start position varying by seed',
+    'Heavy/light push split varies, loss cap',
+    POST_HUNT,LEAK_M,
+    'Commander, this is a two-base triage with the flex squad spawn rotating by seed and a loss cap on a Pyrrhic save. You hold two bases — WEST (24,20) and EAST (78,20) — each with yard, refinery and a small garrison. The flex squad spawns at a seed-chosen position. Scout both pushes (heavy vs light), commit the squad to the lighter side, save yard+refinery there. No more than 18 own units lost (a Pyrrhic save fails the cap). Hold through tick 2400-5400.',
+    'Yard+refinery alive at one base, latches in band 2400-5400, ≤18 own losses.',
+    'More than 18 lost, both bases razed, or deadline (5401 ticks).',
+    60, 5403,
+    'A memorised "always save west" loses on the seed where the flex squad is far from west; trading too aggressively trips the 18-loss cap; doing nothing loses both bases.')
+
+# ── mid-economy-under-fire ──────────────────────────────────────
+# Don't chase — let the static ring intercept; keep harvesters working.
+P='mid-economy-under-fire'; C='action'; M='rush-hour-arena'; SZ='128x40'
+T='observe, harvest, move_units, attack_unit, attack_move, stop'
+POST_R='raider (1-3 enemy tanks worker-focused on hunt vector; stance:3 on attackers)'
+LEAK_ME='LEAK: "Don\'t chase — keep the harvesters in harvest mode and let the ring intercept on contact" — directly names the intended doctrine ("don\'t chase").'
+add(P,'easy',C,M,SZ,'large-trivial',T,
+    'Refinery west + 3× harvester on east patches (22,18)/(22,22) + 3× light tank ring @x=26',
+    '1× enemy raider tank lurks at lane mouth (x=60), worker-focused',
+    POST_R,LEAK_ME,
+    'Commander, this is an economy-under-fire task. You hold an Ore Refinery west, three harvesters on the eastern ore patches at (22,18) and (22,22), and three light tanks ringing the patch at x=26. ONE enemy raider tank lurks at the lane mouth (x=60), targeting your workers. Reach economy value $2000 with at least 2 harvesters alive and ≥1 kill, within about 60 turns.',
+    'Economy value ≥2000, ≥2 harvesters alive, ≥1 kill, within 5400 ticks.',
+    'Fewer than 2 harvesters, or deadline (5401 ticks).',
+    61, 5493,
+    'Chasing the raider with the ring pulls the tanks off the patch and the raider runs the harvesters down; harvesters wandered out of harvest mode collapse income below 2000.')
+add(P,'medium',C,M,SZ,'large-trivial',T,
+    'Same refinery + 3× harvester + 3× light tank ring',
+    '2× enemy raider tanks (x=60 + x=80) staggered, worker-focused',
+    POST_R,LEAK_ME,
+    'Commander, this is an economy-under-fire task with two staggered raider tanks. You hold the same refinery, three harvesters on (22,18)/(22,22), three light tanks ringing the patch. Two enemy raiders advance on the lane (x=60 and x=80), both worker-focused. Reach economy value $3000 with at least 2 harvesters alive and ≥2 kills, within about 60 turns.',
+    'Economy value ≥3000, ≥2 harvesters alive, ≥2 kills, within 5400 ticks.',
+    'Fewer than 2 harvesters, or deadline (5401 ticks).',
+    61, 5493,
+    'Chasing the raiders empties the patch ring and lets the next raider hit the harvesters; harvesters wandered out of harvest mode collapse the $3000 floor.')
+add(P,'hard',C,M,SZ,'large-trivial',T,
+    'Refinery + ring + 3× harvester spawn-rotated NORTH (y=14) or SOUTH (y=26) by seed',
+    '3× raider tanks on TWO distinct lane vectors',
+    POST_R,LEAK_ME,
+    'Commander, this is an economy-under-fire task with two distinct raider vectors and a seed-rotated base latitude. You hold an Ore Refinery and three harvesters on the eastern patch column (at the rotated latitude), plus three light tanks ringing the patch. Three enemy raiders attack from two lane vectors. Reach economy value $4000 with at least 2 harvesters alive, ≥3 kills, and at most 2 losses, within about 60 turns.',
+    'Economy value ≥4000, ≥2 harvesters alive, ≥3 kills, ≤2 losses, within 5400 ticks.',
+    'Fewer than 2 harvesters, more than 2 lost, or deadline (5401 ticks).',
+    61, 5493,
+    'Chasing the raiders abandons the patch and harvesters die; a memorised hold cell aligned to one latitude leaves the other base ringless.')
+
+# ── mid-tech-switch-on-scout ────────────────────────────────────
+# Scout to latch the prerequisite, then commit budget to the matching
+# counter. `then:` clause chain.
+P='mid-tech-switch-on-scout'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+T='observe, scout, build, place_building, move_units, attack_unit, stop'
+POST_S='static (enemy garrison stance:2; no roaming)'
+add(P,'easy',C,M,SZ,'wide',T,
+    'Full mid-game base: fact+powr+tent+weap+fix+proc @(10-20,18-22) + scout jeep; cash 4500',
+    '6× rifle infantry at far-east enemy yard',
+    POST_S,'',
+    'Commander, this is a scout-then-commit task. You hold a full mid-game Allied base — Construction Yard, Power Plant, Allied Barracks, War Factory, Service Depot, Ore Refinery — with a scout jeep and cash $4500. Six enemy rifle infantry guard an enemy yard far east. Drive the scout east to confirm the enemy composition first (this latches the scout prerequisite), then commit the budget to either four rocket soldiers OR a gun turret plus two medium tanks. Three kills within about 60 turns. Pre-picking the counter before scouting fails the then-chain.',
+    'Scout confirms enemy AND ≥3 kills, within 5400 ticks (then-chain).',
+    'Pre-pick (commit before scout latches), 0 kills, or deadline (5401 ticks).',
+    60, 5403,
+    'Pre-picking (commit before scouting) fails the then-chain prerequisite; hedging across counters completes neither and falls short of 3 kills.')
+add(P,'medium',C,M,SZ,'wide',T,
+    'Full mid-game base + scout; cash 2700',
+    'Two enemy compositions hidden at NE and SE corners — fog',
+    POST_S,'',
+    'Commander, this is a scout-then-commit task with the budget rationed to one counter. You hold a full mid-game base with a scout jeep and cash $2700 — enough for exactly one counter (four rocket soldiers OR a gun turret + two medium tanks). Two enemy compositions hide at the NE and SE corners; the near composition is what counts. Scout the near corner first to latch the prerequisite, then commit. Three kills within about 70 turns.',
+    'Scout latches AND ≥3 kills, within 6300 ticks (then-chain).',
+    'Pre-pick, 0 kills, or deadline (6301 ticks).',
+    70, 6303,
+    'Pre-picking wins only half the time on average; hedging finishes neither counter inside $2700.')
+add(P,'hard',C,M,SZ,'wide',T,
+    'Full mid-game base spawn-rotated NORTH (y=10) or SOUTH (y=30); scout; cash 2700',
+    'ENEMY archetype + composition flips per seed; compass-only briefing (no coords)',
+    POST_S,'',
+    'Commander, this is a scout-then-commit task with base latitude and enemy composition both rotating by seed. You hold a full mid-game base in the north (y≈10) or south (y≈30) corridor by seed; scout jeep + cash $2700. The enemy archetype + composition flips per seed and the briefing is compass-only (no coordinates). Scout the near corner first to latch the prerequisite, then commit the matching counter. Three kills, no more than 4 losses, within about 70 turns.',
+    'Scout latches AND ≥3 kills AND ≤4 losses, within 6300 ticks (then-chain).',
+    'Pre-pick, more than 4 lost, or deadline (6301 ticks).',
+    70, 6303,
+    'Pre-picking the counter loses on the seed where the archetype rotates against it; a memorised approach mis-aligns from the other corridor latitude.')
+
+# ════════════════════════════════════════════════════════════════════
+#  WRITE CSV
+# ════════════════════════════════════════════════════════════════════
+FIELDS = [
+    'pack','level','capability','map_name','map_size','map_fit','tools',
+    'agent_force','enemy_force','enemy_posture','posture_issue',
+    'briefing_RA','win_condition','lose_condition','max_turns','tick_budget',
+    'wrong_strategy_loss',
+]
+with OUT.open('w', newline='', encoding='utf-8') as f:
+    w = csv.DictWriter(f, fieldnames=FIELDS, quoting=csv.QUOTE_ALL)
+    w.writeheader()
+    for row in R:
+        w.writerow(row)
+
+print(f'Wrote {len(R)} rows to {OUT}')
