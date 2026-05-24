@@ -69,7 +69,22 @@ meta:
     - "disaster recovery: worker replacement"
   author: "openra-bench"
 
-base_map: rush-hour-arena
+# MAP — per-scenario bespoke arena (replaces rush-hour-arena 128x40,
+# audit `audits/family2_economy.csv` flagged `large-trivial` on every
+# tier). All decisions are base-internal: harv replacement, redirect
+# harvest, defenders auto-fire. Easy/medium actors fit within x≤22.
+# Hard's wave-2 4tnk used to stage at x=60 (~45 cells east of the
+# defender ring at x=20) so the staggered arrival gives the defenders
+# time to wipe wave-1 first; this arena keeps the same staging.
+# Cordon 2 ⇒ playable (2..60, 2..36). Anti-DRAW enemy fact moved
+# from (120,20) to (60,34) — within bounds, far from any harvest path.
+base_map:
+  generator: arena
+  name: econ-replace-dead-harvester-64x40
+  width: 64
+  height: 40
+  cordon: 2
+  title: Econ Replace Dead Harvester Arena 64x40
 starting_cash: 1100  # EXACTLY one harv ⇒ indivisible replacement budget
 
 base:
@@ -123,21 +138,28 @@ levels:
     description: >
       Commander, this is a worker-replacement drill. You hold a
       Construction Yard (fact), Ore Refinery (proc), Allied Barracks
-      (tent), three harvesters (harv, unarmed ore-collector trucks) on
-      two near ore patches, and two heavy tanks (3tnk) on Defend
-      stance, with $1100 in the bank — exactly the cost of one
+      (tent), War Factory (weap — produces vehicles including
+      harvesters), three harvesters (harv, unarmed ore-collector
+      trucks) on two near ore patches, and two heavy tanks (3tnk) on
+      Defend stance, with $1100 in the bank — exactly the cost of one
       replacement harvester. An enemy Mammoth tank (4tnk) attacks from
       the east and will kill ONE harvester before your defenders finish
       it. Within about 60 turns, reach economy value $1800 (cash plus
       stored ore), have at least three harvesters alive, and keep your
-      Refinery standing. Build the replacement and re-issue harvest to
-      every worker — the death event interrupts their cycles.
+      Refinery standing. Build the replacement from the war factory and
+      re-issue harvest to every worker — the death event interrupts
+      their cycles.
     starting_cash: 1100
     overrides:
       actors:
         - {type: fact, owner: agent, position: [8, 18]}
         - {type: proc, owner: agent, position: [12, 18]}
         - {type: tent, owner: agent, position: [8, 22]}
+        # War factory pre-placed — `build('harv')` requires `weap`
+        # (PRODUCTION_TECH_AUDIT.md). The pack's reserve cash (1100)
+        # is EXACTLY one harv; without `weap` the replacement order
+        # silently fails and the harv-count clause is unsatisfiable.
+        - {type: weap, owner: agent, position: [12, 22]}
         # Three pre-placed harvs on the patch lane. The eastern-most
         # (y=22) is the natural target for the raider 4tnk.
         - {type: harv, owner: agent, position: [14, 18]}
@@ -163,10 +185,11 @@ levels:
         # target to the harvester so the 4tnk commits to the harv kill
         # until the 3tnk pair neutralises it.
         - {type: '4tnk', owner: enemy, position: [18, 22]}
-        # Persistent enemy marker far east so the engine doesn't auto-
-        # `done` when the 4tnk is wiped (CLAUDE.md auto-done footgun
-        # would collapse a clean run to DRAW before the economy bar).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # Persistent enemy marker on the far edge of the small arena
+        # so the engine doesn't auto-`done` when the 4tnk is wiped
+        # (CLAUDE.md auto-done footgun would collapse a clean run to
+        # DRAW before the economy bar).
+        - {type: fact, owner: enemy, position: [60, 34]}
     win_condition:
       all_of:
         - {economy_value_gte: 1800}
@@ -202,22 +225,26 @@ levels:
     description: >
       Commander, this is a worker-replacement drill with a tighter
       throughput bar. You hold a Construction Yard (fact), Ore Refinery
-      (proc), Allied Barracks (tent), three harvesters (harv, unarmed
-      ore-collector trucks) on two near ore patches, and two heavy tanks
-      (3tnk) on Defend stance, with $1100 in the bank — one replacement
-      harvester. An enemy Mammoth tank (4tnk) attacks from the east and
-      kills ONE harvester before your defenders wipe it. Within about
-      60 turns, reach economy value $2500 (cash plus stored ore), have
-      at least three harvesters alive, and keep your Refinery standing.
-      Build the replacement and re-issue harvest to every worker — the
-      death event interrupts their cycles, and a missed re-issue costs
-      throughput you cannot recover.
+      (proc), Allied Barracks (tent), War Factory (weap — produces
+      vehicles including harvesters), three harvesters (harv, unarmed
+      ore-collector trucks) on two near ore patches, and two heavy
+      tanks (3tnk) on Defend stance, with $1100 in the bank — one
+      replacement harvester. An enemy Mammoth tank (4tnk) attacks from
+      the east and kills ONE harvester before your defenders wipe it.
+      Within about 60 turns, reach economy value $2500 (cash plus
+      stored ore), have at least three harvesters alive, and keep your
+      Refinery standing. Build the replacement from the war factory and
+      re-issue harvest to every worker — the death event interrupts
+      their cycles, and a missed re-issue costs throughput you cannot
+      recover.
     starting_cash: 1100
     overrides:
       actors:
         - {type: fact, owner: agent, position: [8, 18]}
         - {type: proc, owner: agent, position: [12, 18]}
         - {type: tent, owner: agent, position: [8, 22]}
+        # War factory pre-placed — `build('harv')` requires `weap`.
+        - {type: weap, owner: agent, position: [12, 22]}
         - {type: harv, owner: agent, position: [14, 18]}
         - {type: harv, owner: agent, position: [14, 20]}
         - {type: harv, owner: agent, position: [14, 22]}
@@ -226,7 +253,7 @@ levels:
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 22]}
         - {type: '4tnk', owner: enemy, position: [18, 22]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [60, 34]}
     win_condition:
       all_of:
         - {economy_value_gte: 2500}
@@ -274,15 +301,17 @@ levels:
       Commander, this is a worker-replacement drill with two staggered
       raider waves and seed-rotated base latitude. You hold a
       Construction Yard (fact), Ore Refinery (proc), Allied Barracks
-      (tent), three harvesters (harv, unarmed ore-collector trucks) on
-      two near ore patches, and three heavy tanks (3tnk) on Defend
-      stance at either the NORTH (y=14) or SOUTH (y=26) latitude, with
-      $2200 in the bank — exactly two replacement harvesters. Two enemy
-      Mammoth tanks (4tnk) attack from the east in sequence and will
-      kill TWO of your harvesters. Within about 60 turns, reach economy
-      value $3500 (cash plus stored ore), have at least three
-      harvesters alive, and keep your Refinery standing. Replace BOTH
-      dead workers and re-issue harvest after each death.
+      (tent), War Factory (weap — produces vehicles including
+      harvesters), three harvesters (harv, unarmed ore-collector
+      trucks) on two near ore patches, and three heavy tanks (3tnk) on
+      Defend stance at either the NORTH (y=14) or SOUTH (y=26)
+      latitude, with $3300 in the bank — three replacement harvesters
+      of slack. Two enemy Mammoth tanks (4tnk) attack from the east in
+      sequence and will kill TWO of your harvesters. Within about 60
+      turns, reach economy value $3500 (cash plus stored ore), have at
+      least three harvesters alive, and keep your Refinery standing.
+      Replace BOTH dead workers from the war factory and re-issue
+      harvest after each death.
     starting_cash: 3300
     overrides:
       actors:
@@ -294,6 +323,9 @@ levels:
         - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
         - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
         - {type: tent, owner: agent, position: [8, 18], spawn_point: 0}
+        # War factory pre-placed at each spawn — `build('harv')` requires
+        # `weap`. The hard reserve (3300) funds two harv replacements.
+        - {type: weap, owner: agent, position: [12, 18], spawn_point: 0}
         - {type: harv, owner: agent, position: [14, 14], spawn_point: 0}
         - {type: harv, owner: agent, position: [14, 16], spawn_point: 0}
         - {type: harv, owner: agent, position: [14, 18], spawn_point: 0}
@@ -308,6 +340,8 @@ levels:
         - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
         - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
         - {type: tent, owner: agent, position: [8, 22], spawn_point: 1}
+        # War factory pre-placed at SOUTH spawn.
+        - {type: weap, owner: agent, position: [12, 22], spawn_point: 1}
         - {type: harv, owner: agent, position: [14, 26], spawn_point: 1}
         - {type: harv, owner: agent, position: [14, 24], spawn_point: 1}
         - {type: harv, owner: agent, position: [14, 22], spawn_point: 1}
@@ -326,8 +360,14 @@ levels:
         # far away). Plus one far 4tnk as wave 2.
         - {type: '4tnk', owner: enemy, position: [18, 18]}
         - {type: '4tnk', owner: enemy, position: [18, 22]}
+        # Wave-2 4tnk staged at x=60 (same as the historical
+        # rush-hour-arena placement). The 64x40 bespoke arena preserves
+        # the original arrival delay so wave-2 reaches the harvs only
+        # AFTER the defenders neutralise wave-1.
         - {type: '4tnk', owner: enemy, position: [60, 20]}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # Persistent enemy marker on the far edge of the small arena
+        # (CLAUDE.md auto-done footgun guard).
+        - {type: fact, owner: enemy, position: [60, 34]}
     win_condition:
       # Hard: `then:` gates the win on (a) being past tick 3600 (so
       # both raider waves have had time to bite and the agent has
