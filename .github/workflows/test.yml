@@ -14,9 +14,49 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
+
+      # ── openra_train engine wheel (sibling repo OpenRA-Rust) ─────
+      # Without the wheel, 149+ engine-dependent tests skip at
+      # collection (`pytest.importorskip("openra_train")`). Clone
+      # the engine sibling, build the wheel via maturin, install it
+      # into the same Python env, then verify importability before
+      # pytest runs.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone OpenRA-Rust (sibling repo for engine wheel)
+        uses: actions/checkout@v4
+        with:
+          repository: yxc20089/OpenRA-Rust
+          path: OpenRA-Rust
+          ref: main
+
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            OpenRA-Rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('OpenRA-Rust/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build + install openra_train wheel
+        working-directory: OpenRA-Rust/openra-train
+        run: maturin develop --release
+
+      - name: Verify engine wheel loaded
+        run: python -c "import openra_train; print('engine OK:', openra_train.__file__)"
+
+      # ── bench deps + tests ────────────────────────────────────────
+      - name: Install bench dependencies
         run: |
           pip install pytest
           pip install -r requirements.txt
+
       - name: Run tests
         run: python -m pytest tests/ -v
