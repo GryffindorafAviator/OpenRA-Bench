@@ -29,10 +29,19 @@
 #
 # Difficulty axis (one new controlled variable per tier):
 #   • easy   — LIGHT strike (1× 4tnk + 2 own defenders). The defenders
-#              intercept the lone 4tnk before the proc dies; the agent
-#              never has to rebuild. The bare skill is "commit to
-#              harvest, don't stall, EV bar gets met". `has_building:
-#              proc` is satisfied trivially by the surviving original.
+#              intercept the lone 4tnk before the proc dies; the
+#              original refinery survives. Engine
+#              `auto_route_idle_harvesters` (openra-sim/src/world.rs:
+#              2233) cycles the starting harv onto the patches as soon
+#              as the proc is present, so passive "do nothing" already
+#              accumulates ~10400 EV by the deadline. The bare skill
+#              on easy is therefore EXPANSION: commit the $1400 reserve
+#              to a SECOND refinery (a new harv auto-spawns at the new
+#              proc and harvests in parallel; combined throughput
+#              roughly doubles) so EV clears the elevated bar (15000).
+#              `has_building: proc` is satisfied trivially by the
+#              surviving original. Stall LOSES because the unattended
+#              single-proc ceiling (~10400) is below the expansion bar.
 #   • medium — PROC DESTROYED mid-game (2× 4tnk + 3 own defenders;
 #              proc dies ~tick 273). Agent must rebuild proc with the
 #              1400 reserve AND redirect harv back to the patch.
@@ -228,21 +237,33 @@ levels:
     # near the refinery, two Light Tank ('3tnk') defenders, and $1400
     # cash. A lone enemy heavy tank is staged adjacent to the refinery;
     # your defenders will intercept it before it can destroy the refinery
-    # (the strike is light enough that proc survives intact). To collect
-    # ore, first `move_units` the harv onto a patch cell ((22,18) or
-    # (22,20)) then issue `harvest` with that cell as the target (the
-    # auto-cycle continues on its own). Win = economy value (cash + stored
-    # ore) ≥ 2500 AND you still own a 'proc' AND a 'fact', before tick
-    # 6300. Stalling (only `observe`) earns nothing and loses on the clock
-    # — your starting $1400 alone does NOT clear the 2500 bar without
-    # harvest income.
+    # (the strike is light enough that proc survives intact). The vendor
+    # RA engine auto-routes idle harvesters to nearby ore the moment a
+    # refinery is present (openra-sim/src/world.rs::auto_route_idle_
+    # harvesters), so the starting harv begins delivering with no
+    # action from you — passive play accumulates ~10400 EV by the
+    # deadline, which is BELOW the bar. To clear the EV bar (15000)
+    # you must commit the $1400 reserve to a SECOND refinery: queue
+    # `build('proc')` and `place_building('proc')` away from the original
+    # (e.g. one row south at (12,21)). The engine auto-spawns a fresh
+    # harv at the new proc and binds it to a nearby patch (engine fix
+    # in `place_building` — see `test_proc_auto_spawn_at_new_proc.rs`);
+    # combined two-refinery throughput roughly doubles income and EV
+    # crosses 15000 well before the deadline. Win = economy value
+    # (cash + stored ore) ≥ 15000 AND you still own a 'proc' AND a
+    # 'fact', before tick 6300. Stalling (only `observe`) accumulates
+    # ~10400 EV — BELOW the 15000 bar — and loses on the clock.
     description: >
       You start with a yard, power, refinery, one harvester, two near
       patches, two heavy-tank defenders, and $1400. A lone enemy heavy
       tank is staged beside the refinery — your defenders intercept and
-      the refinery survives. Just commit the harvester to a patch cell and
-      start the harvest cycle. Economy value 2500, refinery and yard
-      alive, within about 70 turns.
+      the refinery survives. The starting harvester begins delivering on
+      its own (vendor auto-routing), but the single-refinery ceiling is
+      below the bar. Commit the $1400 reserve to building a SECOND
+      refinery: queue 'proc' and place it apart from the first (a new
+      harvester auto-spawns at the new refinery and harvests in
+      parallel). Economy value 15000, refinery and yard alive, within
+      about 70 turns.
     starting_cash: 1400
     overrides:
       actors:
@@ -286,9 +307,17 @@ levels:
         # (keeps the engine from auto-`done` when the strike force
         # falls before the EV bar / deadline is evaluated).
         - {type: fact, owner: enemy, position: [120, 20]}
+    # EV bar 15000 sits ABOVE the unattended single-proc ceiling
+    # (~10400, measured via the `_stall` policy at the deadline) and
+    # BELOW the dual-proc expansion ceiling (~19500, measured with a
+    # build('proc') + place_building chain). Stall accumulates the
+    # auto-route harvest income but cannot reach 15000 with a single
+    # refinery before the deadline ⇒ reachable timeout LOSS. The
+    # expansion path (queue 2nd proc, place apart from the original)
+    # clears 15000 with ~30% headroom.
     win_condition:
       all_of:
-        - economy_value_gte: 2500
+        - economy_value_gte: 15000
         - building_count_gte: {type: proc, n: 1}
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 6300
