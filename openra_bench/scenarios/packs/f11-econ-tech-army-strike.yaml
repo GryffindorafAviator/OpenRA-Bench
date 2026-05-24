@@ -1,0 +1,397 @@
+# f11-econ-tech-army-strike — Family-11 full-game arc, ground-only.
+#
+# The complete econ→tech→army→strike chain. UNLIKE the combined-arms
+# POC (`f11-vertical-strike-ground-air`) which pre-places `atek + dome
+# + fix` to focus the test on ARM-PICKING, this pack pre-places ONLY
+# the econ seed (`fact + powr + proc + harv`) — the production tech
+# chain (`weap + fix`) IS the test. The model must:
+#   P1: build a War Factory (`has_building: weap`) — the ground
+#       production gate (prereq: anypower, which the pre-placed powr
+#       satisfies).
+#   P2: build a Service Depot (`has_building: fix`) — tech-completion
+#       gate (vehicle-repair building; binds the tank-only doctrine
+#       to a real second-tier build).
+#   P3: field ≥N medium tanks (per tier).
+#   P4: raze ≥K enemy buildings (per tier).
+#
+# `then:` chain forbids "raze first, then claim production" — a
+# starter-force beeline can't satisfy P1/P2 retroactively (and there
+# IS no starter combat force here — just a harvester).
+#
+# Wrong-strategy traps (per F11 §77):
+#   - over-econ (≥3 procs, no army): cash piles up, P3 never latches
+#     → deadline LOSS.
+#   - over-tech (weap + fix + dome + atek but no tanks): P3 never
+#     latches → deadline LOSS.
+#   - under-econ (single proc, no expansion harv): the cash floor
+#     can't fund a 6-tank army inside `within_ticks` on hard → LOSS.
+#   - stall (observe-only): P1 never satisfied → deadline LOSS.
+#   - brute (no production, march starter harv east): no army, no
+#     production buildings → fails P1+P3 → LOSS.
+#
+# Threat pattern (per §69 "static-then-scheduled"):
+#   - light static garrison at t=0 (rifles + occasional rocket-soldier);
+#   - mid-game raid at tick 1500 (size by tier);
+#   - main attack at tick 3000 (size by tier).
+#   These pressure the model's production stream without overrunning
+#   on the opening — the model's task is to defend AND keep building.
+#
+# Engine guardrails (CLAUDE.md):
+#   - `termination.enemy_units_killed: false` — required because the
+#     win clause demands `enemy_buildings_destroyed_gte: N` and the
+#     scripted-policy strike can kill the last enemy combat unit
+#     before razing the buildings, which would auto-`done` the run
+#     (DRAW, criterion #5 / §79).
+#   - `agent_units_killed: true` (default) paired with `not
+#     own_units_gte: 1` fail clause turns an agent wipe into a clean
+#     LOSS not DRAW.
+#   - Persistent far-corner enemy `fact` sentinel keeps the run alive
+#     past the agent's strike on the main enemy base.
+#   - `within_ticks` ≤ 93 + 90·(max_turns − 1) and ≤ 9999 (engine
+#     `DEFAULT_MAX_TICKS = 10000` cap) on every tier — pinned by
+#     `tests/test_f11_econ_tech_army_strike.py::test_timeout_loss_
+#     is_reachable_on_every_level`.
+#   - Hard tier: agent base round-robins NORTH (y=12) / SOUTH (y=28)
+#     via `spawn_point: 0/1`. Enemy actors carry no spawn_point so
+#     all enemies place every seed (CLAUDE.md per-owner filter).
+#
+# Tuning notes (empirically settled via scripted-policy validation):
+#   - Cash floors are §73 + §81 calibrated for tech-chain overhead
+#     (no pre-placed weap/fix):
+#       easy   $5500  → weap $2000 + fix $1200 + 4×2tnk $3400 = $6600
+#                      (single-harv income covers gap).
+#       medium $8000  → weap + fix + 5×2tnk $4250 + 2nd harv = $11700
+#                      (2-harv income covers gap; raid attrition adds
+#                      ~1-2 tank replacement).
+#       hard   $13000 → weap + fix + 6×2tnk $5100 + 2nd harv + raid
+#                      attrition reserve. Seed-rotation needs the
+#                      same cash floor across both corridors.
+#   - Per §81a CAPABILITY-EXPLICIT PRE-PLACING: ONLY `fact + powr +
+#     proc + harv` is pre-placed; `weap + fix` are the test.
+
+meta:
+  id: f11-econ-tech-army-strike
+  title: 'F11 Econ → Tech → Army → Strike — Full Ground Arc'
+  capability: reasoning
+  real_world_meaning: >
+    Full operational sequencing: an offensive campaign needs an
+    economic base capable of sustaining production, a tech chain
+    capable of producing the force, the force itself, and the strike.
+    Skipping any phase (over-econ without production, over-tech
+    without units, under-econ without expansion) collapses the
+    campaign before the deadline. This is the integration test for
+    the entire RTS verb set inside one episode.
+  robotics_analogue: >
+    End-to-end mission planning under a deadline: build supply
+    pipeline (econ), commission specialised platforms (tech), mass
+    the fleet (army), execute the objective (strike). Each phase
+    has prerequisites and a tick budget; phase imbalance fails the
+    mission.
+  benchmark_anchor:
+    - "full RTS operational arc"
+    - "phase-budget allocation under deadline"
+    - "end-to-end mission planning"
+  author: openra-bench
+
+base_map:
+  generator: arena
+  name: f11-econ-tech-army-strike-arena-96
+  width: 96
+  height: 40
+  cordon: 2
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: turtle}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  interrupts: {}
+  termination:
+    # Engine `max_ticks` cap is 10000 (DEFAULT_MAX_TICKS in env.rs);
+    # within_ticks ≤ 9999 enforced by pack-shape test.
+    max_ticks: 10000
+    agent_units_killed: true
+    # §79 MANDATORY: win clause gates on enemy_buildings_destroyed_gte,
+    # so the engine must NOT auto-`done` on enemy-unit-wipe (the
+    # scripted strike kills all garrison rifles before razing
+    # buildings — without this flag, DRAW).
+    enemy_units_killed: false
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # 96x40, ground-only, light pressure. Agent must build weap + fix,
+  # field ≥4 tanks, raze ≥1 enemy production building.
+  #
+  # Threat profile: 1× rifle picket at enemy base + tick 1500 small
+  # raid (2× 2tnk hunt from midfield) + tick 3000 main (3× e1 hunt
+  # from enemy base). The early raid is small enough that 2-3 finished
+  # tanks intercept it; the model that delays production loses to it.
+  #
+  # Pre-placed: ONLY fact + powr + proc + harv (the econ seed). The
+  # model BUILDS weap + fix to satisfy P1/P2.
+  easy:
+    description: >
+      Commander, this is the full operational arc — econ to fund, tech
+      to enable, army to mass, strike to win. Your western base at
+      (8,20) holds a Construction Yard, a Power Plant, an Ore Refinery
+      and a single Harvester. Two ore patches sit just east of the
+      refinery. Cash on hand: $5500. The enemy holds a base at (82,20),
+      74 cells east, with a single rifleman picket. A light tank raid
+      arrives around tick 1500 and a rifleman push around tick 3000.
+      Build a War Factory AND a Service Depot, field at least four
+      medium tanks, then raze at least one enemy production building —
+      all within about 100 turns. Keep your Construction Yard standing.
+    starting_cash: 5500
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-econ-tech-army-strike-arena-96
+        width: 96
+        height: 40
+        cordon: 2
+      actors:
+        # Agent western base — econ seed ONLY (no weap, no fix). The
+        # tech chain IS the test.
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: mine, owner: neutral, position: [20, 18]}
+        - {type: mine, owner: neutral, position: [20, 22]}
+        # Enemy eastern base — light garrison.
+        - {type: fact, owner: enemy, position: [82, 20]}
+        - {type: powr, owner: enemy, position: [85, 18]}
+        - {type: tent, owner: enemy, position: [85, 22]}
+        - {type: e1,   owner: enemy, position: [80, 20], stance: 2}
+        # Anti-DRAW sentinel — out-of-reach corner fact keeps the run
+        # alive past the strike on the main enemy base.
+        - {type: fact, owner: enemy, position: [92, 38]}
+      scheduled_events:
+        # easy NUISANCE timing: small late raid + small later push.
+        # Both spawn FAR enough from the agent base that the
+        # intended chain (weap → fix → 4 tanks built by ~tick 4000)
+        # has finished before contact. A stall play still loses to
+        # the cumulative push (units_killed_gte fail clause via
+        # own_units_gte:1 floor: rifles eventually reach the lone
+        # harv).
+        - tick: 3000
+          type: spawn_actors
+          actors:
+            - {type: e1,   owner: enemy, position: [70, 20], stance: 3, count: 2}
+        - tick: 4500
+          type: spawn_actors
+          actors:
+            - {type: e1,   owner: enemy, position: [70, 20], stance: 3, count: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-econ-tech-army-strike-easy
+            clauses:
+              # P1: ground production gate (weap = war factory).
+              - {has_building: weap}
+              # P2: tech-completion gate (fix = service depot).
+              - {has_building: fix}
+              # P3: army mass — ≥4 medium tanks.
+              - {unit_type_count_gte: {type: 2tnk, n: 4}}
+              # P4: strike home — ≥1 enemy production building razed.
+              - {enemy_buildings_destroyed_gte: 1}
+        # max_turns 100 ⇒ reachable max = 93+90·99 = 9003;
+        # deadline 8900 leaves ~100-tick buffer.
+        - {within_ticks: 8900}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 100
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # 112x40, heavier enemy garrison, escalated waves. The model needs
+  # 2 harvs to sustain a 5-tank army through wave attrition.
+  medium:
+    description: >
+      Commander, this is the full operational arc against a defended
+      enemy base with mid-game pressure. Your western base at (8,20)
+      holds a Construction Yard, two Power Plants, an Ore Refinery and
+      two starter Harvesters. Three ore patches sit east of the
+      refinery. Cash on hand: $8000. The enemy holds a defended base
+      at (98,20), 90 cells east, with riflemen and a rocket soldier. A
+      mid-game tank raid arrives around tick 1500 and a main attack
+      around tick 3000. Build a War Factory AND a Service Depot, field
+      at least five medium tanks, then raze at least two enemy
+      buildings — all within about 105 turns. Keep your Construction
+      Yard standing.
+    starting_cash: 8000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-econ-tech-army-strike-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      actors:
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [16, 22]}
+        - {type: mine, owner: neutral, position: [20, 18]}
+        - {type: mine, owner: neutral, position: [20, 22]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # Enemy base — heavier garrison.
+        - {type: fact, owner: enemy, position: [98, 20]}
+        - {type: powr, owner: enemy, position: [101, 18]}
+        - {type: tent, owner: enemy, position: [101, 22]}
+        - {type: e1,   owner: enemy, position: [95, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [95, 22], stance: 2}
+        - {type: e3,   owner: enemy, position: [96, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [108, 38]}
+      scheduled_events:
+        # Tick 1500: small hunt-tank raid (2× 2tnk) from far enough
+        # east that the chain has time to build first tanks before
+        # the wave reaches base. A stall play loses to the cumulative
+        # tank/rocket damage.
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [70, 20], stance: 3, count: 2}
+        # Tick 3000: main rocket+rifle push. The model with its
+        # 3-4 tank army intercepts; a model fighting from harvs
+        # alone is overrun.
+        - tick: 3000
+          type: spawn_actors
+          actors:
+            - {type: e3,   owner: enemy, position: [75, 20], stance: 3, count: 3}
+            - {type: e1,   owner: enemy, position: [75, 18], stance: 3, count: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-econ-tech-army-strike-medium
+            clauses:
+              - {has_building: weap}
+              - {has_building: fix}
+              - {unit_type_count_gte: {type: 2tnk, n: 5}}
+              - {enemy_buildings_destroyed_gte: 2}
+        # max_turns 105 ⇒ reachable max = 93+90·104 = 9453;
+        # deadline 9300 leaves ~150-tick buffer.
+        - {within_ticks: 9300}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9301}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 105
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # 112x40, NORTH/SOUTH spawn rotation, dual raid. Requires the model
+  # to sustain a 6-tank army through two waves of attrition.
+  #
+  # Agent base actors all carry spawn_point (CLAUDE.md per-owner
+  # filter: when any agent actor declares spawn_point, agent actors
+  # WITHOUT spawn_point are dropped). Enemy actors do NOT declare
+  # spawn_point so they all place every seed (back-compat path).
+  hard:
+    description: >
+      Commander, this is the full operational arc against a defended
+      enemy under continuous waves. Your western base spawns NORTH
+      (y=12) or SOUTH (y=28) by seed — read your actual starting band
+      from the observation. Each spawn holds a Construction Yard, two
+      Power Plants, an Ore Refinery and two starter Harvesters. Three
+      ore patches sit adjacent. Cash on hand: $13000. The enemy holds
+      a defended base at (98,20), with riflemen, rocket soldiers, a
+      pre-positioned medium tank, and two timed waves — a hunt-tank
+      raid around tick 1500 and a main attack around tick 3000. Build
+      a War Factory AND a Service Depot, field at least six medium
+      tanks, then raze at least three enemy buildings — all within
+      about 110 turns. Keep your Construction Yard standing.
+    starting_cash: 13000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-econ-tech-army-strike-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      actors:
+        # ─ spawn_point 0 — NORTH base @ y=12 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [20, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [20, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 12], spawn_point: 0}
+        # ─ spawn_point 1 — SOUTH base @ y=28 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [20, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [20, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 28], spawn_point: 1}
+        # ─ Enemy base — no spawn_point so places every seed ─────────
+        - {type: fact, owner: enemy, position: [98, 20]}
+        - {type: powr, owner: enemy, position: [101, 18]}
+        - {type: tent, owner: enemy, position: [101, 22]}
+        - {type: e1,   owner: enemy, position: [95, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [95, 22], stance: 2}
+        - {type: e3,   owner: enemy, position: [96, 20], stance: 2}
+        - {type: 2tnk, owner: enemy, position: [94, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [108, 38]}
+      scheduled_events:
+        # Tick 1500 — single-tank hunter PER corridor (small enough
+        # the early base survives) at midfield. Symmetric so geometry
+        # is fair across seed-rotated agent spawn. A stall play
+        # eventually dies; an intended play with its first 2-3
+        # tanks built absorbs the wave.
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [70, 12], stance: 3, count: 1}
+            - {type: 2tnk, owner: enemy, position: [70, 28], stance: 3, count: 1}
+        # Tick 3000 — main attack: mixed rocket-soldier push in
+        # both corridors + rifles. Forces the model to allocate
+        # defenders AND keep producing toward the strike package.
+        - tick: 3000
+          type: spawn_actors
+          actors:
+            - {type: e3,   owner: enemy, position: [70, 12], stance: 3, count: 2}
+            - {type: e3,   owner: enemy, position: [70, 28], stance: 3, count: 2}
+            - {type: e1,   owner: enemy, position: [70, 20], stance: 3, count: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-econ-tech-army-strike-hard
+            clauses:
+              - {has_building: weap}
+              - {has_building: fix}
+              - {unit_type_count_gte: {type: 2tnk, n: 6}}
+              - {enemy_buildings_destroyed_gte: 3}
+        # max_turns 110 ⇒ reachable max = 93+90·109 = 9903;
+        # deadline 9800 leaves ~100-tick buffer (engine max_ticks
+        # caps at 10000).
+        - {within_ticks: 9800}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 110

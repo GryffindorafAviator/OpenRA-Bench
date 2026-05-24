@@ -49,10 +49,11 @@
 #            rocket-soldier garrison reinforce @ tick 6500, heli
 #            garrison @ tick 7500) + enemy AA (`agun` at (104,12),
 #            range-8 covers y=18 building, off the y=22 approach),
-#            $15000 + 2 harvs, seed-rotated NORTH/SOUTH base
-#            (sp 0/1), ≥3 tanks + ≥1 heli + ≥2 kills, within ~110
-#            turns (deadline 9800 / reachable 9903; engine caps
-#            max_ticks at 10000).
+#            $12500 + 2 harvs, seed-rotated NORTH/SOUTH base
+#            (sp 0/1), ≥3 tanks + ≥1 heli + ≥2 kills, within ~140
+#            turns (deadline 12500 / reachable 12603 — engine
+#            `max_ticks` cap removed by commit 493898e; restored
+#            to original audits/family11_full_game.csv design).
 #
 # Engine guardrails (no-defect, no-cheat — CLAUDE.md):
 #   - within_ticks ≤ 93 + 90·(max_turns − 1) on every tier; deadline
@@ -126,13 +127,14 @@ base:
   # tune at the per-tier level.)
   interrupts: {}
   termination:
-    # The Rust engine caps `max_ticks` at DEFAULT_MAX_TICKS=10000
-    # regardless of this value (verified via env.max_ticks against
-    # the wheel). Every tier's deadline (`within_ticks`) must
-    # therefore be ≤ 9999, and `max_turns ≤ 110` (since reachable
-    # tick = 93+90·(N−1) ≤ 9903 at N=110). This is an engine cap,
-    # not a bench cap.
-    max_ticks: 10000
+    # Engine commit 493898e wires `termination.max_ticks` through
+    # end-to-end; scenarios may declare any budget (the historical
+    # 10000-tick hard cap is removed). Hard tier restores the
+    # original `audits/family11_full_game.csv` design at max_turns
+    # 140 / within_ticks 12500 / reachable max 12603. Easy / medium
+    # stay at their POC-validated budgets (≤ 9999) so this single
+    # ceiling covers all three.
+    max_ticks: 13000
     # `agent_units_killed: true` (default): full agent-unit wipe ends
     # the run; the `not: own_units_gte: 1` fail clause then converts
     # it to a clean LOSS (not DRAW).
@@ -360,9 +362,9 @@ levels:
       interceptors around tick 7500. Build a War Factory AND a
       Helipad, field at
       least three medium tanks AND at least one helicopter, then
-      raze at least two enemy buildings — all within about 110
+      raze at least two enemy buildings — all within about 140
       turns. Keep your Construction Yard standing.
-    starting_cash: 15000
+    starting_cash: 12500
     overrides:
       base_map:
         generator: arena
@@ -415,8 +417,11 @@ levels:
         # Anti-DRAW sentinel corner fact.
         - {type: fact, owner: enemy, position: [108, 38]}
       scheduled_events:
-        # Hard tri-wave. Engine `max_ticks` caps at 10000, so all
-        # waves fire ≤ ~7000.
+        # Hard tri-wave. Wave ticks are preserved from the POC
+        # (5000 / 6500 / 7500) — the post-wave window (≈ tick 7500
+        # to deadline 12500) now provides the ~5000-tick rebuild +
+        # strike runway the original CSV design intended (the POC
+        # squeezed this into ~2300 ticks).
         #
         # Wave 1 (tick 3500, 3× hunt-tank) spawns at (60, 20) and
         # hunts the agent base — punishes all-air (no ground arm
@@ -475,14 +480,16 @@ levels:
                   - {unit_type_count_gte: {type: 2tnk, n: 3}}
                   - {unit_type_count_gte: {type: heli, n: 1}}
               - {enemy_buildings_destroyed_gte: 2}
-        # max_turns 110 ⇒ reachable max = 93+90·109 = 9903; deadline
-        # 9800 leaves a ~100-tick buffer (engine caps max_ticks at
-        # 10000 regardless of `termination.max_ticks` setting).
-        - {within_ticks: 9800}
+        # max_turns 140 ⇒ reachable max = 93+90·139 = 12603;
+        # deadline 12500 leaves a ~100-tick buffer. Engine commit
+        # 493898e removed the historical 10000-tick `max_ticks`
+        # cap, so `base.termination.max_ticks: 13000` is honoured
+        # end-to-end and this is the original CSV design budget.
+        - {within_ticks: 12500}
         - {building_count_gte: {type: fact, n: 1}}
     fail_condition:
       any_of:
-        - {after_ticks: 9801}
+        - {after_ticks: 12501}
         - {not: {building_count_gte: {type: fact, n: 1}}}
         - {not: {own_units_gte: 1}}
-    max_turns: 110
+    max_turns: 140
