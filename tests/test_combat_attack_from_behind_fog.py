@@ -79,25 +79,26 @@ def _ctx(
 
 def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    tanks4 = [(100, 20), (100, 21), (100, 19), (100, 22)]
+    tanks4 = [(48, 20), (48, 21), (48, 19), (48, 22)]
+    tanks3 = tanks4[:3]
     tanks2 = tanks4[:2]
-    fact_razed = [("fact", 100, 20)]
+    fact_razed = [("fact", 48, 20)]
 
-    # Intended: fact razed, ≥2 tanks alive, in time → WIN
+    # Intended: fact razed, ≥3 tanks alive, in time → WIN
     assert evaluate(c.win_condition, _ctx(tanks4, tick=3000, destroyed_records=fact_razed))
-    assert evaluate(c.win_condition, _ctx(tanks2, tick=3000, destroyed_records=fact_razed))
+    assert evaluate(c.win_condition, _ctx(tanks3, tick=3000, destroyed_records=fact_razed))
     # No fact razed → predicate fails (kill bar unmet)
     assert not evaluate(c.win_condition, _ctx(tanks4, tick=3000, destroyed_records=()))
-    # Only 1 tank survives → fail clause fires (not own_units_gte:2)
-    assert evaluate(c.fail_condition, _ctx(tanks4[:1], tick=3000, destroyed_records=fact_razed))
+    # Only 2 tanks survive → fail clause fires (not own_units_gte:3)
+    assert evaluate(c.fail_condition, _ctx(tanks2, tick=3000, destroyed_records=fact_razed))
     # Past deadline → real loss, reachable within max_turns
-    assert evaluate(c.fail_condition, _ctx(tanks4, tick=5402, destroyed_records=()))
-    assert 5401 <= 93 + 90 * (c.max_turns - 1), (
-        "after_ticks 5401 must be reachable within max_turns"
+    assert evaluate(c.fail_condition, _ctx(tanks4, tick=4002, destroyed_records=()))
+    assert 4001 <= 93 + 90 * (c.max_turns - 1), (
+        "after_ticks 4001 must be reachable within max_turns"
     )
-    # The SENTINEL fact at (125,4) MUST NOT satisfy the win — it sits
+    # The SENTINEL fact at (60,4) MUST NOT satisfy the win — it sits
     # outside the radius-6 region around (100,20).
-    sentinel_razed = [("fact", 125, 4)]
+    sentinel_razed = [("fact", 60, 4)]
     assert not evaluate(
         c.win_condition, _ctx(tanks4, tick=3000, destroyed_records=sentinel_razed)
     )
@@ -105,30 +106,31 @@ def test_predicates_easy():
 
 def test_predicates_medium_fact_and_survival_bar():
     c = compile_level(load_pack(PACK_PATH), "medium")
-    tanks4 = [(100, 20), (100, 21), (100, 19), (100, 22)]
+    tanks4 = [(48, 20), (48, 21), (48, 19), (48, 22)]
+    tanks3 = tanks4[:3]
     tanks2 = tanks4[:2]
-    fact_razed = [("fact", 100, 20)]
+    fact_razed = [("fact", 48, 20)]
 
-    # Intended: fact razed, ≥2 tanks alive, in time → WIN
+    # Intended: fact razed, ≥3 tanks alive, in time → WIN
     assert evaluate(c.win_condition, _ctx(tanks4, tick=3000, destroyed_records=fact_razed))
-    assert evaluate(c.win_condition, _ctx(tanks2, tick=3000, destroyed_records=fact_razed))
-    # 1 tank remaining → predicate fails (need ≥2)
-    assert not evaluate(c.win_condition, _ctx(tanks4[:1], tick=3000, destroyed_records=fact_razed))
-    # 1 tank remaining → fail clause fires
-    assert evaluate(c.fail_condition, _ctx(tanks4[:1], tick=3000, destroyed_records=fact_razed))
+    assert evaluate(c.win_condition, _ctx(tanks3, tick=3000, destroyed_records=fact_razed))
+    # 2 tanks remaining → predicate fails (need ≥3)
+    assert not evaluate(c.win_condition, _ctx(tanks2, tick=3000, destroyed_records=fact_razed))
+    # 2 tanks remaining → fail clause fires
+    assert evaluate(c.fail_condition, _ctx(tanks2, tick=3000, destroyed_records=fact_razed))
     # Past deadline → real loss, reachable
-    assert evaluate(c.fail_condition, _ctx(tanks4, tick=4502, destroyed_records=()))
-    assert 4501 <= 93 + 90 * (c.max_turns - 1)
-    # Sentinel at (125,4) doesn't satisfy region clause
+    assert evaluate(c.fail_condition, _ctx(tanks4, tick=3502, destroyed_records=()))
+    assert 3501 <= 93 + 90 * (c.max_turns - 1)
+    # Sentinel at (60,4) doesn't satisfy region clause
     assert not evaluate(
-        c.win_condition, _ctx(tanks4, tick=3000, destroyed_records=[("fact", 125, 4)])
+        c.win_condition, _ctx(tanks4, tick=3000, destroyed_records=[("fact", 60, 4)])
     )
 
 
 def test_predicates_hard_fact_and_survival_bar():
     c = compile_level(load_pack(PACK_PATH), "hard")
-    tanks4_n = [(100, 20), (100, 21), (100, 19), (100, 22)]
-    fact_razed = [("fact", 100, 20)]
+    tanks4_n = [(48, 20), (48, 21), (48, 19), (48, 22)]
+    fact_razed = [("fact", 48, 20)]
 
     # Intended: fact razed, ≥2 alive, in time → WIN
     assert evaluate(c.win_condition, _ctx(tanks4_n, tick=3000, destroyed_records=fact_razed))
@@ -137,9 +139,9 @@ def test_predicates_hard_fact_and_survival_bar():
         c.win_condition, _ctx(tanks4_n[:1], tick=3000, destroyed_records=fact_razed)
     )
     # Past deadline → real loss, reachable
-    assert evaluate(c.fail_condition, _ctx(tanks4_n, tick=4502, destroyed_records=()))
-    assert 4501 <= 93 + 90 * (c.max_turns - 1), (
-        "hard after_ticks 4501 must be reachable within max_turns"
+    assert evaluate(c.fail_condition, _ctx(tanks4_n, tick=3502, destroyed_records=()))
+    assert 3501 <= 93 + 90 * (c.max_turns - 1), (
+        "hard after_ticks 3501 must be reachable within max_turns"
     )
 
 
@@ -175,9 +177,9 @@ def test_pack_compiles_and_meta_fields_populated():
 
 def test_timeout_loss_is_reachable_on_every_level():
     """No draw degeneracy: the after_ticks deadline fits inside
-    max_turns on every level (~90 ticks/turn ⇒ 93 + 90·(max_turns-1))."""
+    max_turns on every level (~64 ticks/turn under interrupt mode)."""
     pack = load_pack(PACK_PATH)
-    expected = {"easy": 5401, "medium": 4501, "hard": 4501}
+    expected = {"easy": 4001, "medium": 3501, "hard": 3501}
     for lvl, deadline in expected.items():
         c = compile_level(pack, lvl)
         assert deadline <= 93 + 90 * (c.max_turns - 1), (
@@ -186,7 +188,7 @@ def test_timeout_loss_is_reachable_on_every_level():
 
 
 def test_objective_fact_is_undefended():
-    """The objective fact at (100,20) is the doctrine's "soft rear" —
+    """The objective fact at (48,20) is the doctrine's "soft rear" —
     it must be unguarded (otherwise the test devolves into force
     concentration rather than surprise attack). Verify no enemy
     combat unit / building sits within a small radius of the fact."""
@@ -197,16 +199,16 @@ def test_objective_fact_is_undefended():
             a for a in c.scenario.actors
             if a.owner == "enemy"
             and a.type != "fact"
-            and abs(a.position[0] - 100) + abs(a.position[1] - 20) <= 8
+            and abs(a.position[0] - 48) + abs(a.position[1] - 20) <= 8
         ]
         assert not defenders_near_fact, (
-            f"{lvl}: objective fact at (100,20) must be undefended; "
+            f"{lvl}: objective fact at (48,20) must be undefended; "
             f"found nearby enemies: {[(a.type, a.position) for a in defenders_near_fact]}"
         )
 
 
-def test_line_is_west_facing_at_x_50():
-    """Structural: the defensive line spans y=15..25 at x=50, west-
+def test_line_is_west_facing_at_x_24():
+    """Structural: the defensive line spans y=15..25 at x=24, west-
     facing (stance:2), interleaved pbox + e3. Verify the per-level
     composition is monotone increasing easy → medium → hard."""
     pack = load_pack(PACK_PATH)
@@ -216,7 +218,7 @@ def test_line_is_west_facing_at_x_50():
         line_units = [
             a for a in c.scenario.actors
             if a.owner == "enemy"
-            and a.position[0] == 50
+            and a.position[0] == 24
             and 15 <= a.position[1] <= 25
             and a.type in ("e3", "pbox")
         ]
@@ -256,17 +258,17 @@ def _stall_policy(rs, Command):
 
 def _brute_attack_move_policy(rs, Command):
     """Brute attack_move east. Engine auto-targets the nearest
-    hostile (the e3/pbox on the line); the column gets pinned at
-    x≈45..55 reducing the line one defender at a time while turns
-    burn. Either survival bar busts (medium/hard) or the deadline
-    fires before x=100 is reached."""
+    hostile (the e3/pbox on the line at x=24); the column gets
+    pinned at x≈19..29 reducing the line one defender at a time
+    while turns burn. Either survival bar busts (medium/hard) or
+    the deadline fires before x=48 is reached."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
     cmds = []
     for u in units:
         cmds.append(
-            Command.attack_move([str(u["id"])], target_x=110, target_y=u["cell_y"])
+            Command.attack_move([str(u["id"])], target_x=58, target_y=u["cell_y"])
         )
     return cmds
 
@@ -275,7 +277,7 @@ def _frontal_charge_policy(rs, Command):
     """Frontal head-on charge: move east on the engagement axis,
     attack nearest defender when visible. Head-on geometry; the
     column reduces the line one defender at a time but burns the
-    clock before reaching x=100."""
+    clock before reaching x=48."""
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
     targs = _targets(enemies)
@@ -284,23 +286,23 @@ def _frontal_charge_policy(rs, Command):
     cmds = []
     for u in units:
         ux, uy = u["cell_x"], u["cell_y"]
-        if targs and ux >= 40:
+        if targs and ux >= 18:
             t0 = min(
                 targs, key=lambda e: abs(e["cell_x"] - ux) + abs(e["cell_y"] - uy)
             )
             cmds.append(Command.attack_unit([str(u["id"])], str(t0["id"])))
         else:
             cmds.append(
-                Command.move_units([str(u["id"])], target_x=min(48, ux + 12), target_y=uy)
+                Command.move_units([str(u["id"])], target_x=min(24, ux + 6), target_y=uy)
             )
     return cmds
 
 
 def _intended_fog_flank_policy(rs, Command):
     """Intended fog-flank cycle (the spec's load-bearing decision):
-    route the strike force to the far north (y=2) or far south
-    (y=38) — depending on the spawn latitude — drive east past
-    x=100, then turn inward to descend on the fact at (100,20).
+    route the strike force to the far north (y=3) or far south
+    (y=36) — depending on the spawn latitude — drive east past
+    x=48, then turn inward to descend on the fact at (48,20).
     The line never fires on the flanker (out of range).
     """
     units = rs.get("units_summary", []) or []
@@ -308,7 +310,7 @@ def _intended_fog_flank_policy(rs, Command):
         return [Command.observe()]
     avg_y = sum(u["cell_y"] for u in units) / max(1, len(units))
     going_north = avg_y < 20
-    fog_y = 2 if going_north else 38
+    fog_y = 3 if going_north else 36
 
     cmds = []
     for u in units:
@@ -318,18 +320,18 @@ def _intended_fog_flank_policy(rs, Command):
             cmds.append(
                 Command.move_units([str(u["id"])], target_x=ux, target_y=fog_y)
             )
-        # Phase 2: drive east along the fog lane to past the fact's
+        # Phase 2: drive east along the fog lane past the fact's
         # longitude.
-        elif ux < 100:
+        elif ux < 48:
             cmds.append(
                 Command.move_units(
-                    [str(u["id"])], target_x=min(105, ux + 12), target_y=fog_y
+                    [str(u["id"])], target_x=min(52, ux + 8), target_y=fog_y
                 )
             )
-        # Phase 3: descend onto the fact at (100,20).
+        # Phase 3: descend onto the fact at (48,20).
         else:
             cmds.append(
-                Command.attack_move([str(u["id"])], target_x=100, target_y=20)
+                Command.attack_move([str(u["id"])], target_x=48, target_y=20)
             )
     return cmds
 
