@@ -118,6 +118,35 @@ Before editing any scenario pack:
 
 ## Engine facts you must internalise
 
+- **Vendor RA YAML is the SINGLE source of unit data.** The historical
+  hardcoded `GameRules::defaults()` table in
+  `OpenRA-Rust/openra-sim/src/gamerules.rs` was removed in PR #15
+  (replacing the earlier sync). All actor / weapon stats — HP, cost,
+  speed, footprint, weapons, prereqs — now come exclusively from
+  `OpenRA-Rust/vendor/OpenRA/mods/ra/rules/*.yaml`, parsed by
+  `from_ruleset()` and reached via:
+  - `GameRules::from_vendor()` — fresh parse, panics with a clear
+    message if the vendor directory is unreachable.
+  - `GameRules::vendor_cached()` — `OnceLock`-cached clone, suitable
+    for tests that spin up many worlds (parity sweeps, etc.).
+  - `openra-train/src/env.rs::load_rules_strict()` — runtime entry
+    point for the bench wheel; panics on missing vendor.
+  - `openra-sim/src/world.rs::build_world(map, ..., None, ...)` — the
+    `None` fallback now hits `vendor_cached()` instead of the deleted
+    `defaults()` stub, so every test that passes `None` for rules
+    transparently inherits vendor truth.
+  **Footguns this closes**: the stub used to drift from vendor — `fact`
+  footprint was 3×2 but vendor is 3×4; pillbox/tanya weapons were
+  hand-coded stubs (`AAStub`, `TanyaPistol`) rather than the real
+  vendor armaments (`Nike`, `Colt45`). Every pack edit now sees
+  vendor numbers without exception. **Footguns this exposes** (carried
+  in this CLAUDE.md): a handful of legacy tests pinned to stub HP /
+  weapon names (sync_hash_verify recorded sync hashes against stub
+  footprints; SAM Nike missile projectile path isn't fully simulated)
+  are marked `#[ignore]` with FIXMEs pointing here. If you author a
+  new pack and discover an actor stat that surprises you, read the
+  vendor YAML — not the audit CSVs from before PR #15 — for the
+  truth.
 - **Ticks/turn — the empirical numbers** (confirmed by 3+ audit
   passes and 12+ in-tree test files):
   - **Non-interrupt mode**: **~90 ticks per decision turn**. Reachable
@@ -144,6 +173,23 @@ Before editing any scenario pack:
   - **Defect rule**: any `within_ticks` / `after_ticks` above the
     reachable tick is **inert** (won't bite) ⇒ DRAW degeneracy
     (CLAUDE.md "no defect, no cheat" criterion #2).
+  - **`termination.max_ticks` is honoured exactly** (historical
+    footgun fixed). The engine used to ignore the scenario YAML
+    `termination.max_ticks` field and always use the constant
+    `DEFAULT_MAX_TICKS = 10000`, effectively capping every scenario
+    at `max_turns ≤ 110`. The parser now surfaces the field on
+    `MapDef.max_ticks`, and `Env::new_with_spawn_point` applies the
+    value EXACTLY — no clamp. Long-horizon packs (F11
+    vertical-strike with `max_turns 140-180` ⇒ reachable max tick
+    ≈ 16203) declare any budget their capability requires (e.g.
+    `termination: {max_ticks: 16500}`). When the YAML omits the
+    field the env falls back to `DEFAULT_MAX_TICKS = 10000` for
+    back-compat. Pinned by
+    `openra-data/tests/test_scenario_termination_parse.rs` (parser
+    coverage) and
+    `openra-train/tests/test_max_ticks_unbounded.rs` (end-to-end:
+    the engine actually runs past tick 10000 under a declared
+    higher budget).
 - **Engine auto-done:** the engine sets `done=True` when all enemy
   actors are eliminated, or sometimes when an agent unit reaches an
   enemy-key location. Without a persistent enemy actor a win-by-reach
