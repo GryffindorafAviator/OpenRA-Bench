@@ -170,6 +170,12 @@ UPGRADED = [
     # via scheduled_events.spawn_actors; hard tier seed-rotates
     # NORTH/SOUTH base.
     "f11-pivot-on-scout",
+    # Family-11 — full econ→tech→army→strike arc with seed-rotated
+    # NORTH/SOUTH agent base on hard.
+    "f11-econ-tech-army-strike",
+    # Family-11 — defense-then-counter (offensive enemy from t=0)
+    # with seed-rotated NORTH/SOUTH agent base on hard.
+    "f11-defense-then-counter",
     "mfb-tech-base-vs-economy-base",
     "combat-harass-balanced-hit-and-run",
     "tech-aggro-all-in",
