@@ -97,3 +97,27 @@ jobs:
             -n auto \
             --maxfail=20 \
             --tb=short
+
+      # Verify the no-cheat bar — every pack's stall (observe-only)
+      # policy must LOSE on every level x seed. Catches the auto-harvest
+      # baseline defect class (CLAUDE.md criterion #8) and any pack with
+      # a structurally-satisfiable win predicate. See
+      # tools/validate_pack_bar.py + audits/pack_bar_status.csv.
+      - name: Validate no-cheat bar (stall must LOSE every pack)
+        run: |
+          .venv/bin/python tools/validate_pack_bar.py \
+            --out /tmp/pack_bar_status.csv
+          # Fail the workflow if any stall_wins cells exist.
+          .venv/bin/python -c "
+          import json, sys, csv
+          rows = list(csv.DictReader(open('/tmp/pack_bar_status.csv')))
+          wins = [r for r in rows if r['policy']=='stall' and r['outcome']=='win']
+          if wins:
+              print(f'STALL-WINS BAR BREAK on {len(wins)} cells across '
+                    f'{len({r[\"pack\"] for r in wins})} packs:')
+              for r in wins:
+                  print(f'  - {r[\"pack\"]} {r[\"level\"]}/s{r[\"seed\"]} '
+                        f'ev={r[\"economy_value\"]}')
+              sys.exit(1)
+          print(f'OK — 0 stall-wins across {len(rows)} cells.')
+          "
