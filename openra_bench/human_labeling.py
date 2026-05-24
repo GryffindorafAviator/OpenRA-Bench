@@ -859,8 +859,24 @@ class InteractiveSession:
             self._playback = None
 
     def _pb_frame(self, rs: dict) -> "str | None":
-        """Per-turn minimap PNG (b64) via the SAME renderer model
-        playback uses, so saved human frames match model frames."""
+        """Per-turn minimap PNG (b64) via the SAME renderer the Play tab
+        shows, so saved human frames match the clicked UI frame."""
+        try:
+            import base64
+            import io
+
+            from .minimap import render_tactical_minimap
+
+            img = render_tactical_minimap(
+                rs, scale=5, grid=True, legend=True,
+            )
+            if img is not None:
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                return base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception:  # noqa: BLE001
+            pass
+
         try:
             from .minimap import terrain_png_for
 
@@ -868,21 +884,18 @@ class InteractiveSession:
                 self._pb_terrain = terrain_png_for(
                     self.compiled.scenario.base_map
                 )
-            png = None
             try:
                 from .prompt_v2 import minimap_b64 as _v2_mm
 
-                png = _v2_mm(
+                return _v2_mm(
                     rs, self._pb_terrain, self._pb_explored,
                     constant_colors=self.compiled.level in ("easy", "medium"),
                 )
             except Exception:  # noqa: BLE001
                 pass
-            if png is None:
-                from .minimap import render_b64
+            from .minimap import render_b64
 
-                png = render_b64(rs, self._pb_terrain)
-            return png
+            return render_b64(rs, self._pb_terrain)
         except Exception:  # noqa: BLE001
             return None
 
@@ -892,7 +905,7 @@ class InteractiveSession:
             return
         from .goal_tracker import turn_goal
 
-        rs = self._adapter.render_state()
+        rs = self.render_state()
         self._issued += len(cmds)
         self._playback.record_turn(
             self.turn, rs, cmds, self._adapter.signals,
