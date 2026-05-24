@@ -48,15 +48,36 @@ PACK = PACKS_DIR / "mcv-deploy-near-resource.yaml"
 
 
 def _near_patch_for_harv(rs):
-    """Hard tier has two spawn groups (y=18 and y=28). Read the
+    """Hard tier has two spawn groups (y=12 and y=28). Read the
     harvester's actual y and return the matching near-patch coords.
-    Easy/medium always y=18."""
+    Easy/medium always y=20."""
     own = rs.get("units_summary", []) or []
     hy = next(
         (u["cell_y"] for u in own if str(u.get("type", "")).lower() == "harv"),
-        18,
+        20,
     )
-    return (16, 28 if hy > 22 else 18)
+    if hy < 18:
+        return (60, 12)
+    if hy > 22:
+        return (60, 28)
+    return (60, 20)
+
+
+def _deploy_target(rs):
+    """Read MCV row → matching deploy cell ADJACENT to the spawn-
+    local ore patch (so the resulting fact lands inside the
+    building_in_region predicate's 6-cell radius around the patch
+    centre)."""
+    own = rs.get("units_summary", []) or []
+    my = next(
+        (u["cell_y"] for u in own if str(u.get("type", "")).lower() == "mcv"),
+        20,
+    )
+    if my < 18:
+        return (61, 12)
+    if my > 22:
+        return (61, 28)
+    return (61, 20)
 
 
 def stall_policy(rs, Command):
@@ -64,25 +85,28 @@ def stall_policy(rs, Command):
 
 
 def intended_factory():
-    """Deploy MCV in place (turn 1), keep the harvester on the local
-    near patch — the no-cheat WIN policy on every tier."""
-    state = {"deployed": False}
+    """Drive the MCV east to the spawn-local ore patch, deploy adjacent
+    to the patch (so the new fact lands inside the building_in_region
+    predicate). The pre-placed harv auto-cycles to the spawn-local
+    ore patch with no explicit harvest order; issuing one interrupts
+    the auto-cycle and stalls income — leave it alone."""
+    state = {"moved": False, "deployed": False}
 
     def policy(rs, Command):
         cmds = []
         own = rs.get("units_summary", []) or []
-        mcvs = [
-            str(u["id"]) for u in own if str(u.get("type", "")).lower() == "mcv"
-        ]
-        harvs = [
-            str(u["id"]) for u in own if str(u.get("type", "")).lower() == "harv"
-        ]
+        mcvs = [u for u in own if str(u.get("type", "")).lower() == "mcv"]
         if mcvs and not state["deployed"]:
-            cmds.append(Command.deploy(mcvs))
-            state["deployed"] = True
-        if harvs:
-            px, py = _near_patch_for_harv(rs)
-            cmds.append(Command.harvest(harvs, px, py))
+            m = mcvs[0]
+            dx, dy = _deploy_target(rs)
+            if not state["moved"]:
+                cmds.append(
+                    Command.move_units([str(m["id"])], target_x=dx, target_y=dy)
+                )
+                state["moved"] = True
+            elif abs(m["cell_x"] - dx) <= 2 and abs(m["cell_y"] - dy) <= 2:
+                cmds.append(Command.deploy([str(m["id"])]))
+                state["deployed"] = True
         return cmds or [Command.observe()]
 
     return policy

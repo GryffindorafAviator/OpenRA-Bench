@@ -92,7 +92,7 @@ def _no_scout_pre_commit_policy(easy_mode: bool):
             cmds.append(Cmd.build("e3"))
         if e3 >= 6:
             ids = [u["id"] for u in units if u.get("type") == "e3"]
-            cmds.append(Cmd.attack_move(ids, 122, ny))
+            cmds.append(Cmd.attack_move(ids, 82, ny))
         return cmds or [Cmd.observe()]
     return pol
 
@@ -126,7 +126,7 @@ def _intended_scout_attack_policy(easy_mode: bool):
         # 1. Scout — drive the jeep into the eastern scout band and
         #    keep it there so the enemy fact stays in vision.
         if jeep:
-            cmds.append(Cmd.move_units([jeep["id"]], 120, ny))
+            cmds.append(Cmd.move_units([jeep["id"]], 82, ny))
         # 2. Produce the e3 assault counter once scouting is under way.
         if state["scouted"]:
             n = sum(1 for u in units if u.get("type") == "e3")
@@ -135,7 +135,7 @@ def _intended_scout_attack_policy(easy_mode: bool):
             # 3. Attack — attack-move the e3 at the near fact.
             if n >= 6:
                 ids = [u["id"] for u in units if u.get("type") == "e3"]
-                cmds.append(Cmd.attack_move(ids, 122, ny))
+                cmds.append(Cmd.attack_move(ids, 82, ny))
         return cmds or [Cmd.observe()]
     return pol
 

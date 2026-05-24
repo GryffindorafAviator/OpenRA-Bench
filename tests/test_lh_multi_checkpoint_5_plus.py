@@ -59,8 +59,10 @@ def _stall_policy():
 
 def _enemy_fact_xy(level: str) -> tuple[int, int]:
     """Per-level enemy fact coords (lifted from the YAML so the
-    policies attack the right point on each tier)."""
-    return (115, 30) if level in ("easy", "medium") else (115, 20)
+    policies attack the right point on each tier). Map width is 96
+    so the OOB sentinel targets (115,*) from earlier pack versions
+    no longer work — point directly at the actual enemy fact cell."""
+    return (80, 30) if level in ("easy", "medium") else (80, 20)
 
 
 def _skip_to_attack_policy(level: str):
