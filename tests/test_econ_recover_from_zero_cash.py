@@ -281,7 +281,7 @@ def _intended_factory():
 
 def _run(level, policy_or_factory, seed=1):
     c = compile_level(load_pack(PACK), level)
-    assert c.map_supported, "rush-hour-arena must compile"
+    assert c.map_supported, "bespoke 48x40 arena must compile"
     pol = (
         policy_or_factory()
         if callable(policy_or_factory)
