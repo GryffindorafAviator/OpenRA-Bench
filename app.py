@@ -1301,7 +1301,7 @@ def _play_minimap(render_state: dict, sel=None, queue=None):
         queued_dest: dict = {}
         for a in queue or []:
             if getattr(a, "mode", "") in (
-                "move", "attack", "attack_move"
+                "move", "attack", "attack_move", "harvest"
             ) and getattr(a, "target", None):
                 for uid in a.units:
                     queued_dest[str(uid)] = (a.target[0], a.target[1])
@@ -1395,7 +1395,25 @@ def _play_status_md(sess) -> str:
     if sess is None:
         return "_No active session — pick a scenario and click **Start**._"
     st = sess.status()
-    line = f"**Turn {st['turn']}/{st['max_turns']}** · tick {st['tick']}"
+    try:
+        rs = sess.render_state()
+    except Exception:  # noqa: BLE001
+        rs = {}
+    cash = int(rs.get("cash", 0) or 0)
+    resources = int(rs.get("resources", 0) or 0)
+    economy_value = int(rs.get("economy_value", cash + resources) or 0)
+    harvesters = int(rs.get("harvesters", 0) or 0)
+    power = int(rs.get("power_provided", 0) or 0) - int(
+        rs.get("power_drained", 0) or 0
+    )
+    production = ", ".join(str(p) for p in (rs.get("production") or []))
+    line = (
+        f"**Turn {st['turn']}/{st['max_turns']}** · tick {st['tick']}  \n"
+        f"**Cash:** {cash} · **Resources:** {resources} · "
+        f"**Economy value:** {economy_value} · **Harvesters:** {harvesters} · "
+        f"**Power:** {power:+d}  \n"
+        f"**Production queue:** {production or '(empty)'}"
+    )
     if st["done"]:
         line += f" · **{st['outcome'].upper()}** — game over"
         if st.get("save_path"):
@@ -1442,6 +1460,23 @@ def _play_render(sess, sel, queue, show_objectives=False):
     )
 
 
+def _nearest_resource_cell(rs: dict, cx: int, cy: int):
+    candidates = []
+    for key in ("resource_cells", "harvest_points"):
+        for cell in rs.get(key) or []:
+            if not isinstance(cell, dict):
+                continue
+            try:
+                rx, ry = int(cell["cell_x"]), int(cell["cell_y"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            candidates.append(((rx - cx) ** 2 + (ry - cy) ** 2, rx, ry))
+    if not candidates:
+        return None
+    _, rx, ry = min(candidates)
+    return rx, ry
+
+
 def _play_start(prev_sess, pack, level, seed, show_objectives=False):
     # Release any prior session's engine env before opening a new one.
     if prev_sess is not None:
@@ -1473,12 +1508,15 @@ def _play_start(prev_sess, pack, level, seed, show_objectives=False):
     )
 
 
-def _play_click(sess, sel, queue, show_objectives, evt: gr.SelectData):
+def _play_click(
+    sess, sel, queue, show_objectives, harvest_mode, evt: gr.SelectData
+):
     """Contextual minimap click — classic RTS interaction, no mode:
 
     * click a cell holding YOUR unit(s)  → select/deselect them (toggle);
     * click an enemy with units selected → queue an ATTACK on it;
-    * click empty ground with a selection → queue a MOVE there.
+    * click empty ground with a selection → queue a MOVE there, or a
+      HARVEST when Harvest mode is enabled.
 
     So 'select a unit, then click where to send it' just works."""
     if sess is None or evt is None or evt.index is None:
@@ -1537,10 +1575,18 @@ def _play_click(sess, sel, queue, show_objectives, evt: gr.SelectData):
                 f"({len(sel)} unit(s))"
             )
         elif sel:
+            mode = "harvest" if harvest_mode else "move"
+            target = (cx, cy)
+            if harvest_mode:
+                snapped = _nearest_resource_cell(rs, cx, cy)
+                if snapped is not None:
+                    target = snapped
+                    if target != (cx, cy):
+                        note += f" → snapped to ore **({target[0]}, {target[1]})**"
             queue = queue + [
-                HumanAction(mode="move", units=list(sel), target=(cx, cy))
+                HumanAction(mode=mode, units=list(sel), target=target)
             ]
-            note += f" — queued **move** of {len(sel)} unit(s) here"
+            note += f" — queued **{mode}** of {len(sel)} unit(s) here"
         else:
             note += " — empty (select one of your units first)"
     except Exception as e:  # noqa: BLE001
@@ -1589,6 +1635,29 @@ def _play_clear_selection(sess, queue, show_objectives=False):
     return (
         [], _play_briefing_md(sess, [], queue),
         _play_units_df(sess, []), img,
+    )
+
+
+def _play_build_item(sess, sel, queue, item, show_objectives=False):
+    """Queue a production order for the current turn."""
+    note = ""
+    item = str(item or "").strip().lower()
+    if sess is not None and item:
+        try:
+            from openra_bench.human_labeling import HumanAction
+
+            queue = queue + [HumanAction(mode="build", unit_type=item)]
+            note = f"Queued **build {item}**"
+        except Exception as e:  # noqa: BLE001
+            logger.warning("play build queue failed: %s", e)
+            note = ""
+    img = (
+        _play_minimap(_play_render_state(sess, show_objectives), sel, queue)
+        if sess is not None else None
+    )
+    return (
+        queue, "", _play_briefing_md(sess, sel, queue, note),
+        _play_units_df(sess, sel), img,
     )
 
 
@@ -2486,6 +2555,11 @@ def build_app() -> gr.Blocks:
                     label="Show objective rings", value=False,
                     info="Only available when the scenario already reveals exact coordinates.",
                 )
+                play_harvest_mode = gr.Checkbox(
+                    label="Harvest mode",
+                    value=False,
+                    info="When enabled, selected units click a cell with the harvest tool instead of move.",
+                )
                 gr.Markdown(
                     "_Press **Enter** to end the turn when focus is outside "
                     "inputs._"
@@ -2509,8 +2583,8 @@ def build_app() -> gr.Blocks:
                 with gr.Row():
                     play_build_item = gr.Textbox(
                         label="Build item",
-                        value="e1",
-                        placeholder="e1, pbox, proc, powr, ...",
+                        value="harv",
+                        placeholder="harv, e1, pbox, proc, powr, ...",
                         scale=2,
                     )
                     play_build_btn = gr.Button("Queue build", scale=1)
@@ -2541,7 +2615,7 @@ def build_app() -> gr.Blocks:
                     _play_click,
                     inputs=[
                         play_sess, play_sel, play_queue,
-                        play_show_objectives,
+                        play_show_objectives, play_harvest_mode,
                     ],
                     outputs=[
                         play_sel, play_queue, play_brief, play_units,
