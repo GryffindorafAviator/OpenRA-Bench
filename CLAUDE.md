@@ -41,6 +41,20 @@ A scenario is defective if any of the following hold:
 7. The pack is `UPGRADED` in `tests/test_hard_tier.py` but its hard
    tier does not produce ≥2 distinct seed-driven spawns (or there is
    no documented `NOT_APPLICABLE` reason).
+8. **A pre-placed `harv` adjacent to a `proc` auto-routes to nearby
+   ore from t=0** (engine `auto_route_idle_harvesters` in
+   `OpenRA-Rust/openra-sim/src/world.rs:2233`). This is intentional
+   game behaviour, NOT an engine bug. The consequence for pack
+   tuning: any `economy_value_gte: N` bar must sit ABOVE the
+   unattended auto-harvest ceiling at the pack's deadline; otherwise
+   a stall (observe-only) policy WINS by free baseline income, and
+   the no-cheat bar is broken. Measure the ceiling with a temporary
+   bar of 100000 (so the episode runs to the deadline rather than
+   triggering early), then set the real bar comfortably above it.
+   Three packs were silently violating this until 2026-05-24:
+   `economy-harvest-timebox` easy, `rob-cash-depletion-recovery`
+   easy, both since fixed. See `tools/validate_pack_bar.py` (below)
+   for the audit script that surfaces this defect class.
 
 ## Authoritative docs (read these, in order)
 
@@ -87,6 +101,21 @@ A scenario is defective if any of the following hold:
 - **The 21 no-cheat-redesign commits on `main`** are worked examples
   of every capability/predicate/bot combination. Browse with
   `git log --oneline --grep "no-cheat redesign"` and read the bodies.
+- **`tools/validate_pack_bar.py`** — sweep-runs `observe()`-only
+  (stall) against every active pack × level × seed 1–4 and emits
+  `audits/pack_bar_status.csv`. Any cell where stall WINS is a
+  no-cheat-bar break (cheat policies must LOSE per the bar). Run
+  before merging any pack edit:
+  ```
+  python3 tools/validate_pack_bar.py
+  python3 tools/analyze_pack_bar.py audits/pack_bar_status.csv
+  ```
+  Catches the auto-harvest-baseline defect class (above) and any
+  win predicate that's structurally satisfiable without agent
+  action (e.g. `within_ticks:N` with no objective predicate).
+  The intended-must-WIN half of the bar is still verified by each
+  pack's `tests/test_*.py` — the validator is the missing piece
+  for the cheats-must-LOSE half.
 
 ## Audit-doc workflow (binding for every pack edit)
 
