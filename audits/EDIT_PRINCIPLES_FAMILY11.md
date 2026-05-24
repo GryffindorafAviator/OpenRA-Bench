@@ -157,11 +157,18 @@ F11 packs exercise the combined-arms verb set: ground (`weap` →
   | Buildable | Allied Prereq | Cost | Build sec |
   |---|---|---|---|
   | `hpad` | `tent` (canonical) + `proc` or `fact` (varies) | 1000 | ~20 |
-  | `heli` | `hpad` | 1200 | ~24 |
+  | `heli` | `hpad` | **2000** | ~24 |
   | `syrd` | `proc` + adjacent water cell | 2000 | ~40 |
   | `dd` | `syrd` | 1000 | ~20 |
   | `afld` | `tent` (Soviet variant) | 1000 | ~20 |
   | `spen` | `proc` + water (Soviet variant) | 2000 | ~40 |
+
+  **Heli cost correction (2026-05-24)**: previous draft said $1200;
+  verified against vendored RA YAML during the F11 engine-risk
+  verification — actual canonical cost is **$2000**. Per-tier cash
+  budgets in §73 must accommodate $2000/heli, not $1200. All F11
+  packs requiring built helis: budget at least $2000 per heli unit
+  the win predicate demands.
 
   Costs above are CANONICAL RA-mod values, NOT yet pinned in the
   bench's PRODUCTION_TECH_AUDIT.md (which only enumerates
@@ -261,15 +268,15 @@ Cash budget per tier (the model must afford ≥1 of each required
 production building + ≥N units; the chain feasibility check is
 F6 §41 critical-path):
 
-- **easy**: starting_cash $4000-5000 + econ income → fund weap
-  ($2000) + hpad ($1000) + ≥2 tanks ($1600) + ≥1 heli ($1200) =
-  $5800. Tight without econ income; deliberate (the econ axis
+- **easy**: starting_cash $5500-6500 + econ income → fund weap
+  ($2000) + hpad ($1000) + ≥2 tanks ($1600) + ≥1 heli ($2000) =
+  **$6600**. Tight without econ income; deliberate (the econ axis
   must work).
-- **medium**: starting_cash $5000-6000 + econ income → fund
-  weap + hpad + fix + ≥3 tanks + ≥1 heli = $7800. Income
+- **medium**: starting_cash $7000-8000 + econ income → fund
+  weap + hpad + fix + ≥3 tanks + ≥1 heli = **$9000**. Income
   required.
-- **hard**: starting_cash $6000-7500 + econ income → fund weap
-  + hpad + syrd + fix + ≥3 tanks + ≥1 heli + ≥1 dd = $9000+.
+- **hard**: starting_cash $8000-9500 + econ income → fund weap
+  + hpad + syrd + fix + ≥3 tanks + ≥1 heli + ≥1 dd = **$10000+**.
   Income mandatory; cash-starved play LOSES.
 
 Audit-check: every F11 pack's starting_cash + ~30-turn econ income
