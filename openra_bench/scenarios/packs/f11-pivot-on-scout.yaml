@@ -1,0 +1,460 @@
+# f11-pivot-on-scout — Family-11 (full-game) reactive-idiom pack.
+#
+# REACTIVE-ENEMY scout-and-pivot test. The enemy's composition is
+# observable at a fixed forward scout vantage; the model picks the
+# RPS counter and produces it. On hard the enemy SWITCHES arm mid-
+# episode via `scheduled_events.spawn_actors` so a one-shot scout +
+# build is insufficient — the model must RE-SCOUT and RE-PIVOT.
+#
+# ENGINE NOTE — §81a per-pack pre-placing (binding):
+#   ALL production buildings are pre-placed (fact + powr + proc +
+#   tent + weap + hpad + syrd + fix + harvs). The capability under
+#   test is the RE-SCOUT-RE-PIVOT decision, NOT a build chain — the
+#   model must be able to produce ANY arm in ≤1 production cycle
+#   from any tier. Cost of arm-pivoting is bounded by the per-unit
+#   train cost (heli $2000, 2tnk $850, e1 $100) — not by tech-chain
+#   time. See EDIT_PRINCIPLES_FAMILY11.md §81a.
+#
+# Win predicate shape (per F11 §68 + §75 — full-chain `then:` plus
+# per-tier counter arm count):
+#   easy   — enemy committed to INFANTRY → counter = `2tnk` (medium
+#            tanks beat clustered infantry). Predicate: `then:[
+#            buildings_discovered_gte:1 (sees enemy's `tent`
+#            production), unit_type_count_gte:2tnk:2,
+#            enemy_buildings_destroyed_gte:1]`.
+#   medium — enemy has TWO production buildings visible (`tent`
+#            AND `hpad`), but only `tent` is producing (the active
+#            arm is infantry). Counter is still `2tnk`. Wrong-arm
+#            (build heli to match the visible hpad) LOSES on the
+#            kill clause because heli alone can't crack the
+#            infantry+rocket picket on the timer.
+#   hard   — enemy SWITCHES arm at tick 2000 via `spawn_actors`:
+#            initial 4× e1 infantry picket is reinforced with
+#            5× 2tnk hunt tanks. Counter post-switch is `heli`
+#            (helis kite tanks). Win predicate keys on heli:
+#            `then:[buildings_discovered_gte:1, after_ticks:2000,
+#            unit_type_count_gte:heli:2,
+#            enemy_buildings_destroyed_gte:1]` — the
+#            after_ticks:2000 gate forces the production decision
+#            to land POST-SWITCH.
+#
+# Wrong-strategy traps (per F11 §72 + §75):
+#   - same-arm-as-enemy (easy/medium: build only e1; hard: build
+#     only 2tnk to match the post-switch arm OR e1 to match the
+#     pre-switch arm) — `unit_type_count_gte:counter:n` fails →
+#     `then:` stalls forever → deadline LOSS.
+#   - ignored-scout-build-blind (skip scouting, produce a default
+#     arm) — for hard the post-switch counter is heli, which a
+#     blind build-2tnk policy never produces → LOSS.
+#   - pivot-once-at-tick-0-only (hard: build 2tnk continuously,
+#     never pivot to heli even after the switch) — heli≥2 never
+#     latches → deadline LOSS.
+#   - stall (only observe) — no buildings, no force, no kills →
+#     `then:` chain never advances → after_ticks LOSS.
+#   - brute (move starter units east) — no production tied to the
+#     counter arm; the kill bar may incidentally latch but the
+#     counter `unit_type_count_gte` clause never does →
+#     after_ticks LOSS.
+#
+# Engine fixtures pinned (CLAUDE.md):
+#   - tests/test_scheduled_events.py: spawn_actors at fixed ticks
+#     (the hard-tier arm switch at tick 2000).
+#   - tests/test_build_heli_roundtrip.py: build('hpad') +
+#     place_building + build('heli') round-trip — required so the
+#     model can produce helis from the pre-placed hpad.
+#   - tests/test_f11_scheduled_air_spawn.py / test_f11_scheduled_
+#     ship_spawn.py: scheduled-event Aircraft/Ship spawn
+#     (CLAUDE.md F11 §78.4 pre-flight item).
+#
+# Engine guardrails (no-defect, no-cheat — CLAUDE.md):
+#   - `termination.enemy_units_killed: false` — required by F11 §79
+#     because the win predicate includes
+#     `enemy_buildings_destroyed_gte`. Without this flag the agent
+#     killing all enemy COMBAT units before razing a building auto-
+#     `done`s and the run DRAWS.
+#   - within_ticks ≤ 93 + 90·(max_turns − 1) on every tier;
+#     deadline bites cleanly.
+#   - Persistent anti-DRAW sentinel enemy `fact` far east keeps
+#     the run alive when the agent kills the enemy's PRODUCTION
+#     building (which is the kill target) before any other base
+#     buildings.
+
+meta:
+  id: f11-pivot-on-scout
+  title: 'F11 Pivot on Scout — Reactive Arm-Picking'
+  capability: reasoning
+  real_world_meaning: >
+    Reactive perception loop: an opposing force commits to a
+    particular composition; the commander observes it, picks the
+    counter (the RPS choice — armour beats massed infantry; air
+    beats armour without anti-air), and produces the counter under
+    a clock. The hardest version is when the opposing force pivots
+    mid-engagement — the commander must re-observe and re-pivot
+    rather than executing a one-shot plan.
+  robotics_analogue: >
+    Closed-loop adversarial scenario planning: a robot mission
+    where the target set is dynamic (a search-and-engage task
+    where the target type changes between sorties). A robot that
+    chooses its tooling once at sortie-start and never re-observes
+    fails when the target set changes mid-mission.
+  benchmark_anchor:
+    - "rock-paper-scissors counter-pick under perception"
+    - "AlphaStar / SC2 reactive build-order pivot"
+    - "OODA-loop re-observation"
+  author: openra-bench
+
+base_map:
+  generator: arena
+  name: f11-pivot-on-scout-arena-112
+  width: 112
+  height: 40
+  cordon: 2
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: turtle}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  interrupts: {}
+  termination:
+    max_ticks: 10000
+    agent_units_killed: true
+    enemy_units_killed: false
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Single visible arm: enemy infantry (`tent` producing, 4× e1 picket
+  # visible). The model scouts (a forward jeep + a fixed enemy `tent`
+  # at known cell (80,20)) → picks counter (2tnk) → produces ≥2 tanks
+  # → razes ≥1 enemy production building.
+  #
+  # Agent seed per §81a: every production building pre-placed (the
+  # capability under test is arm-picking, not tech-chain).
+  easy:
+    description: >
+      Commander, this is a perception-and-counter operation. Your
+      western base at (8,20) holds a Construction Yard, Power
+      Plant, Ore Refinery, Barracks, War Factory, Helipad, Shipyard,
+      Service Depot and one starter Harvester. A starter Jeep sits
+      forward at (20,20). Two ore patches sit just east of your
+      refinery. Cash on hand: $5000. An enemy base sits to the east
+      around (95,20); a forward Barracks at (80,20) is reported
+      producing infantry — visible from the scout vantage there.
+      Read the enemy's arm via your jeep, produce at least two
+      medium tanks (the RPS counter to massed infantry), then raze
+      at least one enemy production building — all within about 90
+      turns. Keep your western Construction Yard standing.
+    starting_cash: 5000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-pivot-on-scout-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      actors:
+        # Agent western base — every production building pre-placed
+        # (§81a). The model uses these immediately; the capability
+        # tested is the arm-picking decision, not the tech-chain.
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: dome, owner: agent, position: [12, 22]}
+        - {type: atek, owner: agent, position: [15, 22]}
+        - {type: tent, owner: agent, position: [4, 14]}
+        - {type: weap, owner: agent, position: [4, 26]}
+        - {type: hpad, owner: agent, position: [8, 14]}
+        - {type: syrd, owner: agent, position: [4, 30]}
+        - {type: fix,  owner: agent, position: [8, 30]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        # Forward starter jeep — the scout. Stance:0 holdfire so it
+        # doesn't aggro mid-move on whatever it sees.
+        - {type: jeep, owner: agent, position: [20, 20], stance: 0}
+        # Ore patches.
+        - {type: mine, owner: neutral, position: [20, 18]}
+        - {type: mine, owner: neutral, position: [20, 22]}
+        # Enemy forward production building — INFANTRY arm. This is
+        # what the scout must observe. Placed at (80,20) so a jeep
+        # at (20,20) can drive east into observation range.
+        - {type: tent, owner: enemy, position: [80, 20]}
+        # Enemy infantry picket — the visible arm.
+        - {type: e1, owner: enemy, position: [82, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [82, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [84, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [78, 20], stance: 2}
+        # Enemy main base east of the forward production building.
+        - {type: fact, owner: enemy, position: [95, 20]}
+        - {type: powr, owner: enemy, position: [98, 18]}
+        # Anti-DRAW sentinel — out-of-reach corner fact keeps the run
+        # alive past the strike (engine auto-done mitigation).
+        - {type: fact, owner: enemy, position: [108, 38]}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-pivot-on-scout-easy
+            clauses:
+              # P1: scout has SEEN the enemy production building
+              # (the load-bearing perception gate; a blind-build
+              # policy hasn't observed it).
+              - {buildings_discovered_gte: 1}
+              # P2: counter arm fielded. Enemy = infantry, counter
+              # = 2tnk. Same-arm-as-enemy (build only e1) fails
+              # this clause.
+              - {unit_type_count_gte: {type: 2tnk, n: 2}}
+              # P3: strike home — ≥1 enemy production building
+              # destroyed.
+              - {enemy_buildings_destroyed_gte: 1}
+        # max_turns 90 ⇒ reachable max = 93+90·89 = 8103;
+        # deadline 8000 leaves a ~100-tick buffer.
+        - {within_ticks: 8000}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 90
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: TWO enemy production buildings are
+  # visible (a `tent` AND a `hpad`), but only `tent` is producing the
+  # actual picket — the `hpad` is a decoy. The model must observe
+  # WHICH building is producing (the unit composition near each
+  # building is the tell), not just assume the heli pad means air.
+  # Wrong-arm (build heli to counter the decoy hpad) LOSES — the heli
+  # alone can't crack the infantry picket inside the deadline.
+  #
+  # Counter is still `2tnk` (the load-bearing arm is infantry).
+  medium:
+    description: >
+      Commander, this is a perception-and-counter operation against
+      a more ambiguous enemy posture. Your western base at (8,20)
+      holds the full production stack (Construction Yard, Power
+      Plant, Refinery, Barracks, War Factory, Helipad, Shipyard,
+      Service Depot) and two starter Harvesters. A starter Jeep
+      sits forward at (20,20). Three ore patches sit east of the
+      refinery. Cash on hand: $7000. The enemy has TWO forward
+      production buildings visible — a Barracks at (80,18) and a
+      Helipad at (80,22) — but only ONE is actually producing the
+      threat. Drive your jeep east to observe which arm is active,
+      produce the matching counter (at least three of the right
+      unit type), then raze at least one enemy production
+      building — all within about 100 turns. Keep your western
+      Construction Yard standing.
+    starting_cash: 7000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-pivot-on-scout-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      actors:
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: dome, owner: agent, position: [12, 22]}
+        - {type: atek, owner: agent, position: [15, 22]}
+        - {type: tent, owner: agent, position: [4, 14]}
+        - {type: weap, owner: agent, position: [4, 26]}
+        - {type: hpad, owner: agent, position: [8, 14]}
+        - {type: syrd, owner: agent, position: [4, 30]}
+        - {type: fix,  owner: agent, position: [8, 30]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [16, 22]}
+        - {type: jeep, owner: agent, position: [20, 20], stance: 0}
+        - {type: mine, owner: neutral, position: [20, 18]}
+        - {type: mine, owner: neutral, position: [20, 22]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # TWO enemy production buildings — decoy ambiguity.
+        - {type: tent, owner: enemy, position: [80, 18]}
+        - {type: hpad, owner: enemy, position: [80, 22]}
+        # Infantry picket — `tent` is the active producer.
+        # Slightly heavier picket so a single-heli "wrong-arm"
+        # play burns out before clearing.
+        - {type: e1, owner: enemy, position: [82, 16], stance: 2}
+        - {type: e1, owner: enemy, position: [82, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [82, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [82, 22], stance: 2}
+        - {type: e3, owner: enemy, position: [84, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [78, 20], stance: 2}
+        # Enemy main base.
+        - {type: fact, owner: enemy, position: [95, 20]}
+        - {type: powr, owner: enemy, position: [98, 18]}
+        - {type: fact, owner: enemy, position: [108, 38]}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-pivot-on-scout-medium
+            clauses:
+              - {buildings_discovered_gte: 1}
+              # Counter is `2tnk`. Wrong-arm (heli-only) cannot
+              # latch this clause inside the deadline because the
+              # enemy picket damages helis faster than the heli
+              # alone can crack the picket.
+              - {unit_type_count_gte: {type: 2tnk, n: 3}}
+              - {enemy_buildings_destroyed_gte: 1}
+        # max_turns 100 ⇒ reachable max = 93+90·99 = 9003;
+        # deadline 8900 leaves a ~100-tick buffer.
+        - {within_ticks: 8900}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 100
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +1 controlled variable vs medium: the enemy SWITCHES arm at tick
+  # 2000 via `scheduled_events.spawn_actors`. Initial composition is
+  # infantry (4× e1 visible at the `tent` forward); at tick 2000 the
+  # enemy injects 5× 2tnk hunt tanks at the forward cell — the arm
+  # shifts to ARMOUR. Counter to armour is HELI (kites tanks).
+  #
+  # The win predicate is GATED behind `after_ticks: 2000` for the
+  # heli clause — a pivot-once-at-tick-0-only policy that builds
+  # 2tnk continuously never produces helis → heli-count clause
+  # never latches → deadline LOSS.
+  #
+  # Also seed-rotated NORTH/SOUTH base (sp 0/1) so the geometry
+  # can't be memorised (F1 §10 + F11 §76). Per CLAUDE.md the per-
+  # owner spawn_point filter requires every agent actor to declare
+  # spawn_point.
+  hard:
+    description: >
+      Commander, this is a perception-and-counter operation against
+      a reactive enemy. Your western base spawns NORTH (y=12) or
+      SOUTH (y=28) by seed — read your actual starting band from
+      the observation. Each spawn holds the full production stack
+      (Construction Yard, Power Plant, Refinery, Barracks, War
+      Factory, Helipad, Shipyard, Service Depot) and two starter
+      Harvesters. A starter Jeep sits forward at (20,20) (centre
+      of the map). Three ore patches sit adjacent. Cash on hand:
+      $12000. The enemy initially produces infantry from a
+      Barracks at (80,20); around tick 2000 the enemy switches
+      arms and a hunt-tank package will arrive at the forward cell.
+      Drive your jeep east to observe the initial arm and the
+      switched arm, produce the appropriate counter to whichever
+      arm is active LATE in the engagement (≥2 of the post-switch
+      counter), then raze at least one enemy production building —
+      all within about 110 turns. Keep your Construction Yard
+      standing.
+    starting_cash: 12000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-pivot-on-scout-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      actors:
+        # ─ spawn_point 0 — NORTH base @ y=12 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: dome, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: atek, owner: agent, position: [15, 14], spawn_point: 0}
+        - {type: tent, owner: agent, position: [4,  6], spawn_point: 0}
+        - {type: weap, owner: agent, position: [4, 18], spawn_point: 0}
+        - {type: hpad, owner: agent, position: [8,  6], spawn_point: 0}
+        - {type: syrd, owner: agent, position: [8, 18], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [12, 18], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [20, 12], stance: 0, spawn_point: 0}
+        - {type: mine, owner: neutral, position: [20, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [20, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 12], spawn_point: 0}
+        # ─ spawn_point 1 — SOUTH base @ y=28 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: dome, owner: agent, position: [12, 30], spawn_point: 1}
+        - {type: atek, owner: agent, position: [15, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [4, 22], spawn_point: 1}
+        - {type: weap, owner: agent, position: [4, 34], spawn_point: 1}
+        - {type: hpad, owner: agent, position: [8, 22], spawn_point: 1}
+        - {type: syrd, owner: agent, position: [8, 34], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [12, 34], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 30], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [20, 28], stance: 0, spawn_point: 1}
+        - {type: mine, owner: neutral, position: [20, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [20, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 28], spawn_point: 1}
+        # ─ Enemy actors — no spawn_point, place every seed ─────────
+        # Enemy forward production building — initially producing
+        # infantry; at tick 2000 the scheduled spawn injects tanks.
+        - {type: tent, owner: enemy, position: [80, 20]}
+        # Initial infantry picket — the visible "first arm".
+        - {type: e1, owner: enemy, position: [82, 18], stance: 2}
+        - {type: e1, owner: enemy, position: [82, 22], stance: 2}
+        - {type: e1, owner: enemy, position: [84, 20], stance: 2}
+        - {type: e1, owner: enemy, position: [78, 20], stance: 2}
+        # Enemy main base.
+        - {type: fact, owner: enemy, position: [95, 20]}
+        - {type: powr, owner: enemy, position: [98, 18]}
+        - {type: fact, owner: enemy, position: [108, 38]}
+      scheduled_events:
+        # ARM SWITCH at tick 2000. 3× 2tnk armour pickets spawn at
+        # the enemy forward `tent` cell (80,20) on DEFEND stance —
+        # the enemy's new "second arm" is ARMOUR co-located with
+        # the original infantry picket. The intended counter to
+        # armour (with the agent's full toolkit available) is
+        # `heli` — heli kites tanks (faster than 2tnk, attacks
+        # while moving). A model that locked-in on 2tnk pre-switch
+        # never builds the heli the `unit_type_count_gte: heli: 2`
+        # clause demands → LOSS.
+        #
+        # Stance:2 (defend) — the tanks hold at the forward
+        # production cell, becoming the new picket the agent's
+        # strike package must crack. A hunt stance would let the
+        # tanks chase east into the agent base, wipe the unarmored
+        # jeep+harvs, and trigger the engine's agent-unit-wipe
+        # auto-`done` before the agent can rebuild — a degenerate
+        # LOSS that masks the actual pivot test.
+        - tick: 2000
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [80, 20], stance: 2, count: 3}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-pivot-on-scout-hard
+            clauses:
+              # P1: initial scout — the model must have seen the
+              # enemy production building.
+              - {buildings_discovered_gte: 1}
+              # P2: arm-switch gate — the heli count clause only
+              # latches AFTER tick 2000. A pivot-once-at-tick-0
+              # policy that built tanks pre-switch and stopped
+              # producing cannot retroactively satisfy this.
+              - {after_ticks: 2000}
+              # P3: post-switch counter — HELI (counters armour).
+              # Same-arm (build only 2tnk, mirror enemy's post-
+              # switch arm) fails this clause.
+              - {unit_type_count_gte: {type: heli, n: 2}}
+              # P4: strike home.
+              - {enemy_buildings_destroyed_gte: 1}
+        # max_turns 110 ⇒ reachable max = 93+90·109 = 9903;
+        # deadline 9800 leaves a ~100-tick buffer (engine caps
+        # max_ticks at 10000 regardless of `termination.max_ticks`).
+        - {within_ticks: 9800}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 110
