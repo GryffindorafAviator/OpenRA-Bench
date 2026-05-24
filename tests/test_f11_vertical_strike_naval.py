@@ -302,14 +302,18 @@ def test_every_level_has_fail_condition():
 
 
 def test_timeout_loss_is_reachable_on_every_level():
-    """`within_ticks` ≤ reachable max tick `93 + 90·(N-1)` AND ≤ 9999
-    (engine cap). Without this the deadline never bites → DRAW."""
+    """`within_ticks` ≤ reachable max tick `93 + 90·(N-1)` AND <
+    `base.termination.max_ticks` (engine commit 493898e removed the
+    historical 10000-tick hard cap; the scenario-declared
+    `termination.max_ticks` is now the authoritative ceiling).
+    Without this the deadline never bites → DRAW."""
     pack = load_pack(PACK)
+    engine_cap = (pack.base.get("termination") or {}).get("max_ticks")
+    assert engine_cap is not None, "base.termination.max_ticks missing"
     for lvl in LEVELS:
         L = pack.levels[lvl]
         max_turns = L.max_turns
         reachable = 93 + 90 * (max_turns - 1)
-        ENGINE_CAP = 9999
 
         def _collect(node, key, out):
             if isinstance(node, dict):
@@ -332,8 +336,9 @@ def test_timeout_loss_is_reachable_on_every_level():
                 f"{lvl} within_ticks {wt} > reachable {reachable} "
                 f"(max_turns={max_turns}) — deadline never bites ⇒ draw"
             )
-            assert wt <= ENGINE_CAP, (
-                f"{lvl} within_ticks {wt} > engine cap {ENGINE_CAP}"
+            assert wt < engine_cap, (
+                f"{lvl} within_ticks {wt} >= engine cap {engine_cap} "
+                f"(base.termination.max_ticks)"
             )
         for ft in fts:
             assert ft <= reachable + 1, (
