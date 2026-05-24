@@ -38,7 +38,13 @@ A scenario is defective if any of the following hold:
    (a scenario nobody can win is also defective).
 5. The engine auto-terminates on enemy-elimination before the win/fail
    is evaluated (mitigation: place an unarmed high-HP enemy `fact`
-   marker at the objective).
+   marker at the objective, OR declare
+   `termination.enemy_units_killed: false` to disable the auto-`done`
+   for that side; see the engine-fact note below). The mirror flag
+   `termination.agent_units_killed: false` keeps the run alive past an
+   agent-side wipe — load-bearing for forlorn-hope / suicide-charge
+   packs where the within_ticks fail clause must fire AFTER the strike
+   package dies.
 6. Actors are placed outside the map's playable bounds (engine
    panics).
 7. The pack is `UPGRADED` in `tests/test_hard_tier.py` but its hard
@@ -124,7 +130,39 @@ Before editing any scenario pack:
   actors are eliminated, or sometimes when an agent unit reaches an
   enemy-key location. Without a persistent enemy actor a win-by-reach
   scenario can end as DRAW. Put an unarmed high-HP enemy `fact`
-  marker at the objective.
+  marker at the objective, OR set
+  `termination.enemy_units_killed: false` (see next note).
+- **`termination.{agent,enemy}_units_killed` are now load-bearing
+  flags** (engine fix, pinned by
+  `OpenRA-Rust/openra-data/tests/test_scenario_termination_parse.rs`,
+  `OpenRA-Rust/openra-train/tests/env_termination_flags.rs`, and
+  `tests/test_termination_flags_python.py`). Historical footgun: the
+  flags were documented in `TerminationConfig` and on several pack
+  headers (`combat-suicide-charge-mission`, `strategy-dilemma`,
+  `strategy-twobody`, `rush-hour`, `mid-concede-vs-hold`,
+  `econ-deny-enemy-expansion`, `coord-diversionary-attack`) but had
+  no consumer — `oramap::parse_scenario_yaml` silently dropped the
+  `termination:` block, so the engine's `is_terminal` check always
+  auto-`done`d on either side's wipe. That collapsed sacrifice /
+  decoy / forlorn-hope packs to DRAW the moment the agent's last
+  unit died (the `within_ticks` fail clause never had a chance to
+  fire). Triaged in `audits/qwen9b_draws_and_medium_dip.md` (the
+  5-cell `combat-suicide-charge-mission` DRAW cluster). The parser
+  now reads the `termination:` block; the two gating flags surface on
+  `MapDef` as `terminate_on_{agent,enemy}_units_killed` (default
+  `true` ⇒ legacy behaviour) and `Env::is_terminal` gates the
+  corresponding wipe path behind them. A scenario opts out by
+  declaring the flag `false`:
+    * `termination.agent_units_killed: false` — keep the run alive
+      past an agent-side wipe (sacrifice anchor: lose the strike
+      package without ending the run, so a within_ticks fail clause
+      can score the post-wipe arrival).
+    * `termination.enemy_units_killed: false` — keep the run alive
+      past an enemy-side wipe (the proper fix instead of the
+      far-corner `fact` marker workaround for the auto-done race).
+  A surrendered agent is still defeated regardless of the flag
+  (`Command::Surrender` is an explicit player action, not the
+  units-killed auto-done).
 - **Own-unit `actor_type`** surfaces in `units_summary`
   (`unit_type_count_eq / _gte` work). Predicates relying on it are
   valid.
