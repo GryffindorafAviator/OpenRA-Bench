@@ -240,7 +240,7 @@ def _make_commit_blind(corner):
 
 def _make_dither(corner):
     """Over-scout: jeeps scout, but the column is HELD at base until
-    t≈1500 (waiting for full certainty) — the late commit busts the
+    t≈2300 (waiting for full certainty) — the late commit busts the
     tight clock even when it targets the light corner."""
 
     def pol(rs, Command):
@@ -266,7 +266,7 @@ def _make_dither(corner):
                     )
                 )
             return cmds or [Command.observe()]
-        if t < 1500:
+        if t < 2300:
             return [Command.observe()]
         fid = _fact_id_if_close(rs, corner, tanks)
         if fid:
