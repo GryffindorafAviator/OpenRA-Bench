@@ -126,19 +126,19 @@ prerequisite chain:
 | Buildable | Prereqs (Allies) | Cost |
 |---|---|---|
 | `harv` | `weap` | $1400 |
-| `2tnk` (medium tank) | `weap` + `fix` | $850 |
+| `2tnk` (medium tank) | `weap` + `fix` | $800 |
 | `1tnk` (light tank) | `weap` | $700 |
 | `jeep` | `weap` | $600 |
 | `e1` (rifle) | `tent` | $100 |
 | `e3` (rocket) | `tent` | $300 |
-| `pbox` (pillbox) | `tent` (defense queue, gated by infantry building) | $600 |
+| `pbox` (pillbox) | `tent` (defense queue, gated by infantry building) | $400 |
 | `gun` (turret) | `tent` + `fix` | $600 |
 | `proc` (refinery) | `fact` | $1400 |
 | `powr` (power) | `fact` | $300 |
 | `silo` | `proc` | $150 |
 | `weap` (war factory) | `proc` | $2000 |
 | `fix` (service depot) | `weap` | $1200 |
-| `tent` (barracks) | `fact` | $500 |
+| `tent` (barracks) | `fact` | $400 |
 
 **Cross-check is part of the audit row** — see
 `audits/PRODUCTION_TECH_AUDIT.md` for the explicit per-pack table.

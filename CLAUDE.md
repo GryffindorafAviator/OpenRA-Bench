@@ -339,10 +339,10 @@ Before editing any scenario pack:
   `observe`/`stop` only — the freeze-and-panic signal. A replayed
   trajectory MUST come from the same `pack:level:seed` (engine actor
   ids are seed-deterministic).
-- **`pbox` costs 600** (not the 400 some old specs assumed);
-  defense and infantry are SEPARATE production queues so an
-  efficient policy queues `build('pbox')` and `build('e1')` in
-  parallel from turn 1.
+- **`pbox` costs 400** in the bench engine (verified against
+  `OpenRA-Rust/openra-sim/src/gamerules.rs`); defense and infantry
+  are SEPARATE production queues so an efficient policy queues
+  `build('pbox')` and `build('e1')` in parallel from turn 1.
 - **`pbox` is now an active direct-fire tower** (engine fix,
   pinned by `OpenRA-Rust/openra-sim/tests/test_pbox_fires.rs` +
   `tests/test_pbox_fires.py`). RA's `pbox` is an

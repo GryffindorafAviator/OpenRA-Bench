@@ -23,8 +23,10 @@ intended-capability play must:
 3. **Be affordable** within the projected cash trajectory
    (`starting_cash` + harv income over the build duration).
 4. **Be buildable within the tick budget** (build time + tech-gate
-   resolution must fit `max_turns × 30` ticks for non-interrupt
-   packs).
+   resolution must fit the reachable tick budget — for non-interrupt
+   packs that is `93 + 90·(max_turns − 1)` ticks, i.e. ~90 ticks per
+   decision turn; interrupt-mode packs vary per turn — read
+   `info["ticks_advanced"]`).
 5. **Match the faction** — Allies vs Soviet rosters diverge. Most
    bench packs are Allies; the pack-level `agent: {faction: ...}`
    must match the buildables.
@@ -53,28 +55,31 @@ fact (CY)  → tent (barracks)  → e1 (rifle), e3 (rocket), e4 (flamer*)
 | `e1` | Rifle infantry | 100 | 5 | `tent` |
 | `e3` | Rocket infantry | 300 | 8 | `tent` |
 | `e6` | Engineer | 500 | 10 | `tent` |
-| `e7` (tanya) | Commando | 1200 | 30 | `tent` + `fix` |
+| `e7` (tanya) | Commando | 600 | 30 | `tent` + `fix` |
 | `thf` | Thief | 500 | 15 | `tent` + `fix` |
 | `jeep` | Ranger | 600 | 14 | `weap` |
 | `1tnk` | Light tank | 700 | 16 | `weap` |
-| `2tnk` | Medium tank | 850 | 18 | `weap` + `fix` |
+| `2tnk` | Medium tank | 800 | 18 | `weap` + `fix` |
 | `mtnk` | Mammoth* | 1700 | 30 | `weap` + `fix` + tech |
 | `harv` | Harvester | 1400 | 25 | `weap` |
 | `mcv` | Construction MCV | 2500 | 40 | `weap` + `fix` |
 | `fact` | Construction Yard | (from MCV deploy) | — | — |
-| `tent` | Barracks (Allies) | 500 | 10 | `fact` |
+| `tent` | Barracks (Allies) | 400 | 10 | `fact` |
 | `powr` | Power Plant | 300 | 8 | `fact` |
 | `proc` | Ore Refinery | 1400 | 28 | `fact` |
 | `weap` | War Factory | 2000 | 30 | `proc` |
 | `fix` | Service Depot | 1200 | 22 | `weap` |
 | `silo` | Ore Silo | 150 | 5 | `proc` |
 | `gun` | AA/AT Turret | 600 | 14 | `tent` + `fix` |
-| `pbox` | Pillbox | 600 | 12 | `tent` |
-| `hbox` | Camo Pillbox* | 800 | 14 | `tent` + `fix` |
+| `pbox` | Pillbox | 400 | 12 | `tent` |
+| `hbox` | Camo Pillbox* | 600 | 14 | `tent` + `fix` |
 
-\*"Build seconds" is the canonical RA-mod value; at
-`DEFAULT_TICKS_PER_STEP = 30` ticks/turn (1 turn ≈ 1 sec real-time at
-default speed), the turn count = build seconds. Parallel production
+\*"Build seconds" is the canonical RA-mod value. The bench engine
+advances roughly 90 ticks per decision turn (formula
+`93 + 90·(max_turns − 1)` total reachable ticks; see CLAUDE.md), so
+at the engine's nominal 30 ticks per second the build-second column
+corresponds to roughly `secs / 3` decision turns — e.g. a `weap` (30s)
+becomes ~10 turns of agent decisions. Parallel production
 (2× weap on the same queue) roughly halves the per-unit build time —
 see CLAUDE.md note "Multiple production buildings of the same
 category produce IN PARALLEL".

@@ -105,13 +105,15 @@ FACTION_ONLY = {
 
 # Canonical RA costs and build seconds (= turns @ DEFAULT_TICKS_PER_STEP=30).
 COST = {
-    # Bench-engine canonical costs (verified from pack comments referencing
-    # openra-sim/src/gamerules.rs). Audit doc lists some Allies-mod RA
-    # defaults that differ — bench uses 'proc':1400 and 'tent':500.
-    'e1':100,  'e3':300,  'e6':500,   'e7':1200, 'thf':500, 'e2':160,
-    'jeep':600,'1tnk':700,'2tnk':850, '3tnk':950,'mtnk':1700,'harv':1400,'mcv':2500,
-    'tent':500,'barr':500,'powr':300,'apwr':500,'proc':1400,'weap':2000,'fix':1200,
-    'silo':150,'gun':600,'pbox':600,'hbox':800,'tsla':1500,'dome':1000,
+    # Bench-engine canonical costs — verified directly against the
+    # `actor!(...)` declarations in openra-sim/src/gamerules.rs and the
+    # explicit `assert_eq!(rules.cost("2tnk"), 800)` engine test.
+    # Updated 2026-05-24 (P0.2 in PR #30 review): tent 500→400,
+    # 2tnk 850→800, pbox 600→400, hbox 800→600, e7 1200→600.
+    'e1':100,  'e3':300,  'e6':500,   'e7':600,  'thf':500, 'e2':160,
+    'jeep':600,'1tnk':700,'2tnk':800, '3tnk':950,'mtnk':1700,'harv':1400,'mcv':2500,
+    'tent':400,'barr':500,'powr':300,'apwr':500,'proc':1400,'weap':2000,'fix':1200,
+    'silo':150,'gun':600,'pbox':400,'hbox':600,'tsla':1500,'dome':1000,
     'atek':1500,'stek':2000,'spen':1500,'syrd':1500,'hpad':500,'afld':600,
     'kenn':200,'fact':0,'sam':750,'ftur':600,
 }
