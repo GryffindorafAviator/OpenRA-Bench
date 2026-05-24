@@ -79,7 +79,7 @@ def _swarm(rs, C):
     if cash >= 100 and "e1" not in prod:
         cmds.append(C.build("e1"))
     for u in my_inf:
-        cmds.append(C.attack_move([str(u["id"])], target_x=70, target_y=20))
+        cmds.append(C.attack_move([str(u["id"])], target_x=40, target_y=20))
     return cmds if cmds else [C.stop([])]
 
 
@@ -106,7 +106,7 @@ def _make_armor():
             state["attacks_started"] = True
         if state["attacks_started"]:
             for u in tanks:
-                cmds.append(C.attack_move([str(u["id"])], target_x=70, target_y=20))
+                cmds.append(C.attack_move([str(u["id"])], target_x=40, target_y=20))
         return cmds if cmds else [C.stop([])]
 
     return policy
@@ -227,7 +227,7 @@ def test_in_bounds_actors_on_every_level():
         c = compile_level(pack, lvl)
         for a in c.scenario.actors:
             x, y = a.position
-            assert 2 <= x <= 126 and 2 <= y <= 38, (
+            assert 2 <= x <= 54 and 2 <= y <= 38, (
                 f"{lvl}: actor {a.type} at ({x},{y}) out of bounds"
             )
 
