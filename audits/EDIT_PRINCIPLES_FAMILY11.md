@@ -156,12 +156,12 @@ F11 packs exercise the combined-arms verb set: ground (`weap` →
 
   | Buildable | Allied Prereq | Cost | Build sec |
   |---|---|---|---|
-  | `hpad` | `tent` (canonical) + `proc` or `fact` (varies) | 1000 | ~20 |
-  | `heli` | `hpad` | **2000** | ~24 |
-  | `syrd` | `proc` + adjacent water cell | 2000 | ~40 |
-  | `dd` | `syrd` | 1000 | ~20 |
-  | `afld` | `tent` (Soviet variant) | 1000 | ~20 |
-  | `spen` | `proc` + water (Soviet variant) | 2000 | ~40 |
+  | `hpad` | `dome` | 500 | ~10 |
+  | `heli` | `atek` + `hpad` | **2000** | ~24 |
+  | `syrd` | `anypower` + adjacent water cell | 1000 | ~22 |
+  | `dd` | `dome` + `syrd` | 1000 | ~20 |
+  | `afld` | `dome` (Soviet variant) | 500 | ~14 |
+  | `spen` | `anypower` + water (Soviet variant) | 800 | ~22 |
 
   **Heli cost correction (2026-05-24)**: previous draft said $1200;
   verified against vendored RA YAML during the F11 engine-risk
@@ -170,11 +170,12 @@ F11 packs exercise the combined-arms verb set: ground (`weap` →
   packs requiring built helis: budget at least $2000 per heli unit
   the win predicate demands.
 
-  Costs above are CANONICAL RA-mod values, NOT yet pinned in the
-  bench's PRODUCTION_TECH_AUDIT.md (which only enumerates
-  ground-arm + econ + power). **Audit-phase action item**:
-  cross-reference engine `gamerules.rs` for the exact costs
-  before the per-pack YAML authoring wave commits.
+  Costs above are sourced from vendor RA YAML loaded by
+  `env.rs::load_rules_with_fallback` (the runtime authority). The
+  `gamerules.rs::defaults()` stub diverges in several places — see
+  `audits/engine_unit_audit.csv` for the cross-reference. The
+  vendor table is authoritative because the engine uses it at
+  runtime in every bench evaluation.
 - **Map terrain requirements.** Naval packs need a water rect
   (declared via `water_rect: [x, y, w, h]` in `base:`). Air
   packs need no terrain change (`heli` ignores terrain). Combined-

@@ -48,31 +48,47 @@ fact (CY)  → tent (barracks)  → e1 (rifle), e3 (rocket), e4 (flamer*)
   Armament, so a built pbox actually fires anti-infantry.
 ```
 
-## Costs and build times (canonical, RA-mod defaults)
+## Costs and build times (canonical, vendor RA YAML at runtime)
+
+**Source**: vendor RA YAML loaded by
+`OpenRA-Rust/openra-train/src/env.rs::load_rules_with_fallback`. The
+costs below are the values the model actually plays against at
+runtime; they differ in several places from the `gamerules.rs::defaults()`
+stub (a Rust fallback used only when the vendored YAML can't be
+loaded). See `audits/engine_unit_audit.csv` (commit `813590eb`) for
+the full vendor-vs-defaults divergence and
+`audits/engine_unit_audit.md` for narrative.
 
 | Slug | Name | Cost | Build (sec*) | Prereqs |
 |---|---|---|---|---|
 | `e1` | Rifle infantry | 100 | 5 | `tent` |
 | `e3` | Rocket infantry | 300 | 8 | `tent` |
-| `e6` | Engineer | 500 | 10 | `tent` |
-| `e7` (tanya) | Commando | 600 | 30 | `tent` + `fix` |
-| `thf` | Thief | 500 | 15 | `tent` + `fix` |
-| `jeep` | Ranger | 600 | 14 | `weap` |
+| `e6` | Engineer | 400 | 10 | `tent` |
+| `e7` (tanya) | Commando | 1800 | 30 | `tent` + `atek` |
+| `thf` | Thief | 500 | 15 | `barr` + `dome` |
+| `jeep` | Ranger | 500 | 14 | `weap` |
 | `1tnk` | Light tank | 700 | 16 | `weap` |
-| `2tnk` | Medium tank | 800 | 18 | `weap` + `fix` |
+| `2tnk` | Medium tank | 850 | 18 | `weap` + `fix` |
 | `mtnk` | Mammoth* | 1700 | 30 | `weap` + `fix` + tech |
-| `harv` | Harvester | 1400 | 25 | `weap` |
-| `mcv` | Construction MCV | 2500 | 40 | `weap` + `fix` |
+| `harv` | Harvester | 1100 | 25 | `proc` |
+| `mcv` | Construction MCV | 2000 | 40 | `fix` |
 | `fact` | Construction Yard | (from MCV deploy) | — | — |
-| `tent` | Barracks (Allies) | 400 | 10 | `fact` |
-| `powr` | Power Plant | 300 | 8 | `fact` |
-| `proc` | Ore Refinery | 1400 | 28 | `fact` |
+| `tent` | Barracks (Allies) | 500 | 10 | `anypower` |
+| `powr` | Power Plant | 300 | 8 | — |
+| `proc` | Ore Refinery | 1400 | 28 | `anypower` |
 | `weap` | War Factory | 2000 | 30 | `proc` |
 | `fix` | Service Depot | 1200 | 22 | `weap` |
 | `silo` | Ore Silo | 150 | 5 | `proc` |
-| `gun` | AA/AT Turret | 600 | 14 | `tent` + `fix` |
-| `pbox` | Pillbox | 400 | 12 | `tent` |
-| `hbox` | Camo Pillbox* | 600 | 14 | `tent` + `fix` |
+| `gun` | AA/AT Turret | 800 | 14 | `tent` |
+| `pbox` | Pillbox | 600 | 12 | `tent` |
+| `hbox` | Camo Pillbox* | 750 | 14 | `tent` |
+| `syrd` | Naval Yard (allies) | 1000 | 22 | `anypower` |
+| `spen` | Sub Pen (soviet) | 800 | 22 | `anypower` |
+| `hpad` | Helipad | 500 | 10 | `dome` |
+| `afld` | Airfield (soviet) | 500 | 14 | `dome` |
+| `heli` | Longbow (allies) | 2000 | 24 | `atek` + `hpad` |
+| `dome` | Radar Dome | 1500 | 20 | `proc` |
+| `atek` | Tech Center | 1500 | 25 | `dome` + `weap` |
 
 \*"Build seconds" is the canonical RA-mod value. The bench engine
 advances roughly 90 ticks per decision turn (formula
@@ -135,6 +151,15 @@ afford_at_start | afford_by_deadline | build_in_budget | faction | issues
 3. **`weap` without `proc`.** A war factory needs a refinery as
    prereq — even if you don't intend to harvest, the prereq still
    gates.
+3a. **Stale prereq claims (corrected 2026-05-24).** Vendor RA YAML
+   diverges from earlier docs on three prereqs:
+   - `harv` actually requires `proc` (not `weap`). The harvester is
+     gated by having a refinery, not the war factory.
+   - `afld` (Soviet airfield) actually requires `dome` (radar dome),
+     not `tent`.
+   - `syrd` / `spen` (naval yards) actually require only `anypower`
+     (any power-producing building), not `proc`. They do still need
+     an adjacent water cell.
 4. **Faction mismatch.** A Soviet `agent: {faction: ussr}` cannot
    build `2tnk` (medium tank, Allies-only) or `mtnk` (Mammoth). The
    bench default is Allies; only flip if intentional.

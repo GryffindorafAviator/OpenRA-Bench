@@ -123,22 +123,26 @@ If the briefing says "build pillboxes" / "build tanks" / "build a
 second refinery", the agent's starting set must include the
 prerequisite chain:
 
+Costs/prereqs below reflect vendor RA YAML loaded by
+`env.rs::load_rules_with_fallback` (NOT the `gamerules.rs::defaults()`
+stub — see `audits/engine_unit_audit.csv` for the divergence).
+
 | Buildable | Prereqs (Allies) | Cost |
 |---|---|---|
-| `harv` | `weap` | $1400 |
-| `2tnk` (medium tank) | `weap` + `fix` | $800 |
+| `harv` | `proc` | $1100 |
+| `2tnk` (medium tank) | `weap` + `fix` | $850 |
 | `1tnk` (light tank) | `weap` | $700 |
-| `jeep` | `weap` | $600 |
+| `jeep` | `weap` | $500 |
 | `e1` (rifle) | `tent` | $100 |
 | `e3` (rocket) | `tent` | $300 |
-| `pbox` (pillbox) | `tent` (defense queue, gated by infantry building) | $400 |
-| `gun` (turret) | `tent` + `fix` | $600 |
-| `proc` (refinery) | `fact` | $1400 |
-| `powr` (power) | `fact` | $300 |
+| `pbox` (pillbox) | `tent` (defense queue, gated by infantry building) | $600 |
+| `gun` (turret) | `tent` | $800 |
+| `proc` (refinery) | `anypower` | $1400 |
+| `powr` (power) | — | $300 |
 | `silo` | `proc` | $150 |
 | `weap` (war factory) | `proc` | $2000 |
 | `fix` (service depot) | `weap` | $1200 |
-| `tent` (barracks) | `fact` | $400 |
+| `tent` (barracks) | `anypower` | $500 |
 
 **Cross-check is part of the audit row** — see
 `audits/PRODUCTION_TECH_AUDIT.md` for the explicit per-pack table.
