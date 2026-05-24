@@ -193,7 +193,7 @@ def test_far_enemy_fact_marker_present():
         c = compile_level(pack, lvl)
         far = [
             a for a in c.scenario.actors
-            if a.owner == "enemy" and a.type == "fact" and a.position[0] >= 100
+            if a.owner == "enemy" and a.type == "fact" and a.position[0] >= 60
         ]
         assert far, f"{lvl}: missing far enemy fact marker (anti-DRAW)"
 

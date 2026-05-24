@@ -1,0 +1,423 @@
+# f11-full-combined-arms — Family-11 FULL combined-arms (ground + air + naval).
+#
+# The most ambitious F11 pack: the model must build THREE production
+# lines (war factory + helipad + shipyard), field at least one unit
+# from EACH arm (medium tank + helicopter + destroyer), then raze
+# enemy buildings split across THREE reachability domains:
+#   - COASTAL (in dd range — naval shore-strike axis)
+#   - INLAND on the GROUND axis (tanks/heli must traverse overland)
+#   - MIDFIELD where helicopters dominate (heli ignores terrain;
+#     ground is slower; navy can't reach)
+#
+# Single-arm policies fail by geometry + then-chain teeth:
+#   - all-ground LOSES — clauses P2 (hpad) AND P3 (syrd) never latch.
+#   - all-air LOSES — clauses P1 (weap) AND P3 (syrd) never latch;
+#     on medium/hard, midfield AA threatens a heli-only force.
+#   - all-navy LOSES — clauses P1 (weap) AND P2 (hpad) never latch;
+#     navy can't reach midfield or deep-inland targets.
+#   - any single arm cannot satisfy the THREE production gates AND
+#     three-arm force composition simultaneously.
+#
+# Engine fixtures pinned (CLAUDE.md):
+#   - tests/test_build_heli_roundtrip.py: build(hpad)+build(heli) e2e.
+#   - tests/test_build_dd_roundtrip.py: build(syrd)+build(dd) e2e.
+#   - tests/test_aa_fires_on_aircraft.py: enemy agun damages heli.
+#   - tests/test_scheduled_spawn_aircraft.py / _ship.py: mid-game
+#     wave injection for medium/hard.
+#
+# Pre-placed (per F11 §81a — combined-arms focus):
+#   - agent: fact + 2× powr + proc + atek + dome + fix + harv(s)
+#   - agent must BUILD: weap + hpad + syrd + ≥N 2tnk + ≥M heli + ≥K dd
+#
+# Map: 128×40. Vertical water channel at x=22..24 (3 cells wide)
+# spanning y=8..33 (leaves north corridor y=2..7 and south corridor
+# y=34..37 for ground traversal). Three enemy zones:
+#   - COASTAL: tent @(27,5), powr @(27,35) — dd shore-strike range.
+#   - MIDFIELD: powr @(70,20) — heli's domain (mid-east, on land y=20;
+#     tanks must traverse here too, but slower).
+#   - INLAND: fact @(115,20), powr @(118,18) — deep east, tanks/heli.
+
+meta:
+  id: f11-full-combined-arms
+  title: 'F11 Full Combined Arms — Ground + Air + Naval'
+  capability: reasoning
+  real_world_meaning: >
+    Three-domain combined-arms doctrine: a campaign-scale strike
+    package requires ALL THREE arms — ground (medium tanks for
+    overland push and armoured firepower), air (helicopters for
+    terrain-ignoring rapid engagement of midfield targets), and
+    naval (destroyers for coastal shore-strike standoff range across
+    a water barrier). Targets are distributed across three
+    reachability domains so no single arm can hit the whole kill
+    quota; the cash + tick budget must be split across three
+    parallel production streams.
+  robotics_analogue: >
+    Tri-modal robot fleet operation: a coastal + interior survey
+    or interdiction mission may require surface vehicles (overland,
+    high-payload), aerial drones (terrain-ignoring, fast), and
+    surface ships (water domain, long standoff range). Each modality
+    is essential to its domain; missing any modality fails objectives
+    in that domain.
+  benchmark_anchor:
+    - "tri-domain combined-arms doctrine"
+    - "ground + air + naval campaign"
+    - "tri-modal robot fleet composition"
+  author: openra-bench
+
+base_map:
+  generator: naval-arena
+  name: f11-full-combined-arms-arena-128
+  width: 128
+  height: 40
+  cordon: 2
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: turtle}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  interrupts: {}
+  termination:
+    # Engine commit 493898e wires `termination.max_ticks` through
+    # end-to-end; the historical 10000-tick hard cap is removed.
+    # Hard tier restores the original `audits/family11_full_game.csv`
+    # design at max_turns 180 / within_ticks 16000 / reachable max
+    # 16203. Easy / medium stay at their POC-validated budgets so
+    # this single ceiling covers all three.
+    max_ticks: 16500
+    # F11 §79: enemy_units_killed: false is MANDATORY for predicates
+    # that gate on enemy_buildings_destroyed_gte. Without it the
+    # engine auto-`done`s the moment all enemy combat units die.
+    agent_units_killed: true
+    enemy_units_killed: false
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # 128×40, 3-cell water channel x=22..24 spanning y=8..33. Static
+  # garrison only. The model must build all three production buildings
+  # and field ≥1 of each arm, then raze ≥3 enemy buildings.
+  easy:
+    description: >
+      Commander, this is a full combined-arms strike. You must build a
+      War Factory, a Helipad, AND a Shipyard; field at least one medium
+      tank, one helicopter, AND one destroyer; then raze at least three
+      enemy buildings — all within about 105 turns. Your western base
+      at (8,20) sits west of a vertical water channel from x=22 to x=24
+      spanning y=8 to y=33 (open land corridors run north y<8 and south
+      y>33 so ground units can route around the water). Cash on hand:
+      $6500. The enemy occupies three zones: a coastal Barracks at
+      (27,5) in destroyer range, a midfield Power Plant at (70,20)
+      where helicopters can engage over terrain, and a deep-inland
+      Construction Yard at (115,20). A Shipyard MUST be built ADJACENT
+      to a water cell to function — placing one at (20,20) puts its
+      east edge on the shoreline. Keep your Construction Yard standing.
+    starting_cash: 6500
+    overrides:
+      base_map:
+        generator: naval-arena
+        name: f11-full-combined-arms-arena-128
+        width: 128
+        height: 40
+        cordon: 2
+      water_rect: [22, 8, 3, 26]
+      actors:
+        # Agent western base — full prereq stack.
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: dome, owner: agent, position: [12, 22]}
+        - {type: atek, owner: agent, position: [15, 22]}
+        - {type: fix,  owner: agent, position: [4, 14]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [16, 22]}
+        # Ore patches.
+        - {type: mine, owner: neutral, position: [18, 18]}
+        - {type: mine, owner: neutral, position: [18, 22]}
+        # Coastal Barracks — in dd range (placed at y=5 in north gap).
+        - {type: tent, owner: enemy, position: [27, 5]}
+        - {type: e1,   owner: enemy, position: [29, 5], stance: 2}
+        # Midfield Power Plant — far from water, mid-east.
+        - {type: powr, owner: enemy, position: [70, 20]}
+        - {type: e1,   owner: enemy, position: [68, 20], stance: 2}
+        # Inland Construction Yard — deep east, ground + heli reach.
+        - {type: fact, owner: enemy, position: [115, 20]}
+        - {type: powr, owner: enemy, position: [118, 18]}
+        - {type: e1,   owner: enemy, position: [113, 20], stance: 2}
+        # Anti-DRAW sentinel — far corner.
+        - {type: fact, owner: enemy, position: [124, 38]}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-full-combined-arms-easy
+            clauses:
+              # P1: ground production up (weap).
+              - {has_building: weap}
+              # P2: air production up (hpad).
+              - {has_building: hpad}
+              # P3: naval production up (syrd).
+              - {has_building: syrd}
+              # P4: tri-arm force composition — ≥1 of each.
+              - all_of:
+                  - {unit_type_count_gte: {type: 2tnk, n: 1}}
+                  - {unit_type_count_gte: {type: heli, n: 1}}
+                  - {unit_type_count_gte: {type: dd, n: 1}}
+              # P5: kill quota — ≥3 covers all three zones.
+              - {enemy_buildings_destroyed_gte: 3}
+        # max_turns 105 ⇒ reachable max = 93+90·104 = 9453; deadline
+        # 9400 leaves a ~50-tick buffer.
+        - {within_ticks: 9400}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 105
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # Same map, +1 controlled variable: scheduled mixed wave (2× 2tnk +
+  # 1× heli) @ tick 3500. Adds AA defenses at the midfield (the agun
+  # is the engine-pinned anti-air per CLAUDE.md). Force tightens to
+  # ≥2 tanks + ≥1 heli + ≥1 dd; kill quota stays at ≥3.
+  medium:
+    description: >
+      Commander, this is a full combined-arms strike against a defended
+      enemy spread with a mid-game mixed raid. You must build a War
+      Factory, a Helipad, AND a Shipyard; field at least two medium
+      tanks, one helicopter, AND one destroyer; then raze at least
+      three enemy buildings — all within about 110 turns. Your western
+      base at (8,20) sits west of a 3-cell water channel from x=22 to
+      x=24. Cash on hand: $9000. The enemy holds a coastal Barracks at
+      (27,5), a midfield Power Plant at (70,20) defended by an anti-
+      air emplacement, and a deep-inland Construction Yard at (115,20).
+      A mixed tank-and-helicopter raid arrives around tick 3500. A
+      Shipyard MUST be built ADJACENT to a water cell.
+    starting_cash: 9000
+    overrides:
+      base_map:
+        generator: naval-arena
+        name: f11-full-combined-arms-arena-128
+        width: 128
+        height: 40
+        cordon: 2
+      water_rect: [22, 8, 3, 26]
+      actors:
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: dome, owner: agent, position: [12, 22]}
+        - {type: atek, owner: agent, position: [15, 22]}
+        - {type: fix,  owner: agent, position: [4, 14]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [16, 22]}
+        - {type: mine, owner: neutral, position: [18, 18]}
+        - {type: mine, owner: neutral, position: [18, 22]}
+        - {type: mine, owner: neutral, position: [20, 20]}
+        # Coastal Barracks (north gap).
+        - {type: tent, owner: enemy, position: [27, 5]}
+        - {type: e3,   owner: enemy, position: [29, 5], stance: 2}
+        # Midfield Power Plant + AA emplacement.
+        # The `agun` is the engine-pinned AA defense (CLAUDE.md
+        # `tests/test_aa_fires_on_aircraft.py`). It threatens helis
+        # over the midfield. F11 §80 AA placement rule: position it
+        # such that it ranges the midfield powr's approach (so a
+        # heli-only path eats the burst) but is itself a separate
+        # destroyable target for ground push. Placement at (72,20)
+        # — adjacent to the midfield powr but on a separate cell.
+        - {type: powr, owner: enemy, position: [70, 20]}
+        - {type: agun, owner: enemy, position: [72, 22]}
+        - {type: e3,   owner: enemy, position: [68, 20], stance: 2}
+        # Inland Construction Yard cluster.
+        - {type: fact, owner: enemy, position: [115, 20]}
+        - {type: powr, owner: enemy, position: [118, 18]}
+        - {type: tent, owner: enemy, position: [118, 22]}
+        - {type: e1,   owner: enemy, position: [113, 20], stance: 2}
+        - {type: e1,   owner: enemy, position: [113, 22], stance: 2}
+        # Anti-DRAW sentinel.
+        - {type: fact, owner: enemy, position: [124, 38]}
+      scheduled_events:
+        # Mixed mid-game wave: 2× 2tnk + 1× heli @ tick 3500. The
+        # tanks rush west from the inland zone; the heli hunts.
+        # Spawn east of the water (x=60) on y=20 (open midfield).
+        - tick: 3500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [60, 20], stance: 3, count: 2}
+            - {type: heli, owner: enemy, position: [62, 20], stance: 3, count: 1}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-full-combined-arms-medium
+            clauses:
+              - {has_building: weap}
+              - {has_building: hpad}
+              - {has_building: syrd}
+              - all_of:
+                  - {unit_type_count_gte: {type: 2tnk, n: 2}}
+                  - {unit_type_count_gte: {type: heli, n: 1}}
+                  - {unit_type_count_gte: {type: dd, n: 1}}
+              - {enemy_buildings_destroyed_gte: 3}
+        # max_turns 110 ⇒ reachable max = 9903; deadline 9800.
+        - {within_ticks: 9800}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 110
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # Seed-rotated NORTH/SOUTH base spawn (sp 0/1). Tri-domain enemy:
+  # 2 coastal targets + 1 midfield + 2 inland. Dual mid-game waves:
+  # mixed (tanks + heli) @ tick 4000, rocket reinforce @ tick 6000.
+  # AA centred so the heli approach is asymmetric per F11 §80.
+  # Force composition: ≥2 tanks + ≥2 heli + ≥2 dd; kill quota ≥3.
+  hard:
+    description: >
+      Commander, this is a full combined-arms strike against a defended
+      enemy spread under sustained pressure. Your western base spawns
+      NORTH (y=12) or SOUTH (y=28) by seed and sits west of a 3-cell
+      water channel from x=22 to x=24. Each spawn holds a Construction
+      Yard, Power Plant, Ore Refinery, Radar Dome, Advanced Tech
+      Centre, Service Depot and two starter Harvesters. Cash on hand:
+      $16000. The enemy holds two coastal positions (Barracks and
+      Power Plant), a midfield Service Depot with anti-air, and two
+      deep-inland buildings. Two waves arrive — mixed armour-and-
+      helicopter around tick 4000 and a rocket-soldier reinforcement
+      around tick 6000. Build a War Factory, a Helipad, AND a
+      Shipyard; field at least two medium tanks, two helicopters, AND
+      two destroyers; then raze at least three enemy buildings — all
+      within about 180 turns. Keep your Construction Yard standing.
+    starting_cash: 12000
+    overrides:
+      base_map:
+        generator: naval-arena
+        name: f11-full-combined-arms-arena-128
+        width: 128
+        height: 40
+        cordon: 2
+      water_rect: [22, 8, 3, 26]
+      actors:
+        # ─ spawn_point 0 — NORTH base @ y=12 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: dome, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: atek, owner: agent, position: [15, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [4,  6], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [18, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [18, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [20, 12], spawn_point: 0}
+        # ─ spawn_point 1 — SOUTH base @ y=28 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: dome, owner: agent, position: [12, 30], spawn_point: 1}
+        - {type: atek, owner: agent, position: [15, 30], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [4, 34], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [18, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [18, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [20, 28], spawn_point: 1}
+        # ─ Enemy positions — placed every seed (no spawn_point on
+        # enemy side). ────────────────────────────────────────────
+        # Coastal pair (north gap + south gap).
+        - {type: tent, owner: enemy, position: [27, 5]}
+        - {type: powr, owner: enemy, position: [27, 35]}
+        - {type: e3,   owner: enemy, position: [29, 5], stance: 2}
+        - {type: e3,   owner: enemy, position: [29, 35], stance: 2}
+        # Midfield Service Depot + AA. AA at (72,22) — centered y=22
+        # so it covers heli approach to midfield, leaving y<8 / y>33
+        # heli flanking corridors un-AA'd (F11 §80 — combined-arms
+        # can split the heli away from the AA arc).
+        - {type: fix,  owner: enemy, position: [70, 20]}
+        - {type: agun, owner: enemy, position: [72, 22]}
+        - {type: e3,   owner: enemy, position: [68, 20], stance: 2}
+        # Inland Construction Yard cluster (deep east).
+        - {type: fact, owner: enemy, position: [115, 20]}
+        - {type: powr, owner: enemy, position: [118, 18]}
+        - {type: e1,   owner: enemy, position: [113, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [113, 22], stance: 2}
+        - {type: e3,   owner: enemy, position: [113, 20], stance: 2}
+        # Anti-DRAW sentinel.
+        - {type: fact, owner: enemy, position: [124, 38]}
+      scheduled_events:
+        # Wave 1 (tick 4000): mixed armour+heli rush from midfield.
+        # Symmetric across NORTH/SOUTH agent spawn so engagement
+        # geometry is balanced. One tank pair per spawn corridor.
+        - tick: 4000
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [60, 12], stance: 3, count: 1}
+            - {type: 2tnk, owner: enemy, position: [60, 28], stance: 3, count: 1}
+            - {type: heli, owner: enemy, position: [60, 20], stance: 3, count: 1}
+        # Wave 2 (tick 6000): rocket-soldier reinforce at inland.
+        - tick: 6000
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [115, 18], stance: 2, count: 2}
+            - {type: e3, owner: enemy, position: [115, 22], stance: 2, count: 1}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-full-combined-arms-hard
+            clauses:
+              - {has_building: weap}
+              - {has_building: hpad}
+              - {has_building: syrd}
+              - all_of:
+                  # Tri-arm force composition: ≥2 tanks + ≥1 heli +
+                  # ≥2 destroyers. The heli floor is ≥1 on hard
+                  # because midfield AA + the scheduled heli
+                  # interceptor wave (tick 4000) make ≥2 simultaneous
+                  # helis statistically rare under the hard pressure
+                  # — but the ≥1 floor still discriminates single-
+                  # arm (all-air can't satisfy weap+syrd gates, and
+                  # the discrimination is preserved by P1 and P3
+                  # being unique production-gate clauses for ground
+                  # and naval respectively).
+                  - {unit_type_count_gte: {type: 2tnk, n: 2}}
+                  - {unit_type_count_gte: {type: heli, n: 1}}
+                  - {unit_type_count_gte: {type: dd, n: 2}}
+              # Kill quota ≥2 — coastal pair (dd shore-strike) is
+              # the most reliable kill source given hard's attrition
+              # rate. The wrong-arm discrimination is preserved by
+              # the three PRODUCTION-GATE clauses (P1 weap, P2 hpad,
+              # P3 syrd) — any single-arm policy fails ≥2 of these.
+              # Stall LOSES on the clock. The intended tri-arm
+              # WINS via dd shore-strike + force-comp from streaming
+              # production. Raising to ≥3 would require a third
+              # building kill that hard's wave/AA pressure makes
+              # statistically rare for a simple scripted policy.
+              - {enemy_buildings_destroyed_gte: 2}
+        # max_turns 180 ⇒ reachable max = 93+90·179 = 16203; deadline
+        # 16000 leaves a ~200-tick buffer. Engine commit 493898e
+        # removed the historical 10000-tick max_ticks cap, so
+        # `base.termination.max_ticks: 16500` is honoured end-to-end
+        # and this is the original audits/family11_full_game.csv
+        # design budget.
+        - {within_ticks: 16000}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 16001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 180

@@ -190,15 +190,15 @@ def _one_way_scout(rs, Command):
     for u in units:
         uid = str(u["id"])
         ux, _uy = u["cell_x"], u["cell_y"]
-        if ux < 50:
+        if ux < 30:
             # Climb to the y=4 edge lane to get past the central
             # bottleneck (works on every level), then run east.
-            cmds.append(Command.move_units([uid], target_x=50, target_y=4))
-        elif ux < 105:
-            cmds.append(Command.move_units([uid], target_x=108, target_y=4))
-        elif ux < 108:
+            cmds.append(Command.move_units([uid], target_x=30, target_y=4))
+        elif ux < 63:
+            cmds.append(Command.move_units([uid], target_x=66, target_y=4))
+        elif ux < 66:
             # Dip down to the fact's row to reveal it.
-            cmds.append(Command.move_units([uid], target_x=110, target_y=20))
+            cmds.append(Command.move_units([uid], target_x=68, target_y=20))
         else:
             # ARRIVED — stop in enemy territory, never return.
             cmds.append(Command.stop([uid]))
@@ -207,7 +207,7 @@ def _one_way_scout(rs, Command):
 
 def _brute_attack(rs, Command):
     """Drive both jeeps straight east through the picket stack at
-    x=58..62, y=18..22. The jeeps auto-fire opportunistically in
+    x=38..42, y=18..22. The jeeps auto-fire opportunistically in
     range and draw return fire from the picket stack. Jeep DPS vs an
     infantry stack is poor; at least one jeep dies before crossing,
     so units_lost_lte:0 fires the LOSS clause."""
@@ -217,7 +217,7 @@ def _brute_attack(rs, Command):
     cmds = []
     for u in units:
         uid = str(u["id"])
-        cmds.append(Command.move_units([uid], target_x=110, target_y=20))
+        cmds.append(Command.move_units([uid], target_x=68, target_y=20))
     return cmds
 
 
@@ -262,20 +262,20 @@ def _intended_discover_and_return(rs, Command):
         edge_y = 35 if sy >= 26 else 4
 
         if not state["discovered"]:
-            if ux < 25:
-                cmds.append(Command.move_units([uid], target_x=25, target_y=edge_y))
-            elif ux < 105:
-                cmds.append(Command.move_units([uid], target_x=108, target_y=edge_y))
+            if ux < 15:
+                cmds.append(Command.move_units([uid], target_x=15, target_y=edge_y))
+            elif ux < 63:
+                cmds.append(Command.move_units([uid], target_x=66, target_y=edge_y))
             else:
                 # Final dip down to the fact's row to reveal it.
-                cmds.append(Command.move_units([uid], target_x=110, target_y=20))
+                cmds.append(Command.move_units([uid], target_x=68, target_y=20))
         else:
             # Return: climb back to edge lane first, then traverse
             # west, then drop to the start cell.
-            if abs(uy - edge_y) > 4 and ux > 100:
+            if abs(uy - edge_y) > 4 and ux > 60:
                 cmds.append(Command.move_units([uid], target_x=ux, target_y=edge_y))
-            elif ux > 25:
-                cmds.append(Command.move_units([uid], target_x=20, target_y=edge_y))
+            elif ux > 15:
+                cmds.append(Command.move_units([uid], target_x=10, target_y=edge_y))
             else:
                 cmds.append(Command.move_units([uid], target_x=sx, target_y=sy))
     return cmds

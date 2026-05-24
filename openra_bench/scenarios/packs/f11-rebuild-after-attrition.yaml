@@ -1,0 +1,477 @@
+# f11-rebuild-after-attrition — Family-11 (full-game) reactive-idiom
+# pack: scripted attrition destroys part of the agent's base mid-
+# episode; the agent must REBUILD the destroyed production building
+# AND continue producing under the original deadline.
+#
+# ENGINE NOTE — §81a per-pack pre-placing (binding):
+#   The ENTIRE base is pre-placed (fact + powr + proc + tent + weap
+#   + hpad + fix + harvs + starter tanks). The capability under test
+#   is REBUILDING what's destroyed — not initial build chain. Per
+#   F11 §81a "rebuild-after-attrition: pre-place EVERYTHING".
+#
+# ENGINE NOTE — §79 + agent_units_killed flag (binding):
+#   BOTH `termination.enemy_units_killed: false` AND
+#   `termination.agent_units_killed: false` are set:
+#   - `enemy_units_killed: false` is required by §79 because the
+#     win predicate includes `enemy_buildings_destroyed_gte`.
+#   - `agent_units_killed: false` is required because the scripted
+#     attrition event (`destroy_actors`) wipes one or more
+#     production buildings; in some seeds it can also catch the
+#     adjacent harv inside the blast radius. Without the flag,
+#     the engine's units-killed auto-`done` could end the run
+#     mid-attrition before the rebuild can fire. CLAUDE.md
+#     documents this as the canonical fix for sacrifice / loss-
+#     under-pressure idioms — rebuild-after-attrition is the
+#     same shape (lose part of the force mid-episode, keep the
+#     run alive).
+#
+# Win predicate shape (per F11 §68 + §74):
+#   then:[
+#     building_count_gte:fact:1 (P1: base survives the attrition),
+#     after_ticks:1000           (P2: gate — attrition fired
+#                                  @800 + ~200-tick settle window),
+#     building_count_gte:weap:1  (P3: weap is ALIVE again — i.e.
+#                                  the destroyed weap has been
+#                                  rebuilt because building_count_
+#                                  gte is LIVE-count, not seen-
+#                                  ever, per CLAUDE.md `lh-recovery-
+#                                  after-mid-game-loss` footgun
+#                                  note),
+#     unit_type_count_gte:2tnk:N (P4: post-rebuild force),
+#     enemy_buildings_destroyed_gte:K  (P5: strike home)
+#   ]
+#
+# Wrong-strategy traps (per F11 §74):
+#   - pre-attrition-only force — model builds to N tanks pre-tick-800,
+#     then ignores rebuild and pushes east; the attrition wipes the
+#     weap; the `building_count_gte:weap:1` clause goes false and
+#     never re-latches → `then:` chain stalls → deadline LOSS.
+#   - ignore-rebuild — model pushes with the pre-placed starter
+#     tanks only; the kill bar may be met but the `building_count_
+#     gte:weap:1` AFTER attrition is unsatisfied → LOSS.
+#   - stall (only observe) — nothing produced, nothing destroyed →
+#     after_ticks LOSS.
+#   - over-econ (rebuild proc instead of weap) — relevant on hard
+#     where BOTH weap and proc are destroyed; rebuilding only proc
+#     leaves the weap clause unsatisfied → LOSS.
+#
+# Engine fixtures pinned (CLAUDE.md):
+#   - tests/test_scheduled_events.py: destroy_actors at fixed ticks
+#     (pinned in lh-recovery-after-mid-game-loss).
+#   - tests/test_termination_flags_python.py: both
+#     enemy_units_killed and agent_units_killed flags surface and
+#     control the engine's auto-`done` behaviour.
+#   - tests/test_build_heli_roundtrip.py-style build then place
+#     building round-trip — required so the model can REBUILD
+#     `weap` (and on hard, `proc`) via build + place_building
+#     after the attrition.
+
+meta:
+  id: f11-rebuild-after-attrition
+  title: 'F11 Rebuild After Attrition — Disaster Recovery'
+  capability: reasoning
+  real_world_meaning: >
+    Disaster recovery / industrial-accident replanning: the
+    commander has an established production base and an offensive
+    objective; mid-episode an exogenous strike (sabotage,
+    industrial accident, supply-line cut) destroys part of the
+    production line. The commander must rebuild the lost
+    capability, restart production, and still finish the offensive
+    on the ORIGINAL deadline — no extension. The PlanBench
+    replanning idiom: the plan that worked at t=0 is invalidated
+    at t=mid, and the repair plus the original goal must both
+    fit inside the unchanged budget.
+  robotics_analogue: >
+    Mission resilience under a component-failure / station-loss
+    event: a multi-robot warehouse where a charging station goes
+    offline mid-shift; the system must redirect, recharge from
+    secondary capacity, and still hit the day's throughput.
+  benchmark_anchor:
+    - "PlanBench replanning under exogenous failure"
+    - "SC2 comeback (rebuild after bad trade, keep timing)"
+    - "SRE disaster recovery / industrial-accident response"
+  author: openra-bench
+
+base_map:
+  generator: arena
+  name: f11-rebuild-after-attrition-arena-96
+  width: 96
+  height: 40
+  cordon: 2
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: turtle}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  interrupts: {}
+  termination:
+    # Engine commit 493898e wires `termination.max_ticks` through
+    # end-to-end; the historical 10000-tick hard cap is removed.
+    # Hard tier restores the original `audits/family11_full_game.csv`
+    # design at max_turns 160 / within_ticks 14000 / reachable max
+    # 14403. Easy / medium stay at their POC-validated budgets so
+    # this single ceiling covers all three.
+    max_ticks: 14500
+    # BOTH flags are load-bearing — see header note.
+    agent_units_killed: false
+    enemy_units_killed: false
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Attrition: tick 800 destroys the pre-placed `weap` at (15,22)
+  # (and only the weap — radius 2 is tight enough to avoid the harv
+  # at (16,18) and the powr at (15,18)). Light enemy garrison; a
+  # scripted scout drone (1× heli, hunt) arrives at tick 500 to add
+  # an early-game perception pressure (the model must defend the
+  # base before the attrition lands).
+  easy:
+    description: >
+      Commander, this is a rebuild-after-attrition operation. Your
+      western base at (12,20) holds a Construction Yard, Power
+      Plant, Ore Refinery, Barracks, War Factory at (15,22), a
+      Helipad and a Service Depot, plus two starter Harvesters
+      and two starter Medium Tanks on hold-fire. Two ore patches
+      sit east of the refinery. Cash on hand: $5500. Around tick
+      500 a scout helicopter arrives. Around tick 800 a scripted
+      strike will raze the War Factory — only the War Factory.
+      You must rebuild it AND continue producing. An enemy base
+      sits at (80,20), 65 cells east, lightly defended. Win bar:
+      rebuild the War Factory, field at least three medium tanks
+      AFTER the attrition, AND raze at least one enemy production
+      building — all within about 100 turns. Keep your western
+      Construction Yard standing.
+    starting_cash: 5500
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-rebuild-after-attrition-arena-96
+        width: 96
+        height: 40
+        cordon: 2
+      actors:
+        # ─ Agent base — EVERY production building pre-placed
+        # (§81a). The model uses the chain immediately; the test
+        # is REBUILDING what's destroyed.
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [8, 22]}
+        - {type: proc, owner: agent, position: [12, 16]}
+        - {type: dome, owner: agent, position: [12, 24]}
+        - {type: tent, owner: agent, position: [9, 14]}
+        # The TARGET of the attrition — weap at (15,22). The
+        # `destroy_actors` region is centred on (15,22) with
+        # radius 2.
+        - {type: weap, owner: agent, position: [15, 22]}
+        - {type: hpad, owner: agent, position: [9, 28]}
+        - {type: fix,  owner: agent, position: [15, 16]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [16, 20]}
+        # Starter tanks — hold-fire so they don't bait the scout
+        # heli into the base before the attrition.
+        - {type: 2tnk, owner: agent, position: [20, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 21], stance: 0}
+        # Ore patches.
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # Enemy base — light static garrison.
+        - {type: fact, owner: enemy, position: [80, 20]}
+        - {type: powr, owner: enemy, position: [83, 18]}
+        - {type: tent, owner: enemy, position: [83, 22]}
+        - {type: e1,   owner: enemy, position: [78, 19], stance: 2}
+        - {type: e1,   owner: enemy, position: [78, 21], stance: 2}
+        - {type: e3,   owner: enemy, position: [80, 17], stance: 2}
+        # Anti-DRAW sentinel.
+        - {type: fact, owner: enemy, position: [92, 38]}
+      scheduled_events:
+        # Scripted scout drone at tick 500 — adds an early-game
+        # observation event so the model can SEE the attrition
+        # vector (the heli flies in over the base). Stance:2 is
+        # defend, so it harasses but doesn't suicide.
+        - tick: 500
+          type: spawn_actors
+          actors:
+            - {type: heli, owner: enemy, position: [40, 20], stance: 2, count: 1}
+        # ATTRITION: tick 800 destroys the weap at (15,22). Radius
+        # 2 — tight enough to avoid the harv (16,18) and the
+        # adjacent fix (15,16).
+        - tick: 800
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 15, y: 22, radius: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-rebuild-after-attrition-easy
+            clauses:
+              # P1: base survival — fact alive.
+              - {building_count_gte: {type: fact, n: 1}}
+              # P2: post-attrition gate. The attrition fires at
+              # tick 800; +200 settle window puts the rebuild
+              # check at tick 1000.
+              - {after_ticks: 1000}
+              # P3: weap is ALIVE again. `building_count_gte` is
+              # the LIVE count (drops to 0 when attrition fires,
+              # re-latches when the rebuild completes) — see
+              # CLAUDE.md `lh-recovery-after-mid-game-loss`
+              # footgun note that `has_building` accumulates
+              # forever and cannot toggle false.
+              - {building_count_gte: {type: weap, n: 1}}
+              # P4: post-rebuild force composition.
+              - {unit_type_count_gte: {type: 2tnk, n: 3}}
+              # P5: strike home.
+              - {enemy_buildings_destroyed_gte: 1}
+        # max_turns 100 ⇒ reachable max = 93+90·99 = 9003;
+        # deadline 8900 leaves a ~100-tick buffer.
+        - {within_ticks: 8900}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 100
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: a light harass raid (3× e3 hunt)
+  # at tick 2500 puts a small force on the rebuild path. Force-quota
+  # tightens to ≥4 tanks AND ≥2 enemy buildings.
+  medium:
+    description: >
+      Commander, this is a rebuild-after-attrition operation under
+      modest enemy harassment. Your western base at (12,20) holds
+      the full production stack (Construction Yard, Power Plant,
+      Ore Refinery, Barracks, War Factory at (15,22), Helipad,
+      Service Depot), two Harvesters, and two starter Medium Tanks
+      on hold-fire. Three ore patches sit east of the refinery.
+      Cash on hand: $8000. Around tick 500 a scout helicopter
+      arrives. Around tick 800 a scripted strike will raze the War
+      Factory. Around tick 2500 a small rocket-soldier raid will
+      arrive. You must rebuild the War Factory, defend, AND
+      continue producing. An enemy base sits at (82,20), defended
+      by riflemen and a rocket soldier. Win bar: rebuild the War
+      Factory, field at least four medium tanks AFTER the attrition,
+      AND raze at least two enemy buildings — all within about 115
+      turns. Keep your western Construction Yard standing.
+    starting_cash: 8000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-rebuild-after-attrition-arena-96
+        width: 96
+        height: 40
+        cordon: 2
+      actors:
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [8, 22]}
+        - {type: proc, owner: agent, position: [12, 16]}
+        - {type: dome, owner: agent, position: [12, 24]}
+        - {type: tent, owner: agent, position: [9, 14]}
+        - {type: weap, owner: agent, position: [15, 22]}
+        - {type: hpad, owner: agent, position: [9, 28]}
+        - {type: fix,  owner: agent, position: [15, 16]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [16, 20]}
+        - {type: 2tnk, owner: agent, position: [20, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [20, 21], stance: 0}
+        - {type: mine, owner: neutral, position: [22, 18]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        - {type: mine, owner: neutral, position: [24, 19]}
+        # Heavier enemy garrison (vs easy) — but still only 4
+        # combat units so the intended +4 tanks can punch through.
+        - {type: fact, owner: enemy, position: [82, 20]}
+        - {type: powr, owner: enemy, position: [85, 18]}
+        - {type: tent, owner: enemy, position: [85, 22]}
+        - {type: e1,   owner: enemy, position: [78, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [78, 22], stance: 2}
+        - {type: e1,   owner: enemy, position: [80, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [80, 22], stance: 2}
+        - {type: fact, owner: enemy, position: [92, 38]}
+      scheduled_events:
+        - tick: 500
+          type: spawn_actors
+          actors:
+            - {type: heli, owner: enemy, position: [40, 20], stance: 2, count: 1}
+        - tick: 800
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 15, y: 22, radius: 2}
+        # Light harass raid — 2× e3 hunt-stance moving on the agent
+        # base from the east. The model must defend OR ignore (the
+        # base has the surviving production stack and 2 starter
+        # tanks). Reduced from 3 to 2 so the intended assault
+        # retains enough firepower to break the enemy garrison
+        # after attrition.
+        - tick: 2500
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [55, 20], stance: 3, count: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-rebuild-after-attrition-medium
+            clauses:
+              - {building_count_gte: {type: fact, n: 1}}
+              - {after_ticks: 1000}
+              - {building_count_gte: {type: weap, n: 1}}
+              - {unit_type_count_gte: {type: 2tnk, n: 4}}
+              - {enemy_buildings_destroyed_gte: 2}
+        # max_turns 115 ⇒ reachable max = 93+90·114 = 10353; cap
+        # by engine to 9999 → use 9900.
+        - {within_ticks: 9900}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 115
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +1 controlled variable vs medium: a SECOND scripted strike at
+  # tick 2000 destroys the `proc` at (12,16) — the agent must
+  # rebuild BOTH weap and proc. Plus seed-rotated NORTH/SOUTH base
+  # spawn (sp 0/1) so the geometry can't be memorised.
+  hard:
+    description: >
+      Commander, this is a rebuild-after-attrition operation
+      against TWO scripted strikes. Your western base spawns
+      NORTH (y=12) or SOUTH (y=28) by seed — read your actual
+      starting band from the observation. Each spawn holds the
+      full production stack (Construction Yard, Power Plant,
+      Refinery, Barracks, War Factory, Helipad, Service Depot),
+      two Harvesters, and two starter Medium Tanks on hold-fire.
+      Cash on hand: $8500. Around tick 500 a scout helicopter
+      arrives. Around tick 800 a scripted strike will raze the War
+      Factory; around tick 2000 a second strike will raze the
+      Refinery. Around tick 2500 a rocket-soldier raid will
+      arrive. You must rebuild BOTH the War Factory AND the
+      Refinery, defend, AND continue producing. An enemy base
+      sits at (82,20). Win bar: rebuild both production buildings,
+      field at least five medium tanks AFTER the rebuilds, AND
+      raze at least two enemy buildings — all within about 160
+      turns. Keep your Construction Yard standing.
+    starting_cash: 8500
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-rebuild-after-attrition-arena-96
+        width: 96
+        height: 40
+        cordon: 2
+      actors:
+        # ─ spawn_point 0 — NORTH base @ y=12 ────────────────────────
+        - {type: fact, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 8],  spawn_point: 0}
+        - {type: dome, owner: agent, position: [12, 16], spawn_point: 0}
+        - {type: tent, owner: agent, position: [9,  6],  spawn_point: 0}
+        - {type: weap, owner: agent, position: [15, 14], spawn_point: 0}
+        - {type: hpad, owner: agent, position: [9, 18],  spawn_point: 0}
+        - {type: fix,  owner: agent, position: [15, 8],  spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 12], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 11], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [20, 13], stance: 0, spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 12], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [24, 11], spawn_point: 0}
+        # ─ spawn_point 1 — SOUTH base @ y=28 ────────────────────────
+        - {type: fact, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 26],  spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 30],  spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 24], spawn_point: 1}
+        - {type: dome, owner: agent, position: [12, 32], spawn_point: 1}
+        - {type: tent, owner: agent, position: [9, 22],  spawn_point: 1}
+        - {type: weap, owner: agent, position: [15, 30], spawn_point: 1}
+        - {type: hpad, owner: agent, position: [9, 34],  spawn_point: 1}
+        - {type: fix,  owner: agent, position: [15, 24], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 27], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [20, 29], stance: 0, spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 28], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [24, 27], spawn_point: 1}
+        # ─ Enemy actors — place every seed ─────────────────────────
+        - {type: fact, owner: enemy, position: [82, 20]}
+        - {type: powr, owner: enemy, position: [85, 18]}
+        - {type: tent, owner: enemy, position: [85, 22]}
+        - {type: e1,   owner: enemy, position: [78, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [78, 22], stance: 2}
+        - {type: e1,   owner: enemy, position: [80, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [80, 22], stance: 2}
+        - {type: fact, owner: enemy, position: [92, 38]}
+      scheduled_events:
+        - tick: 500
+          type: spawn_actors
+          actors:
+            - {type: heli, owner: enemy, position: [40, 20], stance: 2, count: 1}
+        # FIRST attrition — weap. Duplicated at both latitudes
+        # because scheduled_events do NOT honour spawn_point per
+        # CLAUDE.md `lh-recovery-after-mid-game-loss`: both events
+        # fire, the one on the dormant latitude finds nothing.
+        - tick: 800
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 15, y: 14, radius: 2}
+        - tick: 800
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 15, y: 30, radius: 2}
+        # SECOND attrition — proc. Same dual-latitude duplication.
+        - tick: 2000
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 12, y: 8, radius: 2}
+        - tick: 2000
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 12, y: 24, radius: 2}
+        # Harass raid.
+        - tick: 2500
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [55, 20], stance: 3, count: 3}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-rebuild-after-attrition-hard
+            clauses:
+              - {building_count_gte: {type: fact, n: 1}}
+              # Gate to AFTER the second attrition (tick 2000) +
+              # settle window (~200 ticks).
+              - {after_ticks: 2200}
+              # BOTH rebuilds must complete.
+              - {building_count_gte: {type: weap, n: 1}}
+              - {building_count_gte: {type: proc, n: 1}}
+              - {unit_type_count_gte: {type: 2tnk, n: 5}}
+              - {enemy_buildings_destroyed_gte: 2}
+        # max_turns 160 ⇒ reachable max = 93+90·159 = 14403;
+        # deadline 14000 leaves a ~400-tick buffer. Engine commit
+        # 493898e removed the historical 10000-tick max_ticks cap,
+        # so `base.termination.max_ticks: 14500` is honoured
+        # end-to-end and this is the original
+        # audits/family11_full_game.csv design budget.
+        - {within_ticks: 14000}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 14001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+    max_turns: 160

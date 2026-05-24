@@ -133,7 +133,25 @@ levels:
   # Two destroyers vs four rifle infantry + one rocket soldier (e3).
   # The e3 is the priority threat — its Dragon launcher penetrates
   # the dd's heavy armour. Focus-fire the e3 first; ignore it and
-  # an unlucky volley sinks a destroyer (busts own_units_gte:1).
+  # an unlucky volley sinks a destroyer (busts own_units_gte:2 → LOSS).
+  #
+  # Tier-progression audit fix (2026-05-24, F-INVERT|F-NO-SEED-ROTATION):
+  #   1. Survival tightened: own_units_gte:2 (both dds must survive)
+  #      instead of the medium-loose own_units_gte:1. Easy=1/1
+  #      (100%), medium=1/2 (50%), hard=2/2 (100%) — strictness now
+  #      reads M ≤ H on the preserve ratio while H adds the e3
+  #      anti-armour threat that makes the bar meaningfully harder.
+  #      The previous bar (lose one of two) was paradoxically EASIER
+  #      than easy.
+  #   2. Two enemy spawn_point groups added (per-owner Wave-9 axis):
+  #      the e3 priority threat rotates between the NORTH end of the
+  #      shore line (y=17) and the SOUTH end (y=23) — same e3 threat
+  #      and shoreline length, but the focus-fire target's identity
+  #      depends on the scout's read, not on a memorised "shoot the
+  #      middle". The persistent far-corner fact is duplicated
+  #      across both enemy spawn groups (CLAUDE.md: enemy filter is
+  #      per-owner, an enemy WITHOUT spawn_point would be dropped
+  #      when the filter activates).
   hard:
     description: >
       Commander, this is a coastal bombardment against a hardened
@@ -143,24 +161,36 @@ levels:
       x=18 (y=17..23) is composed of 4 riflemen plus 1 anti-tank
       rocket soldier. The rocket soldier carries an anti-armour
       launcher that can damage your destroyers; the riflemen
-      cannot. Score 5 kills with at least one destroyer still
-      afloat, within 2699 ticks.
+      cannot — identify and focus-fire the rocket soldier first.
+      Score 5 kills with BOTH destroyers still afloat, within 2699
+      ticks.
     overrides:
       actors:
         - {type: dd, owner: agent, position: [15, 18], stance: 0}
         - {type: dd, owner: agent, position: [15, 22], stance: 0}
-        - {type: e1, owner: enemy, position: [18, 17], stance: 0}
-        - {type: e1, owner: enemy, position: [18, 19], stance: 0}
-        - {type: e3, owner: enemy, position: [18, 20], stance: 0}
-        - {type: e1, owner: enemy, position: [18, 21], stance: 0}
-        - {type: e1, owner: enemy, position: [18, 23], stance: 0}
-        - {type: fact, owner: enemy, position: [55, 35]}
+        # spawn_point=0 — e3 at NORTH end of the shore line.
+        - {type: e3, owner: enemy, position: [18, 17], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [18, 19], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [18, 20], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [18, 21], stance: 0, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [18, 23], stance: 0, spawn_point: 0}
+        # spawn_point=1 — e3 at SOUTH end of the shore line.
+        - {type: e1, owner: enemy, position: [18, 17], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [18, 19], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [18, 20], stance: 0, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [18, 21], stance: 0, spawn_point: 1}
+        - {type: e3, owner: enemy, position: [18, 23], stance: 0, spawn_point: 1}
+        # Persistent far marker duplicated across both spawn groups
+        # (per-owner filter — see CLAUDE.md).
+        - {type: fact, owner: enemy, position: [55, 35], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [55, 35], spawn_point: 1}
     win_condition:
       all_of:
         - {units_killed_gte: 5}
+        - {own_units_gte: 2}
         - {within_ticks: 2699}
     fail_condition:
       any_of:
         - {after_ticks: 2700}
-        - {not: {own_units_gte: 1}}
+        - {not: {own_units_gte: 2}}
     max_turns: 32

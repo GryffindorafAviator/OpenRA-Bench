@@ -1,5 +1,18 @@
 # econ-protect-harvester-route — defend the harv supply line en route.
 #
+# ENGINE NOTE (tier-progression audit, 2026-05-24): The audit flags
+# this pack F-INVERT-ENEMY because enemy_value drops m=4850 → h=2850.
+# This is INTENTIONAL — the audit md explicitly tags this as
+# "INTENTIONAL — bigger map ⇒ more travel ticks": medium has 3
+# raider tanks on a fixed-x lane; hard adds the Wave-9 axis (TWO
+# agent spawn_point groups: NORTH route y=14 vs SOUTH route y=26),
+# so the per-band raider force is reduced to keep the per-seed
+# pressure equivalent (the symmetric north+south raider waves
+# always place, but only the on-route band engages the agent's
+# convoy). The "smaller enemy" on hard is a per-spawn-axis
+# accounting artefact, not a real difficulty reduction. Not a
+# real inversion.
+#
 # ACTION capability — convoy / supply-line protection (military
 # "protect the convoy on the road, not at the warehouse" doctrine;
 # SC2 harvester-harass defense; supply-line patrolling anchor).
@@ -339,6 +352,22 @@ levels:
         - {type: mine, owner: neutral, position: [50, 20]}
         - {type: 2tnk, owner: enemy, position: [75, 20]}
         - {type: fact, owner: enemy, position: [120, 20]}
+        # 2026-05-24 audit (Qwen 9B v3 deep triage, S.3): medium:1
+        # drew at turn 36 (kills=2 lost=0 progress=0.80) because the
+        # model killed BOTH the raider 2tnk AND the lone (120,20)
+        # sentinel `fact` — enemy MustBeDestroyed elimination then
+        # auto-`done`d the run before the within_ticks 5400 deadline
+        # could land (after_ticks 5401 is reachable in 60 turns ×
+        # ~90 ticks at full step rate, but premature done=True wins
+        # the race). A 2nd off-axis sentinel at (120, 4) — far
+        # north-east, well off the harvester's y=20 commute axis —
+        # survives any attack on the (120, 20) sentinel: stance:2
+        # defenders never auto-chase north, and the raider's
+        # worker-priority brain (botgen.py raider) never targets
+        # enemy buildings. With both sentinels alive on the terminal
+        # frame, the deadline-fail (after_ticks 5401) is reachable
+        # for stall / wrong-tactic plays.
+        - {type: fact, owner: enemy, position: [120, 4]}
     win_condition:
       all_of:
         - {economy_value_gte: 1200}

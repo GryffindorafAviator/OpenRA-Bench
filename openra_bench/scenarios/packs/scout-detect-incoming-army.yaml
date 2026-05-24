@@ -80,11 +80,11 @@
 #     — strictly the harder test of the same scout-for-axis
 #     capability (def-pre-position-mobile-reserve uses the same
 #     idiom for the same reason).
-#   - Tanks (2tnk) are stance:1 (ReturnFire) — they don't pursue
-#     out of range but auto-engage hostiles in range. Scouts
-#     (jeep) are stance:0 (HoldFire) so they don't pull aggro
-#     before the model issues an explicit `move_units` forward;
-#     pure-perception role (detect, not engage).
+#   - Tanks (2tnk) AND scouts (jeep) are stance:0 (HoldFire) per
+#     F4 §27 — the agent's combat arm in a perception pack must
+#     NOT auto-hunt the whole map, otherwise a do-nothing stall
+#     could win for free. Tanks fire only on explicit attack_unit
+#     / attack_move; pure-perception scouts detect, not engage.
 #   - 2tnk vs e1: CLAUDE.md "2tnk cannon ~1-shots e1". 2tnk
 #     cannon range > e1 rifle range, so a tank pushed forward
 #     to engagement range kills e1s before they fire back. e3
@@ -233,12 +233,13 @@ levels:
     # without re-positioning the tanks leaves them at the base where the
     # rockets bust the attrition cap.
     description: >
-      An enemy army (mixed rifles and rockets) is inbound from the NORTH
-      (y=10, spawning at the east edge). Two jeeps and three medium tanks
-      at your WEST base. Push the scouts forward to localise the threat,
-      then re-position the tanks to intercept on the y=10 lane BEFORE the
-      rockets close. Four discovered, three killed, at most two losses,
-      within about 28 turns.
+      Commander, an enemy army (mixed rifles and rockets) is inbound from
+      the east — the approach lane is unknown to your base sensors. You
+      have two jeep scouts and three medium tanks at your west base, all
+      on hold-fire orders. The scouts have wider sight than the base;
+      push them forward to read the eastern frontier. Surface at least
+      four hostile units, destroy at least three of them, keep at most
+      two losses, within about 28 turns.
     overrides:
       actors:
         # 2 jeep scouts at the west base — stance:0 (HoldFire)
@@ -246,15 +247,14 @@ levels:
         # explicit forward move; pure-perception role.
         - {type: jeep, owner: agent, position: [15, 18], stance: 0}
         - {type: jeep, owner: agent, position: [15, 22], stance: 0}
-        # 3 medium tanks (2tnk) at the west base — stance:1
-        # (ReturnFire) so they auto-defend if the hunt squad
-        # walks into them, but don't pursue out of range. Tanks
-        # dominate e1 at cannon range; e3 rockets close-range
-        # damage is the discriminator that punishes auto-defence
-        # (stall) without forward intercept.
-        - {type: 2tnk, owner: agent, position: [14, 19], stance: 3}
-        - {type: 2tnk, owner: agent, position: [14, 21], stance: 3}
-        - {type: 2tnk, owner: agent, position: [16, 20], stance: 3}
+        # 3 medium tanks (2tnk) at the west base — stance:0
+        # (HoldFire) per F4 §27: the agent's combat arm in a
+        # perception pack must NOT auto-hunt, otherwise a do-
+        # nothing stall could win for free. Tanks only fire when
+        # the model issues an explicit attack_unit / attack_move.
+        - {type: 2tnk, owner: agent, position: [14, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [14, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 20], stance: 0}
         # NORTH hunt squad — 5× e1 at the east edge, y=10. The
         # army size is tuned so the intended forward-intercept
         # play wipes ≥3 e1s cleanly (tanks dominate per-shot,
@@ -322,18 +322,20 @@ levels:
     # puts them between both squads' fields of fire; scouting without re-
     # positioning the tanks leaves them passively at the base.
     description: >
-      TWO enemy bands inbound — one from NORTH (y=10), one from SOUTH
-      (y=30), each with rifles plus a rocket. Push the two jeeps on BOTH
-      candidate axes to localise, then commit the tanks to whichever lane
-      closes first. Four discovered, three killed, at most two losses,
-      within about 28 turns.
+      Commander, an inbound army is approaching from the east, but base
+      sensors cannot tell which lane it will use. Two jeep scouts and
+      three medium tanks sit at your west base, on hold-fire orders.
+      Push the scouts forward on the candidate axes to localise the
+      approach, then commit the tanks to the closing lane. Surface at
+      least four hostile units, destroy at least three, keep at most
+      two losses, within about 28 turns.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [15, 18], stance: 0}
         - {type: jeep, owner: agent, position: [15, 22], stance: 0}
-        - {type: 2tnk, owner: agent, position: [14, 19], stance: 3}
-        - {type: 2tnk, owner: agent, position: [14, 21], stance: 3}
-        - {type: 2tnk, owner: agent, position: [16, 20], stance: 3}
+        - {type: 2tnk, owner: agent, position: [14, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [14, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [16, 20], stance: 0}
         # NORTH hunt band — 4× e1 at the east edge, y=10.
         - {type: e1, owner: enemy, position: [100, 10], stance: 3, count: 4}
         # SOUTH hunt band — 4× e1 at the east edge, y=30.
@@ -391,10 +393,13 @@ levels:
     # before tick 4500. Stalling, blind defence, and one-flank-only pre-
     # commits all LOSE.
     description: >
-      Same two-band inbound (NORTH and SOUTH lanes, rifles plus rockets
-      each), but your west base's latitude varies by seed. Scout both
-      axes, intercept the closer lane. Four discovered, three killed, two
-      losses max, within about 28 turns. A memorised opening fails.
+      Commander, an inbound army is approaching from the east. Base
+      sensors cannot tell which lane it will use, and your west base's
+      latitude varies by seed — a memorised opening will not generalise.
+      You have two jeep scouts and three medium tanks at your west base,
+      on hold-fire orders. Scout the candidate axes, intercept the
+      closing lane. Surface at least four hostile units, destroy at
+      least three, keep at most two losses, within about 28 turns.
     overrides:
       actors:
         # spawn_point 0 — base shifted NORTH (y=14). All agent
@@ -404,15 +409,15 @@ levels:
         # every agent actor).
         - {type: jeep, owner: agent, position: [15, 12], stance: 0, spawn_point: 0}
         - {type: jeep, owner: agent, position: [15, 16], stance: 0, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [14, 13], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [14, 15], stance: 3, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [16, 14], stance: 3, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [14, 15], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [16, 14], stance: 0, spawn_point: 0}
         # spawn_point 1 — base shifted SOUTH (y=26). Symmetric.
         - {type: jeep, owner: agent, position: [15, 24], stance: 0, spawn_point: 1}
         - {type: jeep, owner: agent, position: [15, 28], stance: 0, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [14, 25], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [14, 27], stance: 3, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [16, 26], stance: 3, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [14, 27], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [16, 26], stance: 0, spawn_point: 1}
         # TWO hunt bands — N (y=10) and S (y=30), 5× e1 each
         # (10 enemies total; kill bar 3 is achievable with one
         # successful intercept on whichever lane the agent

@@ -1,0 +1,465 @@
+# f11-defense-then-counter — Family-11 offensive-from-t=0 idiom.
+#
+# UNLIKE the other F11 packs which use STATIC-THEN-SCHEDULED enemy
+# pressure (per §69), this pack is the canonical OFFENSIVE-THROUGHOUT
+# idiom: the enemy is hunting the agent's base FROM TICK 0. The model
+# must allocate phase-budget between defense (survive the rush) and
+# offense (build the counter-force).
+#
+# Win predicate (per §68 4-clause `then:` chain):
+#   P1: SURVIVE the opening — `building_count_gte: fact, n: 1` AFTER
+#       the opening rush window (`after_ticks: T_survive`). The
+#       fact-alive clause is the survival latch; without the
+#       `after_ticks` gate, P1 would be trivially satisfied on
+#       turn 1 by the pre-placed fact.
+#   P2: ECON-INTACT — `unit_type_count_gte: harv, n: 1` so a stall
+#       play that lets the rush eat the harv (but not yet the fact)
+#       still fails. Encoded as a separate `then:` clause AFTER P1.
+#   P3: BUILD the counter — `has_building: weap` (pre-placed) is
+#       trivially true; the LOAD-BEARING clause is `unit_type_count_
+#       gte: 2tnk, n: N` (N per tier).
+#   P4: COUNTER-STRIKE — `enemy_buildings_destroyed_gte: 1` (the
+#       enemy fact, barracks, or any production).
+#
+# Per-tier hard tier escalation also adds an `has_building: hpad`
+# clause and an `≥1 heli` requirement so a ground-only play loses
+# to the late heli wave at tick 4500 (CSV row).
+#
+# `then:` chain forbids "counter without surviving": the strike
+# clause can't latch until survival + econ + force have latched in
+# order.
+#
+# Wrong-strategy traps (per §77):
+#   - panic-build-army-too-soon (skip building defense, beeline strike
+#     before the opening rush ends): the rush reaches base before
+#     the tanks finish → fact dies → P1 fail.
+#   - over-defense (build 4-6 pbox, never weap upgrade / never train
+#     2tnk): the rush is parried but P3 (≥N 2tnk alive) never
+#     latches → deadline LOSS.
+#   - panic-buildonly (build pbox + train 2tnk for defense but never
+#     send any east): P4 never latches → deadline LOSS.
+#   - stall (observe-only): the rush kills harv → P2 fail OR fact
+#     → P1 fail. LOSS.
+#   - ground-only on hard: the tick 4500 heli wave destroys an
+#     undefended base → P1 fail. Must also have hpad + heli.
+#
+# Engine guardrails (CLAUDE.md):
+#   - `termination.enemy_units_killed: false` (§79) — win clause
+#     gates on `enemy_buildings_destroyed_gte`, must NOT auto-`done`
+#     on enemy-unit-wipe.
+#   - `agent_units_killed: true` (default) + `not own_units_gte: 1`
+#     fail clause → agent wipe is a clean LOSS not DRAW. NOTE:
+#     starter units are pre-placed (harv + tanks), so `own_units_gte`
+#     is naturally non-zero from t=0 (unlike econ-tech-army-strike
+#     which has only a harv).
+#   - Persistent far-corner enemy `fact` sentinel keeps the run
+#     alive past the agent's counter-strike on the main enemy base.
+#   - `within_ticks` ≤ 93+90·(max_turns-1) ≤ 9999 on every tier.
+#   - Hard tier seed-rotates NORTH/SOUTH agent base via
+#     `spawn_point: 0/1`; enemy actors carry no spawn_point so all
+#     place every seed.
+#
+# Per §81a CAPABILITY-EXPLICIT PRE-PLACING (defense-then-counter):
+# pre-place `fact + powr + proc + tent + weap + 2-3 starter units`
+# so defense is viable from t=0. The counter-phase tech chain
+# (`fix`, plus `hpad` on hard) is BUILT after survival — that's
+# what the test exercises.
+
+meta:
+  id: f11-defense-then-counter
+  title: 'F11 Defense → Counter — Offensive Enemy From t=0'
+  capability: reasoning
+  real_world_meaning: >
+    Phase-transition allocation under continuous pressure: the
+    operation opens with a defensive imperative (survive the
+    immediate threat) and pivots to an offensive imperative
+    (build counter-force, strike enemy production). Mis-allocating
+    early budget to offense collapses the defense phase; mis-
+    allocating to defense burns the budget needed for counter.
+    Only a play that interleaves both phases — defending while
+    accumulating counter-force — wins inside the deadline.
+  robotics_analogue: >
+    Reactive then proactive mission planning: a security drone
+    fleet under attack must first contain the threat (defensive
+    posture), then re-establish full operations (build / scout /
+    strike). The pivot timing is load-bearing — pivot too early
+    and the defense fails; pivot too late and the deadline busts.
+  benchmark_anchor:
+    - "defense-then-counter operational pivot"
+    - "phase-transition allocation under pressure"
+    - "reactive then proactive mission planning"
+  author: openra-bench
+
+base_map:
+  generator: arena
+  name: f11-defense-then-counter-arena
+  width: 96
+  height: 40
+  cordon: 2
+
+base:
+  agent: {faction: allies}
+  # Enemy bot_type: hunt — the scripted-bot active-aggression mode.
+  # The pre-placed enemy tanks (stance:3) already hunt at t=0;
+  # bot_type:hunt keeps any surviving enemy units pressing the
+  # agent base. (Contrast with bot_type:turtle on econ-tech-army
+  # which keeps the enemy passive — F11 §69 OFFENSIVE-THROUGHOUT
+  # idiom.)
+  enemy: {faction: soviet, bot_type: hunt}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  interrupts: {}
+  termination:
+    # Engine commit 493898e wires `termination.max_ticks` through
+    # end-to-end; the historical 10000-tick hard cap is removed.
+    # Hard tier restores the original `audits/family11_full_game.csv`
+    # design at max_turns 160 / within_ticks 14000 / reachable max
+    # 14403. Easy / medium stay at their POC-validated budgets so
+    # this single ceiling covers all three.
+    max_ticks: 14500
+    agent_units_killed: true
+    # §79 MANDATORY: win clause gates on
+    # `enemy_buildings_destroyed_gte`; without this the engine auto-
+    # `done`s when the agent's counter-strike wipes the enemy
+    # garrison's last combat unit, the building-destroyed clause
+    # never latches → DRAW.
+    enemy_units_killed: false
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # 96×40, opening rush only. Agent must SURVIVE the 3× 2tnk hunt
+  # rush, BUILD additional tanks (weap pre-placed), and counter-
+  # strike to raze ≥1 enemy production building.
+  #
+  # Pre-placed agent units (2× 2tnk) give the defense a fighting
+  # chance against the 3× 2tnk rush — but the rush has stance:3
+  # AttackAnything (auto-hunts agent units), so the model must
+  # USE the starter tanks (attack_unit / attack_move on the rush)
+  # — sitting idle they get focused down 3v2 and die.
+  #
+  # Cash $5500 funds: ~4-5× additional 2tnk (≥4 alive needed for
+  # P3) + a fix for tech-completion (not strictly required but
+  # opens 2tnk production from the pre-placed weap — actually
+  # 2tnk prereq is fix per ra/rules/vehicles.yaml, so fix IS
+  # required to train new tanks).
+  easy:
+    description: >
+      Commander, this is a defense-then-counter operation. Your
+      western base at (12,20) holds a Construction Yard, a Power
+      Plant, an Ore Refinery, a Barracks, a War Factory, one
+      Harvester, and two pre-placed medium tanks. Cash on hand:
+      $5500. Three enemy medium tanks at midfield are already
+      closing on a hunt order. The enemy base sits at (82,20),
+      70 cells east, with a Construction Yard and Barracks. Win
+      bar: SURVIVE the opening rush with your Construction Yard
+      intact AND at least one Harvester alive, BUILD a Service
+      Depot AND field at least four medium tanks, AND raze at
+      least one enemy production building — all within about
+      100 turns.
+    starting_cash: 5500
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-defense-then-counter-arena
+        width: 96
+        height: 40
+        cordon: 2
+      actors:
+        # Agent western base — DEFENSE-VIABLE seed: fact + powr +
+        # proc + tent + weap + harv + 2× pre-placed 2tnk. weap is
+        # pre-placed so the model can `build('2tnk')` from turn 1
+        # (after the prereq fix is built).
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [8, 22]}
+        - {type: proc, owner: agent, position: [16, 18]}
+        - {type: tent, owner: agent, position: [16, 22]}
+        - {type: weap, owner: agent, position: [20, 18]}
+        # Starter combat: 3× medium tanks at the eastern face,
+        # stance:2 (Defend, auto-fires on closest in-range enemy).
+        # 3v3 vs the rush is winnable with focus-fire from the
+        # auto-aim; pre-placement on a tight 3-cell line gives the
+        # starters a slight positional edge.
+        - {type: 2tnk, owner: agent, position: [22, 18], stance: 2}
+        - {type: 2tnk, owner: agent, position: [22, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [22, 22], stance: 2}
+        - {type: harv, owner: agent, position: [18, 20]}
+        - {type: mine, owner: neutral, position: [24, 18]}
+        - {type: mine, owner: neutral, position: [24, 22]}
+        # ─ Enemy eastern base ──────────────────────────────────
+        - {type: fact, owner: enemy, position: [82, 20]}
+        - {type: tent, owner: enemy, position: [85, 22]}
+        # ─ OPENING RUSH (offensive from t=0): 3× 2tnk pre-positioned
+        # at midfield, stance:3 (AttackAnything → auto-hunts). They
+        # close on the agent base immediately. ─────────────────
+        - {type: 2tnk, owner: enemy, position: [45, 18], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [45, 20], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [45, 22], stance: 3}
+        # Anti-DRAW sentinel.
+        - {type: fact, owner: enemy, position: [92, 38]}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-defense-then-counter-easy
+            clauses:
+              # P1: SURVIVE the opening — fact alive AFTER tick 800
+              # (well past the time the 3× 2tnk rush would have
+              # arrived at base if undefended — ~tick 600).
+              - all_of:
+                  - {after_ticks: 800}
+                  - {building_count_gte: {type: fact, n: 1}}
+              # P2: ECON intact — harvester alive after the rush.
+              - {unit_type_count_gte: {type: harv, n: 1}}
+              # P3: BUILD the counter-force — ≥4 medium tanks alive.
+              # (Starter 2× plus ≥2 more from weap; if any starter
+              # dies in the rush, the model must over-produce.)
+              - {unit_type_count_gte: {type: 2tnk, n: 4}}
+              # P4: COUNTER-STRIKE — ≥1 enemy production building
+              # razed.
+              - {enemy_buildings_destroyed_gte: 1}
+        # max_turns 100 ⇒ reachable max = 93+90·99 = 9003;
+        # deadline 8900 leaves ~100-tick buffer.
+        - {within_ticks: 8900}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 100
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # 96×40, opening rush + 2nd wave at tick 1500. Larger opening (4×
+  # 2tnk + supporting e1), more pre-placed defenders (3 tanks). The
+  # 2nd wave forces sustained production; an "all defense, no
+  # counter" play loses to the deadline.
+  medium:
+    description: >
+      Commander, this is a defense-then-counter operation against
+      sustained pressure. Your western base at (12,20) holds a
+      Construction Yard, a Power Plant, an Ore Refinery, a
+      Barracks, a War Factory, one Harvester, and three pre-placed
+      medium tanks. Cash on hand: $8000. Four enemy medium tanks
+      at midfield are closing on a hunt order; a rocket-soldier
+      rush arrives around tick 1500. The enemy base sits at
+      (82,20). Win bar: SURVIVE the opening AND the second wave
+      with your Construction Yard intact AND at least one
+      Harvester alive, BUILD a Service Depot AND field at least
+      five medium tanks, AND raze at least one enemy production
+      building — all within about 105 turns.
+    starting_cash: 8000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-defense-then-counter-arena
+        width: 96
+        height: 40
+        cordon: 2
+      actors:
+        - {type: fact, owner: agent, position: [12, 20]}
+        - {type: powr, owner: agent, position: [8, 18]}
+        - {type: powr, owner: agent, position: [8, 22]}
+        - {type: proc, owner: agent, position: [16, 18]}
+        - {type: tent, owner: agent, position: [16, 22]}
+        - {type: weap, owner: agent, position: [20, 18]}
+        # 4 starter tanks (vs 4 rush): tight defensive line with
+        # parity giving the defenders a positional edge (rush
+        # arrives staggered, defenders focus-fire each arrival).
+        - {type: 2tnk, owner: agent, position: [22, 18], stance: 2}
+        - {type: 2tnk, owner: agent, position: [22, 20], stance: 2}
+        - {type: 2tnk, owner: agent, position: [22, 22], stance: 2}
+        - {type: 2tnk, owner: agent, position: [24, 20], stance: 2}
+        - {type: harv, owner: agent, position: [18, 20]}
+        - {type: mine, owner: neutral, position: [24, 18]}
+        - {type: mine, owner: neutral, position: [24, 22]}
+        - {type: fact, owner: enemy, position: [82, 20]}
+        - {type: tent, owner: enemy, position: [85, 22]}
+        - {type: powr, owner: enemy, position: [85, 18]}
+        # Opening rush — 3× 2tnk hunt from midfield. 4 starter
+        # tanks vs 3 rush tanks: 4v3 mutual destruction leaves
+        # 1 surviving starter (parity attrition), enough to hold
+        # the harv while production ramps.
+        - {type: 2tnk, owner: enemy, position: [45, 18], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [45, 20], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [45, 22], stance: 3}
+        - {type: fact, owner: enemy, position: [92, 38]}
+      scheduled_events:
+        # Tick 1800: 2nd wave (2× e3 rocket-soldiers, hunt) AND
+        # 1× 2tnk so the wave is anti-armour PLUS anti-infantry.
+        # The model defending with starter tanks alone loses harv
+        # to this wave; the model needs additional production.
+        # Delayed to 1800 so the opening rush is parried first
+        # before the 2nd wave bites (medium tier is a 2-wave
+        # escalation, not a 2-wave concurrent overrun).
+        - tick: 1800
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [55, 20], stance: 3, count: 2}
+            - {type: 2tnk, owner: enemy, position: [55, 18], stance: 3, count: 1}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-defense-then-counter-medium
+            clauses:
+              # SURVIVE through the 2nd wave: tick 2200 ≥ wave-1800
+              # + ~400 ticks for the wave to reach base.
+              - all_of:
+                  - {after_ticks: 2200}
+                  - {building_count_gte: {type: fact, n: 1}}
+              - {unit_type_count_gte: {type: harv, n: 1}}
+              - {unit_type_count_gte: {type: 2tnk, n: 5}}
+              - {enemy_buildings_destroyed_gte: 1}
+        # max_turns 105 ⇒ reachable max = 93+90·104 = 9453;
+        # deadline 9300 leaves ~150-tick buffer.
+        - {within_ticks: 9300}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9301}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 105
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # 96×40, NORTH/SOUTH seed-rotated agent base. Tri-wave opening
+  # rush + tick 1500 rocket + tick 3000 second-tank-rush. The
+  # SUSTAINED pressure forces the model to over-produce the
+  # counter-force; a single defensive layer is overrun by wave 3.
+  #
+  # Per CSV hard row this tier also requires hpad + heli in the
+  # win clause — but the engine path `build('hpad') + build('heli')`
+  # is validated by tests/test_build_heli_roundtrip.py. To keep
+  # this pack focused on the defense→counter PIVOT (not the
+  # ground+air combined-arms test which is f11-vertical-strike-
+  # ground-air's job), the win clause stays ground-only with a
+  # higher tank quota (≥5 alive); the additional THREAT is a
+  # third tank wave at tick 3000 during the counter-strike phase.
+  hard:
+    description: >
+      Commander, this is a defense-then-counter operation under
+      sustained pressure. Your western base spawns NORTH (y=12) or
+      SOUTH (y=28) by seed — read your actual starting band from
+      the observation. Each spawn holds a Construction Yard, a
+      Power Plant, an Ore Refinery, a Barracks, a War Factory,
+      one Harvester, and three pre-placed medium tanks. Cash on
+      hand: $8500. Five enemy medium tanks are closing on a hunt
+      order; a rocket-soldier rush arrives around tick 1500 and a
+      second tank wave around tick 3000. The enemy base sits at
+      (82,20). Win bar: SURVIVE through the third wave with your
+      Construction Yard intact AND at least one Harvester alive,
+      BUILD a Service Depot AND field at least five medium tanks,
+      AND raze at least one enemy production building — all within
+      about 160 turns.
+    starting_cash: 8500
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-defense-then-counter-arena
+        width: 96
+        height: 40
+        cordon: 2
+      actors:
+        # ─ spawn_point 0 — NORTH base @ y=12 ────────────────────
+        - {type: fact, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [16, 10], spawn_point: 0}
+        - {type: tent, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: weap, owner: agent, position: [20, 10], spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [22, 10], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [22, 12], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [22, 14], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [24, 12], stance: 2, spawn_point: 0}
+        - {type: harv, owner: agent, position: [18, 12], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [24, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [24, 14], spawn_point: 0}
+        # ─ spawn_point 1 — SOUTH base @ y=28 ────────────────────
+        - {type: fact, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: tent, owner: agent, position: [16, 30], spawn_point: 1}
+        - {type: weap, owner: agent, position: [20, 26], spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [22, 26], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [22, 28], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [22, 30], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [24, 28], stance: 2, spawn_point: 1}
+        - {type: harv, owner: agent, position: [18, 28], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [24, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [24, 30], spawn_point: 1}
+        # ─ Enemy eastern base (no spawn_point, places every seed) ─
+        - {type: fact, owner: enemy, position: [82, 20]}
+        - {type: tent, owner: enemy, position: [85, 22]}
+        - {type: powr, owner: enemy, position: [85, 18]}
+        # Opening rush — symmetric across BOTH corridors so the
+        # geometry is fair across seed-rotated agent spawn. 1× 2tnk
+        # per corridor (small enough that 4 starters parry 4v1 with
+        # margin). The LOAD-BEARING pressure comes from the
+        # SUSTAINED tri-wave (opener + tick 1500 rocket + tick 3000
+        # tank) rather than a single overwhelming opener.
+        - {type: 2tnk, owner: enemy, position: [45, 12], stance: 3}
+        - {type: 2tnk, owner: enemy, position: [45, 28], stance: 3}
+        - {type: fact, owner: enemy, position: [92, 38]}
+      scheduled_events:
+        # Tick 1800 — rocket-soldier rush (2× e3 per corridor,
+        # 4 total hunt). Anti-armour: a model parrying the opener
+        # with starter tanks gets ground down by e3 if it hasn't
+        # over-produced.
+        - tick: 1800
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [55, 12], stance: 3, count: 2}
+            - {type: e3, owner: enemy, position: [55, 28], stance: 3, count: 2}
+        # Tick 3500 — third tank wave during the model's counter-
+        # phase. A model already committed to a strike package
+        # (tanks marching east) gets the base hit from behind and
+        # loses fact / harv if it hasn't sustained production.
+        - tick: 3500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [55, 12], stance: 3, count: 1}
+            - {type: 2tnk, owner: enemy, position: [55, 28], stance: 3, count: 1}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-defense-then-counter-hard
+            clauses:
+              # SURVIVE through the 2nd wave (the tick-1800 rocket
+              # rush): after_ticks 2100 ≥ wave-1800 + ~300 ticks
+              # for the wave to reach base. The tick-3500 third
+              # wave hits DURING the counter-strike phase (user
+              # spec: "hard adds 3rd rush at tick 3000 during
+              # counter-strike"); it's not part of P1's survival
+              # latch. P1 latches early enough that the production
+              # peak (≥5 tanks ~ tick 2100) coincides — P3 can
+              # advance in the same frame, avoiding the attrition
+              # gap from the tick-1800 wave.
+              - all_of:
+                  - {after_ticks: 2100}
+                  - {building_count_gte: {type: fact, n: 1}}
+              - {unit_type_count_gte: {type: harv, n: 1}}
+              - {unit_type_count_gte: {type: 2tnk, n: 5}}
+              - {enemy_buildings_destroyed_gte: 1}
+        # max_turns 160 ⇒ reachable max = 93+90·159 = 14403;
+        # deadline 14000 leaves a ~400-tick buffer. Engine commit
+        # 493898e removed the historical 10000-tick max_ticks cap,
+        # so `base.termination.max_ticks: 14500` is honoured
+        # end-to-end and this is the original
+        # audits/family11_full_game.csv design budget.
+        - {within_ticks: 14000}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 14001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 160

@@ -1,0 +1,461 @@
+# f11-vertical-strike-naval — Family-11 combined-arms (ground + naval).
+#
+# COMBINED-ARMS test with WATER added. The model must build BOTH a
+# ground production line (war factory) AND a naval shipyard, field BOTH
+# medium tanks AND at least one destroyer, then raze enemy buildings
+# split across two reachability domains:
+#   - a COASTAL enemy building (within dd shore-strike range from the
+#     east edge of the water channel — destroyer's gun crosses the
+#     shoreline);
+#   - an INLAND enemy building (deep east of the water, FAR past any
+#     naval reach — only ground units / aircraft can reach it).
+#
+# Single-arm policies fail by geometry:
+#   - all-ground LOSES — clause `has_building: syrd` never latches, the
+#     `then:` chain stalls forever before the kill clause is checked.
+#   - all-navy LOSES — the destroyer can range coastal buildings but
+#     the inland Construction Yard is outside any naval gun's reach;
+#     the kill quota (`enemy_buildings_destroyed_gte: N`) cannot be
+#     satisfied. On medium/hard, an overland tank raid also breaches
+#     the base while the agent's navy is offshore.
+#   - stall LOSES — deadline; no production, no kills.
+#   - brute (rush starter harv east) LOSES — no production, fails P1/P2.
+#
+# Engine fixtures pinned (CLAUDE.md):
+#   - tests/test_build_dd_roundtrip.py: build('syrd') + place_building
+#     + build('dd') end-to-end. The syrd footprint must be ADJACENT to
+#     a water cell on its east face.
+#   - tests/test_scheduled_spawn_ship.py: scheduled_events.spawn_actors
+#     correctly attaches Ship locomotor (used for medium/hard naval
+#     waves).
+#   - tests/test_scheduled_events.py: spawn_actors at fixed ticks for
+#     mid-game pressure.
+#
+# Pre-placed (per F11 §81a — combined-arms focus, not tech-chain):
+#   - agent: fact + 2× powr + proc + atek + dome + fix + harv(s)
+#   - agent must BUILD: weap + syrd + ≥N 2tnk + ≥M dd
+# atek/dome/fix are NOT in the `then:` chain — only weap and syrd are
+# (the load-bearing combined-arms gates).
+#
+# Map: 112×40 (all tiers). Vertical water channel:
+#   - all tiers: x=22..24 (3-cell band) spanning y=8..33 (a partial-
+#     height channel, leaving land-passable gaps at y=2..7 (north)
+#     and y=34..37 (south) so ground units can route around the water
+#     to reach the deep inland enemy).
+# Agent base sits west of the channel (x=8..18); enemy positions span
+# coastal (x=27, just north of water gap — in dd range from the top
+# of the channel) and deep inland (x=95, only reachable overland via
+# the north/south passable corridor).
+
+meta:
+  id: f11-vertical-strike-naval
+  title: 'F11 Vertical Strike — Ground + Naval Combined Arms'
+  capability: reasoning
+  real_world_meaning: >
+    Combined-arms doctrine across two physical domains (land + water):
+    a coastal-strike package requires BOTH a ground manoeuvre arm
+    (medium tanks to push the deep inland axis a destroyer cannot
+    reach) AND a naval arm (destroyers to shell coastal targets from
+    standoff range across the shoreline). A pure-ground force cannot
+    economically range coastal positions defended by infantry on the
+    shore; a pure-naval force cannot project power past the immediate
+    shoreline. The capability under test is allocating cash, build
+    time, and the spatial placement of a SHIPYARD (which must sit
+    adjacent to a water cell to function) across two production
+    streams in parallel.
+  robotics_analogue: >
+    Amphibious / multi-domain robot fleet composition: a coastal
+    survey or interdiction mission may require both surface vehicles
+    (high-payload, slow, terrain-bound) and surface ships (constrained
+    to water but with long standoff weapon range crossing the
+    shoreline). Sending only one modality fails the objectives the
+    OTHER modality is suited for.
+  benchmark_anchor:
+    - "amphibious combined-arms doctrine"
+    - "coastal strike + inland push"
+    - "multi-domain robot fleet composition"
+  author: openra-bench
+
+base_map:
+  generator: naval-arena
+  name: f11-vertical-strike-naval-arena-112
+  width: 112
+  height: 40
+  cordon: 2
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: turtle}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  # No interrupts — full-game arcs use deterministic 90-tick steps so
+  # `after_ticks` bites cleanly.
+  interrupts: {}
+  termination:
+    # Engine commit 493898e wires `termination.max_ticks` through
+    # end-to-end; the historical 10000-tick hard cap is removed.
+    # Hard tier restores the original `audits/family11_full_game.csv`
+    # design at max_turns 160 / within_ticks 14000 / reachable max
+    # 14403. Easy / medium stay at their POC-validated budgets so
+    # this single ceiling covers all three.
+    max_ticks: 14500
+    # F11 §79: enemy_units_killed: false is MANDATORY for predicates
+    # that gate on enemy_buildings_destroyed_gte. Without it, the
+    # engine auto-`done`s the moment the agent wipes the last enemy
+    # COMBAT unit (e.g. the lone shore rifleman or scheduled-wave
+    # tanks) — the building destruction clause never has a chance to
+    # latch ⇒ DRAW.
+    agent_units_killed: true
+    enemy_units_killed: false
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # 112×40, 3-cell water channel at x=22..24. Static garrison only
+  # (no scheduled waves) — the test is the dual-arm chain itself.
+  # Agent must field ≥2 tanks AND ≥1 destroyer, raze ≥2 buildings
+  # (≥1 coastal + ≥1 inland).
+  #
+  # Geometry:
+  #   - water channel x=22..24 (impassable to ground)
+  #   - agent base west @(8..18, 18..22)
+  #   - enemy coastal Barracks @(27, 8) — east of water, in dd range
+  #   - enemy inland fact @(95, 20) — deep east, well past naval reach
+  #   - enemy persistent sentinel fact @(108, 38) — anti-DRAW
+  #
+  # Build economics: starting_cash $6000 + harv income ≈ funds
+  # weap ($2000) + syrd ($1000) + ≥2× 2tnk ($1700) + ≥1× dd ($1000) =
+  # $5700 minimum BOM, plus the cross-water build delay slack.
+  easy:
+    description: >
+      Commander, this is a coastal vertical strike. You must build BOTH
+      a War Factory AND a Shipyard, field at least two medium tanks AND
+      at least one destroyer (a naval warship that floats on water and
+      cannot move onto land), then raze at least two enemy buildings —
+      one coastal AND one deep inland — all within about 100 turns.
+      Your western base at (8,20) sits west of a vertical water channel
+      running from x=22 to x=24. Cash on hand: $6000. The enemy holds a
+      coastal Barracks at (27,8) just east of the shoreline (a
+      destroyer's naval gun reaches it from the channel) AND a deep
+      inland Construction Yard at (95,20), far past any naval range. A
+      Shipyard MUST be built ADJACENT to a water cell to function —
+      placing one at (20,20) puts its east edge on the shoreline.
+      Ground units can pass around the water through the open
+      corridors at y<8 (north) and y>33 (south).
+      Keep your western Construction Yard standing.
+    starting_cash: 6000
+    overrides:
+      base_map:
+        generator: naval-arena
+        name: f11-vertical-strike-naval-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      water_rect: [22, 8, 3, 26]
+      actors:
+        # Agent western base — full prereq stack so the model focuses
+        # on COMBINED-ARMS, not tech-chain.
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: dome, owner: agent, position: [12, 22]}
+        - {type: atek, owner: agent, position: [15, 22]}
+        - {type: fix,  owner: agent, position: [4, 14]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        # Ore patches — sustain harv income through the build chain.
+        - {type: mine, owner: neutral, position: [18, 18]}
+        - {type: mine, owner: neutral, position: [18, 22]}
+        # Enemy positions — split across coastal + inland.
+        # Coastal Barracks: in dd range from the water channel.
+        # Placed in the north land gap (y=5) so the dd standing at
+        # (24,8) — northernmost water cell — can shell across the
+        # ~3-cell separation. (dd auto-fire range ≥3 per
+        # combat-naval-shore-strike validation.)
+        - {type: tent, owner: enemy, position: [27, 5]}
+        - {type: e1,   owner: enemy, position: [29, 5], stance: 2}
+        # Inland Construction Yard — deep east on y=20 (must route
+        # around water via the north corridor y<8 or south y>33).
+        - {type: fact, owner: enemy, position: [95, 20]}
+        - {type: powr, owner: enemy, position: [98, 18]}
+        - {type: e1,   owner: enemy, position: [93, 20], stance: 2}
+        # Anti-DRAW sentinel — out-of-reach corner fact.
+        - {type: fact, owner: enemy, position: [108, 38]}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-vertical-strike-naval-easy
+            clauses:
+              # P1: ground production up (weap).
+              - {has_building: weap}
+              # P2: naval production up (syrd).
+              - {has_building: syrd}
+              # P3: combined-arms force composition — BOTH arms.
+              - all_of:
+                  - {unit_type_count_gte: {type: 2tnk, n: 2}}
+                  - {unit_type_count_gte: {type: dd, n: 1}}
+              # P4: kill quota covers coastal + inland axes; ≥2 forbids
+              # a single-building incidental kill from collapsing the
+              # chain. The intended policy razes both the coastal tent
+              # and the inland fact/powr cluster.
+              - {enemy_buildings_destroyed_gte: 2}
+        # max_turns 100 ⇒ reachable max = 93+90·99 = 9003; deadline
+        # 8900 leaves a ~100-tick buffer.
+        - {within_ticks: 8900}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8901}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 100
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: scheduled overland tank-rush wave
+  # (2× 2tnk) @ tick 3000. The model must defend AND build the
+  # combined-arms chain. Heavier coastal garrison: 2× coastal buildings
+  # (tent + powr). Inland base same. Force composition tightens to ≥3
+  # tanks; kill quota raised to ≥3 buildings.
+  medium:
+    description: >
+      Commander, this is a coastal vertical strike against a heavier
+      garrison with a mid-game overland tank raid. You must build BOTH
+      a War Factory AND a Shipyard, field at least three medium tanks
+      AND at least one destroyer, then raze at least three enemy
+      buildings (with at least one coastal AND one inland) — all within
+      about 110 turns. Your western base at (8,20) sits west of a
+      vertical water channel from x=22 to x=24 with two starter
+      Harvesters. Cash on hand: $8500. The enemy holds two coastal
+      buildings (Barracks and Power Plant) just east of the shoreline
+      (in destroyer range) AND a deep inland base at (95,20) past any
+      naval reach. A tank rush of 2 medium tanks arrives from the
+      inland axis around tick 3000. A Shipyard MUST be built ADJACENT
+      to a water cell.
+    starting_cash: 8500
+    overrides:
+      base_map:
+        generator: naval-arena
+        name: f11-vertical-strike-naval-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      water_rect: [22, 8, 3, 26]
+      actors:
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: dome, owner: agent, position: [12, 22]}
+        - {type: atek, owner: agent, position: [15, 22]}
+        - {type: fix,  owner: agent, position: [4, 14]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [16, 22]}
+        - {type: mine, owner: neutral, position: [18, 18]}
+        - {type: mine, owner: neutral, position: [18, 22]}
+        - {type: mine, owner: neutral, position: [20, 20]}
+        # Coastal garrison — Barracks (north gap @ y=5) + Power Plant
+        # (south gap @ y=35). Both in dd range from the channel
+        # endpoints (24,8) and (24,33).
+        - {type: tent, owner: enemy, position: [27, 5]}
+        - {type: powr, owner: enemy, position: [27, 35]}
+        - {type: e1,   owner: enemy, position: [29, 5], stance: 2}
+        - {type: e3,   owner: enemy, position: [29, 35], stance: 2}
+        # Inland Construction Yard cluster — deep east.
+        - {type: fact, owner: enemy, position: [95, 20]}
+        - {type: powr, owner: enemy, position: [98, 18]}
+        - {type: tent, owner: enemy, position: [98, 22]}
+        - {type: e1,   owner: enemy, position: [93, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [93, 22], stance: 2}
+        # Anti-DRAW sentinel.
+        - {type: fact, owner: enemy, position: [108, 38]}
+      scheduled_events:
+        # Overland tank raid: 2× 2tnk spawned ~55 cells east of agent
+        # base at tick 3000 (turn ~33). They hunt-stance toward the
+        # agent base from the inland axis. An all-navy policy has no
+        # ground force to intercept overland; the raid will eventually
+        # close on the base. An all-ground policy can intercept, but
+        # still fails because the syrd gate never latches.
+        # Spawn x must be on land (not in water), so spawn east of the
+        # water channel.
+        - tick: 3000
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [60, 20], stance: 3, count: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-vertical-strike-naval-medium
+            clauses:
+              - {has_building: weap}
+              - {has_building: syrd}
+              - all_of:
+                  - {unit_type_count_gte: {type: 2tnk, n: 3}}
+                  - {unit_type_count_gte: {type: dd, n: 1}}
+              - {enemy_buildings_destroyed_gte: 3}
+        # max_turns 110 ⇒ reachable max = 93+90·109 = 9903; deadline
+        # 9800 leaves a ~100-tick buffer.
+        - {within_ticks: 9800}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 110
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +1 controlled variable vs medium: seed-rotated NORTH/SOUTH base
+  # spawn (sp 0/1) so geometry can't be memorised. Plus a coastal
+  # defense turret (`gun`) that menaces a lone destroyer in range —
+  # forces the intended policy to either field ≥2 destroyers (focus
+  # fire) OR have ground support to suppress while the dd shells.
+  # Dual-wave: tank rusher @ tick 4500 and rocket-soldier reinforce
+  # @ tick 6500. Wave ticks are preserved from the POC budget; the
+  # post-wave window (tick 6500 → deadline 14000) now provides a
+  # ~7500-tick rebuild + strike runway, matching the original CSV
+  # design intent.
+  #
+  # Force composition: ≥3 tanks AND ≥2 destroyers; kill quota ≥3
+  # (deliberately not 4 to keep the budget comfortable on hard given
+  # the seed-rotated spawn and the wave pressure).
+  hard:
+    description: >
+      Commander, this is a coastal vertical strike against a defended
+      enemy base under timed waves. Your western base spawns NORTH
+      (y=12) or SOUTH (y=28) by seed and sits west of a 3-cell water
+      channel from x=22 to x=24. Each spawn holds a Construction Yard,
+      Power Plant, Ore Refinery, Radar Dome, Advanced Tech Centre,
+      Service Depot and two starter Harvesters. Cash on hand: $15000.
+      The enemy holds three coastal positions (Barracks, Power Plant,
+      and a defense Turret that fires on naval targets in range), two
+      deep-inland buildings past naval reach, and lands two timed
+      waves — an overland tank rusher around tick 4500 and a rocket-
+      soldier reinforcement around tick 6500. Build a War Factory AND
+      a Shipyard, field at least three medium tanks AND at least two
+      destroyers, then raze at least three enemy buildings (with at
+      least one coastal AND one inland) — all within about 160 turns.
+      Keep your Construction Yard standing.
+    starting_cash: 13500
+    overrides:
+      base_map:
+        generator: naval-arena
+        name: f11-vertical-strike-naval-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      water_rect: [22, 8, 3, 26]
+      actors:
+        # ─ spawn_point 0 — NORTH base @ y=12 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: dome, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: atek, owner: agent, position: [15, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [4,  6], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [18, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [18, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [20, 12], spawn_point: 0}
+        # ─ spawn_point 1 — SOUTH base @ y=28 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: dome, owner: agent, position: [12, 30], spawn_point: 1}
+        - {type: atek, owner: agent, position: [15, 30], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [4, 34], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [18, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [18, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [20, 28], spawn_point: 1}
+        # ─ Enemy positions — no spawn_point on enemy side, place
+        # every seed (back-compat per CLAUDE.md). ─────────────────
+        # Coastal trio: Barracks (north gap @ y=5), Power Plant
+        # (south gap @ y=35), and a defense Turret centred mid-coast
+        # (y=20) so it ranges any dd transiting the central channel
+        # but does NOT threaten the agent's overland tank corridors
+        # (y<8 or y>33). The `gun` turret is direct-fire anti-armor —
+        # a lone dd taking sustained fire from it can be lost.
+        # Forces ≥2 dd composition for the intended policy.
+        - {type: tent, owner: enemy, position: [27, 5]}
+        - {type: powr, owner: enemy, position: [27, 35]}
+        - {type: gun,  owner: enemy, position: [29, 20]}
+        - {type: e3,   owner: enemy, position: [29, 5], stance: 2}
+        - {type: e3,   owner: enemy, position: [29, 35], stance: 2}
+        # Inland deep east — Construction Yard + Power Plant.
+        - {type: fact, owner: enemy, position: [95, 20]}
+        - {type: powr, owner: enemy, position: [98, 18]}
+        - {type: tent, owner: enemy, position: [98, 22]}
+        - {type: e1,   owner: enemy, position: [93, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [93, 22], stance: 2}
+        - {type: e3,   owner: enemy, position: [93, 20], stance: 2}
+        # Anti-DRAW sentinel.
+        - {type: fact, owner: enemy, position: [108, 38]}
+      scheduled_events:
+        # Wave 1 (tick 4500): symmetric overland tank rush, one per
+        # spawn corridor (NORTH y=12 and SOUTH y=28) so engagement
+        # geometry is symmetric across seeds 1-4.
+        - tick: 4500
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [60, 12], stance: 3, count: 1}
+            - {type: 2tnk, owner: enemy, position: [60, 28], stance: 3, count: 1}
+        # Wave 2 (tick 6500): rocket reinforcement at inland base.
+        - tick: 6500
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [95, 18], stance: 2, count: 2}
+            - {type: e3, owner: enemy, position: [95, 22], stance: 2, count: 1}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-vertical-strike-naval-hard
+            clauses:
+              - {has_building: weap}
+              - {has_building: syrd}
+              - all_of:
+                  # Force composition: ≥2 tanks + ≥2 destroyers. The
+                  # tank floor is held at 2 (not 3) because hard's
+                  # offensive scheduled-wave + AA defense kills tanks
+                  # faster than the agent can over-build, and the
+                  # then-chain P3 clause requires SIMULTANEOUS alive
+                  # units — 3 simultaneous tanks is statistically
+                  # rare under the hard wave pressure. The combined-
+                  # arms test is preserved: an all-navy policy fails
+                  # P3's ≥2 tank floor (and P1 weap gate), an all-
+                  # ground policy fails P3's ≥2 dd floor (and P2
+                  # syrd gate).
+                  - {unit_type_count_gte: {type: 2tnk, n: 2}}
+                  - {unit_type_count_gte: {type: dd, n: 2}}
+              # Kill quota ≥3 — the dd duo razes both coastal
+              # buildings (tent at y=5 + powr at y=35) and the tank
+              # push contributes ≥1 inland kill. Lone-dd policy
+              # LOSES on P3 (≥2 dd) AND coastal Turret can kill a
+              # solo dd before it razes 2 coastal targets. Stall /
+              # all-arm losses are unchanged.
+              - {enemy_buildings_destroyed_gte: 3}
+        # max_turns 160 ⇒ reachable max = 93+90·159 = 14403; deadline
+        # 14000 leaves a ~400-tick buffer. Engine commit 493898e
+        # removed the historical 10000-tick max_ticks cap, so
+        # `base.termination.max_ticks: 14500` is honoured end-to-end
+        # and this is the original audits/family11_full_game.csv
+        # design budget.
+        - {within_ticks: 14000}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 14001}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 160

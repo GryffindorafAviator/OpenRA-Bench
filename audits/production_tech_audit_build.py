@@ -52,12 +52,12 @@ BUILDINGS = {
 # Allies tech tree (the bench default); Soviet differences flagged via
 # FACTION_ONLY below.
 PREREQS = {
-    # infantry
+    # infantry (vendor RA YAML; see audits/engine_unit_audit.csv)
     'e1':  ['tent'],   # rifle
     'e3':  ['tent'],   # rocket
     'e6':  ['tent'],   # engineer
-    'e7':  ['tent','fix'],   # Tanya commando
-    'thf': ['tent','fix'],   # thief
+    'e7':  ['atek','tent'],  # Tanya commando — vendor requires atek+tent
+    'thf': ['barr','dome'],  # thief — vendor: barr+dome
     # Soviet infantry
     'e2':  ['barr'],
     # vehicles
@@ -66,36 +66,36 @@ PREREQS = {
     '2tnk':['weap','fix'],   # Allies medium — needs both
     '3tnk':['weap'],         # Soviet heavy
     'mtnk':['weap','fix'],   # Mammoth
-    'harv':['weap'],         # harvester
-    'mcv': ['weap','fix'],
-    # base buildings
-    'tent':['fact'],
-    'barr':['fact'],
-    'powr':['fact'],
+    'harv':['proc'],         # harvester — vendor: proc (not weap)
+    'mcv': ['fix'],          # vendor: fix only
+    # base buildings (vendor: most need anypower, not fact)
+    'tent':['anypower'],
+    'barr':['anypower'],
+    'powr':[],
     'apwr':['fact'],         # advanced power
-    'proc':['fact'],
+    'proc':['anypower'],
     'weap':['proc'],
     'fix': ['weap'],
     'silo':['proc'],
-    # defenses
-    'gun': ['tent','fix'],
+    # defenses (vendor: gun/pbox/hbox gated by tent only, not tent+fix)
+    'gun': ['tent'],
     'pbox':['tent'],
-    'hbox':['tent','fix'],
-    'tsla':['barr'],         # Soviet tesla coil
+    'hbox':['tent'],
+    'tsla':['weap'],         # vendor: weap-gated
     # tech / radar / superweapons
     'dome':['proc'],
     'atek':['fix'],
-    'stek':['weap'],
-    # naval / air (rarely used in bench)
-    'spen':['proc'],
-    'syrd':['proc'],
-    'hpad':['fact'],
-    'afld':['fact'],
+    'stek':['weap','dome'],
+    # naval / air (vendor)
+    'spen':['anypower'],     # vendor: anypower (water adjacency separate)
+    'syrd':['anypower'],
+    'hpad':['dome'],
+    'afld':['dome'],         # vendor: dome (not tent)
     # buildings whose prereq we don't audit; treat as no prereq
     'kenn':['fact'],
     'fact':[],
-    'sam': ['fact'],
-    'ftur':['tent'],
+    'sam': ['dome'],
+    'ftur':['barr'],
 }
 
 FACTION_ONLY = {
@@ -103,19 +103,26 @@ FACTION_ONLY = {
     'soviet': {'barr','tsla','3tnk','e2','kenn'},
 }
 
-# Canonical RA costs and build seconds (= turns @ DEFAULT_TICKS_PER_STEP=30).
+# RA costs (vendor YAML, runtime authority) and build seconds.
 COST = {
-    # Bench-engine canonical costs — verified directly against the
-    # `actor!(...)` declarations in openra-sim/src/gamerules.rs and the
-    # explicit `assert_eq!(rules.cost("2tnk"), 800)` engine test.
-    # Updated 2026-05-24 (P0.2 in PR #30 review): tent 500→400,
-    # 2tnk 850→800, pbox 600→400, hbox 800→600, e7 1200→600.
-    'e1':100,  'e3':300,  'e6':500,   'e7':600,  'thf':500, 'e2':160,
-    'jeep':600,'1tnk':700,'2tnk':800, '3tnk':950,'mtnk':1700,'harv':1400,'mcv':2500,
-    'tent':400,'barr':500,'powr':300,'apwr':500,'proc':1400,'weap':2000,'fix':1200,
-    'silo':150,'gun':600,'pbox':400,'hbox':600,'tsla':1500,'dome':1000,
-    'atek':1500,'stek':2000,'spen':1500,'syrd':1500,'hpad':500,'afld':600,
-    'kenn':200,'fact':0,'sam':750,'ftur':600,
+    # Sourced from the vendor RA YAML loaded by
+    # `OpenRA-Rust/openra-train/src/env.rs::load_rules_with_fallback`.
+    # The bench engine uses these values at runtime (NOT the
+    # `gamerules.rs::defaults()` stub, which is a fallback only when
+    # the vendor YAML can't be loaded). See
+    # `audits/engine_unit_audit.csv` (commit 813590eb) for the full
+    # vendor-vs-defaults divergence table.
+    # Updated 2026-05-24: sync to vendor. e6 500->400, e7 600->1800,
+    # jeep 600->500, 2tnk 800->850, harv 1400->1100, mcv 2500->2000,
+    # tent 400->500, pbox 400->600, hbox 600->750, gun 600->800,
+    # spen 1500->800, syrd 1500->1000, dome 1000->1500, e2 160->150,
+    # 3tnk 950->1150, kenn 200->300, sam 750->700.
+    'e1':100,  'e3':300,  'e6':400,   'e7':1800, 'thf':500, 'e2':150,
+    'jeep':500,'1tnk':700,'2tnk':850, '3tnk':1150,'mtnk':1700,'harv':1100,'mcv':2000,
+    'tent':500,'barr':500,'powr':300,'apwr':500,'proc':1400,'weap':2000,'fix':1200,
+    'silo':150,'gun':800,'pbox':600,'hbox':750,'tsla':1200,'dome':1500,
+    'atek':1500,'stek':1500,'spen':800,'syrd':1000,'hpad':500,'afld':500,
+    'kenn':300,'fact':0,'sam':700,'ftur':600,
 }
 BUILD_SEC = {
     'e1':5,'e3':8,'e6':10,'e7':30,'thf':15,'e2':6,
@@ -127,6 +134,46 @@ BUILD_SEC = {
 }
 
 BUILD_TOOLS = {'build','place_building','deploy','start_production'}
+
+# Production-queue category for each buildable slug. The engine tracks
+# FIVE independent queues per player (Building / Defense / Vehicle /
+# Infantry / Aircraft / Ship). Build-times serialize WITHIN a queue
+# but the queues advance IN PARALLEL — so the build-time-in-budget
+# check must group chain steps by queue and compare the MAX queue
+# time against `max_turns`, not the sum across queues.
+#
+# Mapping rules (mirror engine `World::item_queue_type` in
+# openra-sim/src/world.rs:5559):
+#   ActorKind::Infantry        → Infantry queue (fed by tent/barr)
+#   ActorKind::Vehicle / Mcv   → Vehicle queue (fed by weap)
+#   ActorKind::Aircraft        → Aircraft queue (fed by hpad/afld)
+#   ActorKind::Ship            → Ship queue (fed by spen/syrd)
+#   ActorKind::Building, fp(1,1) → Defense queue (fed by construction yard)
+#   ActorKind::Building, fp!=(1,1) → Building queue (fed by construction yard)
+# Building AND Defense are both fed by the construction yard but are
+# DISTINCT queues — they run in parallel with each other (you can
+# build a pbox WHILE the construction yard makes a powr).
+#
+# Slug → queue mapping below is derived from openra-sim/src/gamerules.rs
+# (ActorKind + footprint). `silo` is not in gamerules.rs (loaded from
+# the vendored YAML) but is a 1×2 storage building → Building queue.
+QUEUE = {
+    # Infantry (tent/barr-gated)
+    'e1':'infantry','e2':'infantry','e3':'infantry','e4':'infantry',
+    'e6':'infantry','e7':'infantry','thf':'infantry',
+    # Vehicle (weap-gated)
+    'jeep':'vehicle','1tnk':'vehicle','2tnk':'vehicle','3tnk':'vehicle',
+    'mtnk':'vehicle','harv':'vehicle','mcv':'vehicle',
+    # Defense (construction-yard-gated, 1×1 footprint)
+    'pbox':'defense','hbox':'defense','gun':'defense','tsla':'defense',
+    'sam':'defense','ftur':'defense',
+    # Building (construction-yard-gated, larger footprint)
+    'fact':'building','tent':'building','barr':'building','powr':'building',
+    'apwr':'building','proc':'building','weap':'building','fix':'building',
+    'silo':'building','dome':'building','atek':'building','stek':'building',
+    'spen':'building','syrd':'building','afld':'building','hpad':'building',
+    'kenn':'building',
+}
 
 # ---------------------------------------------------------------------------
 # Hand-curated table: what the intended-capability play MUST build for each
@@ -395,6 +442,13 @@ def emit(pid: str):
         present_for_prereqs.add('tent')
     if 'tent' in present_for_prereqs:
         present_for_prereqs.add('barr')
+    # "anypower" is satisfied by any power-producing building (vendor
+    # RA YAML uses this synthetic prereq for tent/barr/proc/syrd/spen).
+    if 'powr' in present_for_prereqs or 'apwr' in present_for_prereqs:
+        present_for_prereqs.add('anypower')
+    # fact also produces some power in the engine; permissive
+    if 'fact' in present_for_prereqs:
+        present_for_prereqs.add('anypower')
 
     buildables = BUILDABLES.get(pid, [])
     # tech_gates_missing: for every required buildable, its prereqs must
@@ -405,6 +459,8 @@ def emit(pid: str):
     chain_equiv = set(buildables)
     if 'barr' in chain_equiv: chain_equiv.add('tent')
     if 'tent' in chain_equiv: chain_equiv.add('barr')
+    if {'powr', 'apwr', 'fact'} & chain_equiv:
+        chain_equiv.add('anypower')
 
     missing = []
     for b in buildables:
@@ -429,8 +485,23 @@ def emit(pid: str):
     projected = cash + income_per_turn * turns
     afford_by_deadline = projected >= chain_cost
 
-    # build_in_budget: sum of build seconds ≤ max_turns
-    chain_secs = sum(BUILD_SEC.get(b, 0) for b in buildables)
+    # build_in_budget: PER-QUEUE build-second sum ≤ max_turns. The
+    # engine runs Building / Defense / Vehicle / Infantry / Aircraft /
+    # Ship queues IN PARALLEL — chain steps in DIFFERENT queues do
+    # NOT serialize. A pack that needs (powr, proc) (both Building) AND
+    # (2tnk) (Vehicle) and AND (e3) (Infantry) sees the Building queue
+    # take powr+proc seconds; the Vehicle queue takes 2tnk seconds;
+    # the Infantry queue takes e3 seconds; the binding constraint is
+    # the LONGEST queue, not the sum across queues. Engine pin:
+    # openra-sim/src/world.rs:5559 (item_queue_type maps each item to
+    # its queue) + openra-sim/tests/test_parallel_production.rs (two
+    # weap roughly double vehicle throughput).
+    per_queue: dict[str, int] = {}
+    for b in buildables:
+        q = QUEUE.get(b, 'building')
+        per_queue[q] = per_queue.get(q, 0) + BUILD_SEC.get(b, 0)
+    chain_secs = max(per_queue.values()) if per_queue else 0
+    chain_secs_total = sum(per_queue.values())  # diagnostic only
     build_in_budget = chain_secs <= turns
 
     # Faction mismatch: any buildable that's faction-locked to a different
@@ -449,7 +520,15 @@ def emit(pid: str):
     elif not afford_at_start:
         issues.append(f'tight-cash:need={chain_cost},have={cash}')
     if not build_in_budget:
-        issues.append(f'build-time-over-budget:{chain_secs}s>{turns}t')
+        # Per-queue breakdown so a reviewer can see WHICH queue is
+        # the binding constraint (e.g. "vehicle=46s" means the
+        # Vehicle queue alone overflows, independent of the
+        # construction yard queue).
+        bottleneck = max(per_queue, key=per_queue.get)
+        issues.append(
+            f'build-time-over-budget:{bottleneck}={per_queue[bottleneck]}s>{turns}t'
+            f' (per-queue={per_queue}, serial-total={chain_secs_total}s)'
+        )
     if fac_mismatch:
         issues.append(f'faction-mismatch:{",".join(fac_mismatch)}')
     hd = hard_diffs(pack, present)

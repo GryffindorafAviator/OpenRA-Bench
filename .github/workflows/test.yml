@@ -14,9 +14,130 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
+
+      # ── openra_train engine wheel (sibling repo OpenRA-Rust) ─────
+      # Without the wheel, 149+ engine-dependent tests skip at
+      # collection (`pytest.importorskip("openra_train")`). Clone
+      # the engine sibling, build the wheel via maturin, install it
+      # into the same Python env, then verify importability before
+      # pytest runs.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone OpenRA-Rust (sibling repo for engine wheel)
+        uses: actions/checkout@v4
+        with:
+          repository: yxc20089/OpenRA-Rust
+          path: OpenRA-Rust
+          ref: main
+
+      # Vendor RA YAML is gitignored in OpenRA-Rust (/vendor/), so the
+      # checkout above doesn't include it. Clone upstream OpenRA into
+      # the expected vendor path. Engine PR #15 made vendor strict-
+      # required (no defaults() fallback), so this MUST exist.
+      # Sparse-checkout only the rules + tilesets we actually need
+      # (~10MB vs the full 139MB OpenRA repo).
+      - name: Fetch vendor RA YAML (upstream OpenRA)
+        uses: actions/checkout@v4
+        with:
+          repository: OpenRA/OpenRA
+          path: OpenRA-Rust/vendor/OpenRA
+          ref: release-20231010
+          sparse-checkout: |
+            mods/ra/rules
+            mods/ra/weapons
+            mods/ra/tilesets
+            mods/common/rules
+            mods/common/weapons
+          sparse-checkout-cone-mode: false
+
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            OpenRA-Rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('OpenRA-Rust/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      # `maturin develop` requires a virtualenv. Create one explicitly
+      # so the PyO3 wheel installs into the same env pytest will run in.
+      # Earlier attempts: (1) `maturin develop` with system Python failed
+      # (no venv); (2) `maturin build --out dist && pip install` packaged
+      # only the Python stub, missing the .abi3.so native binding.
+      - name: Create venv + install maturin
         run: |
-          pip install pytest
-          pip install -r requirements.txt
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip maturin
+
+      # The crate uses PyO3 bindings but has no pyproject.toml, so
+      # maturin 1.13+'s autodetect picks cffi-mode and produces a
+      # pure-Python wheel (no .abi3.so → `from openra_train import
+      # OpenRAEnv` fails). Write a minimal pyproject.toml that pins
+      # bindings = "pyo3" so maturin packages the native module.
+      - name: Pin maturin bindings via pyproject.toml
+        run: |
+          cat > OpenRA-Rust/openra-train/pyproject.toml <<'EOF'
+          [build-system]
+          requires = ["maturin>=1.0"]
+          build-backend = "maturin"
+
+          [project]
+          name = "openra_train"
+          version = "0.1.0"
+          requires-python = ">=3.9"
+
+          [tool.maturin]
+          bindings = "pyo3"
+          # The crate gates ALL PyO3 code behind a `python` feature
+          # (see openra-train/Cargo.toml [features]). The `python`
+          # feature itself enables `dep:pyo3` + `pyo3/extension-module`.
+          # Without this, `PyInit_openra_train` is not exported and
+          # `from openra_train import OpenRAEnv` fails at import.
+          features = ["python"]
+          EOF
+
+      - name: Build + install openra_train wheel into venv
+        working-directory: OpenRA-Rust/openra-train
+        run: |
+          source $GITHUB_WORKSPACE/.venv/bin/activate
+          maturin develop --release
+
+      - name: Verify engine wheel loaded
+        run: .venv/bin/python -c "from openra_train import OpenRAEnv, Command; print('engine OK')"
+
+      # ── bench deps + tests ────────────────────────────────────────
+      - name: Install bench dependencies (into the same venv as the wheel)
+        run: |
+          .venv/bin/pip install pytest pytest-timeout pytest-xdist
+          .venv/bin/pip install -r requirements.txt
+
+      # Verify vendor RA YAML exists in the OpenRA-Rust checkout (PR #15
+      # removed gamerules::defaults() — vendor is now strict-required).
+      - name: Verify vendor YAML present
+        run: |
+          ls OpenRA-Rust/vendor/OpenRA/mods/ra/rules/*.yaml | head -5
+          echo "VENDOR_DIR=$(pwd)/OpenRA-Rust/vendor/OpenRA/mods/ra" >> $GITHUB_ENV
+
       - name: Run tests
-        run: python -m pytest tests/ -v
+        # --timeout=120 per-test (was hanging the workflow at 20+ min with
+        # no progress; engine-bound scripted-policy tests can be slow, but
+        # any single test taking >2 min is a hang or a bad-design bug.)
+        # -n auto for parallel execution across CPU cores.
+        # --maxfail=20 to cap noise on a broken commit and surface the
+        # first 20 failures without burning the whole 6h budget.
+        # OPENRA_VENDOR_DIR — engine PR #15 (defaults() removed) requires
+        # vendor RA YAML at runtime. The auto-resolved paths
+        # (CARGO_MANIFEST_DIR/../vendor, ./vendor, ../vendor) don't reach
+        # the OpenRA-Rust sibling checkout in CI; set the env var
+        # explicitly to the cloned vendor dir.
+        env:
+          OPENRA_VENDOR_DIR: ${{ env.VENDOR_DIR }}
+        run: |
+          .venv/bin/python -m pytest tests/ -v \
+            --timeout=120 \
+            -n auto \
+            --maxfail=20 \
+            --tb=short

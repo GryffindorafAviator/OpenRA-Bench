@@ -58,7 +58,7 @@ def _near_y(obs, easy_mode):
     """The eastern corner reachable from this seed's agent base.
     Easy is a single fixed corner (y=18); medium/hard round-robin
     the agent spawn between a NORTH base (near corner y=5) and a
-    SOUTH base (near corner y=38)."""
+    SOUTH base (near corner y=36)."""
     if easy_mode:
         return 18
     af = next(
@@ -68,7 +68,7 @@ def _near_y(obs, easy_mode):
     )
     if af and af["cell_y"] < 18:
         return 5
-    return 38
+    return 36
 
 
 def _no_scout_pre_commit_policy(easy_mode: bool):

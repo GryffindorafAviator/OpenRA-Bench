@@ -229,7 +229,7 @@ def _intended_policy(level: str):
         jeeps = [u for u in units if u.get("type") == "jeep"]
         if jeeps and not state["scouted"]:
             jids = [j["id"] for j in jeeps]
-            cmds.append(Cmd.move_units(jids, 100, 20))
+            cmds.append(Cmd.move_units(jids, 60, 20))
             state["scouted"] = True
         # Queue K 2tnks (one per turn) from the weap; weap is pre-
         # placed and 2tnk's tech prereqs (weap + fix) are pre-met.
@@ -239,10 +239,10 @@ def _intended_policy(level: str):
             cmds.append(Cmd.build("2tnk"))
             state["queued"] += 1
         # Once we have K tanks, attack-move them east to the
-        # defender cloud (110,20).
+        # defender cloud (68,20).
         if len(own_tanks) >= K and not state["sent"]:
             tids = [t["id"] for t in own_tanks]
-            cmds.append(Cmd.attack_move(tids, 110, 20))
+            cmds.append(Cmd.attack_move(tids, 68, 20))
             state["sent"] = True
         if not cmds:
             cmds.append(Cmd.observe())
@@ -266,7 +266,7 @@ def _under_build_policy():
         jeeps = [u for u in units if u.get("type") == "jeep"]
         if jeeps and not state["scouted"]:
             jids = [j["id"] for j in jeeps]
-            cmds.append(Cmd.move_units(jids, 100, 20))
+            cmds.append(Cmd.move_units(jids, 60, 20))
             state["scouted"] = True
         prod = obs.get("production", []) or []
         own_tanks = [u for u in units if u.get("type") == "2tnk"]
@@ -275,7 +275,7 @@ def _under_build_policy():
             state["queued"] += 1
         if len(own_tanks) >= 2 and not state["sent"]:
             tids = [t["id"] for t in own_tanks]
-            cmds.append(Cmd.attack_move(tids, 110, 20))
+            cmds.append(Cmd.attack_move(tids, 68, 20))
             state["sent"] = True
         if not cmds:
             cmds.append(Cmd.observe())
@@ -298,7 +298,7 @@ def _over_build_policy():
         jeeps = [u for u in units if u.get("type") == "jeep"]
         if jeeps and not state["scouted"]:
             jids = [j["id"] for j in jeeps]
-            cmds.append(Cmd.move_units(jids, 100, 20))
+            cmds.append(Cmd.move_units(jids, 60, 20))
             state["scouted"] = True
         prod = obs.get("production", []) or []
         own_tanks = [u for u in units if u.get("type") == "2tnk"]
@@ -310,7 +310,7 @@ def _over_build_policy():
         # wave).
         if len(own_tanks) >= OVER_BUILD_N and not state["sent"]:
             tids = [t["id"] for t in own_tanks]
-            cmds.append(Cmd.attack_move(tids, 110, 20))
+            cmds.append(Cmd.attack_move(tids, 68, 20))
             state["sent"] = True
         if not cmds:
             cmds.append(Cmd.observe())

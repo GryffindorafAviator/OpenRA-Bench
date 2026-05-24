@@ -163,6 +163,33 @@ UPGRADED = [
     "lh-opening-to-tech-to-army",
     "lh-tech-pivot-attack",
     "lh-credit-only-final-phase",
+    # Family-11 (full-game) — first POC pack: combined-arms ground
+    # + air vertical strike with seed-rotated NORTH/SOUTH base.
+    "f11-vertical-strike-ground-air",
+    # Family-11 combined-arms ground + naval: water channel forces
+    # syrd to be built adjacent to water; the dd + tank force
+    # composition; hard tier seed-rotates NORTH/SOUTH coastal base.
+    "f11-vertical-strike-naval",
+    # Family-11 FULL combined-arms (ground + air + naval): three
+    # production gates (weap + hpad + syrd) in a 5-clause `then:`
+    # chain; hard tier seed-rotates NORTH/SOUTH base across the
+    # tri-domain target spread (coastal + midfield + inland).
+    "f11-full-combined-arms",
+    # Family-11 reactive-idiom pack: enemy SWITCHES arm mid-episode
+    # via scheduled_events.spawn_actors; hard tier seed-rotates
+    # NORTH/SOUTH base.
+    "f11-pivot-on-scout",
+    # Family-11 — full econ→tech→army→strike arc with seed-rotated
+    # NORTH/SOUTH agent base on hard.
+    "f11-econ-tech-army-strike",
+    # Family-11 — defense-then-counter (offensive enemy from t=0)
+    # with seed-rotated NORTH/SOUTH agent base on hard.
+    "f11-defense-then-counter",
+    # Family-11 reactive-idiom pack: scheduled_events.destroy_actors
+    # wipes a production building mid-episode; agent must rebuild.
+    # Hard tier seed-rotates NORTH/SOUTH base and adds a second
+    # attrition event at tick 2000.
+    "f11-rebuild-after-attrition",
     "mfb-tech-base-vs-economy-base",
     "combat-harass-balanced-hit-and-run",
     "tech-aggro-all-in",

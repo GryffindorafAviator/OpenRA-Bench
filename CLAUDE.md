@@ -18,20 +18,11 @@ A scenario is defective if any of the following hold:
    advertised capability (the "laziest play wins" inversion).
 2. `within_ticks` or `after_ticks` is set above the tick reachable
    within `max_turns`; the deadline never bites ⇒ the episode times
-   out as a **DRAW**, not a LOSS. **Reachable max tick ≈
-   `93 + 90·(max_turns − 1)`** — the bench advances ~90 ticks per
-   decision turn in non-interrupt mode (the engine constant
-   `DEFAULT_TICKS_PER_STEP = 30` in `openra-train/src/env.rs:33` is
-   advanced 3× per `env.step()` via internal `process_frame` calls
-   in the bench's step path; net effect is ~90 ticks/turn). The
-   bench test suite enforces this formula via the
-   `test_timeout_reachable_inside_max_turns` helper used in 12+
-   pack tests (search for `93 + 90 * (max_turns`). Interrupt-mode
-   runs (any pack with a non-empty `interrupts:` block) advance
-   variable ticks per turn (`max_ticks` defaults to 5 in the bench
-   call site `openra_bench/eval_core.py`), so per-turn tick advance
-   is non-constant — read the actual value from
-   `info["ticks_advanced"]` instead of assuming it.
+   out as a **DRAW**, not a LOSS. **Reachable max tick = `93 + 90·
+   (max_turns − 1)`** for non-interrupt mode; interrupt-mode packs
+   advance 1-5 ticks per turn (variable). See the full "Ticks/turn"
+   note in "Engine facts you must internalise" below for the
+   complete formula + common pitfall.
 3. There is no `fail_condition`, or it only triggers on full
    force-wipe; a stall / preserve / partial outcome silently draws.
 4. The intended capability is not solvable inside the declared budget
@@ -127,19 +118,78 @@ Before editing any scenario pack:
 
 ## Engine facts you must internalise
 
-- **Ticks/turn:** non-interrupt mode advances ~90 ticks per
-  decision turn (the engine constant
-  `DEFAULT_TICKS_PER_STEP = 30` in `openra-train/src/env.rs:33` is
-  advanced 3× per `env.step()` via internal `process_frame` calls
-  in the bench's step path). **Reachable max tick ≈
-  `93 + 90·(max_turns − 1)`** — the bench test suite enforces this
-  formula via the `test_timeout_reachable_inside_max_turns` helper
-  used in 12+ pack tests (search for `93 + 90 * (max_turns`).
-  Interrupt mode (`step_until_event`, used whenever `interrupts:`
-  is non-empty) advances variable ticks per turn — read
-  `info["ticks_advanced"]` rather than computing arithmetically.
-  Any `within_ticks` / `after_ticks` above the reachable tick is
-  **inert** (won't bite) ⇒ draw degeneracy.
+- **Vendor RA YAML is the SINGLE source of unit data.** The historical
+  hardcoded `GameRules::defaults()` table in
+  `OpenRA-Rust/openra-sim/src/gamerules.rs` was removed in PR #15
+  (replacing the earlier sync). All actor / weapon stats — HP, cost,
+  speed, footprint, weapons, prereqs — now come exclusively from
+  `OpenRA-Rust/vendor/OpenRA/mods/ra/rules/*.yaml`, parsed by
+  `from_ruleset()` and reached via:
+  - `GameRules::from_vendor()` — fresh parse, panics with a clear
+    message if the vendor directory is unreachable.
+  - `GameRules::vendor_cached()` — `OnceLock`-cached clone, suitable
+    for tests that spin up many worlds (parity sweeps, etc.).
+  - `openra-train/src/env.rs::load_rules_strict()` — runtime entry
+    point for the bench wheel; panics on missing vendor.
+  - `openra-sim/src/world.rs::build_world(map, ..., None, ...)` — the
+    `None` fallback now hits `vendor_cached()` instead of the deleted
+    `defaults()` stub, so every test that passes `None` for rules
+    transparently inherits vendor truth.
+  **Footguns this closes**: the stub used to drift from vendor — `fact`
+  footprint was 3×2 but vendor is 3×4; pillbox/tanya weapons were
+  hand-coded stubs (`AAStub`, `TanyaPistol`) rather than the real
+  vendor armaments (`Nike`, `Colt45`). Every pack edit now sees
+  vendor numbers without exception. **Footguns this exposes** (carried
+  in this CLAUDE.md): a handful of legacy tests pinned to stub HP /
+  weapon names (sync_hash_verify recorded sync hashes against stub
+  footprints; SAM Nike missile projectile path isn't fully simulated)
+  are marked `#[ignore]` with FIXMEs pointing here. If you author a
+  new pack and discover an actor stat that surprises you, read the
+  vendor YAML — not the audit CSVs from before PR #15 — for the
+  truth.
+- **Ticks/turn — the empirical numbers** (confirmed by 3+ audit
+  passes and 12+ in-tree test files):
+  - **Non-interrupt mode**: **~90 ticks per decision turn**. Reachable
+    max tick = **`93 + 90·(max_turns − 1)`** (≈ `90·max_turns`).
+    This is the formula the test suite enforces — every pack ships
+    a `test_timeout_loss_is_reachable` test using exactly
+    `93 + 90 * (max_turns − 1)` (`grep -lE '93 \+ 90 \*' tests/`).
+  - **Interrupt mode** (any pack with a non-empty `interrupts:`
+    block, dispatching through `step_until_event`): **1-5 ticks per
+    decision turn**, breaking on the first interrupt signal. The
+    bench's call site (`openra_bench/eval_core.py:348`) passes
+    `max_ticks=5` explicitly, so per-turn tick advance is variable
+    in `[1, 5]`. Read `info["ticks_advanced"]` rather than computing
+    arithmetically. **Reachable max tick ≤ `5·max_turns`** in the
+    worst case (no early signal), but the agent typically sees far
+    fewer because the interrupt fires.
+  - **Common pitfall** (the reason this section is long): the engine
+    constant `DEFAULT_TICKS_PER_STEP = 30` in
+    `openra-train/src/env.rs:33` is NOT the per-decision-turn value.
+    The bench advances frames 3× per `env.step()` (search
+    `process_frame` in `env.rs`), giving the ~90 figure above.
+    Don't quote the `30` figure — it's an internal constant, not
+    the budget every audit needs.
+  - **Defect rule**: any `within_ticks` / `after_ticks` above the
+    reachable tick is **inert** (won't bite) ⇒ DRAW degeneracy
+    (CLAUDE.md "no defect, no cheat" criterion #2).
+  - **`termination.max_ticks` is honoured exactly** (historical
+    footgun fixed). The engine used to ignore the scenario YAML
+    `termination.max_ticks` field and always use the constant
+    `DEFAULT_MAX_TICKS = 10000`, effectively capping every scenario
+    at `max_turns ≤ 110`. The parser now surfaces the field on
+    `MapDef.max_ticks`, and `Env::new_with_spawn_point` applies the
+    value EXACTLY — no clamp. Long-horizon packs (F11
+    vertical-strike with `max_turns 140-180` ⇒ reachable max tick
+    ≈ 16203) declare any budget their capability requires (e.g.
+    `termination: {max_ticks: 16500}`). When the YAML omits the
+    field the env falls back to `DEFAULT_MAX_TICKS = 10000` for
+    back-compat. Pinned by
+    `openra-data/tests/test_scenario_termination_parse.rs` (parser
+    coverage) and
+    `openra-train/tests/test_max_ticks_unbounded.rs` (end-to-end:
+    the engine actually runs past tick 10000 under a declared
+    higher budget).
 - **Engine auto-done:** the engine sets `done=True` when all enemy
   actors are eliminated, or sometimes when an agent unit reaches an
   enemy-key location. Without a persistent enemy actor a win-by-reach
@@ -353,8 +403,10 @@ Before editing any scenario pack:
   `observe`/`stop` only — the freeze-and-panic signal. A replayed
   trajectory MUST come from the same `pack:level:seed` (engine actor
   ids are seed-deterministic).
-- **`pbox` costs 400** in the bench engine (verified against
-  `OpenRA-Rust/openra-sim/src/gamerules.rs`); defense and infantry
+- **`pbox` costs 600** in the bench engine (verified against vendor
+  RA YAML loaded by `env.rs::load_rules_with_fallback`; note the
+  `gamerules.rs::defaults()` stub says 400 but the runtime value is
+  600 — see `audits/engine_unit_audit.csv`); defense and infantry
   are SEPARATE production queues so an efficient policy queues
   `build('pbox')` and `build('e1')` in parallel from turn 1.
 - **`pbox` is now an active direct-fire tower** (engine fix,
@@ -400,6 +452,20 @@ Before editing any scenario pack:
 - **`place_building` does NOT enforce build-adjacency** — orders
   work at arbitrary in-bounds coords. Forward-base / far-region
   building is solvable with a single `build + place_building`.
+- **`scout` is NOT a tool / `Command` verb** — it is a NOUN used in
+  pack briefings and pack names (`scout-and-report`,
+  `mid-tech-switch-on-scout`, …) to refer to a scout-role UNIT
+  (typically `jeep`) and the SCOUTING capability (move into the
+  fog to reveal hidden actors / buildings). The actual verb is
+  `move_units` (drive the jeep into the unexplored region); the
+  predicate that gates the WIN is `buildings_discovered_gte` /
+  `enemies_discovered_gte` (snapshot of the agent's fog-of-war
+  scan, populated by the engine's `is_visible_to` + the
+  adapter's `enemies_seen_ids`). No pack currently lists `scout`
+  in `tools:` (verified by a YAML scan), and there is no
+  `Command::Scout` variant in `openra-train/src/env.rs`. The F9
+  audit's "scout tool semantics unclear" caveat was a
+  false-positive on the NOUN; nothing to change.
 - **`fact` has cost 0** → not buildable via `StartProduction`
   (engine gates on `cost > 0`). Use `proc` as the "second base seed"
   in expand-arm objectives.

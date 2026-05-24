@@ -129,7 +129,7 @@ def test_predicates_per_level_attrition_cap_and_deadline():
     pack = load_pack(PACK_PATH)
     # The intended winning context: a jeep IS in the recon region,
     # the loss cap is honoured, the deadline isn't past.
-    in_region = [(110, 20), (8, 18), (8, 20), (8, 22)]
+    in_region = [(100, 20), (8, 18), (8, 20), (8, 22)]
     expected_caps = {"easy": 2, "medium": 1, "hard": 0}
     for lvl, cap in expected_caps.items():
         c = compile_level(pack, lvl)
@@ -170,8 +170,8 @@ def test_intended_predicate_wins_only_when_actually_at_recon_point():
             c.win_condition,
             _ctx(units_xy=spawn_only, tick=3000, lost=0),
         ), f"{lvl}: sitting at spawn must NOT win"
-        # Adjacent to recon point (within radius 6) — wins.
-        near_recon = [(108, 22)]
+        # Adjacent to recon point (within radius 3) — wins.
+        near_recon = [(98, 22)]
         assert evaluate(
             c.win_condition,
             _ctx(units_xy=near_recon, tick=3000, lost=0),
@@ -220,7 +220,7 @@ def test_pack_is_in_not_applicable_with_roe_reason():
 def _intended_policy(rs, Command):
     """Detour-around-sentries policy. Routes the jeep column via the
     NORTH bypass (y=8): first leg WEST→(25,8), middle leg →(100,8),
-    then drop SOUTH to the recon point (110,20). Move-only orders —
+    then drop SOUTH to the recon point (100,20). Move-only orders —
     no attack_unit / attack_move is ever issued."""
     units = rs.get("units_summary", []) or []
     if not units:
@@ -233,7 +233,7 @@ def _intended_policy(rs, Command):
         elif ux < 100:
             tx, ty = 100, 8
         else:
-            tx, ty = 110, 20
+            tx, ty = 100, 20
         cmds.append(Command.move_units([str(u["id"])], target_x=tx, target_y=ty))
     return cmds
 
@@ -256,7 +256,7 @@ def _wrong_path_policy(rs, Command):
     cmds = []
     for u in units:
         cmds.append(
-            Command.move_units([str(u["id"])], target_x=110, target_y=20)
+            Command.move_units([str(u["id"])], target_x=100, target_y=20)
         )
     return cmds
 

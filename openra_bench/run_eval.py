@@ -686,7 +686,79 @@ def write_report(stats: dict, path: str | Path) -> None:
     Path(path).write_text(json.dumps(stats, indent=2))
 
 
-def _resolve_packs(spec: str | None) -> list[Path]:
+# Family → pack-name prefix map. Keep in sync with the audit CSVs
+# (audits/familyN_*.csv). Used by `--family f1,f2,...` to filter the
+# bundled `openra_bench/scenarios/packs/` directly — no staging dir
+# needed, so `data/packs-*-v3/` etc. are no longer load-bearing.
+_FAMILY_PREFIXES = {
+    "f1": ("combat-", "action-", "harass-"),
+    "f2": ("econ-", "economy-"),
+    "f3": ("def-", "defense-", "build-defensive-"),
+    "f4": ("scout-", "perception-", "navigation-"),
+    "f5": ("lh-", "longhorizon-"),
+    "f6": ("build-engineer-", "build-power-", "build-production-",
+           "build-rally-", "build-repair-", "build-sell-",
+           "build-sequence-", "build-tech-", "building-",
+           "tech-", "power-"),
+    "f7": ("proc-", "strict-", "maint-", "rob-"),
+    "f8": ("mfb-", "mcv-", "coord-", "coordination-"),
+    "f9": ("tp-", "tempo-", "strategy-", "adv-", "adversarial-",
+           "artofwar-", "risk-", "reasoning-", "expansion-", "mid-"),
+    "f10": ("spec-", "custom-"),
+    # f10 also covers the rush-hour baseline; matched by exact name below.
+}
+_F10_EXACT = {"rush-hour"}
+
+
+def _packs_for_families(family_spec: str) -> list[Path]:
+    """Resolve `--family f1,f2,f3to10` (or `--family all`) to the
+    matching pack files in the bundled `PACKS_DIR`. Replaces the
+    ad-hoc `data/packs-*-v3/` staging dir pattern.
+
+    Family tokens: f1..f10, or compound `f3to10` (= f3+f4+...+f10).
+    """
+    fams: list[str] = []
+    for tok in family_spec.split(","):
+        tok = tok.strip().lower()
+        if not tok:
+            continue
+        if tok == "all":
+            fams.extend(f"f{i}" for i in range(1, 11))
+        elif "to" in tok:  # e.g. f3to10
+            a, _, b = tok.partition("to")
+            ai = int(a.lstrip("f"))
+            bi = int(b)
+            fams.extend(f"f{i}" for i in range(ai, bi + 1))
+        else:
+            fams.append(tok)
+
+    seen: set[str] = set()
+    prefixes: list[str] = []
+    exact: set[str] = set()
+    for f in fams:
+        if f not in _FAMILY_PREFIXES:
+            raise ValueError(f"unknown --family token: {f}")
+        for p in _FAMILY_PREFIXES[f]:
+            if p not in seen:
+                seen.add(p)
+                prefixes.append(p)
+        if f == "f10":
+            exact.update(_F10_EXACT)
+
+    out: list[Path] = []
+    for p in sorted(PACKS_DIR.rglob("*.yaml")):
+        if p.name.startswith(("_", "TEMPLATE")):
+            continue
+        stem = p.stem
+        if any(stem.startswith(pref) for pref in prefixes) or stem in exact:
+            out.append(p)
+    return out
+
+
+def _resolve_packs(spec: str | None,
+                   family_spec: str | None = None) -> list[Path]:
+    if family_spec:
+        return _packs_for_families(family_spec)
     if not spec:
         # Recurse so quarantined packs in `_archive/` are surfaced —
         # they get short-circuited into `skipped` by the quarantine
@@ -728,6 +800,14 @@ def main(argv: list[str]) -> int:
     _load_dotenv()
     ap = argparse.ArgumentParser(description="Run a model over OpenRA-Bench scenario packs")
     ap.add_argument("--packs", help="pack file or dir (default: bundled packs/)")
+    ap.add_argument(
+        "--family",
+        help=(
+            "Comma-separated family tokens (f1,f2,...,f10,all) or compound "
+            "ranges like 'f3to10'. Filters the bundled packs/ dir to the "
+            "named families; mutually exclusive with --packs."
+        ),
+    )
     ap.add_argument("--levels", default="easy,medium,hard")
     ap.add_argument("--seeds", default="1,2,3")
     ap.add_argument(
@@ -865,8 +945,10 @@ def main(argv: list[str]) -> int:
             cfg_kw["bedrock_region"] = a.bedrock_region
         cfg = ProviderConfig(**cfg_kw)
 
+    if a.packs and a.family:
+        ap.error("--packs and --family are mutually exclusive")
     stats = evaluate(
-        _resolve_packs(a.packs),
+        _resolve_packs(a.packs, a.family),
         a.levels.split(","),
         [int(s) for s in a.seeds.split(",")],
         provider_cfg=cfg,

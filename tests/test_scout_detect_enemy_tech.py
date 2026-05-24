@@ -54,10 +54,10 @@ def _stall_policy():
 
 
 def _intended_scout_policy(easy_mode: bool):
-    """Drive both jeeps east. Easy: one cluster, both jeeps to (115,18).
-    Medium/hard: split — jeep[0] to (113,10) (north band → weap + tech),
-    jeep[1] to (113,28) (south band → dome + tech); both cross the mid
-    band en route, registering fact at (110,18) along the way."""
+    """Drive both jeeps east. Easy: one cluster, both jeeps to (71,18).
+    Medium/hard: split — jeep[0] to (69,10) (north band → weap + tech),
+    jeep[1] to (69,28) (south band → dome + tech); both cross the mid
+    band en route, registering fact at (66,18) along the way."""
     def pol(obs, Cmd):
         units = obs.get("units_summary", []) or []
         jeeps = [u for u in units if u.get("type") == "jeep"]
@@ -65,12 +65,12 @@ def _intended_scout_policy(easy_mode: bool):
             return [Cmd.observe()]
         ids = sorted([u["id"] for u in jeeps])
         if easy_mode:
-            return [Cmd.move_units(ids, 115, 18)]
+            return [Cmd.move_units(ids, 71, 18)]
         cmds = []
         if len(ids) >= 1:
-            cmds.append(Cmd.move_units([ids[0]], 113, 10))
+            cmds.append(Cmd.move_units([ids[0]], 69, 10))
         if len(ids) >= 2:
-            cmds.append(Cmd.move_units([ids[1]], 113, 28))
+            cmds.append(Cmd.move_units([ids[1]], 69, 28))
         return cmds or [Cmd.observe()]
     return pol
 
@@ -80,7 +80,7 @@ def _over_scout_policy():
     burns the clock without registering enough enemy buildings.
     Models the "drive into every fog pocket" failure mode."""
     state = {"wp_idx": 0}
-    waypoints = [(120, 5), (5, 5), (5, 40), (120, 40), (60, 18), (115, 18)]
+    waypoints = [(38, 5), (5, 5), (5, 37), (38, 37), (20, 18), (38, 5)]
 
     def pol(obs, Cmd):
         units = obs.get("units_summary", []) or []
@@ -110,7 +110,7 @@ def _brute_attack_policy():
         eb = obs.get("enemy_buildings_summary", []) or []
         if eb:
             return [Cmd.attack_unit(ids, eb[0].get("id"))]
-        return [Cmd.move_units(ids, 115, 18)]
+        return [Cmd.move_units(ids, 71, 18)]
     return pol
 
 

@@ -174,6 +174,14 @@ class RunJournal:
         self._lock = threading.Lock()
 
     def done_keys(self) -> set[str]:
+        """Keys of episodes considered DONE for resume-skip purposes.
+
+        Cells whose recorded `outcome == "error"` are EXCLUDED — an
+        error means the provider/engine call faulted (429 storm,
+        timeout, malformed tool-call response, …), not that the cell
+        was actually played. Resuming should RETRY those, not skip.
+        A real `win` / `loss` / `draw` cell stays in the done set.
+        """
         if not self.path.exists():
             return set()
         keys: set[str] = set()
@@ -182,9 +190,14 @@ class RunJournal:
             if not line:
                 continue
             try:
-                keys.add(json.loads(line)["_key"])
+                rec = json.loads(line)
             except Exception:  # noqa: BLE001 — tolerate a torn last line
                 continue
+            if rec.get("outcome") == "error":
+                continue  # retry on next run
+            key = rec.get("_key")
+            if key is not None:
+                keys.add(key)
         return keys
 
     def append(self, key: str, record: dict) -> None:
