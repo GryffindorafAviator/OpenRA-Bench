@@ -115,9 +115,13 @@ base:
   planning: true
   interrupts: {}
   termination:
-    # Engine `max_ticks` cap is 10000 (DEFAULT_MAX_TICKS in env.rs);
-    # within_ticks ≤ 9999 enforced by pack-shape test.
-    max_ticks: 10000
+    # Engine commit 493898e wires `termination.max_ticks` through
+    # end-to-end; the historical 10000-tick hard cap is removed.
+    # Hard tier restores the original `audits/family11_full_game.csv`
+    # design at max_turns 150 / within_ticks 13000 / reachable max
+    # 13503. Easy / medium stay at their POC-validated budgets so
+    # this single ceiling covers all three.
+    max_ticks: 13500
     agent_units_killed: true
     # §79 MANDATORY: win clause gates on enemy_buildings_destroyed_gte,
     # so the engine must NOT auto-`done` on enemy-unit-wipe (the
@@ -310,14 +314,14 @@ levels:
       (y=12) or SOUTH (y=28) by seed — read your actual starting band
       from the observation. Each spawn holds a Construction Yard, two
       Power Plants, an Ore Refinery and two starter Harvesters. Three
-      ore patches sit adjacent. Cash on hand: $13000. The enemy holds
+      ore patches sit adjacent. Cash on hand: $9500. The enemy holds
       a defended base at (98,20), with riflemen, rocket soldiers, a
       pre-positioned medium tank, and two timed waves — a hunt-tank
       raid around tick 1500 and a main attack around tick 3000. Build
       a War Factory AND a Service Depot, field at least six medium
       tanks, then raze at least three enemy buildings — all within
-      about 110 turns. Keep your Construction Yard standing.
-    starting_cash: 13000
+      about 150 turns. Keep your Construction Yard standing.
+    starting_cash: 9500
     overrides:
       base_map:
         generator: arena
@@ -384,14 +388,17 @@ levels:
               - {has_building: fix}
               - {unit_type_count_gte: {type: 2tnk, n: 6}}
               - {enemy_buildings_destroyed_gte: 3}
-        # max_turns 110 ⇒ reachable max = 93+90·109 = 9903;
-        # deadline 9800 leaves ~100-tick buffer (engine max_ticks
-        # caps at 10000).
-        - {within_ticks: 9800}
+        # max_turns 150 ⇒ reachable max = 93+90·149 = 13503;
+        # deadline 13000 leaves a ~500-tick buffer. Engine commit
+        # 493898e removed the historical 10000-tick max_ticks cap,
+        # so `base.termination.max_ticks: 13500` is honoured
+        # end-to-end and this is the original
+        # audits/family11_full_game.csv design budget.
+        - {within_ticks: 13000}
         - {building_count_gte: {type: fact, n: 1}}
     fail_condition:
       any_of:
-        - {after_ticks: 9801}
+        - {after_ticks: 13001}
         - {not: {building_count_gte: {type: fact, n: 1}}}
         - {not: {own_units_gte: 1}}
-    max_turns: 110
+    max_turns: 150
