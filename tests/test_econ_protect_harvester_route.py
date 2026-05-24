@@ -318,16 +318,17 @@ def test_predicates_enforce_capability():
     one_harv = [{"cell_x": 30, "cell_y": 20, "type": "harv", "id": "9001"}]
     base_buildings = [("fact", 8, 20), ("proc", 12, 20)]
 
-    # Intended: bar met, harv alive, base intact, in time → WIN.
+    # Intended: bar met (medium bar=1200), harv alive, base intact,
+    # in time → WIN.
     assert evaluate(
         c.win_condition,
-        _ctx(units=one_harv, tick=2000, cash=1500,
+        _ctx(units=one_harv, tick=2000, cash=1200,
              own_buildings=base_buildings),
     )
     # Bar short → not a WIN.
     assert not evaluate(
         c.win_condition,
-        _ctx(units=one_harv, tick=2000, cash=1499,
+        _ctx(units=one_harv, tick=2000, cash=1199,
              own_buildings=base_buildings),
     )
     # Harv dead → not a WIN AND a real FAIL.
@@ -386,14 +387,14 @@ def _defenders_stand_at_base(rs, Command):
     against: harvest IS re-issued to the harv (so income would
     accumulate if the harv survived), but the defenders are
     explicitly told to stop / hold at base. The defender sight
-    envelope does not reach the kill zone (x≈40..50) and the harv
+    envelope does not reach the kill zone (x≈35..45) and the harv
     dies on the route → LOSS."""
     cmds = []
     h = _harv(rs)
     if h is not None:
         # Issue harvest to the active mine on the harv's own y-band.
         my = int(h.get("cell_y", 20))
-        cmds.append(Command.harvest([str(h["id"])], 60, my))
+        cmds.append(Command.harvest([str(h["id"])], 50, my))
     for d in _defenders(rs):
         cmds.append(Command.stop([str(d["id"])]))
     return cmds or [Command.observe()]
@@ -434,21 +435,17 @@ def _intended_intercept_on_route(rs, Command):
     raider = _raider(rs)
     if h is not None:
         my = int(h.get("cell_y", 20))
-        cmds.append(Command.harvest([str(h["id"])], 60, my))
-        for d in defenders:
-            if raider is not None:
-                cmds.append(Command.attack_unit([str(d["id"])],
-                                                str(raider["id"])))
-            else:
-                # Raider not yet in vision — push east along the
-                # harv's lane to close the intercept distance.
-                cmds.append(Command.attack_move([str(d["id"])], 55, my))
-    else:
-        # Lost the harv before issuing the first order — best-effort
-        # is to still push the defenders east on their own row.
-        for d in defenders:
+        cmds.append(Command.harvest([str(h["id"])], 50, my))
+    for d in defenders:
+        if raider is not None:
+            cmds.append(Command.attack_unit([str(d["id"])],
+                                            str(raider["id"])))
+        else:
+            # Raider not yet in vision — each defender pushes east
+            # on its OWN y-band (using the harv's y would converge
+            # both defenders onto a single cell, blocking each other).
             dy = int(d.get("cell_y", 20))
-            cmds.append(Command.attack_move([str(d["id"])], 55, dy))
+            cmds.append(Command.attack_move([str(d["id"])], 45, dy))
     return cmds or [Command.observe()]
 
 
