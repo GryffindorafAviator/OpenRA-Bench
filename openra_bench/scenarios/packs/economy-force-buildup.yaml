@@ -16,6 +16,10 @@ meta:
     AND a set of capable mission agents — not a swarm of the cheapest
     drones — before a mission deadline; an unfocused spend yields
     neither in time.
+  benchmark_anchor:
+    - "SC2 build-order under fixed budget"
+    - "PlanBench cost-bounded multi-goal allocation"
+    - "fixed-budget force buildup"
   author: autonomous-loop
 
 # ENGINE NOTE (verified 2026-05): harvest income is 0 in a runnable
@@ -28,7 +32,20 @@ meta:
 # requires the item to be queued via `build` and completed first
 # (two-step: build → place). Budgets/clocks measured with a scripted
 # allocator (build powr → place → train e3): see commit message.
-base_map: rush-hour-arena
+# MAP — per-scenario (replaces the generic rush-hour-arena 128x40).
+# The decision under test is PURELY a base-internal spend+place+train
+# cycle (no traversal). A 48x40 bespoke arena cuts the empty pre-engagement
+# corridor entirely: the pre-placed base anchors at x≈10-14, and a single
+# inert enemy marker sits at x=42 on the far edge to keep the engine from
+# auto-`done`-ing on enemy-wipe before the win/fail evaluator runs.
+# Cordon 2 ⇒ playable (2..44, 2..36).
+base_map:
+  generator: arena
+  name: economy-force-buildup-48x40
+  width: 48
+  height: 40
+  cordon: 2
+  title: Economy Force-Buildup Arena 48x40
 # Pack-wide economy default; levels set the binding per-level budget.
 starting_cash: 2400
 
@@ -45,7 +62,7 @@ base:
     - stop
   planning: true
   termination:
-    max_ticks: 30000
+    max_ticks: 12000
   actors:
     - type: fact
       owner: agent
@@ -62,12 +79,16 @@ base:
       position:
       - 10
       - 22
+    # Persistent inert enemy marker — far east of the small arena,
+    # HoldFire so it can't shoot back. Stops ConquestVictoryConditions
+    # auto-`done` on enemy-wipe before the win/fail evaluator fires
+    # (CLAUDE.md engine footgun).
     - type: e1
       owner: enemy
       position:
-      - 112
+      - 42
       - 34
-      stance: 2
+      stance: 0
 
 levels:
   easy:
@@ -81,10 +102,14 @@ levels:
     # neither bar. Generous clock; the only failure is an unfocused or
     # late spend.
     description: >
-      Allocate your budget for both upgrade and quality force: stand up a
-      second power plant AND train at least four anti-vehicle rocket
-      soldiers. Spamming cheap rifles clears neither bar. Generous clock —
-      only an unfocused or late spend fails. Within about 31 turns.
+      Commander, this is a fixed-budget force buildup. You start with a
+      Construction Yard ('fact'), one Power Plant ('powr'), and an Allied
+      Barracks ('tent'), plus $2400 cash. Allocate this budget for BOTH a
+      structural upgrade AND a quality force: stand up a second Power
+      Plant AND train at least four anti-vehicle rocket soldiers ('e3' —
+      300cr each, longer-ranged than rifles). Spamming the cheap rifle
+      ('e1', 100cr) clears neither bar. The clock is generous (about 31
+      turns); only an unfocused or late spend fails.
     starting_cash: 2400
     win_condition:
       all_of:
@@ -101,10 +126,12 @@ levels:
     max_turns: 30
   medium:
     description: >
-      Tighter budget and clock. The same allocation, scaled: a second
-      power plant plus 5 anti-vehicle infantry. The budget covers
-      exactly this one coherent build — cheap-unit spam or an
-      over-investment misses the deadline.
+      Commander, this is a tighter fixed-budget force buildup. You start
+      with a Construction Yard, one Power Plant, and an Allied Barracks
+      plus $1900 cash. Stand up a second Power Plant AND train at least
+      five anti-vehicle rocket soldiers ('e3' — 300cr each). The budget
+      covers exactly this one coherent build — cheap-rifle spam clears
+      neither bar; any over-investment misses the clock (about 28 turns).
     starting_cash: 1900
     win_condition:
       all_of:
@@ -117,10 +144,14 @@ levels:
     max_turns: 28
   hard:
     description: >
-      Lean budget, short clock, zero-attrition: build and place a
-      second power plant and train 6 anti-vehicle infantry, losing
-      nothing. Every credit and tick must convert to fielded force in
-      the correct order; spam or an over-spend fails the clock.
+      Commander, this is the leanest fixed-budget force buildup under a
+      short clock with zero-attrition. You start with a Construction Yard,
+      one Power Plant, and an Allied Barracks plus $2150 cash. Build and
+      place a second Power Plant AND train at least six anti-vehicle
+      rocket soldiers ('e3' — 300cr each) without losing a single one.
+      Every credit and every tick must convert to fielded force in the
+      correct order; cheap-rifle spam or any over-spend fails the clock
+      (about 24 turns).
     starting_cash: 2150
     win_condition:
       all_of:
