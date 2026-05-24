@@ -2,17 +2,27 @@
 high-value enemy objective (forlorn hope / military sacrifice doctrine).
 
 The bar: an all-in commit that drives the WHOLE force decisively at the
-enemy fact (110, 20), focus-firing through the picket and accepting the
+enemy fact (50, 20), focus-firing through the picket and accepting the
 loss of the bulk of the force, WINS on every level and every hard seed
 (1..4). STALL (only observe), PRESERVE-FORCE (only the lead tank
 probes, the rest hold), and STANDOFF (the whole force advances but
 halts short of the objective) all LOSE on every level — non-win is a
 real reachable timeout LOSS via the `after_ticks` fail clause.
 
-Recalibrated after the engine movement fixes (moving units take fire
-en route; `attack_unit` on out-of-sight targets paths normally; no
-sprint-invincibility). Two engine behaviours had to be designed
-around — both surfaced during this recalibration:
+Map (per tier, tailored after the original rush-hour-arena 4-corner-
+spawn rotation footgun caused authored coords to be silently
+seed-translated — ENGINE_FOLLOWUPS #6):
+  * easy / medium — open 96×40 arena, single explicit mpspawn at
+    (6, 20). The strike package stages at x=6 across y=16..24; the
+    objective fact sits at (50, 20); the picket sits at x=82..85.
+  * hard — 96×40 arena with water-painted chokepoint walls at
+    midmap (x=44..50, y=2..14 and y=26..37) leaving only a
+    y=15..25 corridor open. Two declared mpspawns at (6, 10) and
+    (6, 30) — NORTH and SOUTH staging — round-robined by seed via
+    `spawn_point`. The 4tnk is pulled back to x=88 (behind the
+    objective fact) so the all-in WIN is robust to either flank.
+
+Two engine behaviours the pack must design around:
 
   * The engine auto-`done`s the episode the moment the AGENT force is
     fully wiped, REGARDLESS of `termination.agent_units_killed`. A
@@ -22,18 +32,15 @@ around — both surfaced during this recalibration:
     keep a remnant alive long enough to raze the fact (loses ≈4 on
     easy / ≈6 on medium / a near-total loss on hard).
   * The engine also auto-`done`s when the last enemy COMBAT unit dies;
-    the far-corner SENTINEL fact (an enemy building) keeps the episode
-    alive past picket elimination so `within_ticks` evaluates on the
-    terminal frame.
+    the far-corner SENTINEL fact (an enemy building at (53, 4)) keeps
+    the episode alive past picket elimination so `within_ticks`
+    evaluates on the terminal frame.
 
-Picket re-tuned: a 2/3/3-e3 anti-armor wall at x=106 graded
-easy→medium→hard, with the 4tnk close in front of the fact (x=109 on
-easy/medium; x=112 on hard, where the seed-flank staging needs a
-flank-robust win). A `move`-beeline policy is NOT used as a losing
-probe: a plain move onto the objective cell trips the engine
-auto-`done` and collapses to a DRAW (not a real LOSS), so the losing
-probes are stall / careful-preserve / halt-short — all of which leave
-the picket alive and the fact intact and time out as real LOSSES.
+A `move`-beeline policy is NOT used as a losing probe: a plain move
+onto the objective cell trips the engine auto-`done` and collapses to
+a DRAW (not a real LOSS), so the losing probes are stall /
+careful-preserve / halt-short — all of which leave the picket alive
+and the fact intact and time out as real LOSSES.
 
 Validation is scripted (no model / network).
 """
@@ -76,7 +83,7 @@ def test_pack_compiles_and_meta_fields_populated():
 
 
 def _ctx(*, units=(), tick=1000, lost=0, fact_destroyed=False,
-         fact_xy=(110, 20)):
+         fact_xy=(50, 20)):
     """Synthesize a WinContext for predicate-level checks.
 
     `fact_destroyed=True` simulates the objective fact at `fact_xy`
@@ -170,12 +177,12 @@ def test_predicates_all_levels():
 
 
 def test_predicate_region_scoped_to_objective():
-    """The destroyed `fact` must be at (110, 20) — a fact destroyed
-    elsewhere (e.g. the far-corner SENTINEL fact at (122, 4)) does
+    """The destroyed `fact` must be at (50, 20) — a fact destroyed
+    elsewhere (e.g. the far-corner SENTINEL fact at (53, 4)) does
     NOT satisfy the in-region predicate."""
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(load_pack(PACK_PATH), lvl)
-        # Sentinel fact at (122, 4) razed (would only happen if the
+        # Sentinel fact at (53, 4) razed (would only happen if the
         # agent burned ticks on the wrong target) — predicate must
         # NOT trigger.
         import types
@@ -191,12 +198,12 @@ def test_predicate_region_scoped_to_objective():
             enemy_buildings_seen_ids=set(),
             enemy_buildings_destroyed=1,
             enemy_buildings_destroyed_types={"fact": 1},
-            enemy_buildings_destroyed_records=[("fact", 122, 4)],
+            enemy_buildings_destroyed_records=[("fact", 53, 4)],
         )
         ctx = WinContext(signals=sig, render_state={"units_summary": []})
         assert not evaluate(c.win_condition, ctx), (
-            f"{lvl}: razing the sentinel fact at (122,4) must NOT "
-            "satisfy the in-region predicate at (110,20)"
+            f"{lvl}: razing the sentinel fact at (92,4) must NOT "
+            "satisfy the in-region predicate at (86,20)"
         )
 
 
@@ -229,8 +236,8 @@ def test_hard_has_two_spawn_point_groups():
 
 
 def test_objective_fact_and_sentinel_present():
-    """Two enemy `fact` per level: one OBJECTIVE fact at (110, 20)
-    and one SENTINEL fact far away (~(122, 4)). The sentinel keeps
+    """Two enemy `fact` per level: one OBJECTIVE fact at (50, 20)
+    and one SENTINEL fact far away (~(53, 4)). The sentinel keeps
     the episode alive past objective-fact destruction so the
     within_ticks predicate evaluates on the terminal frame (engine
     auto-done footgun on MustBeDestroyed enemy buildings —
@@ -248,26 +255,27 @@ def test_objective_fact_and_sentinel_present():
             f"got {len(facts)} at {facts}"
         )
         objective = [(x, y) for (x, y) in facts
-                     if (x - 110) ** 2 + (y - 20) ** 2 <= 36]
+                     if (x - 50) ** 2 + (y - 20) ** 2 <= 36]
         sentinel = [(x, y) for (x, y) in facts
-                    if (x - 110) ** 2 + (y - 20) ** 2 > 36]
+                    if (x - 50) ** 2 + (y - 20) ** 2 > 36]
         assert len(objective) == 1 and len(sentinel) == 1, (
-            f"{lvl}: expected 1 objective fact at ~(110,20) + 1 "
+            f"{lvl}: expected 1 objective fact at ~(86,20) + 1 "
             f"sentinel far away, got obj={objective} sent={sentinel}"
         )
 
 
 def test_actors_inside_playable_bounds():
-    """rush-hour-arena playable bounds are (2..126, 2..38). Every
-    authored actor must be inside or the engine panics."""
+    """Per-tier tailored arena 56x40 with cordon=2 ⇒ playable bounds
+    (2..53, 2..37). Every authored actor must be inside or the engine
+    panics."""
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
         for a in c.scenario.actors:
             x, y = a.position
-            assert 2 <= x <= 126 and 2 <= y <= 38, (
+            assert 2 <= x <= 53 and 2 <= y <= 37, (
                 f"{lvl}: actor {a.type} owner={a.owner} at {a.position} "
-                f"is outside rush-hour-arena playable bounds"
+                f"is outside the per-tier arena 56x40 playable bounds"
             )
 
 
@@ -353,8 +361,8 @@ def _all_in(rs, Command):
     objective. When any enemy comes into vision the whole force
     `attack_unit`'s a single target — focus-firing — and switches to
     the objective fact the moment it appears. Until contact the force
-    `attack_move`s to a staging cell SHORT of the fact (106, 20):
-    advancing onto the fact's own cell (110, 20) would trip the
+    `attack_move`s to a staging cell SHORT of the fact (48, 20):
+    advancing onto the fact's own cell (50, 20) would trip the
     engine auto-`done`. Tanks + rocket infantry absorb fire and
     trade the bulk of the force for the kill on the fact. The
     intended sacrifice play."""
@@ -364,12 +372,12 @@ def _all_in(rs, Command):
     ids = [str(u["id"]) for u in units]
     enemies = rs.get("enemy_summary", []) or []
     if enemies:
-        # Prioritise the objective fact if in vision (cell_x < 115
-        # filters out the far-corner sentinel fact at (122,4) which
-        # sits past the objective).
+        # Prioritise the objective fact if in vision (cell_x < 53
+        # filters out the far-corner sentinel fact at (54,4) which
+        # sits past the objective on the 56-wide arena).
         for e in enemies:
             t = (e.get("type") or "").lower()
-            if t == "fact" and int(e.get("cell_x", 200)) < 115:
+            if t == "fact" and int(e.get("cell_x", 200)) < 53:
                 return [Command.attack_unit(ids, str(e["id"]))]
         # Otherwise focus-fire the single nearest defender.
         tx = sum(int(u["cell_x"]) for u in units) / len(units)
@@ -379,21 +387,24 @@ def _all_in(rs, Command):
             + (int(e.get("cell_y", 0)) - ty) ** 2
         )
         return [Command.attack_unit(ids, str(enemies[0]["id"]))]
-    return [Command.attack_move(ids, 106, 20)]
+    return [Command.attack_move(ids, 48, 20)]
 
 
 def _standoff(rs, Command):
     """Half-commit / brute-but-timid: the WHOLE force advances east
-    with `attack_move` but halts short of the objective at (90, 20).
-    The units bleed in the open against the picket's reach but never
-    press onto the fact; the fact never takes damage, the clock runs
-    out → LOSS. Discriminates a full decisive commit from a partial
-    advance."""
+    with `attack_move` but halts short of the objective at (28, 20)
+    — outside the guard-bot leash (16 cells from picket at x=46).
+    The units stand in the open inside the picket's distant Dragon
+    arc but never press onto the fact; the fact never takes damage,
+    the clock runs out → LOSS. Discriminates a full decisive commit
+    from a partial advance. Halting deeper (e.g. x=40) gets the
+    whole force inside guard-lunge range and the engine auto-`done`s
+    on full agent-wipe (collapses to DRAW instead of a real LOSS)."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
     ids = [str(u["id"]) for u in units]
-    return [Command.attack_move(ids, 90, 20)]
+    return [Command.attack_move(ids, 28, 20)]
 
 
 def _preserve_force(rs, Command):
@@ -415,9 +426,9 @@ def _preserve_force(rs, Command):
     # Lead pushes east — but if damaged, retreats to safety.
     lead_hp = int(lead.get("health", lead.get("hp", 100)) or 100)
     if lead_hp < 50:
-        cmds.append(Command.move_units([str(lead["id"])], 6, int(lead["cell_y"])))
+        cmds.append(Command.move_units([str(lead["id"])], 4, int(lead["cell_y"])))
     else:
-        cmds.append(Command.attack_move([str(lead["id"])], 100, 20))
+        cmds.append(Command.attack_move([str(lead["id"])], 48, 20))
     # Holders explicitly stop and stay west.
     for h in holders:
         cmds.append(Command.stop([str(h["id"])]))
@@ -481,7 +492,7 @@ def test_preserve_force_loses(level, seed):
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_standoff_loses(level, seed):
     """Half-commit / brute-but-timid: the whole force advances east
-    but halts short of the objective at (90, 20). The force bleeds in
+    but halts short of the objective at (40, 20). The force bleeds in
     the open but never presses onto the fact; the fact never takes
     damage, clock expires → LOSS. Discriminates a decisive full
     commit from a partial advance."""

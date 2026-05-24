@@ -234,7 +234,7 @@ def _stand_and_shoot_policy(rs, Command):
             # No vision yet — march east to the engagement axis.
             cmds.append(
                 Command.move_units(
-                    [str(u["id"])], target_x=min(75, u["cell_x"] + 12),
+                    [str(u["id"])], target_x=min(60, u["cell_x"] + 12),
                     target_y=u["cell_y"],
                 )
             )
@@ -251,7 +251,7 @@ def _brute_attack_move_policy(rs, Command):
     cmds = []
     for u in units:
         cmds.append(
-            Command.attack_move([str(u["id"])], target_x=110, target_y=u["cell_y"])
+            Command.attack_move([str(u["id"])], target_x=92, target_y=u["cell_y"])
         )
     return cmds
 
@@ -281,7 +281,7 @@ def _intended_kite_policy(rs, Command):
             if d <= KITE_TRIGGER:
                 # Retreat: opposite of tank along x (the lane).
                 sign = 1 if dx <= 0 else -1
-                tx = max(2, min(126, ux + sign * RETREAT_DIST))
+                tx = max(2, min(93, ux + sign * RETREAT_DIST))
                 cmds.append(
                     Command.move_units([str(u["id"])], target_x=tx, target_y=uy)
                 )
@@ -293,7 +293,7 @@ def _intended_kite_policy(rs, Command):
             # No vision yet — march east to the engagement axis.
             cmds.append(
                 Command.move_units(
-                    [str(u["id"])], target_x=min(75, ux + 10), target_y=uy
+                    [str(u["id"])], target_x=min(55, ux + 10), target_y=uy
                 )
             )
     return cmds

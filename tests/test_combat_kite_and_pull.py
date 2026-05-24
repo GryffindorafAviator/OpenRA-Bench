@@ -86,26 +86,27 @@ def _brute(rs, C):
         return [C.observe()]
     return [
         C.attack_move(
-            [str(u["id"]) for u in own], target_x=120, target_y=own[0]["cell_y"]
+            [str(u["id"]) for u in own], target_x=92, target_y=own[0]["cell_y"]
         )
     ]
 
 
 def _kite(rs, C):
     """Intended kite-and-pull: each turn, if the heavy has closed
-    within ~6 cells of a kiter, MOVE that kiter ~8 cells AWAY along
-    its lane (the PULL); otherwise attack_unit the heavy from range
-    (the STRIKE). When no heavy is yet visible, advance east to draw
-    the hunting chaser into vision (capped at x=50 — far enough to
-    contact, not so far as to march into the heavy's lethal close
-    range without warning). The cycle is purely reactive — derived
-    each turn from geometry, no memory.
+    within ~7 cells of a kiter (Manhattan), MOVE that kiter ~8 cells
+    AWAY along its lane (the PULL); otherwise attack_unit the heavy
+    from range (the STRIKE). When no heavy is yet visible, advance
+    east to draw the hunting chaser into vision (capped at x=50 —
+    far enough to contact, not so far as to march into the heavy's
+    lethal close range without warning). The cycle is purely
+    reactive — derived each turn from geometry, no memory.
 
-    The retreat-threshold ≤6 and retreat-distance 8 are deliberately
-    matched to the 2tnk weapon range (~4.75 cells): the kiter
-    retreats just before the chaser enters its own attack range,
-    opening a window where attack_unit closes the kiter ONTO the
-    chaser to fire and then the next retreat pulls back."""
+    The retreat-threshold ≤7 and retreat-distance 8 are tuned for
+    the 96x40 arena (kiters stage at x=20, heavy at x=80): on the
+    diagonal-lag geometry (kiter y=9/11, heavy y=20), the chaser
+    enters vision at distance ~7 (Manhattan), so a ≤6 trigger
+    leaves the kiter inside cannon range one extra turn — costing
+    a kiter on medium's 2-of-2-must-survive bar."""
     own = _kiters(rs)
     if not own:
         return [C.observe()]
@@ -120,7 +121,7 @@ def _kite(rs, C):
                 + abs(e["cell_y"] - u["cell_y"]),
             )
             d = abs(u["cell_x"] - t["cell_x"]) + abs(u["cell_y"] - t["cell_y"])
-            if d <= 6:
+            if d <= 7:
                 cmds.append(
                     C.move_units(
                         [str(u["id"])],
@@ -132,8 +133,10 @@ def _kite(rs, C):
                 cmds.append(C.attack_unit([str(u["id"])], str(t["id"])))
     else:
         # No vision yet — march east on the staging lane until the
-        # hunting heavy comes into sight (cap at x=50 so the kiter
-        # does not blind-march into the heavy's lethal close range).
+        # hunting heavy comes into sight (cap at x=38 so the kiter
+        # does not blind-march into the heavy's lethal close range
+        # on the 96x40 arena; gives the kiter ~36 cells of retreat
+        # space before the cordon).
         cmds.append(
             C.move_units(
                 [str(u["id"]) for u in own],
@@ -267,7 +270,7 @@ def test_in_bounds_actors_on_every_level():
         c = compile_level(pack, lvl)
         for a in c.scenario.actors:
             x, y = a.position
-            assert 2 <= x <= 126 and 2 <= y <= 38, (
+            assert 2 <= x <= 93 and 2 <= y <= 37, (
                 f"{lvl}: actor {a.type} at ({x},{y}) out of bounds"
             )
 

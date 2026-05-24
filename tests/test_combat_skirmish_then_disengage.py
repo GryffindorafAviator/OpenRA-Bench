@@ -160,7 +160,7 @@ def test_timeout_loss_is_reachable_on_every_level():
 
 PHASE_STRIKE_UNTIL_TICK = 1300
 APPROACH_STEP = 15
-APPROACH_LIMIT_X = 46  # don't overrun the cluster (~x=50)
+APPROACH_LIMIT_X = 24  # don't overrun the cluster (~x=28..31 on shrunk map)
 
 
 def _e1_foes(enemies):
@@ -199,9 +199,10 @@ def _never_engage_policy(rs, Command):
 
 def _commit_until_overwhelmed_policy(rs, Command):
     """Charge east; attack_unit any visible foe; never retreat. The
-    kill bar IS met (4× jeep MG vs stance:0 rifles), but the jeeps
-    end the run sitting at the kill site (~x=50), not in the
-    recovery region. The region clause fails → after_ticks LOSS.
+    kill bar IS met (4× jeep MG vs ReturnFire rifles), but the jeeps
+    end the run sitting at the kill site (~x=28..31 on the shrunk
+    map), not in the recovery region. The region clause fails →
+    after_ticks LOSS.
     """
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
@@ -218,11 +219,11 @@ def _commit_until_overwhelmed_policy(rs, Command):
             )
             cmds.append(Command.attack_unit([str(u["id"])], str(t["id"])))
         else:
-            # March east to the cluster axis but STOP at the cluster
-            # (don't overrun to the far-east fact and trip auto-done).
+            # March east to the cluster axis but STOP at x=30 (don't
+            # overrun to the far-east fact and trip auto-done).
             cmds.append(
                 Command.move_units(
-                    [str(u["id"])], target_x=min(50, ux + 12), target_y=uy
+                    [str(u["id"])], target_x=min(30, ux + 12), target_y=uy
                 )
             )
     return cmds
@@ -246,7 +247,7 @@ def _intended_skirmish_then_disengage_policy(rs, Command):
     # Pick the nearest spawn-corner candidate as the recovery target
     # (stateless — works for both single-corner and any_of-corner
     # recovery clauses).
-    candidates = [(5, 20), (5, 10), (5, 30)]
+    candidates = [(4, 20), (4, 10), (4, 30)]
     cx = sum(u["cell_x"] for u in units) / len(units)
     cy = sum(u["cell_y"] for u in units) / len(units)
     home = min(

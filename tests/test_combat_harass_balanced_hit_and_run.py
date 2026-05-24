@@ -174,7 +174,8 @@ def test_timeout_loss_is_reachable_on_every_level():
 # intended pulse must be PROACTIVE: strike exactly one worker, then
 # immediately retreat past the leash without waiting to see the tank.
 PULSE_MG_RANGE = 4  # jeep M60mg engagement range to a soft worker
-PULSE_RETREAT_X = 50  # west rally line — comfortably past GUARD_LEASH
+PULSE_RETREAT_X = 50  # west rally line — comfortably past GUARD_LEASH (18)
+                      # from the post at (82,5)/(82,35) on the 96x40 arena
 
 
 def _workers(enemies):
@@ -329,7 +330,7 @@ def _brute_policy(rs, Command):
         else:
             cmds.append(
                 Command.move_units(
-                    [str(u["id"])], target_x=min(115, ux + 10), target_y=uy
+                    [str(u["id"])], target_x=min(92, ux + 10), target_y=uy
                 )
             )
     return cmds

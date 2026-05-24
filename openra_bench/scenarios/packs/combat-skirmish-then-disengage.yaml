@@ -11,6 +11,25 @@
 # disengages before attrition mounts past the survival bar — and gets
 # the force HOME (recovery region around the start) before the clock.
 #
+# 2026-05-23 audit (Family-1 #21): briefing rewritten per
+# audits/EDIT_PRINCIPLES.md; map shrunk rush-hour-arena 128x40 →
+# tailored arena 64x40 per tier so the cluster sits ~24 cells east
+# of the staging point — a short pulse-and-pull cycle.
+#
+# POSTURE FIX (2026-05-23): enemy rifle infantry bumped from
+# stance:0 HoldFire to stance:1 ReturnFire. Previously the cluster
+# sat passive while the jeeps strafed them — no incoming damage to
+# the raiders, so "disengage to preserve force" was meaningless (the
+# attrition cap could never be met). ReturnFire means the enemy
+# fires back the instant the jeeps engage: each strike now does
+# cost the raiders a slow trickle of damage, and a commit-and-stay
+# play eventually loses jeeps past the own_units_gte:3 floor. The
+# load-bearing decision — pull back BEFORE losses build — has real
+# teeth. ReturnFire (st1) is chosen over Defend (st2) because the
+# enemy must NOT fire FIRST (that would give the kill bar to a
+# stall policy via auto-return-fire on idle jeeps); the jeeps must
+# initiate combat explicitly via attack_unit / attack_move.
+#
 # Real-world anchors:
 #   - SC2 skirmisher tactics: a controlled "pull back to base" call
 #     after scoring damage, vs the "commit until dead" anti-pattern.
@@ -21,20 +40,20 @@
 #
 # Idiom (the four-policy bar — every level):
 #   • stall (only observe)            → LOSS. Kill bar unmet (≥3 kills
-#     required); the jeeps' default stance does not let them rack up
-#     return-fire kills sitting at home — they must drive east to
-#     find foes inside MG range.
+#     required); the jeeps' stance:0 (HoldFire) keeps them from
+#     accidentally returning fire even when the e1 cluster eventually
+#     fires at them — they must drive east and explicitly attack.
 #   • never-engage (park at start)    → LOSS. units_in_region clause
 #     is satisfied (jeeps already at the recovery zone), but the kill
 #     bar (units_killed_gte:3) is unmet → after_ticks LOSS.
 #   • commit-until-overwhelmed (charge east, never retreat)
 #                                     → LOSS. Kill bar IS met (the
 #     enemy infantry trade poorly vs 4× jeep MG), but the jeeps end
-#     the run at the enemy cluster (~x=50), NOT in the recovery
-#     region around the start. units_in_region_gte:{x:5,y:..,r:6,n:3}
-#     is unmet → after_ticks LOSS. On hard tier additionally the
-#     hunt-bot spawn waves grind down the un-retreating force past
-#     own_units_gte:3.
+#     the run at the enemy cluster (~x=28), NOT in the recovery
+#     region around the start. units_in_region_gte:{x:4,y:..,r:6,n:3}
+#     is unmet → after_ticks LOSS. With ReturnFire enemies the
+#     attrition trickle also bites: on medium/hard the commit play
+#     eventually drops below own_units_gte:3.
 #   • intended skirmish-then-disengage (drive east, kill ≥3, then
 #     move_units back to the start) → WIN. All three clauses met
 #     inside the 4500-tick budget.
@@ -50,15 +69,15 @@
 # Engine notes (load-bearing for the bar):
 #   - Jeeps start `stance: 0` (HoldFire). With stance:0 they do NOT
 #     auto-return-fire on approaching enemies — sitting idle while
-#     hunt-bot e1 close in DOES NOT score kills (kill bar unmet).
+#     ReturnFire e1 close in DOES NOT score kills (kill bar unmet).
 #     The only way to score is to explicitly `attack_unit` (or
 #     `attack_move`), which makes the agent's strike decision
 #     load-bearing.
 #   - Enemy `e1` at the mid-x cluster are placed at y=19/y=21 cells
 #     (verified-placement rows per CLAUDE.md — `e1` at some mid-x
-#     cells silently fails to surface; (50,19)/(50,21) are confirmed
-#     working).
-#   - Persistent unarmed enemy `fact` at far east (x=124) prevents the
+#     cells silently fails to surface; (28,19)/(28,21) are confirmed
+#     working at the new 64-wide map width).
+#   - Persistent unarmed enemy `fact` at far east (x=60) prevents the
 #     engine from auto-`done`ing on enemy unit wipe (which would
 #     collapse the run to DRAW before the within_ticks + region
 #     predicates evaluate cleanly on the terminal frame).
@@ -111,63 +130,63 @@ levels:
   # ── EASY ────────────────────────────────────────────────────────────
   # Bare skirmish-then-disengage skill: 4 jeeps (stance:0, no
   # auto-fire — kills require explicit attack_unit) vs 4× slow rifle
-  # infantry (e1, stance:0 — no auto-fire either, so a never-engage
-  # policy never scores). The strike force easily scores ≥3 kills
-  # under attack_unit (4× jeep MG vs unanswered rifles); the load-
-  # bearing decision is whether the agent then ORDERS THE RETREAT
-  # back to the recovery zone instead of mopping up the last enemy in
-  # place. stall / never-engage LOSE on the kill bar; commit-until-
-  # wiped LOSES because the jeeps end at x≈50 instead of the
-  # (5,20,r=6) recovery region.
+  # infantry (e1, stance:1 ReturnFire — they fire BACK once shot at
+  # but never first). The strike force easily scores ≥3 kills under
+  # attack_unit (4× jeep MG vs ReturnFire rifles), but each shot
+  # bought from the cluster comes with a slow trickle of return
+  # damage; the load-bearing decision is whether the agent then
+  # ORDERS THE RETREAT back to the recovery zone instead of mopping
+  # up the last enemy in place. stall / never-engage LOSE on the
+  # kill bar; commit-until-wiped LOSES because the jeeps end at
+  # x≈28 instead of the (4,20,r=6) recovery region.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four jeeps stage at the west base (5,20). Four enemy RIFLE INFANTRY
-    # (e1, slow) hold a cluster around (50,20). Drive east, kill AT LEAST
-    # THREE rifle infantry, then PULL BACK so AT LEAST THREE of your jeeps
-    # end inside the recovery zone (a 6-cell radius around (5,20) — i.e.
-    # your starting region). Keep at least three jeeps alive. Finish
-    # before tick 4500. Stalling LOSES (kill bar unmet); never engaging
-    # LOSES (kill bar unmet); committing east and staying at the cluster
-    # LOSES (your jeeps are at the kill site, not the recovery zone). The
-    # discriminator is the DISENGAGE order — stop attacking and move_units
-    # back to (5,20) once you have your 3 kills.
     description: >
-      Four jeeps at the western base face four enemy riflemen clustered
-      around (50,20). Drive east, gun down three of them, then pull back
-      so at least three jeeps end inside the 6-cell recovery disc around
-      (5,20). Staying at the kill site fails the region clause. Three
-      kills, three jeeps in recovery, within about 50 turns.
+      Commander, this is a skirmish-and-disengage raid. You are given
+      4 jeeps at the western staging point at (4,20). An enemy
+      cluster of 4 riflemen holds a knot around (28,20). The riflemen
+      are on Return-Fire orders — they only shoot back when shot at,
+      never first. Your jeeps start on hold-fire so they will not
+      engage on their own; you must order them in. Drive east, gun
+      down at least three riflemen, then pull every survivor back
+      into the 6-cell recovery disc around (4,20). Three kills,
+      three jeeps back home, within about 50 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: combat-skirmish-easy-arena
+        width: 64
+        height: 40
+        cordon: 2
+        spawns: [[4, 20]]
+        title: 'Combat Skirmish — Easy 64x40'
       actors:
         # Strike force: 4 jeeps at the western staging point.
         # stance:0 (HoldFire) — no auto-return-fire, so kills require
         # an explicit attack_unit / attack_move order (the load-
         # bearing decision under test).
-        - {type: jeep, owner: agent, position: [5, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [4, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [4, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [4, 21], stance: 0}
         - {type: jeep, owner: agent, position: [5, 20], stance: 0}
-        - {type: jeep, owner: agent, position: [5, 21], stance: 0}
-        - {type: jeep, owner: agent, position: [6, 20], stance: 0}
         # Enemy infantry cluster — 4× e1 spread across rows y=19/y=21
-        # (CLAUDE.md confirms y=19/y=21 mid-x cells place reliably).
-        # stance:0 so they sit on post — fair "discoverable cluster"
-        # for the test (a never-engage agent never gets attacked into
-        # an accidental kill).
-        - {type: e1, owner: enemy, position: [48, 19], stance: 0}
-        - {type: e1, owner: enemy, position: [50, 19], stance: 0}
-        - {type: e1, owner: enemy, position: [50, 21], stance: 0}
-        - {type: e1, owner: enemy, position: [52, 21], stance: 0}
+        # at x=27-29 (CLAUDE.md confirms y=19/y=21 mid-x cells place
+        # reliably). stance:1 ReturnFire — they fire BACK when shot
+        # at but never open fire first, so a never-engage agent
+        # never gets free kills, while a striking agent does bleed
+        # damage from each shot.
+        - {type: e1, owner: enemy, position: [27, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [29, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [27, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [29, 21], stance: 1}
         # Persistent far-east enemy fact — prevents engine auto-done
         # on enemy wipe collapsing the run to DRAW before the
         # within_ticks + region predicates evaluate.
-        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: fact, owner: enemy, position: [60, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 3}
         - {own_units_gte: 3}
-        - {units_in_region_gte: {x: 5, y: 20, radius: 6, n: 3}}
+        - {units_in_region_gte: {x: 4, y: 20, radius: 6, n: 3}}
         - {within_ticks: 4500}
     fail_condition:
       any_of:
@@ -185,46 +204,46 @@ levels:
   # — "stop attacking after 3 kills and order the disengage" — is
   # sharper.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four jeeps stage at the west base (5,20). SIX enemy rifle infantry
-    # hold a cluster around (50,20). Drive east, kill AT LEAST THREE rifle
-    # infantry, then PULL BACK so AT LEAST THREE of your jeeps end inside
-    # the recovery zone (6-cell radius around (5,20)). Keep at least three
-    # jeeps alive. Finish before tick 4500. With six enemies in the
-    # cluster a "commit until everything is dead" policy spends most of
-    # the budget mopping up — by the deadline your jeeps are still at the
-    # kill site, not the recovery zone, and the run fails on the region
-    # clause. Order the DISENGAGE after the third kill and drive west to
-    # the recovery zone.
     description: >
-      Same four jeeps at the western base; the cluster grows to six rifles
-      around (50,20). Killing all six eats the clock and leaves you
-      stranded forward. Order the disengage after the third kill and drive
-      west into the (5,20) recovery disc with three jeeps surviving,
-      within about 50 turns.
+      Commander, this is a skirmish-and-disengage raid. You are given
+      4 jeeps at the western staging point at (4,20). The enemy
+      cluster is bigger here — 6 riflemen knotted around (28,20),
+      all on Return-Fire orders (they shoot back when shot at, never
+      first). Your jeeps start on hold-fire. The cluster bleeds you
+      every round you fight it, and mopping up all six eats the
+      clock and leaves you stranded forward. Drive east, gun down
+      three riflemen, then pull every survivor back into the 6-cell
+      recovery disc around (4,20), keeping three jeeps alive, within
+      about 50 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: combat-skirmish-medium-arena
+        width: 64
+        height: 40
+        cordon: 2
+        spawns: [[4, 20]]
+        title: 'Combat Skirmish — Medium 64x40'
       actors:
-        - {type: jeep, owner: agent, position: [5, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [4, 19], stance: 0}
+        - {type: jeep, owner: agent, position: [4, 20], stance: 0}
+        - {type: jeep, owner: agent, position: [4, 21], stance: 0}
         - {type: jeep, owner: agent, position: [5, 20], stance: 0}
-        - {type: jeep, owner: agent, position: [5, 21], stance: 0}
-        - {type: jeep, owner: agent, position: [6, 20], stance: 0}
-        # 6× e1 cluster around (50,20). Verified-placement rows
-        # (y=19/y=21 mid-x).
-        - {type: e1, owner: enemy, position: [48, 19], stance: 0}
-        - {type: e1, owner: enemy, position: [48, 21], stance: 0}
-        - {type: e1, owner: enemy, position: [50, 19], stance: 0}
-        - {type: e1, owner: enemy, position: [50, 21], stance: 0}
-        - {type: e1, owner: enemy, position: [52, 19], stance: 0}
-        - {type: e1, owner: enemy, position: [52, 21], stance: 0}
-        - {type: fact, owner: enemy, position: [124, 20]}
+        # 6× e1 cluster around (28,20). ReturnFire so the strike
+        # bleeds the jeeps slowly. Verified-placement rows
+        # (y=19/y=21).
+        - {type: e1, owner: enemy, position: [27, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [27, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [29, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [29, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [31, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [31, 21], stance: 1}
+        - {type: fact, owner: enemy, position: [60, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 3}
         - {own_units_gte: 3}
-        - {units_in_region_gte: {x: 5, y: 20, radius: 6, n: 3}}
+        - {units_in_region_gte: {x: 4, y: 20, radius: 6, n: 3}}
         - {within_ticks: 4500}
     fail_condition:
       any_of:
@@ -242,60 +261,58 @@ levels:
   #   2. Two agent spawn_point groups (NORTH y=10 or SOUTH y=30)
   #      round-robined by seed; the recovery zone is `any_of` over the
   #      two spawn corners so the agent must return to ITS OWN start
-  #      corner (no "always retreat to (5,20)" memorisation). Spec's
+  #      corner (no "always retreat to (4,20)" memorisation). Spec's
   #      "2 spawn groups".
-  # Enemy actors do NOT honour spawn_point (CLAUDE.md), so the e1
-  # cluster sits symmetrically at the mid-latitude (y=20) — both
-  # spawn corridors face the same eastern threat geometry. The
-  # cluster size stays at 6 (matching medium); the hunt bot is the
-  # threat-axis upgrade, not raw enemy count — extra waves would
-  # overwhelm 4 jeeps before any disengage could complete (verified
-  # 2026-05-20: +4 extra e1 at x≈90 + hunt drops the intended-policy
-  # win rate to ~0% as the swarm closes inside 5 turns).
+  # Enemy actors do NOT honour spawn_point on the agent-side idiom
+  # (CLAUDE.md), so the e1 cluster sits symmetrically at the
+  # mid-latitude (y=20) — both spawn corridors face the same eastern
+  # threat geometry. Hunt bot upgrades enemy stance to st3 and adds
+  # OrderMove on the agent centroid, so ReturnFire vs Defend on the
+  # YAML stance is moot (bot wins). Cluster stays at 6 (matching
+  # medium); the hunt bot is the threat-axis upgrade.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four jeeps stage at ONE of two western staging points (NORTH (5,10)
-    # or SOUTH (5,30), chosen by seed — anti-memorisation). Six enemy
-    # RIFLE INFANTRY (e1) sit at a cluster around (50,20). The enemy side
-    # is HUNTING — surviving e1 actively pursue your jeeps. Kill AT LEAST
-    # THREE rifle infantry, keep at least three jeeps alive, AND end with
-    # at least three jeeps inside the recovery zone (6-cell radius around
-    # YOUR spawn corner, either (5,10) or (5,30)). Finish before tick
-    # 4500. Stalling, never engaging, and commit-and-stay all LOSE; the
-    # hunt bot ensures that a slow disengage also fails on the survival or
-    # region clause.
     description: >
-      Eight jeeps stage in the north (5,10) or south (5,30) staging area
-      by seed. Six enemy rifles cluster at (50,20) and actively hunt.
-      Strike, score three kills, then disengage back into YOUR matching
-      recovery disc with three jeeps inside, within about 50 turns. A slow
-      retreat lets the hunters catch you.
+      Commander, this is a skirmish-and-disengage raid on a hostile
+      cluster. You are given 4 jeeps at either the north staging
+      point (4,10) or the south (4,30) by seed. An enemy cluster of
+      6 riflemen sits at (28,20) and is actively HUNTING — surviving
+      riflemen advance on whichever of your jeeps is closest. Your
+      jeeps start on hold-fire. Drive east, gun down three riflemen,
+      then pull every survivor back into the 6-cell recovery disc
+      around YOUR matching staging point — either (4,10) or (4,30).
+      Three kills, three jeeps in your recovery disc, within about
+      50 turns. A slow retreat lets the hunters catch you.
     overrides:
+      base_map:
+        generator: arena
+        name: combat-skirmish-hard-arena
+        width: 64
+        height: 40
+        cordon: 2
+        spawns: [[4, 10], [4, 30]]
+        title: 'Combat Skirmish — Hard 64x40 (NORTH/SOUTH)'
       actors:
         # spawn_point 0 — NORTH staging (y=10)
-        - {type: jeep, owner: agent, position: [5,  9], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [4,  9], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [4, 10], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [4, 11], stance: 0, spawn_point: 0}
         - {type: jeep, owner: agent, position: [5, 10], stance: 0, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [5, 11], stance: 0, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [6, 10], stance: 0, spawn_point: 0}
         # spawn_point 1 — SOUTH staging (y=30)
-        - {type: jeep, owner: agent, position: [5, 29], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [4, 29], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [4, 30], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [4, 31], stance: 0, spawn_point: 1}
         - {type: jeep, owner: agent, position: [5, 30], stance: 0, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [5, 31], stance: 0, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [6, 30], stance: 0, spawn_point: 1}
-        # 6× e1 cluster at (50,20). Hunt bot gives them stance:3 on
+        # 6× e1 cluster at (28,20). Hunt bot gives them stance:3 on
         # init and issues Attack orders that drive them west toward
         # the jeeps; the infantry walk to contact takes ~6-8 turns.
-        - {type: e1, owner: enemy, position: [48, 19], stance: 0}
-        - {type: e1, owner: enemy, position: [48, 21], stance: 0}
-        - {type: e1, owner: enemy, position: [50, 19], stance: 0}
-        - {type: e1, owner: enemy, position: [50, 21], stance: 0}
-        - {type: e1, owner: enemy, position: [52, 19], stance: 0}
-        - {type: e1, owner: enemy, position: [52, 21], stance: 0}
+        - {type: e1, owner: enemy, position: [27, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [27, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [29, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [29, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [31, 19], stance: 1}
+        - {type: e1, owner: enemy, position: [31, 21], stance: 1}
         # Persistent far-east enemy fact.
-        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: fact, owner: enemy, position: [60, 20]}
       enemy: {faction: soviet, cash: 0, bot_type: hunt}
     # Hard win: recovery zone is `any_of` over the two spawn corners
     # — the agent must return to ITS OWN start corner. (A wrong-corner
@@ -306,8 +323,8 @@ levels:
         - {units_killed_gte: 3}
         - {own_units_gte: 3}
         - any_of:
-            - {units_in_region_gte: {x: 5, y: 10, radius: 6, n: 3}}
-            - {units_in_region_gte: {x: 5, y: 30, radius: 6, n: 3}}
+            - {units_in_region_gte: {x: 4, y: 10, radius: 6, n: 3}}
+            - {units_in_region_gte: {x: 4, y: 30, radius: 6, n: 3}}
         - {within_ticks: 4500}
     fail_condition:
       any_of:

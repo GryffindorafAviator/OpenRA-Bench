@@ -621,6 +621,16 @@ UPGRADED = [
     # y=20 so either spawn faces the same flank-vs-frontal decision
     # from a flipped bearing, and no memorised opening generalises.
     "combat-flanking-attack",
+    # Wave-14 combat-micro pack: hero / commando doctrine — a single
+    # Tanya commando (HP 10000, Colt45 weapon — 10000 dmg × reload 7
+    # one-shots an e1) holds the centre against e1 rushes that vary
+    # by tier. Hard defines two enemy spawn_point groups: NORTH
+    # corridor (x=16..21, y=17) OR SOUTH corridor (x=16..21, y=23)
+    # round-robined by seed; the corridor is symmetric across y=20
+    # so the policy faces the same hero-engagement decision but the
+    # rush direction flips. The intended doctrine is stance:2 Defend
+    # + per-turn attack_unit on the closest visible e1.
+    "combat-tanya-vs-rush",
     # Wave-7 REASONING seed: military divide-and-conquer / defeat-in-
     # detail / SMAC squad-isolation / CICERO splitting anchor. The
     # agent commands 4× 2tnk vs TWO enemy clusters (N at y=15 / S at

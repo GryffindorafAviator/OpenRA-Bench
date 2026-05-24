@@ -222,7 +222,7 @@ def _build_1tnk_policy(rs, Command):
         if targets:
             cmds.append(Command.attack_unit([str(u["id"])], str(targets[0]["id"])))
         else:
-            cmds.append(Command.attack_move([str(u["id"])], 68, u["cell_y"]))
+            cmds.append(Command.attack_move([str(u["id"])], 40, u["cell_y"]))
     return cmds if cmds else [Command.observe()]
 
 
@@ -240,16 +240,18 @@ def _build_e1_policy(rs, Command):
         if targets:
             cmds.append(Command.attack_unit([str(u["id"])], str(targets[0]["id"])))
         else:
-            cmds.append(Command.attack_move([str(u["id"])], 68, u["cell_y"]))
+            cmds.append(Command.attack_move([str(u["id"])], 40, u["cell_y"]))
     return cmds if cmds else [Command.observe()]
 
 
 def _intended_build_e3_policy(rs, Command):
-    """INTENDED counter — rocket soldiers (anti-vehicle Dragon launcher).
-    Queue e3 every turn the budget allows; once produced, attack_unit
-    the visible heavy tank (engine auto-targets work too but explicit
-    attack_unit is cleaner). $1800 buys exactly 6× e3, which is the
-    win bar (unit_type_count_gte:e3:6 AND units_killed_gte:K)."""
+    """INTENDED counter — rocket soldiers (anti-vehicle Dragon launcher,
+    range 5 cells). Queue e3 every turn the budget allows; once produced,
+    march east via attack_move to x=35 — JUST outside the heavies' 105mm
+    gun range (4.75 cells) so the Dragon outranges them. Once enemies
+    appear in vision, attack_unit them directly. $1800 buys exactly 6×
+    e3, which is the win bar (unit_type_count_gte:e3:6 AND
+    units_killed_gte:K)."""
     cmds = []
     cash = rs.get("cash", 0)
     if cash >= 300:
@@ -260,7 +262,15 @@ def _intended_build_e3_policy(rs, Command):
         if targets:
             cmds.append(Command.attack_unit([str(u["id"])], str(targets[0]["id"])))
         else:
-            cmds.append(Command.attack_move([str(u["id"])], 68, u["cell_y"]))
+            # Stop 5 cells west of the enemy column (x=40), aiming
+            # at y=20 (the heavies' centre row) so NORTH/SOUTH-staged
+            # hard-tier e3s descend into the engagement latitude.
+            # Dragon range 5 reaches the heavies while keeping e3
+            # outside 105mm/120mm gun range 4.75. Stagger the target
+            # y by unit id parity so e3s don't bunch on a single cell
+            # and stall path-finding.
+            target_y = 19 if int(u["id"]) % 2 == 0 else 21
+            cmds.append(Command.attack_move([str(u["id"])], 35, target_y))
     return cmds if cmds else [Command.observe()]
 
 
