@@ -20,7 +20,9 @@ its own.)
 
 The bar (per the spec):
   • stall (only observe)            → LOSS (no 2tnk, no kills; the
-    idle HoldFire jeep is hunted down → force-wipe / after_ticks)
+    idle HoldFire jeep is hunted down, the stance:3 e1 swarm marches
+    west and destroys the agent fact → not has_building:fact /
+    after_ticks LOSS)
   • build-only-e1 (match 1:1)       → LOSS (never builds 2tnk → the
     2tnk:3 clause is structurally unmet)
   • build-only-e3 (wrong counter)   → LOSS (never builds 2tnk → the
@@ -127,15 +129,17 @@ def test_easy_predicates():
         for i in range(8)
     ]
     assert not evaluate(c.win_condition, _ctx(units=e3s, tick=2000, kills=6))
-    # Force wipe (all units dead) → fail via not own_units_gte:1
-    assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=6, lost=4))
     # Fact destroyed → fail via not has_building:fact
     assert evaluate(
         c.fail_condition,
         _ctx(tanks=3, tick=2000, kills=6, has_fact=False),
     )
-    # Timeout with bar unmet → fail (after_ticks 5401 reachable)
-    assert evaluate(c.fail_condition, _ctx(tanks=3, tick=5402, kills=5))
+    # Timeout with bar unmet → fail (after_ticks 2701 reachable)
+    assert evaluate(c.fail_condition, _ctx(tanks=3, tick=2702, kills=5))
+    # Force-wipe alone (fact still up) is NOT a fail anymore — the
+    # Qwen-9B triage B.4 fix dropped `not own_units_gte:1` so the
+    # briefing-mandated scout dying doesn't insta-LOSS the run.
+    assert not evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=6, lost=4))
 
 
 def test_medium_predicates():
@@ -146,15 +150,15 @@ def test_medium_predicates():
     assert not evaluate(c.win_condition, _ctx(tanks=2, tick=2000, kills=8))
     # Bar unmet (only 7 kills) → not a win
     assert not evaluate(c.win_condition, _ctx(tanks=3, tick=2000, kills=7))
-    # Force wipe → fail
-    assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=8, lost=4))
     # Fact destroyed → fail
     assert evaluate(
         c.fail_condition,
         _ctx(tanks=3, tick=2000, kills=8, has_fact=False),
     )
     # Timeout → fail
-    assert evaluate(c.fail_condition, _ctx(tanks=3, tick=5402, kills=7))
+    assert evaluate(c.fail_condition, _ctx(tanks=3, tick=2702, kills=7))
+    # Force-wipe alone (fact still up) is NOT a fail (B.4 fix).
+    assert not evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=8, lost=4))
 
 
 def test_hard_predicates():
@@ -165,15 +169,15 @@ def test_hard_predicates():
     assert not evaluate(c.win_condition, _ctx(tanks=2, tick=2000, kills=8))
     # Bar unmet → not a win
     assert not evaluate(c.win_condition, _ctx(tanks=3, tick=2000, kills=7))
-    # Force wipe → fail
-    assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=8, lost=4))
     # Fact destroyed → fail
     assert evaluate(
         c.fail_condition,
         _ctx(tanks=3, tick=2000, kills=8, has_fact=False),
     )
     # Timeout → fail
-    assert evaluate(c.fail_condition, _ctx(tanks=3, tick=5402, kills=7))
+    assert evaluate(c.fail_condition, _ctx(tanks=3, tick=2702, kills=7))
+    # Force-wipe alone (fact still up) is NOT a fail (B.4 fix).
+    assert not evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=8, lost=4))
 
 
 def test_win_requires_three_medium_tanks():
@@ -196,17 +200,24 @@ def test_win_requires_three_medium_tanks():
 
 
 def test_timeout_reachable_inside_max_turns():
-    """No draw degeneracy: after_ticks 5401 ≤ 93 + 90·(max_turns-1)."""
+    """No draw degeneracy: after_ticks 2701 must bite before the engine
+    auto-`done`s. The stance:3 e1 swarm finishes hunting at ~tick 3243
+    on medium/hard (12-strong cluster) and ~tick 4683 on easy
+    (8-strong cluster); after_ticks 2701 sits well inside the earliest
+    envelope so a stall policy hits the timeout LOSS on every tier,
+    never a DRAW. (Triage B.4 fix: the deadlines were 5401/5400 — past
+    the engine auto-done envelope — propped up only by the dropped
+    `not own_units_gte:1` fail clause.)"""
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
         max_tick = 93 + 90 * (c.max_turns - 1)
-        assert 5401 <= max_tick, (
-            f"{lvl}: after_ticks 5401 > max reachable tick {max_tick} "
+        assert 2701 <= max_tick, (
+            f"{lvl}: after_ticks 2701 > max reachable tick {max_tick} "
             f"(max_turns={c.max_turns}); deadline never bites"
         )
-        assert 5400 <= max_tick, (
-            f"{lvl}: within_ticks 5400 > max reachable tick {max_tick}"
+        assert 2700 <= max_tick, (
+            f"{lvl}: within_ticks 2700 > max reachable tick {max_tick}"
         )
 
 

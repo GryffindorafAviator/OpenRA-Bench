@@ -77,21 +77,33 @@
 #     is satisfied on units killed, not buildings; the marker keeps
 #     the episode running through the win/fail evaluator's terminal
 #     frame).
-#   • `after_ticks` fail clauses reachable within max_turns
-#     (within_ticks 5400 ≤ 5403 at max_turns 60): a staller hits
-#     after_ticks 5401 and LOSES, never draws.
+#   • `after_ticks` fail clauses reachable within max_turns:
+#     empirically the engine advances ~90 ticks/turn here so
+#     max_turns 60 reaches tick ~5400 BUT the engine auto-`done`s
+#     much earlier once the live e1 swarm finishes hunting (turn
+#     ~36 on medium/hard with the 12-strong cluster, turn ~50 on
+#     easy with the 8-strong cluster). within_ticks 2700 /
+#     after_ticks 2701 fits well inside the earliest auto-done
+#     envelope (~3243 ticks on medium/hard) so a staller LOSES via
+#     after_ticks on every tier, never DRAWS. Intended-build-2tnk
+#     wins at ~tick 1623 (~18 turns) on every level, leaving ~1000
+#     ticks of headroom.
 #   • Starting `jeep` is `stance: 0` (HoldFire) — it scouts but
 #     never auto-fires, so a pure-observe stall policy cannot score
 #     kills with it. The win predicate's `unit_type_count_gte`
 #     2tnk:3 is the real anti-cheat: only the agent that builds the
 #     3-tank fist can clear the bar. The fail clause is
-#     `after_ticks | not has_building:fact | not own_units_gte:1` —
-#     the agent starts WITH the jeep so `own_units_gte:1` is
-#     satisfied from t=0 (the unit-less turn-1 mis-fire footgun in
-#     CLAUDE.md does not apply); the force-wipe clause turns a
-#     stalled-and-overrun episode into a real LOSS instead of an
-#     engine auto-`done` DRAW when the entrenched e1 swarm hunts
-#     down the idle HoldFire jeep.
+#     `after_ticks | not has_building:fact` — a stalled policy hits
+#     after_ticks 2701 and LOSES; a base-wipe (stance:3 e1 swarm
+#     marches west and destroys the fact) hits `not has_building:fact`
+#     and LOSES. The previous `not own_units_gte:1` fail clause was
+#     dropped (Qwen-9B triage B.4): it punished the briefing-mandated
+#     scout doctrine — the jeep is sent forward to scout the fogged
+#     cluster, dies in 4-5 turns, and the run instant-failed at
+#     tick ~300 long before the 3-tank fist was built. The base-wipe
+#     clause still keeps a stalled-and-overrun episode from
+#     degenerating to a DRAW because the entrenched stance:3 e1
+#     swarm hunts west and destroys the agent fact.
 #   • The vehicle queue (`weap` war factory) needs `powr` online
 #     AND a `fix` service depot present for `2tnk` to clear its
 #     prerequisites — both are pre-placed in every base so the
@@ -205,7 +217,7 @@ levels:
     # with the jeep, pick the correct hard counter, and commit the whole
     # budget. Win when you have fielded 3 medium tanks (2tnk) AND 6 enemy
     # units are killed AND your construction yard still stands, before
-    # tick 5400. Stalling or picking the wrong counter never fields the
+    # tick 2700. Stalling or picking the wrong counter never fields the
     # 3-tank fist and fails the bar.
     description: >
       Commander, this is a hard-counter selection mission. You are given
@@ -245,12 +257,11 @@ levels:
         - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 6}
         - {has_building: fact}
-        - {within_ticks: 5400}
+        - {within_ticks: 2700}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 2701}
         - {not: {has_building: fact}}
-        - {not: {own_units_gte: 1}}
     max_turns: 60
 
   # ── MEDIUM ───────────────────────────────────────────────────────
@@ -276,7 +287,7 @@ levels:
     # rifle mass on attrition; matching with own rifles (e1 @ $100) is a
     # 1:1 trade with no advantage. Win when you have fielded 3 medium
     # tanks (2tnk) AND 8 enemy units are killed AND your fact still
-    # stands, before tick 5400.
+    # stands, before tick 2700.
     description: >
       Commander, this is a hard-counter selection mission. You are given
       a full starter base on the west — Construction Yard, Power Plant,
@@ -315,12 +326,11 @@ levels:
         - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 8}
         - {has_building: fact}
-        - {within_ticks: 5400}
+        - {within_ticks: 2700}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 2701}
         - {not: {has_building: fact}}
-        - {not: {own_units_gte: 1}}
     max_turns: 60
 
   # ── HARD ─────────────────────────────────────────────────────────
@@ -348,7 +358,7 @@ levels:
     # and get out- DPSed on attrition; matching with own rifles is a 1:1
     # trade with no advantage. Win when you have fielded 3 medium tanks
     # (2tnk) AND 8 enemy units are killed AND your fact still stands,
-    # before tick 5400.
+    # before tick 2700.
     description: >
       Commander, this is a hard-counter selection mission with
       seed-varied staging. You are given a full starter base — Construction
@@ -401,10 +411,9 @@ levels:
         - {unit_type_count_gte: {type: 2tnk, n: 3}}
         - {units_killed_gte: 8}
         - {has_building: fact}
-        - {within_ticks: 5400}
+        - {within_ticks: 2700}
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
+        - {after_ticks: 2701}
         - {not: {has_building: fact}}
-        - {not: {own_units_gte: 1}}
     max_turns: 60
