@@ -169,6 +169,53 @@ The audit phase does not change deadlines. If `max_turns` is unset on
 a pack (rare, e.g. `rush-hour`), note `'unset'` so the YAML-edit phase
 can fix it.
 
+## 9.5. No solution leak — describe the situation, not the answer
+
+The briefing tells the model WHAT IT HAS and WHAT IT MUST ACHIEVE. It
+does NOT tell the model HOW to achieve it. The benchmark measures the
+model's reasoning; if the briefing hands over the strategy, the model
+isn't being measured — the briefing is being measured.
+
+**Forbidden** in the description prose (allowed in top-of-file YAML
+`# ENGINE NOTE` comments for contributors):
+
+- **Per-policy outcome tables** — "4 tanks frontal lose 3/4; flank
+  loses 1/4". Lookup table for the solution. Cut.
+- **Strategy prescriptions by verb** — "Flank the line", "Kite the
+  Mammoth", "Focus-fire the rocket infantry first". The model must
+  derive doctrine from the forces vs the enemy + the constraint.
+- **"Intended play is X" / "Optimal is X" / "The correct strategy
+  is X".** Anywhere the briefing names the winning policy by verb.
+- **Negative policy comparisons** — "A frontal charge costs all
+  units"; "Stall yields only 2 kills"; "Sprinting through the
+  middle dies to the line". Telegraphing what NOT to do.
+- **Damage / income / kill arithmetic done for the model** — "Your
+  3 tanks deal 6000 DPS to the Mammoth's 9000 HP". The model has
+  units + observation; it can compute.
+- **Exhaustive coordinate dumps** — Two or three load-bearing
+  landmarks are fine ("Construction Yard at (44,4) NE", "ore
+  patches east"); enumerating every cell is briefing-as-blueprint.
+
+**Allowed**:
+
+- The forces given ("4 medium tanks + 3 light tanks on west edge").
+- The objective with a number ("Destroy the rear CY within 5400
+  ticks").
+- Relative-direction landmarks ("Construction Yard north-east",
+  "ore patches east of your base", "rush approaches from south").
+- Constraints / threats / stance / fog state ("on hold-fire orders",
+  "raider approaches at ~tick 1500", "no losses allowed",
+  "coordinates HIDDEN — only direction labels").
+- Faction / tech context the model can't otherwise derive.
+
+For Family-2 (economy) packs, the F2 supplement (§18 of
+`EDIT_PRINCIPLES_FAMILY2.md`) adds economy-specific forbiddens
+(per-harvester income tables, build-count prescriptions).
+
+**Lint heuristic** for reviewers: if you delete the briefing and the
+test suite still tells you the right policy, the briefing was
+load-bearing for the model only. That's the bar.
+
 ## 10. Pack-edit phase (later) follows the same principles
 
 When we move from the audit CSV to actually editing the YAML files, the

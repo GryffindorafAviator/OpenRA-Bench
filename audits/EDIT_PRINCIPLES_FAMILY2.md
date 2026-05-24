@@ -148,6 +148,55 @@ defect. So is a pack that says "expand to a 2nd refinery" but
 doesn't surface the $2000 + $1400 (proc + auto-harv) in projected
 cash.
 
+## §18. No solution leak — the briefing describes the situation, not the answer
+
+The briefing tells the model WHAT IT HAS and WHAT IT MUST ACHIEVE. It
+does NOT tell the model HOW to achieve it. The benchmark measures the
+model's reasoning; if the briefing hands over the strategy, the model
+isn't being measured — the briefing is being measured.
+
+Specifically **forbidden** in the description prose (allowed in
+top-of-file YAML comments for contributors):
+
+- **Per-policy income / damage / kill tables.** "A single harvester
+  yields ~8500; two reach ~11200; three reach ~14800." This is a
+  lookup table for the solution. Cut.
+- **Build-count prescriptions.** "Enough for TWO extra harvesters."
+  "The intended play is to build one extra harvester." The model
+  must derive this from cash + cost + income.
+- **"Intended play is X" / "Optimal is X" / "The correct strategy is
+  X".** Anywhere the briefing names the winning policy by verb.
+- **"Stall yields ~3650" / "Brute-rush costs all units".** Negative
+  policy comparisons that telegraph what NOT to do.
+- **Income arithmetic done for the model.** Stating projected
+  cash/economy by tick. The model has `cash` in the obs; it can
+  compute its own trajectory.
+- **Exact coordinate dumps for every patch / building.** Two or
+  three load-bearing landmarks are fine ("Refinery at (12,18), ore
+  patches east"); enumerating every cell is briefing-as-blueprint.
+
+Specifically **allowed**:
+
+- The forces given ("ONE Harvester, ONE War Factory, $2200 cash").
+- The objective with a NUMBER ("Reach economy value 12000 by tick
+  3600 / about 40 turns").
+- Relative-direction landmarks ("ore patches east of your base",
+  "enemy expansion to the south").
+- Constraints / threats ("no losses allowed", "enemy raider
+  approaches at ~tick 1500").
+- Faction/tech context the model can't otherwise derive.
+
+If the briefing reads like a strategy guide, rewrite it as a
+situation report. Use the YAML's top-of-file `# ENGINE NOTE` block
+for the analytics — that's where the income arithmetic, intended-
+policy validation, and per-policy outcome counts BELONG (for the
+contributor audit trail).
+
+**Lint heuristic** for reviewers: if you can delete the entire
+description and the test suite still tells you what the right policy
+is, the description was load-bearing for the model only — not the
+suite. That's the bar.
+
 ---
 
 ## Family-2 audit CSV column contract
