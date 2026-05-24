@@ -85,7 +85,7 @@ def test_predicates_easy():
     assert not evaluate(c.win_condition, _ctx(home3, tick=3000, killed=1, lost=1))
     # Tanks elsewhere (not at safe zone) → not WIN
     assert not evaluate(
-        c.win_condition, _ctx([(55, 20), (55, 21), (55, 22)], tick=3000, killed=3, lost=1)
+        c.win_condition, _ctx([(30, 20), (30, 21), (30, 22)], tick=3000, killed=3, lost=1)
     )
     # 3 tanks lost (only 1 alive) → fail clause own_units_gte:2 fires
     assert evaluate(c.fail_condition, _ctx([(5, 20)], tick=3000, killed=3, lost=3))
@@ -107,7 +107,7 @@ def test_predicates_medium_force_preservation_bar():
     # 3 tanks alive but only 2 in safe zone → fails
     assert not evaluate(
         c.win_condition,
-        _ctx([(5, 20), (5, 21), (55, 20)], tick=3000, killed=3, lost=1),
+        _ctx([(5, 20), (5, 21), (30, 20)], tick=3000, killed=3, lost=1),
     )
     # 2 tanks alive ⇒ fail clause fires (preservation cap)
     assert evaluate(c.fail_condition, _ctx(home2, tick=3000, killed=3, lost=2))
@@ -184,9 +184,12 @@ def test_timeout_loss_is_reachable_on_every_level():
 # wheel; predicate-level tests above run without it.
 
 # Retreat the instant any tank's HP drops below this floor; ENGAGE_X
-# is the x-line the squad closes to before opening fire.
-RETREAT_HP_FLOOR = 0.5
-ENGAGE_X = 54
+# is the x-line the squad closes to before opening fire. Post-2026-05-23
+# map shrink (112x40 → 56x40): e3 firing line at x=30, 3tnk at x=34;
+# ENGAGE_X is 4 cells west of the e3 line so the focus-fire trade opens
+# at max range.
+RETREAT_HP_FLOOR = 0.35
+ENGAGE_X = 24
 
 
 def _stall_policy(rs, Command):
@@ -204,7 +207,7 @@ def _brute_attack_until_death_policy(rs, Command):
     if not units:
         return [Command.observe()]
     return [
-        Command.attack_move([str(u["id"])], target_x=60, target_y=20)
+        Command.attack_move([str(u["id"])], target_x=30, target_y=20)
         for u in units
     ]
 
@@ -286,12 +289,22 @@ def _make_intended_engage_then_retreat():
             return [
                 Command.attack_unit([str(u["id"])], str(t["id"])) for u in units
             ]
-        # APPROACH: advance toward the engagement line at y=20.
+        # APPROACH: hold the home-y latitude until past x=ENGAGE_X-2,
+        # then drop down to y=20 only when the engagement line is
+        # reached. This keeps the column OUT of the e3 line's fire
+        # envelope (e3 range ~5 cells from (30,19/21) covers
+        # y=14..26 at x=25..35) during transit. On the original
+        # 112x40 the diagonal approach across ~54 cells naturally
+        # converged toward y=20 piecemeal; on the shrunk 56x40 the
+        # diagonal is too short and the lead tank reaches e3 range
+        # while still high above/below y=20.
         return [
             Command.move_units(
                 [str(u["id"])],
                 target_x=min(ENGAGE_X, u["cell_x"] + 12),
-                target_y=20,
+                target_y=hy if hy == 20 else (
+                    hy if u["cell_x"] < ENGAGE_X - 2 else 20
+                ),
             )
             for u in units
         ]

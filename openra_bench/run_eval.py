@@ -155,7 +155,7 @@ def evaluate(
     run_id: str | None = None,
     model: str | None = None,
     journal_path: str | Path | None = None,
-    resume: bool = False,
+    resume: bool = True,
     max_spend_usd: float = 0.0,
     smoke: bool = False,
     dry_run: bool = False,
@@ -448,32 +448,46 @@ def evaluate(
         tasks = tasks[:1]
 
     # Checkpoint/resume: a journal of completed episodes. On resume we
-    # skip done (pack|level|split|seed) and fold prior records back in,
-    # so a killed multi-hour run continues losslessly.
+    # skip done (pack|level|split|seed|fog_mode) and fold prior records
+    # back in, so a killed multi-hour run continues losslessly.
+    #
+    # Default journal path is deterministic per (out_dir, model) — NOT
+    # per-run-id — so a re-launch of `--out <dir> --model <X>` always
+    # finds the prior journal and resumes from it. Explicit
+    # `--journal-path` overrides.
     jp = journal_path
     if jp is None and playback_root is not None:
-        jp = Path(playback_root) / f"{run_id}__{_safe_model}" / "_journal.jsonl"
+        jp = Path(playback_root) / f"_journal__{_safe_model}.jsonl"
     journal = RunJournal(jp) if jp is not None else None
     prior: list[dict] = []
     if journal is not None and resume:
         done = journal.done_keys()
         prior = journal.records()
+        def _cell_fog(cl):
+            """Cell `pack:level:fog` ⇒ fog; otherwise default vision."""
+            return getattr(cl, 'fog_mode', None) or 'vision'
         tasks = [
             t for t in tasks
-            if episode_key(t[0].meta.id, t[0].level, t[2], t[3]) not in done
+            if episode_key(t[0].meta.id, t[0].level, t[2], t[3], _cell_fog(t[0])) not in done
         ]
 
     def _persist(rec: dict) -> None:
         if journal is None:
             return
         slim = {k: v for k, v in rec.items() if k != "_sc"}
+        # Cell can be `pack:level` (no fog suffix) or `pack:level:fog`
+        # (when perception-sweep / explicit fog_mode is set). The fog
+        # suffix matches one of PERCEPTION_MODES.
+        cell = rec["cell"]
+        parts = cell.split(":")
+        from .scenarios.schema import PERCEPTION_MODES
+        if len(parts) >= 3 and parts[-1] in PERCEPTION_MODES:
+            pack, level, fog = parts[0], parts[1], parts[-1]
+        else:
+            pack, level = parts[0], parts[1]
+            fog = rec.get("fog_mode") or "vision"
         journal.append(
-            episode_key(
-                rec["cell"].rsplit(":", 1)[0],
-                rec["cell"].rsplit(":", 1)[1],
-                rec["split"],
-                rec["seed"],
-            ),
+            episode_key(pack, level, rec["split"], rec["seed"], fog),
             slim,
         )
 
@@ -726,10 +740,21 @@ def main(argv: list[str]) -> int:
         "default data/leaderboard.jsonl)",
     )
     # Resilience flags for real OpenRouter runs.
-    ap.add_argument("--resume", action="store_true",
-                    help="skip episodes already in the run journal")
+    # 2026-05-24: resume is the DEFAULT. The journal lives at
+    # `<playback_root>/_journal__<model>.jsonl` and is shared across
+    # re-launches of the same (out_dir, model) so a killed/restarted
+    # run automatically picks up where it left off.
+    ap.add_argument("--no-resume", dest="resume", action="store_false",
+                    help="opt out of automatic resume from the run journal "
+                    "(default: resume is ON)")
+    ap.add_argument("--resume", dest="resume", action="store_true",
+                    default=True,
+                    help="skip episodes already in the run journal "
+                    "(default behavior)")
     ap.add_argument("--journal", default=None,
-                    help="checkpoint journal path (default: under --playback)")
+                    help="checkpoint journal path (default: under "
+                    "<playback>/_journal__<model>.jsonl, deterministic per "
+                    "(out_dir, model) so re-launches resume losslessly)")
     ap.add_argument("--max-spend", type=float, default=0.0,
                     help="hard USD cap; the run finalizes when hit")
     ap.add_argument("--qps", type=float, default=0.0,

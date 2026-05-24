@@ -1,22 +1,151 @@
+# combat-suicide-charge-mission — REASONING, military sacrifice
+# doctrine: spend the entire force to destroy a high-value enemy
+# objective. Accept full attrition for the kill.
+#
+# The capability under test is cost-vs-objective COMMITMENT: a
+# high-value enemy construction yard (`fact`) sits at the far east of
+# a tailored 56×40 arena, defended by an anti-armor picket. The
+# objective is the fact's DESTRUCTION before the deadline; keeping
+# the strike package alive is NOT required and is NOT achievable. A
+# preserve-the-force / careful-skirmish plan loses on the clock (the
+# picket whittles the lead probe down and the reserve never
+# engages); a halt-short standoff bleeds in the open and times out.
+# Only an all-in commit that drives the WHOLE force decisively at
+# the objective and focus-fires through the picket — trading most of
+# the attackers for the kill — actually razes the fact in time.
+#
+# 2026-05-23 audit (Family-1 #23): briefing rewritten per
+# audits/EDIT_PRINCIPLES.md; map shrunk 96x40 → 56x40 per tier so
+# the strike package's east-west run is a meaningful commit (~46
+# cells) but no longer dwarfed by empty traversal. Objective fact
+# pulled from (86, 20) → (50, 20); picket from x=82..85 → x=46..49.
+# Hard tier chokepoint walls retuned to the new mid-map x=24..30.
+# Guard-bot leash (~16-18 cells) still bites at the new geometry:
+# the strike package at x=4..8 engages the picket inside the
+# leash-radius the moment they close past x=30, and the lunge-back
+# snap fires correctly when the package retreats — verified the
+# preserve-force probe still LOSES at the new scale.
+#
+# No posture defect: the picket uses bot_type: guard which lunges
+# at any enemy within ~16 cells and snaps back past ~18. That
+# IS what the briefing claims ("the picket lunges at the strike
+# package as it closes"), so posture matches the mission premise.
+#
+# Real-world anchors:
+#   • Forlorn hope / military sacrifice doctrine (West and East
+#     canonical) — a high-cost storming party accepts attrition the
+#     main body cannot, so the main body's objective is reachable.
+#   • SC2 expendable strike package — all-in commit on a critical
+#     adversary asset under a hard deadline, accepting total
+#     platform loss as the operating cost of mission success.
+#   • MicroRTS / SC2LE attack-the-base under deadline with attrition
+#     explicitly OK.
+#
+# Robotics analogue: an expendable drone fleet must destroy a
+# critical adversary asset under a hard deadline; loiter / stand-off
+# attacks miss the window, so the planner must commit every platform
+# on a one-way attack trajectory and accept total platform loss as
+# the operating cost of mission success.
+#
+# Per-tier escalation (controlled-variable design):
+#   • easy   — light picket (2× e3 at x=46 + 1× 4tnk at x=49
+#              close in front of the fact). All-in commit razes the
+#              fact, losing ≈4 of 10 units.
+#   • medium — heavier picket (3× e3 anti-armor WALL spread y=16/20/24
+#              at x=46 + 1× 4tnk at x=49). The preserve trap tightens
+#              (any standoff loses ground); all-in still wins but
+#              trades ≈6 of 10 units through the wall.
+#   • hard   — defender + CHOKEPOINT approach. The arena is closed
+#              off into a single y=15..25 corridor at midmap (water
+#              walls north + south of the corridor) so both spawn
+#              latitudes must converge through one pinch before
+#              reaching the picket. Spawn flips NORTH y=10 /
+#              SOUTH y=30 per seed so the chokepoint-entry vector
+#              varies and a memorised opening cannot generalise.
+#              The 4tnk is pulled BACK to x=52 (behind the
+#              objective fact) so the win stays robust to either
+#              flank's staging latitude.
+#
+# Topology recap (per tier):
+#   * Strike package — 6× 2tnk + 4× e3, stance:1 ReturnFire so the
+#     formation only engages when ordered (the agent must DRIVE the
+#     commit, not free-ride on auto-fire). Spread vertically across
+#     the staging latitude so the column isn't focus-fired into a
+#     single line on approach.
+#   * Picket — `guard` bot, leashed (lunges within ~16, snaps back
+#     past ~18). e3 rocket infantry (anti-armor "Dragon" — range 5,
+#     damage 5000 vs Heavy armour) at x=46 spread y=16/20/24; 4tnk
+#     heavy "mammoth" at x=49 (easy/medium) or x=52 (hard, behind
+#     the objective) brawls close.
+#   * Objective fact — high-value enemy construction yard at
+#     (50, 20). Predicate is
+#     `enemy_key_buildings_destroyed_in_region: {x: 50, y: 20,
+#     radius: 6, types: [fact]}` — only the objective fact qualifies
+#     (the sentinel fact is far outside the radius).
+#   * Sentinel fact — unarmed enemy `fact` in the far north-east
+#     corner (54, 4). Engine auto-`done`s the moment the last enemy
+#     `MustBeDestroyed` building falls, so without this sentinel the
+#     within_ticks predicate evaluates on a degenerate frame
+#     (CLAUDE.md). The sentinel keeps the episode alive past
+#     objective-fact destruction.
+#
+# Engine auto-`done` invariants the pack must hold (CLAUDE.md):
+#   * `termination.agent_units_killed: false` — without this the
+#     engine auto-`done`s the run the moment the last attacker
+#     dies, collapsing a literal total-sacrifice into a DRAW even
+#     if the objective fact has already been razed and within_ticks
+#     is still satisfied. The picket is tuned so the all-in commit
+#     focus-fires hard enough to keep a remnant alive long enough
+#     to raze the fact (loses ≈4 on easy / ≈6 on medium / a
+#     near-total loss on hard).
+#   * `termination.enemy_units_killed: false` — the sentinel fact
+#     already keeps MustBeDestroyed enemy buildings alive past the
+#     objective fact's destruction; e3 / 4tnk defenders are not
+#     load-bearing for victory conditions.
+#
+# The four-policy bar (CLAUDE.md "no defect, no cheat, no draw"):
+#   * stall (only observe) — LOSS. The fact never takes damage; the
+#     `after_ticks` deadline bites as a real LOSS.
+#   * preserve-the-force (lead tank probes, rest hold; damaged units
+#     retreat to the west edge) — LOSS. Damage dribbles onto the
+#     fact (the lead tank gets shredded long before the fact falls);
+#     the clock runs out → real LOSS.
+#   * standoff / halt-short (whole force advances east but halts
+#     short of the objective) — LOSS. The force bleeds in the open
+#     against the picket's reach but never presses onto the fact;
+#     the fact never takes damage; clock runs out → real LOSS.
+#     Discriminates a full decisive commit from a partial advance.
+#   * intended all-in commit (every agent unit drives at the
+#     objective, focus-fire through the picket, accept the losses,
+#     raze the fact) — WIN on every level and every hard seed.
+#
+# A plain `move`-beeline policy is NOT used as a losing probe: a
+# move onto the objective cell trips the engine auto-`done` and
+# collapses to a DRAW (not a real LOSS), so the three losing probes
+# above each leave the picket alive and the fact intact and time
+# out as real LOSSES.
+#
+# Validate (no model / no network):
+#   python3 -m pytest tests/test_combat_suicide_charge_mission.py -q
 meta:
   id: combat-suicide-charge-mission
   title: 'Suicide Charge — Sacrifice the Force to Raze a High-Value Objective'
   capability: reasoning
   real_world_meaning: >
     Forlorn hope / military sacrifice doctrine. A high-value enemy
-    construction yard (`fact`) sits at the far east of the map,
-    defended by an anti-armor picket; the agent's small strike
-    package at the west cannot punch through without heavy losses.
-    The OBJECTIVE is the building's destruction — keeping the force
-    intact is NOT required and is not achievable. A "preserve the
-    force" policy that engages carefully and tries to save units
-    loses on the clock (the picket grinds the lead element down and
-    the rest never arrive); a half-commit that advances and halts
-    short of the objective also times out. Only an all-in commit
-    that drives the WHOLE force decisively at the objective and
-    focus-fires through the picket — trading most of the attackers
-    for the kill — actually razes the fact in time. This is
-    delayed-terminal credit assignment with an explicit
+    construction yard (`fact`) sits at the far east of a tailored
+    56×40 arena, defended by an anti-armor picket; the agent's small
+    strike package at the west cannot punch through without heavy
+    losses. The OBJECTIVE is the building's destruction — keeping
+    the force intact is NOT required and is not achievable. A
+    "preserve the force" policy that engages carefully and tries to
+    save units loses on the clock (the picket grinds the lead
+    element down and the rest never arrive); a half-commit that
+    advances and halts short of the objective also times out. Only
+    an all-in commit that drives the WHOLE force decisively at the
+    objective and focus-fires through the picket — trading most of
+    the attackers for the kill — actually razes the fact in time.
+    This is delayed-terminal credit assignment with an explicit
     cost-vs-objective trade-off: every unit lost looks locally
     negative, but the only successful plan accepts that the bulk of
     the force is spent and only a remnant survives to land the
@@ -34,39 +163,16 @@ meta:
     - "MicroRTS / SC2LE attack-the-base under deadline with attrition-OK"
   author: openra-bench
 
+# Pack-level base_map is the sentinel `rush-hour-arena` so the
+# loader's `is_map_supported` check resolves to a real on-disk
+# .oramap (compile-time guard); every level redeclares base_map
+# inside its `overrides:` so the easy/medium open-arena topology
+# and the hard chokepoint topology are emitted as DISTINCT
+# `.oramap` files (each with a SINGLE explicit mpspawn, sidestepping
+# the rush-hour-arena 4-corner spawn rotation footgun documented in
+# ENGINE_FOLLOWUPS #6).
 base_map: rush-hour-arena
 
-# The discriminator: the enemy fact at (110,20) is guarded by an
-# anti-armor picket — an e3 rocket-infantry WALL just west of the
-# objective (x=106) plus a 4tnk heavy tank guarding the fact close
-# in. A careful "preserve the force" approach (lead probe, hold the
-# rest, retreat the damaged) cannot land enough damage on the fact
-# before the deadline — the e3 wall outranges and out-damages a
-# single probing 2tnk, and the held-back reserve never engages. A
-# half-commit that advances the whole force but halts SHORT of the
-# objective bleeds units in the open and likewise times out. The
-# intended play commits ALL six tanks plus the four e3 escorts
-# straight east, focus-fires (`attack_unit`) through the e3 wall and
-# the 4tnk, and pushes the remnant onto the fact. Win is
-# buildings-only.
-#
-# Engine recalibration (movement fixes: moving units take fire en
-# route, `attack_unit` on out-of-sight targets paths normally, no
-# sprint-invincibility). Two consequences had to be designed
-# around: (1) the engine auto-`done`s the episode the moment the
-# AGENT force is fully wiped (a true total-sacrifice collapses to a
-# DRAW, not a win-by-objective) — so the all-in must focus-fire hard
-# enough to keep a remnant alive long enough to raze the fact;
-# (2) the engine also auto-`done`s when the last enemy COMBAT unit
-# dies — the SENTINEL fact (an enemy building) keeps the episode
-# alive past picket elimination so within_ticks evaluates on the
-# terminal frame. Re-tuned picket: a 2/3/3-e3 wall at x=106 graded
-# easy→medium→hard, with the 4tnk close in front of the fact (x=109
-# easy/medium; x=112 on hard, where the seed-flank staging needs a
-# flank-robust win). The all-in trades through the picket losing the
-# bulk of the force (≈4 easy / ≈6 medium / a near-total loss on
-# hard) but a remnant razes the fact in budget; stall, careful
-# preserve, and half-commit all time out as real LOSSES.
 base:
   agent: {faction: allies, cash: 0}
   enemy: {faction: soviet, cash: 0, bot_type: guard}
@@ -85,79 +191,70 @@ base:
     # for victory conditions.
     agent_units_killed: false
     enemy_units_killed: false
-  actors:
-    # ── Strike package (west) — 6× 2tnk + 4× e3 ──
-    # Stance 1 = ReturnFire so they push without burning ammo on
-    # patrol fire en route; the all-in commit relies on attack_move
-    # / attack_unit at the end of the lane. Spread vertically across
-    # y=16..24 so the column isn't focus-fired into a single column
-    # on approach.
-    - {type: 2tnk, owner: agent, position: [6, 16], stance: 1, count: 2}
-    - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 2}
-    - {type: 2tnk, owner: agent, position: [6, 24], stance: 1, count: 2}
-    - {type: e3,   owner: agent, position: [8, 18], stance: 1, count: 2}
-    - {type: e3,   owner: agent, position: [8, 22], stance: 1, count: 2}
-    # ── Defender — `guard` bot, leashed (lunge then snap back). e3
-    # rockets shred 2tnk armour at range 5; 4tnk heavy brawls close.
-    # Medium picket = a 3-e3 anti-armor WALL at x=106 (spread
-    # vertically y=16/20/24 across the approach corridor) + 1 4tnk
-    # HP-sponge at x=109 close in front of the objective fact. The
-    # all-in commit focus-fires through the wall losing roughly half
-    # the force; a probing / standoff / preserve play cannot crack
-    # it. On EASY, lighter picket (2 e3 at x=106); on HARD, the
-    # 3-e3 wall plus the 4tnk pulled back to x=112 (behind the fact)
-    # so the win is robust to the seed-flank staging latitude.
-    - {type: e3,   owner: enemy, position: [106, 16], stance: 2}
-    - {type: e3,   owner: enemy, position: [106, 20], stance: 2}
-    - {type: e3,   owner: enemy, position: [106, 24], stance: 2}
-    - {type: 4tnk, owner: enemy, position: [109, 20], stance: 2}
-    # Objective: the high-value enemy fact at far east (110, 20).
-    - {type: fact, owner: enemy, position: [110, 20]}
-    # Sentinel fact — far north corner, never engaged. Keeps the
-    # episode ALIVE past objective-fact destruction so within_ticks
-    # can evaluate on the terminal frame (the CLAUDE.md auto-done
-    # footgun on MustBeDestroyed enemy buildings).
-    - {type: fact, owner: enemy, position: [122, 4]}
+  actors: []
 
 levels:
   # ── EASY ── the bare sacrifice skill: light defender (2× e3
-  # wall at x=106 + 1× 4tnk at x=109). A preserve-the-force plan
+  # wall at x=46 + 1× 4tnk at x=49). A preserve-the-force plan
   # times out, but the all-in commit razes the fact, losing roughly
   # four of its ten units doing so.
+  #
+  # Map: open 56×40 arena, single explicit mpspawn at (4, 20) so
+  # actor coords are not seed-rotated.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # A defended enemy construction yard sits at the far east (110, 20).
-    # Your strike package (6 tanks + 4 rocket infantry) at the west cannot
-    # punch through the picket without heavy losses. The objective is the
-    # enemy fact's DESTRUCTION before the deadline — keeping the force
-    # intact is neither required nor possible. A careful, preserve-the-
-    # force approach times out on the clock; so does advancing and halting
-    # short of the objective. Commit the WHOLE force straight east, focus-
-    # fire through the picket, accept the losses, and raze the fact.
     description: >
-      A defended enemy construction yard sits at (110,20) on the far east.
-      Your strike package — six tanks and four rocket soldiers — can't
-      punch through the picket and keep the force intact, but the yard is
-      the only thing that matters. Commit everything straight in, focus-fire through the defenders, and raze the yard within about 60 turns.
+      Commander, this is a forlorn-hope strike on a defended enemy
+      Construction Yard. You are given a strike package on the west
+      edge: six medium tanks and four rocket soldiers (anti-vehicle
+      Dragon launchers). The objective is the enemy Construction
+      Yard at (50, 20) on the far east — it must fall. The yard is
+      guarded by a light picket (2 rocket soldiers at x=46 and a
+      Mammoth tank at x=49) on guard orders: they hold their post
+      but lunge at any enemy within roughly 16 cells then snap back.
+      Keeping the strike package alive is NOT possible and NOT
+      required. Commit every unit straight at the yard, focus-fire
+      through the defenders, accept the losses, and raze the yard
+      within about 60 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: combat-suicide-charge-easy-arena
+        width: 56
+        height: 40
+        cordon: 2
+        # Single declared mpspawn so the engine doesn't seed-rotate
+        # the corner the agent starts in and silently translate every
+        # actor's authored position. The mpspawn cell (4, 20) is the
+        # strike-package origin; the agent units are stacked around
+        # it. (ENGINE_FOLLOWUPS #6 workaround.)
+        spawns: [[4, 20]]
+        title: 'Suicide Charge — Easy Open Arena 56x40'
       actors:
-        - {type: 2tnk, owner: agent, position: [6, 16], stance: 1, count: 2}
-        - {type: 2tnk, owner: agent, position: [6, 20], stance: 1, count: 2}
-        - {type: 2tnk, owner: agent, position: [6, 24], stance: 1, count: 2}
-        - {type: e3,   owner: agent, position: [8, 18], stance: 1, count: 2}
-        - {type: e3,   owner: agent, position: [8, 22], stance: 1, count: 2}
-        - {type: e3,   owner: enemy, position: [106, 17], stance: 2}
-        - {type: e3,   owner: enemy, position: [106, 23], stance: 2}
-        - {type: 4tnk, owner: enemy, position: [109, 20], stance: 2}
-        - {type: fact, owner: enemy, position: [110, 20]}
-        - {type: fact, owner: enemy, position: [122, 4]}
+        # ── Strike package (W) — 6× 2tnk + 4× e3 ──
+        # Stance 1 = ReturnFire so the formation only engages when
+        # ordered. Spread vertically across y=16..24 so the column
+        # isn't focus-fired into a single column on approach.
+        - {type: 2tnk, owner: agent, position: [4, 16], stance: 1, count: 2}
+        - {type: 2tnk, owner: agent, position: [4, 20], stance: 1, count: 2}
+        - {type: 2tnk, owner: agent, position: [4, 24], stance: 1, count: 2}
+        - {type: e3,   owner: agent, position: [6, 18], stance: 1, count: 2}
+        - {type: e3,   owner: agent, position: [6, 22], stance: 1, count: 2}
+        # ── Defender — light picket (2× e3 + 1× 4tnk). `guard` bot.
+        - {type: e3,   owner: enemy, position: [46, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [46, 23], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [49, 20], stance: 2}
+        # Objective: the high-value enemy fact at far east (50, 20).
+        - {type: fact, owner: enemy, position: [50, 20]}
+        # Sentinel fact — far north-east corner, never engaged.
+        # Keeps the episode ALIVE past objective-fact destruction so
+        # within_ticks can evaluate on the terminal frame (the
+        # CLAUDE.md auto-done footgun on MustBeDestroyed enemy
+        # buildings).
+        - {type: fact, owner: enemy, position: [53, 4]}
     win_condition:
       all_of:
         - enemy_key_buildings_destroyed_in_region:
-            {x: 110, y: 20, radius: 6, types: [fact]}
+            {x: 50, y: 20, radius: 6, types: [fact]}
         - {within_ticks: 5400}
     fail_condition:
       any_of:
@@ -165,96 +262,154 @@ levels:
     max_turns: 62
 
   # ── MEDIUM ── +1 controlled variable: heavier defender (3× e3
-  # wall + 1× 4tnk — the base composition). The preserve-the-force
-  # trap tightens: any standoff loses ground; the all-in commit
-  # still wins but trades roughly six of its ten units through the
-  # wall.
+  # wall + 1× 4tnk). The preserve-the-force trap tightens: any
+  # standoff loses ground; the all-in commit still wins but trades
+  # roughly six of its ten units through the wall.
+  #
+  # Map: same open 56×40 arena topology as easy, distinct .oramap
+  # so the per-tier maps are individually addressable in playback.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Heavier picket (a 3-rocket-infantry wall spread y=16/20/24 at x=106
-    # + 1 heavy tank at x=109) guarding the enemy fact at (110, 20). Same
-    # task: raze the fact before the deadline; keeping the force intact is
-    # not required. The careful, preserve-the-force approach reliably
-    # times out — the e3 outrange your tanks in any standoff — and so does
-    # halting short of the objective. Commit everything, all-in, focus-
-    # fire through the wall, and raze the fact.
     description: >
-      Same far-east yard at (110,20), but the picket is heavier — three
-      rocket soldiers spread across y=16/20/24 with a heavy tank behind at
-      x=109. Their rockets outrange you in any standoff. Don't try to
-      preserve the force: commit, focus-fire through the wall, and raze
-      the yard within about 72 turns.
-    overrides: {}
+      Commander, this is a forlorn-hope strike on a defended enemy
+      Construction Yard. You are given a strike package on the west
+      edge: six medium tanks and four rocket soldiers. The objective
+      is the enemy Construction Yard at (50, 20) on the far east.
+      This picket is heavier — three rocket soldiers spread across
+      y=16/20/24 at x=46 with a Mammoth tank behind at x=49, all on
+      guard orders. Their Dragons outrange you in any standoff. Do
+      not try to preserve the force: commit every unit, focus-fire
+      through the wall, and raze the yard within about 72 turns.
+    overrides:
+      base_map:
+        generator: arena
+        name: combat-suicide-charge-medium-arena
+        width: 56
+        height: 40
+        cordon: 2
+        spawns: [[4, 20]]
+        title: 'Suicide Charge — Medium Open Arena 56x40'
+      actors:
+        - {type: 2tnk, owner: agent, position: [4, 16], stance: 1, count: 2}
+        - {type: 2tnk, owner: agent, position: [4, 20], stance: 1, count: 2}
+        - {type: 2tnk, owner: agent, position: [4, 24], stance: 1, count: 2}
+        - {type: e3,   owner: agent, position: [6, 18], stance: 1, count: 2}
+        - {type: e3,   owner: agent, position: [6, 22], stance: 1, count: 2}
+        # Heavier picket — 3-e3 anti-armor WALL spread y=16/20/24
+        # at x=46 + 1× 4tnk HP-sponge at x=49 close in front of the
+        # objective fact.
+        - {type: e3,   owner: enemy, position: [46, 16], stance: 2}
+        - {type: e3,   owner: enemy, position: [46, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [46, 24], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [49, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [50, 20]}
+        - {type: fact, owner: enemy, position: [53, 4]}
     win_condition:
       all_of:
         - enemy_key_buildings_destroyed_in_region:
-            {x: 110, y: 20, radius: 6, types: [fact]}
+            {x: 50, y: 20, radius: 6, types: [fact]}
         - {within_ticks: 6400}
     fail_condition:
       any_of:
         - {after_ticks: 6401}
     max_turns: 73
 
-  # ── HARD ── +1 controlled variable: seed-chosen staging latitude
-  # (two spawn_point groups, NORTH y=10 / SOUTH y=30) so the all-in
-  # vector flips per seed and can't be memorised. Same 3-e3 wall as
-  # medium but the 4tnk is pulled back behind the fact (x=112) so
-  # the win stays robust to the flank. Tight deadline.
+  # ── HARD ── +2 controlled variables vs medium:
+  #   1. CHOKEPOINT approach. Water obstacles at midmap (x=24..30)
+  #      close off y=2..14 and y=26..37, leaving a single y=15..25
+  #      corridor through which BOTH spawn latitudes must funnel
+  #      before reaching the picket. The chokepoint forces the
+  #      strike package to converge to a narrow front before the
+  #      wall engagement, so a stand-off / preserve play that halts
+  #      west of the corridor cannot deliver damage on the fact at
+  #      all.
+  #   2. Seed-chosen staging latitude — two `spawn_point` groups,
+  #      NORTH y=10 and SOUTH y=30 — so the all-in vector flips per
+  #      seed and a memorised opening cannot generalise.
+  # Same 3-e3 wall as medium but the 4tnk is pulled BACK to x=52
+  # (behind the fact) so the win stays robust to either flank: the
+  # NORTH/SOUTH-staged force converges through the corridor,
+  # focus-fires the wall, and razes the fact without the 4tnk
+  # over-killing it from in front first. Tight deadline.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Defended far-east enemy fact at (110, 20); your strike package
-    # stages from a seed-chosen latitude (NORTH or SOUTH) so the all-in
-    # vector varies per seed. Raze the fact before the (tight) deadline.
-    # Keeping the force intact is not required — the bulk of it will be
-    # spent. The careful preserve plan and any partial / halt-short commit
-    # both time out; only the whole-force all-in commit, focus-firing
-    # through the picket, lands the killing blow on the fact.
     description: >
-      Twelve tanks and eight rocket soldiers stage in the north or south
-      band by seed and must raze the defended enemy yard at (110,20).
-      Halting short or trying to keep the force alive will both miss the
-      clock. Commit the whole package all-in along whichever axis your
-      spawn opens, eat the casualties, and finish the yard within about 80
-      turns.
+      Commander, this is a two-prong forlorn-hope strike. You are
+      given the same ten-unit strike package — six medium tanks and
+      four rocket soldiers — staging in either the north band
+      (around y=10) or the south band (around y=30), chosen by seed.
+      A water cordon at mid-map leaves only a narrow y=15..25
+      corridor open, so both spawn bands must funnel through that
+      one pinch before reaching the picket. The enemy yard is at
+      (50, 20), guarded by two rocket soldiers at x=46 and a Mammoth
+      tank pulled back to x=52, all on guard orders. Halting short
+      of the corridor or trying to keep the force alive will both
+      miss the clock. Commit every unit all-in along whichever axis
+      your seed opens, eat the casualties, and raze the yard within
+      about 80 turns.
     overrides:
+      base_map:
+        generator: arena
+        name: combat-suicide-charge-hard-arena
+        width: 56
+        height: 40
+        cordon: 2
+        # Two declared mpspawns — NORTH (y=10) and SOUTH (y=30) —
+        # round-robined by the env's seed→spawn_point mapping.
+        # Persistent agent actor coords (the strike package) are
+        # duplicated across BOTH spawn groups at matching y so each
+        # seed sees a symmetric staging band.
+        spawns: [[4, 10], [4, 30]]
+        title: 'Suicide Charge — Hard Chokepoint 56x40'
+        obstacles:
+          # NORTH wall — water painted x=24..27, y=2..14 (4 cells wide
+          # so units cross it quickly once they reach y=15+). Closes
+          # the northern half of midmap so the NORTH-staged strike
+          # package (y=8..12) must descend to the y=15..25 corridor
+          # before crossing midmap.
+          - {x: 24, y: 2,  w: 4, h: 13}
+          # SOUTH wall — water painted x=24..27, y=26..37. Closes the
+          # southern half of midmap so the SOUTH-staged strike package
+          # (y=28..32) must ascend to the same y=15..25 corridor.
+          - {x: 24, y: 26, w: 4, h: 12}
       actors:
         # spawn_point 0 — NORTH staging (y=8..12)
-        - {type: 2tnk, owner: agent, position: [6, 8],  stance: 1, count: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [6, 10], stance: 1, count: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [6, 12], stance: 1, count: 2, spawn_point: 0}
-        - {type: e3,   owner: agent, position: [8, 9],  stance: 1, count: 2, spawn_point: 0}
-        - {type: e3,   owner: agent, position: [8, 11], stance: 1, count: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 8],  stance: 1, count: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 10], stance: 1, count: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [4, 12], stance: 1, count: 2, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [6, 9],  stance: 1, count: 2, spawn_point: 0}
+        - {type: e3,   owner: agent, position: [6, 11], stance: 1, count: 2, spawn_point: 0}
         # spawn_point 1 — SOUTH staging (y=28..32)
-        - {type: 2tnk, owner: agent, position: [6, 28], stance: 1, count: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [6, 30], stance: 1, count: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [6, 32], stance: 1, count: 2, spawn_point: 1}
-        - {type: e3,   owner: agent, position: [8, 29], stance: 1, count: 2, spawn_point: 1}
-        - {type: e3,   owner: agent, position: [8, 31], stance: 1, count: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 28], stance: 1, count: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 30], stance: 1, count: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [4, 32], stance: 1, count: 2, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [6, 29], stance: 1, count: 2, spawn_point: 1}
+        - {type: e3,   owner: agent, position: [6, 31], stance: 1, count: 2, spawn_point: 1}
         # Defender — symmetric picket on the objective fact (enemy
-        # actors don't honour spawn_point — see CLAUDE.md; the same
-        # picket meets either spawn). Hard's e3 anti-armor wall is a
-        # 3-e3 wall at x=106 (y=16/20/24) — the same wall as medium —
-        # but the 4tnk HP-sponge is pulled BACK to x=112 (behind the
-        # objective fact). That keeps the all-in WIN robust to the
-        # seed-flank staging latitude (NORTH/SOUTH): a flank-staged
-        # strike package focus-fires the wall and razes the fact
-        # without the 4tnk over-killing it from in front first.
-        - {type: e3,   owner: enemy, position: [106, 16], stance: 2}
-        - {type: e3,   owner: enemy, position: [106, 20], stance: 2}
-        - {type: e3,   owner: enemy, position: [106, 24], stance: 2}
-        - {type: 4tnk, owner: enemy, position: [112, 20], stance: 2}
-        - {type: fact, owner: enemy, position: [110, 20]}
-        - {type: fact, owner: enemy, position: [122, 4]}
+        # actors don't honour spawn_point in the agent-side idiom —
+        # see CLAUDE.md; the same picket meets either spawn). The
+        # hard tier's e3 anti-armor wall is the same 3-e3 wall as
+        # medium at x=46 (y=16/20/24) — but the 4tnk HP-sponge is
+        # pulled BACK to x=52 (behind the objective fact). That
+        # keeps the all-in WIN robust to the seed-flank staging
+        # latitude (NORTH/SOUTH): a flank-staged strike package
+        # focus-fires the wall and razes the fact without the 4tnk
+        # over-killing it from in front first.
+        # Hard picket — 2× e3 wall (matching easy's count) plus a
+        # pulled-back Mammoth. We don't use medium's 3-e3 wall on
+        # hard because the chokepoint corridor already concentrates
+        # the strike's attack vector; a 3-e3 wall in the funnel
+        # focus-fires the entire formation as it emerges and
+        # destroys it before the fact takes damage. The hard
+        # escalation comes from the CHOKEPOINT (mid-map water
+        # cordon), not from a denser picket.
+        - {type: e3,   owner: enemy, position: [46, 17], stance: 2}
+        - {type: e3,   owner: enemy, position: [46, 23], stance: 2}
+        - {type: 4tnk, owner: enemy, position: [52, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [50, 20]}
+        - {type: fact, owner: enemy, position: [53, 4]}
     win_condition:
       all_of:
         - enemy_key_buildings_destroyed_in_region:
-            {x: 110, y: 20, radius: 6, types: [fact]}
+            {x: 50, y: 20, radius: 6, types: [fact]}
         - {within_ticks: 7200}
     fail_condition:
       any_of:

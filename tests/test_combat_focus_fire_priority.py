@@ -118,12 +118,14 @@ def test_medium_predicates():
 
 def test_hard_predicates():
     c = compile_level(load_pack(PACK_PATH), "hard")
-    # Intended: kills 14, 0 lost → WIN
+    # 2026-05-23 audit: hard attrition cap is ≤1 (was 0 — see YAML).
+    # Intended: kills 14, ≤1 lost → WIN
     assert evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=14, lost=0))
+    assert evaluate(c.win_condition, _ctx(units=_alive(3), tick=2000, kills=14, lost=1))
     # Bar unmet → not a win
     assert not evaluate(c.win_condition, _ctx(units=_alive(4), tick=2000, kills=13, lost=0))
-    # Any tank lost (cap is 0) → fail
-    assert evaluate(c.fail_condition, _ctx(units=_alive(3), tick=2000, kills=14, lost=1))
+    # 2 tanks lost → busts cap → fail
+    assert evaluate(c.fail_condition, _ctx(units=_alive(2), tick=2000, kills=14, lost=2))
     # Force wipe → fail
     assert evaluate(c.fail_condition, _ctx(units=[], tick=2000, kills=14, lost=4))
     # Timeout → fail

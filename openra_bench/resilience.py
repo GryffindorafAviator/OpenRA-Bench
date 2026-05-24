@@ -153,8 +153,14 @@ class CostMeter:
 # ── checkpoint / resume journal ────────────────────────────────────────────
 
 
-def episode_key(pack: str, level: str, split: str, seed: int) -> str:
-    return f"{pack}|{level}|{split}|{seed}"
+def episode_key(pack: str, level: str, split: str, seed: int,
+                fog_mode: str = "vision") -> str:
+    """Stable key for the run journal — pack|level|split|seed|fog_mode.
+
+    fog_mode is included so a (pack, level, split, seed) eval'd in
+    `vision` and again in `structured` are treated as distinct cells;
+    resume on the same out_dir won't accidentally skip a new modality."""
+    return f"{pack}|{level}|{split}|{seed}|{fog_mode}"
 
 
 class RunJournal:

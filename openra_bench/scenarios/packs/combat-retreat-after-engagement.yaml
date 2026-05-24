@@ -1,6 +1,13 @@
 # combat-retreat-after-engagement — disengage when battle goes poorly
 # to PRESERVE the force (Wave-6 reasoning pack).
 #
+# 2026-05-23 EDIT: map shrunk 112x40 → 56x40 per audits/EDIT_PRINCIPLES
+# §10 (cut empty pre-engagement traversal — the original was tagged
+# `large-trivial`). Engagement line x=60 → x=30, 3tnk escort x=64 →
+# x=34, sentinel (108,20) → (52,20), forward markers x=56/x=64 →
+# x=28/x=34. Safe-zone discs (5,20) / (5,10) / (5,30) and the
+# engagement / retreat / preservation teeth all preserved at half scale.
+#
 # Real-world anchors:
 #   - SC2 retreat micro: when a fight is going poorly, pull units back
 #     to a safe rally point before they die. The decision is timing —
@@ -11,72 +18,22 @@
 #     trades hits for intel/attrition, then breaks contact before the
 #     enemy can encircle and destroy.
 #
-# Recalibrated 2026-05-20 after the OpenRA-Rust movement fixes
-# (moving units fire AND take fire en route; attack_unit on an
-# out-of-sight target paths normally). Those fixes made the close-
-# range trade far more lethal, and the interrupt-mode tick cadence
-# means an action-heavy episode advances FEWER ticks per turn than a
-# pure stall — so the old after_ticks:4501 deadline was inert for the
-# intended policy (a non-winning run DREW instead of LOSING). The
-# enemy is now lighter and the deadline pulled down to 4000 (reached
-# by every policy inside max_turns=51; verified no draw).
+# Recalibrated 2026-05-20 after the OpenRA-Rust movement fixes (moving
+# units fire AND take fire en route; attack_unit on out-of-sight target
+# paths normally). Those fixes made the close-range trade far more
+# lethal, and the interrupt-mode tick cadence means an action-heavy
+# episode advances FEWER ticks per turn than a pure stall — so the old
+# after_ticks:4501 deadline was inert. The enemy is now lighter and the
+# deadline pulled down to 4000.
 #
-# Idiom (the four-policy bar — same shape used by combat-kite and
-# combat-focus-fire):
-#   • stall (only observe)                    → LOSS. The kill bar is
-#     never met; the after_ticks:4000 deadline (reached ~turn 45)
-#     fires → real LOSS, never a draw.
-#   • brute attack-until-death (commit fully) → LOSS. An attack_move
-#     column overshoots the e3 line into the set-back 3tnk heavy and
-#     is out-traded; `own_units_gte:N` flips to fail before the
-#     survivors can pull back.
-#   • never-engage (sit at safe zone)         → LOSS. The tanks stay
-#     in the safe zone the whole episode but the kill bar is unmet →
+# Idiom (the four-policy bar):
+#   • stall (only observe)                    → LOSS. Kill bar unmet,
+#     after_ticks:4000 fires → real LOSS.
+#   • brute attack-until-death (commit fully) → LOSS. The column
+#     overshoots the e3 line into the set-back 3tnk and is out-traded.
+#   • never-engage (sit at safe zone)         → LOSS. Kill bar unmet →
 #     after_ticks LOSS.
-#   • intended engage-then-retreat            → WIN. March east into
-#     fire range, attack_unit the soft e3 rocket infantry (the kill-
-#     bar fodder), then the instant a tank is lost OR any tank's HP
-#     drops below a floor, issue a move_units order WEST back to the
-#     safe-zone region. The bar is own_units_gte:N (lose at most one
-#     tank on medium/hard, up to two on easy) AND ≥3 tanks back in
-#     the safe-zone radius. The decision under test is DISENGAGE
-#     TIMING: bail BEFORE attrition busts the force-preservation cap.
-#
-# Why "battle is lethal head-on" (verified vs engine combat sheet):
-#   • The e3 rocket infantry (Dragon launcher, anti-armour) alpha-
-#     strike the column hard — a brute attack_move that closes past
-#     the e3 line into the set-back 3tnk's cannon range is out-traded
-#     and the loss cap flips before the kill bar is met.
-#   • The "engage the e3 line → break contact" play kills the cheap
-#     targets under concentrated tank fire then bails the moment the
-#     trade turns — keeping ≥3 tanks in the loss cap.
-#
-# Engine guardrails:
-#   • Map: rush-hour-arena (128 × 40, playable x in [2..126],
-#     y in [2..38]). Tanks stage at the west edge (x=5..7), enemies
-#     at (60,20). Cells verified placeable per CLAUDE.md.
-#   • Enemy bot is `guard` (not `hunt`): guard holds post and lunges
-#     within GUARD_AGGRO~16, snaps back past leash 18. The e3 actors
-#     additionally carry stance:2 Defend so they auto-fire in range
-#     but never advance — they HOLD the firing line and do NOT chase
-#     the retreating column (a stance:3 e3 would hunt the tanks all
-#     the way home and confound the retreat). This also means the
-#     never-engage policy is not punished by enemy approach, so
-#     never-engage is a CLEAN kill-bar LOSS, not a confounded loss.
-#   • Persistent unarmed `fact` far east (x=120, y=20) prevents engine
-#     auto-done on enemy-elimination collapsing the run to DRAW — if
-#     the agent accidentally kills everything, the run still evaluates
-#     the in-region predicate at the safe zone (and the agent likely
-#     hasn't retreated → fail clause fires on the clock or attrition).
-#   • after_ticks 4000 is reached by every policy inside max_turns=51
-#     (a pure stall crosses tick 4000 at ~turn 45; an action-heavy
-#     policy, which advances fewer ticks per turn in interrupt mode,
-#     still crosses it before turn 51) → a non-winning run is a real
-#     LOSS, never a draw.
-#   • units_lost / units_killed are signal-level integers (combat-
-#     focus-fire idiom); units_in_region_gte is the geometry predicate
-#     established by action-multiunit-coordination / artofwar-lure-
-#     the-tiger.
+#   • intended engage-then-retreat            → WIN.
 
 meta:
   id: combat-retreat-after-engagement
@@ -90,18 +47,14 @@ meta:
     SC2 retreat-micro idiom: commit briefly to score the kill bar on
     the soft anti-tank infantry (e3), then break contact and pull
     the surviving tanks BACK to the safe rally point in the west
-    before attrition busts the force-preservation cap. The decision
-    under test is disengage TIMING — stalling never engages (kill
-    bar unmet), brute attack-until-death loses the force, and only
-    the engage-then-retreat play wins.
+    before attrition busts the force-preservation cap.
   robotics_analogue: >
     Military tactical-withdrawal doctrine and the SC2 retreat-micro
     pattern — when a battle goes poorly, the policy must IDENTIFY
     the losing trade and pull back to a safe rally before the unit
     is destroyed. The skill is reading the engagement state and
     issuing a withdrawal order at the right moment; over- or
-    under-commitment both fail. Preservation of force is its own
-    objective.
+    under-commitment both fail.
   benchmark_anchor:
     - "SC2 retreat micro / disengage timing"
     - "military tactical withdrawal doctrine"
@@ -109,18 +62,39 @@ meta:
     - "skirmish-and-pullback tactics"
   author: openra-bench
 
-base_map: rush-hour-arena
+base_map:
+  # Tailored 56x40 arena: half the original 112x40 (cordon 2 ⇒ playable
+  # x in [2..53], y in [2..37]). Six small 2×2 water markers visually
+  # demarcate the two functional zones:
+  #   - safe REAR position in the WEST (markers at (10,4) and (10,34),
+  #     framing the x=2..9 staging column where the tanks live);
+  #   - forward ENGAGEMENT zone in the CENTRE (markers at (28,4),
+  #     (34,4), (28,34), (34,34), bracketing the e3 firing line at
+  #     x=30 and the 3tnk escort at x=34).
+  # Every marker sits OUTSIDE every safe-zone disc (radius 6 from
+  # (5,20) on easy/medium; from (5,10) and (5,30) on hard) and well
+  # off the y=18..22 engagement corridor.
+  generator: arena
+  name: combat-retreat-after-engagement-arena-56x40
+  width: 56
+  height: 40
+  cordon: 2
+  title: Combat Retreat 56x40
+  obstacles:
+    - {x: 10, y: 4,  w: 2, h: 2}
+    - {x: 10, y: 34, w: 2, h: 2}
+    - {x: 28, y: 4,  w: 2, h: 2}
+    - {x: 34, y: 4,  w: 2, h: 2}
+    - {x: 28, y: 34, w: 2, h: 2}
+    - {x: 34, y: 34, w: 2, h: 2}
+  spawns:
+    - [5, 20]
 
 base:
   agent: {faction: allies, cash: 0}
   enemy: {faction: soviet, cash: 0, bot_type: guard}
   tools: [move_units, attack_unit, attack_move, stop]
   planning: true
-  # React the instant a tank is destroyed — retreat timing is the
-  # capability under test; without own_unit_destroyed the policy
-  # only learns of the first loss on the next turn boundary and the
-  # second loss lands in the gap. enemy_unit_spotted lets the policy
-  # see the contact frame so it can pick targets before opening fire.
   interrupts:
     enemy_unit_spotted: true
     own_unit_destroyed: true
@@ -129,66 +103,24 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Bare retreat skill. Recalibrated 2026-05-20 after the OpenRA-Rust
-  # movement fixes (moving units fire AND take fire en route; attack_
-  # unit on out-of-sight targets paths normally). Those fixes made the
-  # close-range trade far more lethal — the old 4×e3+1×3tnk enemy was
-  # unwinnable WITHIN the loss cap (killing the quota required losing
-  # too many tanks), and the inert after_ticks deadline let a
-  # non-winning run DRAW instead of LOSE.
-  # New shape: enemy is 2× e3 (anti-tank rockets, stance:2 Defend so
-  # they HOLD the line, not chase the retreat) on the firing line plus
-  # ONE 3tnk heavy escort set back at x=64. Loss cap forgiving
-  # (own_units_gte:2 ⇒ lose up to 2 tanks); kill bar 2 (kill both
-  # e3s). The engage-then-retreat play kills the e3 line and pulls
-  # back losing ~1 tank; the brute overcommits past the line into the
-  # heavy and is wiped; stall / never-engage never meet the kill bar.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four medium tanks (2tnk) stage at the safe zone in the west (x=5,
-    # y=18..21). An enemy squad of TWO rocket infantry (e3, anti-tank
-    # Dragon launcher) holds the firing line at x=60, escorting ONE heavy
-    # tank (3tnk) set back at x=64. The fight is lethal head-on — the
-    # rocket infantry shred armour and the 3tnk cannon out-trades the
-    # column once it overshoots into close range. The intended play: march
-    # east into engagement range, focus-fire and kill the TWO e3s, then
-    # move your tanks WEST BACK to the safe zone before attrition busts
-    # the loss cap. Win when ≥2 enemies are killed AND ≥3 of your tanks
-    # are within radius 6 of (5,20) AND you have ≥2 tanks alive, before
-    # tick 4000. Stall, brute attack-until-death, and never-engage all
-    # LOSE.
     description: >
-      Four medium tanks sit in the western safe zone. Two anti-tank rocket
-      soldiers hold the firing line at x=60 with one heavy tank behind
-      them at x=64. The fight will chew you up if you stay; push east,
-      focus-fire the two rockets, then pull back. Two kills, three tanks
-      back in the (5,20) disc, two tanks alive, within about 45 turns.
+      Four medium tanks sit in the western safe zone. Two anti-tank
+      rocket soldiers hold the firing line at x=30 with one heavy tank
+      behind them at x=34. The fight will chew you up if you stay; push
+      east, focus-fire the two rockets, then pull back. Two kills,
+      three tanks back in the (5,20) disc, two tanks alive, within
+      about 45 turns.
     overrides:
       actors:
-        # Strike force — 4 medium tanks at the safe-zone start.
         - {type: 2tnk, owner: agent, position: [5, 18], stance: 1}
         - {type: 2tnk, owner: agent, position: [5, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [5, 20], stance: 1}
         - {type: 2tnk, owner: agent, position: [5, 21], stance: 1}
-        # Enemy squad — 2× e3 anti-tank rockets ON the firing line at
-        # x=60 (the kill bar's soft targets), stance:2 Defend so they
-        # HOLD the line and auto-fire in range but do NOT chase the
-        # retreating column (a stance:3 e3 would hunt the tanks all
-        # the way home and confound the retreat). The 1× 3tnk heavy
-        # escort sits 4 cells BACK at x=64 — out of weapon range from
-        # the e3 firing line, so it only weighs in when the agent
-        # commits PAST the e3 line (the brute overshoot), supplying
-        # the attrition that makes the brute LOSE.
-        - {type: e3,   owner: enemy, position: [60, 19], stance: 2}
-        - {type: e3,   owner: enemy, position: [60, 21], stance: 2}
-        - {type: 3tnk, owner: enemy, position: [64, 20], stance: 2}
-        # Persistent far-east enemy fact — prevents engine auto-done
-        # on enemy-elimination so the safe-zone predicate is
-        # evaluated rather than the run collapsing to DRAW.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: e3,   owner: enemy, position: [30, 19], stance: 2}
+        - {type: e3,   owner: enemy, position: [30, 21], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [34, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [52, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 2}
@@ -202,57 +134,24 @@ levels:
     max_turns: 51
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # +1 controlled variable vs easy: a bigger e3 line (3× e3 instead of
-  # 2×, kill bar 3 instead of 2) AND a tighter survival bar
-  # (own_units_gte:3 ⇒ lose AT MOST ONE tank). The engage window is
-  # shorter — three e3s alpha-strike the column harder, so the agent
-  # must focus-fire efficiently and break contact a turn sooner. The
-  # intended engage-then-retreat still wins (focus-fire the 3 e3s,
-  # pull back losing one tank); the brute overcommits past the line
-  # into the heavy and loses the force.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four medium tanks (2tnk) stage at the safe zone in the west (x=5,
-    # y=18..21). The enemy squad is THREE rocket infantry (e3, anti-tank
-    # Dragon launcher) holding the firing line at x=60, escorting ONE
-    # heavy tank (3tnk) set back at x=64. The fight is lethal head-on —
-    # the rockets shred armour and the 3tnk cannon out-trades the column
-    # once it overshoots. The intended play: march east into engagement
-    # range, focus-fire and kill the THREE e3s, then move your tanks WEST
-    # BACK to the safe zone before attrition takes a second tank. Win when
-    # ≥3 enemies are killed AND ≥3 of your tanks are within radius 6 of
-    # (5,20) AND you have ≥3 tanks alive, before tick 4000. Stall, brute
-    # attack-until-death, and never-engage all LOSE.
     description: >
       Same four tanks in the western safe zone, but the firing line now
-      holds three rocket soldiers plus the rear heavy. Strike, kill all
-      three rockets, then disengage west before the heavy collapses the
-      column. Three kills, three tanks in the (5,20) disc, three tanks
-      alive, within about 45 turns.
+      holds three rocket soldiers plus the rear heavy at x=34. Strike,
+      kill all three rockets, then disengage west before the heavy
+      collapses the column. Three kills, three tanks in the (5,20)
+      disc, three tanks alive, within about 45 turns.
     overrides:
       actors:
         - {type: 2tnk, owner: agent, position: [5, 18], stance: 1}
         - {type: 2tnk, owner: agent, position: [5, 19], stance: 1}
         - {type: 2tnk, owner: agent, position: [5, 20], stance: 1}
         - {type: 2tnk, owner: agent, position: [5, 21], stance: 1}
-        # Enemy squad — 3× e3 (kill-bar fodder; anti-tank Dragon
-        # launcher) ON THE LINE at x=60, stance:2 Defend so they hold
-        # the line and do not chase the retreat. The 1× 3tnk heavy
-        # escort sits 4 cells back at x=64, out of weapon range from
-        # the e3 firing line — it only weighs in when the agent
-        # commits PAST the e3 line (the brute overshoot). Spread the
-        # e3 line across y=18..22 so the squad faces fire.
-        - {type: e3,   owner: enemy, position: [60, 18], stance: 2}
-        - {type: e3,   owner: enemy, position: [60, 20], stance: 2}
-        - {type: e3,   owner: enemy, position: [60, 22], stance: 2}
-        # Heavy tank 4 cells BEHIND the rocket line — the attrition
-        # trigger for the brute attack_move policy that closes past
-        # x=60 into 3tnk cannon range.
-        - {type: 3tnk, owner: enemy, position: [64, 20], stance: 2}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: e3,   owner: enemy, position: [30, 18], stance: 2}
+        - {type: e3,   owner: enemy, position: [30, 20], stance: 2}
+        - {type: e3,   owner: enemy, position: [30, 22], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [34, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [52, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 3}
@@ -266,52 +165,13 @@ levels:
     max_turns: 51
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # +1 axis vs medium: TWO seed-driven agent spawn_point groups
-  # (NORTH safe zone at (5,10) OR SOUTH safe zone at (5,30)). The
-  # safe-zone position FLIPS per seed, so a memorised "always
-  # retreat to (5,20)" play cannot generalise — the policy must
-  # read the obs to find its own start cell and retreat to THAT
-  # safe zone. Win predicate is an any_of over the two safe-zone
-  # regions so either spawn satisfies the geometry. Enemy formation
-  # is symmetric across y=20 mid-latitude so both spawns face the
-  # same engagement geometry.
-  #
-  # The corner spawn is the hard challenge: the squad must close on
-  # the e3 line along a long DIAGONAL, taking fire the whole approach
-  # (the engine movement fix means a moving column is a live target).
-  # That diagonal makes the medium-tier 3-e3 line genuinely
-  # unsolvable inside the loss cap, so hard trades raw enemy count
-  # for positional difficulty — 2× e3 + 1× 3tnk, kill bar 2 — while
-  # the seed-flipped corridor and the read-your-own-safe-zone
-  # requirement supply the discrimination.
-  #
-  # Per the CLAUDE.md `spawn_point` contract: ALL agent actors
-  # carry an explicit spawn_point (the filter applies only to AGENT
-  # actors); the enemy actors are unchanged and always place.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Four medium tanks (2tnk) stage at ONE of two safe-zone corridors
-    # (NORTH at x=5, y=8..11 OR SOUTH at x=5, y=28..31, chosen by seed —
-    # anti-memorisation). An enemy squad of TWO rocket infantry (e3)
-    # escorting ONE heavy tank (3tnk) holds the centre at (60, 20). The
-    # fight is lethal head-on, and the corner spawn means a long diagonal
-    # approach under fire. The intended play: march east-and-toward-centre
-    # into engagement range, focus-fire and kill the TWO e3s, then move
-    # your tanks BACK to YOUR safe zone (the one you started in — read
-    # your start cell from obs) before attrition takes a second tank. Win
-    # when ≥2 enemies are killed AND ≥3 of your tanks are within radius 6
-    # of YOUR safe zone (north (5,10) OR south (5,30)) AND you have ≥3
-    # tanks alive, before tick 4000. Stall, brute attack-until-death,
-    # never-engage, and retreating to the WRONG safe zone all LOSE.
     description: >
       Four tanks stage in the north (5,10) or south (5,30) safe zone by
-      seed; two rocket soldiers and a heavy hold the centre at (60,20).
-      Strike, kill two rockets, then retreat to YOUR safe zone — not the
-      wrong one. Two kills, three tanks in the matching disc, three tanks
-      alive, within about 45 turns.
+      seed; two rocket soldiers and a heavy hold the centre at (30,20)
+      and (34,20). Strike, kill two rockets, then retreat to YOUR safe
+      zone — not the wrong one. Two kills, three tanks in the matching
+      disc, three tanks alive, within about 45 turns.
     overrides:
       actors:
         # spawn_point 0 — NORTH safe zone (y=8..11)
@@ -324,16 +184,10 @@ levels:
         - {type: 2tnk, owner: agent, position: [5, 29], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [5, 30], stance: 1, spawn_point: 1}
         - {type: 2tnk, owner: agent, position: [5, 31], stance: 1, spawn_point: 1}
-        # Enemy squad — symmetric across y=20 so both spawns face the
-        # same engagement geometry. e3 line forward at x=60 (Dragon
-        # range 5), stance:2 Defend so the e3 hold the line and do
-        # not chase the retreat. The 1× 3tnk escort sits 4 cells back
-        # at x=64, out of weapon range from the e3 firing line so the
-        # heavy only weighs in on a brute overshoot past the line.
-        - {type: e3,   owner: enemy, position: [60, 19], stance: 2}
-        - {type: e3,   owner: enemy, position: [60, 21], stance: 2}
-        - {type: 3tnk, owner: enemy, position: [64, 20], stance: 2}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: e3,   owner: enemy, position: [30, 19], stance: 2}
+        - {type: e3,   owner: enemy, position: [30, 21], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [34, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [52, 20]}
     win_condition:
       all_of:
         - {units_killed_gte: 2}

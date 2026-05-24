@@ -66,7 +66,7 @@ def _ctx(units_xy=(), tick=1000, killed=0, lost=0):
 
 def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    tanks4 = [(6, 18), (6, 19), (6, 20), (6, 21)]
+    tanks4 = [(4, 18), (4, 19), (4, 20), (4, 21)]
     tanks3 = tanks4[:3]
     tanks2 = tanks4[:2]
 
@@ -80,15 +80,15 @@ def test_predicates_easy():
     # 2 tanks remaining → fail clause fires (not own_units_gte:3)
     assert evaluate(c.fail_condition, _ctx(tanks2, tick=3000, killed=3, lost=2))
     # Past deadline → real loss, reachable within max_turns
-    assert evaluate(c.fail_condition, _ctx(tanks4, tick=4502, killed=0, lost=0))
-    assert 4501 <= 93 + 90 * (c.max_turns - 1), (
-        "after_ticks 4501 must be reachable within max_turns"
+    assert evaluate(c.fail_condition, _ctx(tanks4, tick=3002, killed=0, lost=0))
+    assert 3001 <= 93 + 90 * (c.max_turns - 1), (
+        "after_ticks 3001 must be reachable within max_turns"
     )
 
 
 def test_predicates_medium_four_kill_three_survive_bar():
     c = compile_level(load_pack(PACK_PATH), "medium")
-    tanks4 = [(6, 18), (6, 19), (6, 20), (6, 21)]
+    tanks4 = [(4, 18), (4, 19), (4, 20), (4, 21)]
     tanks3 = tanks4[:3]
     tanks2 = tanks4[:2]
 
@@ -102,13 +102,13 @@ def test_predicates_medium_four_kill_three_survive_bar():
     # 2 tanks remaining → fail clause fires (not own_units_gte:3)
     assert evaluate(c.fail_condition, _ctx(tanks2, tick=3000, killed=4, lost=2))
     # Past deadline → real loss, reachable
-    assert evaluate(c.fail_condition, _ctx(tanks4, tick=4502, killed=0, lost=0))
-    assert 4501 <= 93 + 90 * (c.max_turns - 1)
+    assert evaluate(c.fail_condition, _ctx(tanks4, tick=3002, killed=0, lost=0))
+    assert 3001 <= 93 + 90 * (c.max_turns - 1)
 
 
 def test_predicates_hard_five_kill_three_survive_bar():
     c = compile_level(load_pack(PACK_PATH), "hard")
-    tanks4_n = [(6, 14), (6, 15), (6, 16), (6, 17)]
+    tanks4_n = [(4, 14), (4, 15), (4, 16), (4, 17)]
 
     # Intended: 5 kills, ≥3 alive, in time → WIN
     assert evaluate(c.win_condition, _ctx(tanks4_n, tick=3000, killed=5, lost=0))
@@ -117,9 +117,9 @@ def test_predicates_hard_five_kill_three_survive_bar():
         c.win_condition, _ctx(tanks4_n[:2], tick=3000, killed=5, lost=2)
     )
     # Past deadline → real loss, reachable
-    assert evaluate(c.fail_condition, _ctx(tanks4_n, tick=4502, killed=0, lost=0))
-    assert 4501 <= 93 + 90 * (c.max_turns - 1), (
-        "hard after_ticks 4501 must be reachable within max_turns"
+    assert evaluate(c.fail_condition, _ctx(tanks4_n, tick=3002, killed=0, lost=0))
+    assert 3001 <= 93 + 90 * (c.max_turns - 1), (
+        "hard after_ticks 3001 must be reachable within max_turns"
     )
 
 
@@ -159,8 +159,8 @@ def test_timeout_loss_is_reachable_on_every_level():
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
-        assert 4501 <= 93 + 90 * (c.max_turns - 1), (
-            f"{lvl}: after_ticks 4501 not reachable within max_turns"
+        assert 3001 <= 93 + 90 * (c.max_turns - 1), (
+            f"{lvl}: after_ticks 3001 not reachable within max_turns"
         )
 
 
@@ -170,7 +170,7 @@ def test_timeout_loss_is_reachable_on_every_level():
 def _targets(enemies):
     return [
         e for e in enemies
-        if (e.get("type") or "").lower() in ("e3", "3tnk")
+        if (e.get("type") or "").lower() in ("e3", "e1", "3tnk")
         and not e.get("is_building")
     ]
 
@@ -184,16 +184,16 @@ def _stall_policy(rs, Command):
 
 def _brute_attack_move_policy(rs, Command):
     """Brute attack_move east. Engine auto-targets the nearest
-    hostile (the e3 in the column on the same y); head-on geometry,
-    column gets pinned in the kill envelope and loses the survival
-    bar."""
+    hostile (the e3/e1 in the column on the same y); head-on geometry,
+    column gets pinned in the water funnel + kill envelope and loses
+    the survival bar."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
     cmds = []
     for u in units:
         cmds.append(
-            Command.attack_move([str(u["id"])], target_x=110, target_y=u["cell_y"])
+            Command.attack_move([str(u["id"])], target_x=28, target_y=u["cell_y"])
         )
     return cmds
 
@@ -212,25 +212,24 @@ def _frontal_charge_policy(rs, Command):
     cmds = []
     for u in units:
         ux, uy = u["cell_x"], u["cell_y"]
-        if targs and ux >= 50:
+        if targs and ux >= 18:
             t0 = min(
                 targs, key=lambda e: abs(e["cell_x"] - ux) + abs(e["cell_y"] - uy)
             )
             cmds.append(Command.attack_unit([str(u["id"])], str(t0["id"])))
         else:
             cmds.append(
-                Command.move_units([str(u["id"])], target_x=min(60, ux + 12), target_y=uy)
+                Command.move_units([str(u["id"])], target_x=min(24, ux + 6), target_y=uy)
             )
     return cmds
 
 
 def _intended_flank_policy(rs, Command):
     """Intended flank cycle (the spec's load-bearing decision):
-    move the strike force WELL off-axis (north of y=18 — y=8 — or
-    south of y=22 — y=32 — depending on the spawn latitude), drive
-    east along that flank lane until reaching x≈60, then push INTO
-    the line from the flank end so only 1-2 defenders are in range
-    of the leading flanker at any time.
+    route via the NORTH (y=3) or SOUTH (y=36) detour lane around the
+    central water funnel, push east past x=20, then turn in and pick
+    off the rocket line end-on. The map is 32 wide — the flank lane
+    starts immediately east of the spawn.
     """
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
@@ -239,18 +238,18 @@ def _intended_flank_policy(rs, Command):
         return [Command.observe()]
     avg_y = sum(u["cell_y"] for u in units) / max(1, len(units))
     going_north = avg_y < 20
-    flank_y_outer = 8 if going_north else 32
+    flank_y_outer = 3 if going_north else 36
 
     cmds = []
     for u in units:
         ux, uy = u["cell_x"], u["cell_y"]
-        if ux < 50:
+        if ux < 22:
             target_y = max(flank_y_outer, uy - 3) if going_north else min(
                 flank_y_outer, uy + 3
             )
             cmds.append(
                 Command.move_units(
-                    [str(u["id"])], target_x=min(58, ux + 10), target_y=target_y
+                    [str(u["id"])], target_x=min(22, ux + 5), target_y=target_y
                 )
             )
         elif (going_north and uy > flank_y_outer + 2) or (
@@ -272,7 +271,7 @@ def _intended_flank_policy(rs, Command):
                 cmds.append(Command.attack_unit([str(u["id"])], str(t0["id"])))
             else:
                 ty = uy + (2 if going_north else -2)
-                ty = min(max(ty, 5), 35)
+                ty = min(max(ty, 3), 36)
                 cmds.append(
                     Command.move_units([str(u["id"])], target_x=ux, target_y=ty)
                 )

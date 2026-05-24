@@ -75,8 +75,8 @@ def test_split_dash_policy_can_win_easy():
         if len(ids) < 2:
             return [C.observe()]
         half = len(ids) // 2
-        return [C.move_units(ids[:half], 110, 6),
-                C.move_units(ids[half:], 110, 33)]
+        return [C.move_units(ids[:half], 44, 4),
+                C.move_units(ids[half:], 44, 34)]
 
     res = run_level(c, split, seed=1)
     assert res.outcome == "win", f"split policy should win easy, got {res.outcome}"
@@ -91,9 +91,11 @@ def test_medium_regions_are_dispersed_not_clustered():
     pts = [(cl["units_in_region_gte"]["x"], cl["units_in_region_gte"]["y"])
            for cl in wc["all_of"] if "units_in_region_gte" in cl]
     xs = [p[0] for p in pts]
-    assert max(xs) - min(xs) >= 80, f"regions not x-dispersed: {pts}"
-    assert min(xs) <= 25, f"no bottom-left/low-x region: {pts}"   # (20,36)
-    assert max(xs) >= 110, f"no far-east region: {pts}"
+    # On the audit-tight 48x40 map, dispersion is ~32 cells horizontally
+    # (SW at x=12, NE/SE at x=44).
+    assert max(xs) - min(xs) >= 25, f"regions not x-dispersed: {pts}"
+    assert min(xs) <= 15, f"no bottom-left/low-x region: {pts}"   # (12,36)
+    assert max(xs) >= 40, f"no far-east region: {pts}"
 
 
 def test_medium_split_wins_but_all_east_misses_bottom_left():
@@ -110,13 +112,13 @@ def test_medium_split_wins_but_all_east_misses_bottom_left():
             return [C.observe()]
         a, b = ids[:3], ids[3:6]
         c2 = ids[6:] or ids[:1]
-        return [C.move_units(a, 115, 6),     # NE corner
-                C.move_units(b, 20, 36),     # bottom-left
-                C.move_units(c2, 115, 34)]   # SE corner
+        return [C.move_units(a, 44, 4),     # NE corner
+                C.move_units(b, 12, 36),    # bottom-left
+                C.move_units(c2, 44, 34)]   # SE corner
 
     def all_east(rs, C):
         ids = [str(u["id"]) for u in (rs.get("units_summary") or [])]
-        return [C.move_units(ids, 115, 20)] if ids else [C.observe()]
+        return [C.move_units(ids, 44, 20)] if ids else [C.observe()]
 
     assert run_level(c, three_way, seed=1).outcome == "win"
     # one eastward column physically can't cover the bottom-left region

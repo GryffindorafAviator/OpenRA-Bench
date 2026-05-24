@@ -65,7 +65,7 @@ def test_pack_with_generator_spec_compiles():
     # #2 hard dogfoods the YAML path: base_map is a generator spec.
     p = load_pack(PACKS_DIR / "action-sequenced-execution.yaml")
     hard = compile_level(p, "hard")
-    assert hard.scenario.base_map == "scout-arena"
+    assert hard.scenario.base_map == "action-sequenced-execution-arena-hard"
     assert hard.map_supported
 
 

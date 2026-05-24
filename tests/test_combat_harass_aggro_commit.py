@@ -182,7 +182,7 @@ def _retreat(rs, Command):
     that picks survival over commitment fails the aggro bar)."""
     cmds = []
     for uid in _own_ids(rs):
-        cmds.append(Command.move_units([uid], 6, 20))
+        cmds.append(Command.move_units([uid], 4, 20))
     return cmds or [Command.observe()]
 
 
@@ -195,7 +195,7 @@ def _attack_harv_only(rs, Command):
     cmds = []
     raiders = _own_ids(rs)
     for rid in raiders:
-        cmds.append(Command.attack_move([rid], 80, 20))
+        cmds.append(Command.attack_move([rid], 40, 20))
     return cmds or [Command.observe()]
 
 
@@ -224,7 +224,7 @@ def _intended(rs, Command):
         if tid is not None:
             return [Command.attack_unit(raiders, str(tid))]
     # No defenders / harvs in sight — attack-move east into the cluster.
-    return [Command.attack_move([rid], 80, 20) for rid in raiders]
+    return [Command.attack_move([rid], 40, 20) for rid in raiders]
 
 
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])

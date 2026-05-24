@@ -133,7 +133,13 @@ meta:
     - "fragile-target preservation tactics"
   author: "openra-bench"
 
-base_map: rush-hour-arena
+base_map:
+  generator: arena
+  name: combat-protect-vip-escort-arena
+  width: 144
+  height: 40
+  cordon: 2
+  title: 'Protect the VIP - Long Lane 144x40'
 
 base:
   agent: {faction: allies, cash: 0}
@@ -159,71 +165,67 @@ levels:
   # escort must lead, destroy the interceptors, then bring the VIP
   # across. Generous tick budget.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # A single ore harvester (the VIP — unique unit type, unarmed, cannot
-    # fight) is staged at (8,20) with four medium tank escorts. The VIP
-    # must reach the EAST extraction point (x ≈ 100, y ≈ 20, radius 6)
-    # before tick 4500, and MUST be alive on arrival (the harv is the only
-    # one of its type; a destroyed harv fails the run). A guard
-    # interception force holds the route centre at x ≈ 49: one Soviet
-    # heavy tank (3tnk) and four rifle infantry (e1). The guard heavy tank
-    # lunges at the nearest foe — it runs down a lone, unescorted VIP. The
-    # escort tanks must move AHEAD, destroy the interceptors, and only
-    # then send the VIP across.
     description: >
-      A single unarmed harvester at (8,20) — your VIP — must reach the
-      extraction disc near (100,20) alive. Four medium tanks ride escort.
-      The route is blocked at x=49 by one Soviet heavy tank and four
-      riflemen; the heavy will hunt down a lone harvester. Push the
-      escorts ahead, clear the interceptors, then walk the VIP through,
-      within about 50 turns.
+      Commander, this is a VIP escort mission across a long 144x40 lane.
+      You are given 1 harvester (an unarmed ore-collector truck — your
+      VIP, cannot fight back, starting at 70% HP) at (6,20), plus 4
+      medium tank escorts straddling it at (6, 18/19/21/22). The
+      harvester is the ONLY one of its type on the map; if it dies the
+      mission is lost. Two ambushes block the route east: at x=49 sits
+      a guard force of 1 enemy heavy tank (hits harder than your
+      mediums; will lunge at and run down a lone harvester) plus 4
+      riflemen, and at x=85 sits a smaller picket — 1 anti-tank rocket
+      soldier (Dragon launcher, range 5 — punches the harvester's
+      armour) with 2 rifle flankers. Move the escort tanks AHEAD to break each
+      ambush in turn while
+      holding the VIP back at staging; only after the route is cleared,
+      send the harvester across to the extraction disc around (130,20).
+      Within about 60 turns.
     overrides:
       actors:
-        # VIP — the single unique harvester at the west staging
-        # zone. Unique-unit-type marker: the only harv on the map,
-        # so the "VIP alive" check is exactly
-        # `unit_type_count_gte:{harv,1}`. stance:0 (HoldFire)
-        # documents convoy discipline (the harv is unarmed anyway).
-        # health:70 — the VIP starts already at 70% HP (a genuinely
-        # FRAGILE principal). Engine move-fire fix: a harv crossing
-        # WITH the column eats the guard 3tnk's focus while moving;
-        # at 70% start HP that hot crossing is now lethal (the harv
-        # dies before the escort clears the route). The intended
-        # escort holds the VIP at the staging zone — it crosses a
-        # COLD route at full 70%, untouched, and survives.
-        - {type: harv, owner: agent, position: [8, 20], stance: 0, health: 70}
-        # Escorts — 4 medium tanks at the same west staging zone,
-        # straddling the VIP. stance:1 (return fire) so the escorts
-        # retaliate when contacted but don't wander.
-        - {type: 2tnk, owner: agent, position: [8, 18], stance: 1}
-        - {type: 2tnk, owner: agent, position: [8, 19], stance: 1}
-        - {type: 2tnk, owner: agent, position: [8, 21], stance: 1}
-        - {type: 2tnk, owner: agent, position: [8, 22], stance: 1}
-        # Guard interception force — ONE 3tnk (the load-bearing
-        # anti-VIP interceptor) + 4× e1 rifle filler at the route
-        # centre. Off the (50,20) silently-failing column.
+        # VIP — single unique harvester at the west staging zone.
+        # health:70 — fragile principal (engine move-fire fix makes
+        # this load-bearing: a harv crossing the hot route in the
+        # column eats live heavy fire and dies; the intended escort
+        # holds the VIP back so it only ever crosses a cleared
+        # (cold) corridor and arrives at 70% untouched).
+        - {type: harv, owner: agent, position: [6, 20], stance: 0, health: 70}
+        # Escort — 4 medium tanks straddling the VIP at the west
+        # staging zone. stance:1 return-fire so they only engage
+        # when contacted or ordered.
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
+        # AMBUSH 1 @ x=49 — guard force of 1× 3tnk + 4× e1. The
+        # 3tnk is the load-bearing anti-VIP interceptor (lunges at
+        # and destroys an unescorted harv). Off the (50,20)
+        # silently-failing column per CLAUDE.md.
         - {type: 3tnk, owner: enemy, position: [49, 20], stance: 3}
         - {type: e1, owner: enemy, position: [49, 17], stance: 3}
         - {type: e1, owner: enemy, position: [49, 18], stance: 3}
         - {type: e1, owner: enemy, position: [49, 22], stance: 3}
         - {type: e1, owner: enemy, position: [49, 23], stance: 3}
-        # Persistent far enemy `fact` — keeps the episode alive
-        # past the route enemies being cleaned out so the win/fail
-        # evaluator sees the terminal frame (no DRAW collapse).
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # AMBUSH 2 @ x=85 — anti-armour picket on the long lane.
+        # One rocket soldier (e3, Dragon launcher, range 5) on the
+        # y=20 axis can damage the harv's armour as it passes — a
+        # column charge takes Dragon fire en route and the 70%-HP
+        # harv dies. Two rifle flankers pad the picket.
+        - {type: e3, owner: enemy, position: [85, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [85, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [85, 22], stance: 3}
+        # Persistent far enemy fact — engine auto-done mitigation.
+        - {type: fact, owner: enemy, position: [140, 20]}
     win_condition:
       all_of:
-        - {units_of_type_in_region_gte: {type: harv, x: 100, y: 20, radius: 6, n: 1}}
+        - {units_of_type_in_region_gte: {type: harv, x: 130, y: 20, radius: 6, n: 1}}
         - {unit_type_count_gte: {type: harv, n: 1}}
-        - {within_ticks: 4500}
+        - {within_ticks: 5400}
     fail_condition:
       any_of:
-        - {after_ticks: 4501}
+        - {after_ticks: 5401}
         - {not: {unit_type_count_gte: {type: harv, n: 1}}}
-    max_turns: 50
+    max_turns: 61
 
   # ── MEDIUM ───────────────────────────────────────────────────────
   # +1 axis vs easy: the guard interception clump gains two more e1
@@ -233,33 +235,32 @@ levels:
   # is unchanged (a second would out-trade the escort). Stall /
   # VIP-alone / VIP-leads-charge LOSE; intended escort WINS.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # A single ore harvester (the VIP — unique unit type, unarmed, cannot
-    # fight) is staged at (8,20) with four medium tank escorts. The VIP
-    # must reach the EAST extraction point (x ≈ 100, y ≈ 20, radius 6)
-    # before tick 4500, alive. A guard interception force holds the route
-    # centre at x ≈ 49: one Soviet heavy tank (3tnk) and six rifle
-    # infantry (e1) arrayed across y=16..24. The escort tanks must lead —
-    # destroy the heavy interceptor and the rifle corridor — because the
-    # unarmed VIP is caught and killed if it enters the route unescorted
-    # or at the head of the column.
     description: >
-      Same lone harvester and four tank escorts, but the interception now
-      adds two more riflemen — one heavy plus six rifles spread across
-      y=16..24. Lead with the tanks to break the line; the unarmed VIP
-      cannot survive a stray volley. Land the harvester in the (100,20)
-      disc within about 50 turns.
+      Commander, this is a VIP escort mission across a long 144x40 lane.
+      You are given 1 harvester (an unarmed ore-collector truck — your
+      VIP, cannot fight back, starting at 70% HP) at (6,20), plus 4
+      medium tank escorts straddling it at (6, 18/19/21/22). The
+      harvester is the ONLY one of its type on the map; if it dies the
+      mission is lost. Two ambushes block the route east: at x=49 sits
+      a tall guard line of 1 enemy heavy tank (hits harder than your
+      mediums; will lunge at a lone harvester) plus 6 riflemen spread
+      across y=16..24, and at x=85 sits a line of 3 anti-tank rocket
+      soldiers (Dragon launchers, range 5 — they punch the harvester's
+      armour) with 2 rifle flankers. Move the escort tanks AHEAD to
+      break each ambush in turn while
+      holding the VIP back at staging; only after the route is cleared,
+      send the harvester across to the extraction disc around (130,20).
+      Within about 60 turns.
     overrides:
       actors:
-        - {type: harv, owner: agent, position: [8, 20], stance: 0, health: 70}
-        - {type: 2tnk, owner: agent, position: [8, 18], stance: 1}
-        - {type: 2tnk, owner: agent, position: [8, 19], stance: 1}
-        - {type: 2tnk, owner: agent, position: [8, 21], stance: 1}
-        - {type: 2tnk, owner: agent, position: [8, 22], stance: 1}
-        # Guard interception force — ONE 3tnk + 6× e1 corridor.
+        - {type: harv, owner: agent, position: [6, 20], stance: 0, health: 70}
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 19], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 21], stance: 1}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1}
+        # AMBUSH 1 @ x=49 — guard force of 1× 3tnk + 6× e1 vertical
+        # corridor (y=16..24). The taller line means a harv-led
+        # column charge takes more cumulative exposure.
         - {type: 3tnk, owner: enemy, position: [49, 20], stance: 3}
         - {type: e1, owner: enemy, position: [49, 16], stance: 3}
         - {type: e1, owner: enemy, position: [49, 17], stance: 3}
@@ -267,17 +268,25 @@ levels:
         - {type: e1, owner: enemy, position: [49, 22], stance: 3}
         - {type: e1, owner: enemy, position: [49, 23], stance: 3}
         - {type: e1, owner: enemy, position: [49, 24], stance: 3}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # AMBUSH 2 @ x=85 — anti-armour pickets on the long lane.
+        # Three e3 rocket soldiers + rifle flankers; Dragon fire
+        # punches the 70%-HP harv's armour during a column charge.
+        - {type: e3, owner: enemy, position: [85, 19], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 20], stance: 3}
+        - {type: e3, owner: enemy, position: [85, 21], stance: 3}
+        - {type: e1, owner: enemy, position: [85, 17], stance: 3}
+        - {type: e1, owner: enemy, position: [85, 23], stance: 3}
+        - {type: fact, owner: enemy, position: [140, 20]}
     win_condition:
       all_of:
-        - {units_of_type_in_region_gte: {type: harv, x: 100, y: 20, radius: 6, n: 1}}
+        - {units_of_type_in_region_gte: {type: harv, x: 130, y: 20, radius: 6, n: 1}}
         - {unit_type_count_gte: {type: harv, n: 1}}
-        - {within_ticks: 4500}
+        - {within_ticks: 5400}
     fail_condition:
       any_of:
-        - {after_ticks: 4501}
+        - {after_ticks: 5401}
         - {not: {unit_type_count_gte: {type: harv, n: 1}}}
-    max_turns: 50
+    max_turns: 61
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 axis vs medium: TWO seed-driven spawn groups (NORTH staging
@@ -292,70 +301,68 @@ levels:
   # FULL-HP heavies would out-trade the escort and break the
   # intended-WINS half of the bar).
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # A single ore harvester (the VIP — unique unit type, unarmed, cannot
-    # fight) is staged with four medium tank escorts at the NORTH staging
-    # row (y ≈ 16) or the SOUTH staging row (y ≈ 24), chosen by seed for
-    # anti-memorisation. The VIP must reach the EAST extraction point (x ≈
-    # 100, y ≈ 20, radius 6) before tick 4500, alive. A guard interception
-    # force holds the route: two Soviet heavy tanks (3tnk) — one aligned
-    # to each staging lane — backed by rifle-infantry filler. The escort
-    # tanks must lead and destroy the interceptors; the fragile VIP is
-    # caught and killed if it enters the route unescorted or at the head
-    # of the column.
     description: >
-      Your harvester and four-tank escort spawn either on the north (y=16)
-      or south (y=24) row by seed. The route holds two Soviet heavies —
-      one aligned to each lane — plus a few riflemen. The escorts must
-      lead and break the interceptors before the VIP enters the route.
-      Reach the (100,20) disc within about 50 turns.
+      Commander, this is a VIP escort mission across a long 144x40 lane,
+      with seed-rotated staging. You are given 1 harvester (an unarmed
+      ore-collector truck — your VIP, cannot fight back, starting at
+      70% HP) plus 4 medium tank escorts, staged together at either the
+      NORTH row (around y=16) or the SOUTH row (around y=24) depending
+      on seed — read your actual starting row from the observation. The
+      harvester is the ONLY one of its type on the map; if it dies the
+      mission is lost. The route holds two enemy heavy tanks at x=49 —
+      one aligned to each staging lane, each at 55% HP, each able to
+      lunge at and destroy an unescorted harvester — backed by a wide
+      rifle filler at x=55, plus a smaller second rifle clump at x=85
+      spanning y=18..22 — the rifles cap the route latitude so neither
+      lane offers a free sprint after the first ambush. Move the escort tanks AHEAD to break the
+      interceptors while holding the VIP back at staging; only after
+      the route is clear, send the harvester across to the extraction
+      disc around (130,20). Within about 60 turns.
     overrides:
       actors:
         # spawn_point 0 — NORTH staging at y ≈ 16.
-        - {type: harv, owner: agent, position: [8, 16], stance: 0, spawn_point: 0, health: 70}
-        - {type: 2tnk, owner: agent, position: [8, 14], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [8, 15], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [8, 17], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [8, 18], stance: 1, spawn_point: 0}
-        # spawn_point 1 — SOUTH staging at y ≈ 24 (mirrored across
-        # y=20).
-        - {type: harv, owner: agent, position: [8, 24], stance: 0, spawn_point: 1, health: 70}
-        - {type: 2tnk, owner: agent, position: [8, 22], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [8, 23], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [8, 25], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [8, 26], stance: 1, spawn_point: 1}
-        # Guard interception force — TWO 3tnk heavies, ONE on each
-        # staging lane (y=16 NORTH, y=24 SOUTH), each at health:55.
-        # Post engine move-fire fix, a single y=20-axis 3tnk can no
-        # longer catch a harv-led column that funnels off-axis (the
-        # no-teleport attack-chase lags the fast column) — so each
-        # lane carries its own lane-aligned interceptor that the
-        # harv-led charge must cross. The heavies are at 55% HP so
-        # the 4-tank escort focus-firing AHEAD of the VIP can still
-        # clear BOTH within budget (intended escort WINS); a
-        # harv-led column eats a lane heavy's focus and the 70%-HP
-        # VIP dies (VIP-leads-charge LOSES). Two FULL-HP heavies
-        # would out-trade the escort — the health:55 floor is what
-        # keeps the escort-leadership capability load-bearing.
+        - {type: harv, owner: agent, position: [6, 16], stance: 0, spawn_point: 0, health: 70}
+        - {type: 2tnk, owner: agent, position: [6, 14], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 15], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 17], stance: 1, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [6, 18], stance: 1, spawn_point: 0}
+        # spawn_point 1 — SOUTH staging at y ≈ 24 (mirrored).
+        - {type: harv, owner: agent, position: [6, 24], stance: 0, spawn_point: 1, health: 70}
+        - {type: 2tnk, owner: agent, position: [6, 22], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 23], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 25], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [6, 26], stance: 1, spawn_point: 1}
+        # AMBUSH 1 @ x=49 — TWO 3tnk heavies (ONE per lane, y=16 N
+        # and y=24 S) at health:55 + 5× e1 spanning the corridor.
+        # The 55% HP floor keeps a 4-tank escort able to clear BOTH
+        # heavies in budget (intended-WINS); a harv-led column
+        # crosses a lane-aligned heavy and the 70%-HP VIP dies
+        # (VIP-leads-charge LOSES). Two FULL-HP heavies would
+        # out-trade the escort — the health:55 floor is the
+        # load-bearing tuning.
         - {type: 3tnk, owner: enemy, position: [49, 16], stance: 3, health: 55}
         - {type: 3tnk, owner: enemy, position: [49, 24], stance: 3, health: 55}
-        # e1 rifle filler spanning the corridor — cheap kills that
-        # pad the route without out-trading the escort.
         - {type: e1, owner: enemy, position: [55, 16], stance: 3}
         - {type: e1, owner: enemy, position: [55, 20], stance: 3}
         - {type: e1, owner: enemy, position: [55, 24], stance: 3}
+        # AMBUSH 2 @ x=85 — small rifle band on the long lane
+        # spanning y=16..24. On hard the load-bearing anti-VIP
+        # threat is the dual lane-aligned heavies at x=49; the x=85
+        # rifle band caps the route latitude so neither lane offers
+        # a free sprint after the first ambush, without out-trading
+        # the four-tank escort.
+        - {type: e1, owner: enemy, position: [85, 18], stance: 3}
+        - {type: e1, owner: enemy, position: [85, 20], stance: 3}
+        - {type: e1, owner: enemy, position: [85, 22], stance: 3}
         # Persistent far enemy fact — engine auto-done mitigation.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [140, 20]}
     win_condition:
       all_of:
-        - {units_of_type_in_region_gte: {type: harv, x: 100, y: 20, radius: 6, n: 1}}
+        - {units_of_type_in_region_gte: {type: harv, x: 130, y: 20, radius: 6, n: 1}}
         - {unit_type_count_gte: {type: harv, n: 1}}
-        - {within_ticks: 4500}
+        - {within_ticks: 5400}
     fail_condition:
       any_of:
-        - {after_ticks: 4501}
+        - {after_ticks: 5401}
         - {not: {unit_type_count_gte: {type: harv, n: 1}}}
-    max_turns: 50
+    max_turns: 61

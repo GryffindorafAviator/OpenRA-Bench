@@ -2,10 +2,11 @@
 
 The bar: TWO 3-tank squads start on the SAME west edge at OPPOSING
 latitudes (north y=8, south y=32). A central enemy cluster sits at
-the mid-map (around (50,20)). The win predicate REQUIRES both squads
-to engage simultaneously:
+the mid-map at (22,20) (post-2026-05-23 map shrink from 144x40 to
+72x40). The win predicate REQUIRES both squads to engage
+simultaneously:
 
-  • `units_in_region_gte:{x:50,y:20,radius:8,n:4}` — at least 4 tanks
+  • `units_in_region_gte:{x:22,y:20,radius:8,n:4}` — at least 4 tanks
     must be inside the central region; a single squad has only 3 tanks
     so single-squad-A cannot satisfy this clause regardless of
     attrition.
@@ -91,7 +92,7 @@ def _ctx(*, units=(), tick=1000, kills=0, lost=0):
     )
 
 
-def _tanks_at(n, x=50, y=20):
+def _tanks_at(n, x=22, y=20):
     return [
         {"cell_x": x, "cell_y": y, "type": "2tnk", "id": str(2000 + i)}
         for i in range(n)
@@ -174,9 +175,12 @@ def test_two_squads_on_every_level():
 
 
 def test_enemy_cluster_avoids_silent_no_place_cell():
-    """CLAUDE.md: (50,20) silently fails to place enemy clusters.
-    Cluster must anchor on the off-by-one cells (50,19) / (50,21)."""
+    """CLAUDE.md flags (50,20), (60,28), (90,30) as silent-no-place
+    cluster cells. Post-shrink the cluster anchors at (22,19)/(22,21)
+    — neither cell is on that list; the win region (22,20, r=8) covers
+    both halves."""
     pack = load_pack(PACK_PATH)
+    silent_no_place = {(50, 20), (60, 28), (90, 30)}
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
         cluster = [
@@ -185,11 +189,11 @@ def test_enemy_cluster_avoids_silent_no_place_cell():
         ]
         assert cluster, f"{lvl}: no central cluster declared"
         for a in cluster:
-            assert tuple(a.position) != (50, 20), (
-                f"{lvl}: enemy cluster member at (50,20) — CLAUDE.md "
-                f"silent-no-place footgun"
+            assert tuple(a.position) not in silent_no_place, (
+                f"{lvl}: enemy cluster member at {a.position} — "
+                f"CLAUDE.md silent-no-place footgun"
             )
-            assert a.position[0] == 50 and a.position[1] in (19, 21), (
+            assert a.position[0] == 22 and a.position[1] in (19, 21), (
                 f"{lvl}: cluster member off-anchor; got {a.position}"
             )
 
@@ -204,7 +208,7 @@ def test_persistent_far_enemy_marker_present():
         far_facts = [
             a for a in c.scenario.actors
             if a.owner == "enemy" and a.type == "fact"
-            and a.position[0] >= 100  # far east of the cluster
+            and a.position[0] >= 50  # far east of the cluster (post-shrink)
         ]
         assert far_facts, f"{lvl}: needs a far persistent enemy fact sentinel"
 
@@ -270,7 +274,7 @@ def _make_single_squad_a():
         b = _live(rs, state["b"])
         cmds = []
         if a:
-            cmds.append(Command.attack_move(a, 50, 20))
+            cmds.append(Command.attack_move(a, 22, 20))
         if b:
             cmds.append(Command.stop(b))
         return cmds or [Command.observe()]
@@ -296,10 +300,10 @@ def _make_sequenced_a_then_b_late(delay_turns=20):
         b = _live(rs, state["b"])
         cmds = []
         if a:
-            cmds.append(Command.attack_move(a, 50, 20))
+            cmds.append(Command.attack_move(a, 22, 20))
         if b:
             if state["turn"] >= delay_turns:
-                cmds.append(Command.attack_move(b, 50, 20))
+                cmds.append(Command.attack_move(b, 22, 20))
             else:
                 cmds.append(Command.stop(b))
         return cmds or [Command.observe()]
@@ -322,9 +326,9 @@ def _make_intended_pincer_sync():
         b = _live(rs, state["b"])
         cmds = []
         if a:
-            cmds.append(Command.attack_move(a, 50, 20))
+            cmds.append(Command.attack_move(a, 22, 20))
         if b:
-            cmds.append(Command.attack_move(b, 50, 20))
+            cmds.append(Command.attack_move(b, 22, 20))
         return cmds or [Command.observe()]
 
     return policy

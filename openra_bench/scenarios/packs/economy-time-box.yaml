@@ -1,97 +1,200 @@
+# ECONOMY-TIME-BOX — Time-Boxed Budget Allocation: BREADTH of Spend
+#
+# Spend a fixed cash budget on a BROADER spend than `economy-force-
+# buildup` requires (which is `2nd powr + N e3` — a single quality axis):
+# here the model must convert cash into MULTIPLE distinct building types
+# AND a fielded force WITHIN A HARD TICK DEADLINE. The decision is
+# allocation breadth + spend tempo, not any single build.
+#
+# DEFECT FIX (2026-05-23 — was quarantined):
+#   PR audit `audits/family2_economy.csv` flagged TWO defects:
+#     1. `within_ticks: 22000 / 16000 / 12000` on easy/medium/hard, but
+#        the engine ceiling at max_turns 60/70/80 is only 5403/6303/7203.
+#        The deadline NEVER bit → stall produced DRAW, not LOSS.
+#     2. NO `fail_condition` on any tier → non-win silently DRAW.
+#   Both fixed:
+#     * `within_ticks` re-tuned to 5000 / 5500 / 6500 (well inside the
+#       engine ceiling on each tier).
+#     * `fail_condition` added on every tier with an `after_ticks` clock
+#       AT `within_ticks + 1` (the one-tick-past-deadline idiom — non-
+#       finisher LOSES, not draws) plus a structural "fact razed" clause.
+#   The pack is also un-quarantined and re-tightened so its bar discriminates
+#   from `economy-force-buildup`: that pack tests POWER + ANTI-VEHICLE
+#   QUALITY (powr count + e3 quality); this pack tests SPEND BREADTH
+#   (multiple distinct building types + general unit count) on a tighter
+#   custom arena.
+#
+# Map: shrunk from the generic rush-hour-arena (128x40) to a bespoke
+# economy-time-box-48x40 — the test is purely "spend cash → place
+# buildings + train units" inside the agent's own base, no traversal.
+# 48 wide leaves enough room for placement (build sites at x=10-30)
+# without a 100-cell empty corridor of "decision-free march".
+
 meta:
   id: economy-time-box
-  title: Spend Well Against the Clock — Allocate a Fixed Budget Before Time Runs Out
+  title: Spend Well Against the Clock — Convert a Fixed Budget to Breadth Before Time Runs Out
   capability: reasoning
-  real_world_meaning: 'Time-bounded capital deployment: a fixed budget must be converted into deployed
-    capability AND a standing economy before a hard tick deadline. Cash left unspent at the deadline is
-    wasted; spending it all on units leaves no production economy; the decision is the spend schedule
-    and the unit/structure mix, not any single build.
-
-    '
-  robotics_analogue: 'A field robot with a finite, non-replenishing energy budget that must both perform
-    mission work and stand up persistent infrastructure before a deadline — scheduling expenditure so
-    the objective is met without exhausting the budget prematurely.
-
-    '
+  real_world_meaning: >
+    Time-bounded capital deployment under a BREADTH constraint. A fixed
+    cash budget must be converted into MULTIPLE distinct building types
+    AND a fielded force before a hard tick deadline. Cash left idle at
+    the deadline is wasted; sinking the whole budget into a single
+    structure or a swarm of one unit type misses the breadth bar; the
+    decision is the spend mix (multiple building categories + units)
+    AND the spend tempo (start early enough to fit serial build times
+    inside the clock).
+  robotics_analogue: >
+    A field operation with a finite, non-replenishing energy/cash budget
+    that must both establish a multi-category support footprint
+    (production + power + barracks-class facility) AND fielded mission
+    units before a deadline — scheduling expenditure breadth so neither
+    axis (infrastructure cardinality nor deployed force size) starves
+    before the clock runs out.
+  benchmark_anchor:
+    - "SC2 build-order under a fixed budget"
+    - "PlanBench cost-bounded multi-goal allocation"
+    - "fixed-budget multi-category provisioning"
   author: autonomous-loop
-  status: quarantine
-  quarantine_reason: redundant with economy-force-buildup (= force-buildup + a 'keep a building standing'
-    clause, same budget-under-clock decision); economy-investment kept for the distinct economy-vs-military
-    allocation choice.
-base_map: rush-hour-arena
+
+# Per-scenario arena, sized to the decision under test (spend, place,
+# train — no march). Materialised once into
+# `data/maps/economy-time-box-48x40.oramap`. Playable bounds (2,2,44,36).
+base_map:
+  generator: arena
+  name: economy-time-box-48x40
+  width: 48
+  height: 40
+  cordon: 2
+  title: Economy Time-Box Arena 48x40
+
 starting_cash: 4000
+
 base:
-  agent:
-    faction: allies
-  enemy:
-    faction: soviet
+  agent: {faction: allies}
+  enemy: {faction: soviet}
   tools:
-  - build
-  - place_building
-  - move_units
-  - deploy
-  - stop
+    - build
+    - place_building
+    - move_units
+    - deploy
+    - stop
   planning: true
   termination:
-    max_ticks: 40000
+    max_ticks: 12000
   actors:
-  - type: fact
-    owner: agent
-    position:
-    - 10
-    - 18
-  - type: powr
-    owner: agent
-    position:
-    - 14
-    - 18
-  - type: barr
-    owner: agent
-    position:
-    - 10
-    - 22
-  - type: e1
-    owner: enemy
-    position:
-    - 118
-    - 34
-    stance: 0
-levels:
-  easy:
-    description: 'Generous budget and clock. Field a small force and keep an economy building standing:
-      the only failure is leaving the budget idle or spending it down to nothing.
+    # Pre-placed agent base — Construction Yard, one Power Plant, one
+    # Allied Barracks (tent). The "breadth" the model must add is at
+    # least one more building category (a 2nd powr, a proc/silo/etc.)
+    # plus trained infantry from the tent.
+    - {type: fact, owner: agent, position: [10, 18]}
+    - {type: powr, owner: agent, position: [14, 18]}
+    - {type: tent, owner: agent, position: [10, 22]}
+    # Persistent unarmed enemy actor at the far edge of the small
+    # arena. ConquestVictoryConditions would auto-`done` on "all enemies
+    # eliminated" before the win/fail evaluator sees the terminal frame
+    # (CLAUDE.md footgun). HoldFire stance + far-east position keeps it
+    # alive for the whole episode.
+    - {type: e1, owner: enemy, position: [42, 34], stance: 0}
 
-      '
+levels:
+  # ── EASY ── breadth bar at GENEROUS clock. Budget covers a 2nd powr
+  # (300cr), an extra building (proc 1400cr or silo 150cr), and 4 cheap
+  # rifles (4×100 = 400cr) with margin. ANY allocation that produces 4
+  # buildings (proc/silo cheap addition) + 4 units clears the bar. A
+  # staller LOSES (no spend → 0 units, 3 buildings — neither clause
+  # clears); a "buy nothing but infantry" play LOSES (units may clear
+  # 4, but building total stays at 3); a "buy nothing but buildings"
+  # play LOSES (buildings may clear 4, but unit count stays at 0).
+  # max_turns 60 ⇒ engine ceiling 93+90·59 = 5403; deadline 5000.
+  easy:
+    description: >
+      Commander, this is a fixed-budget time-boxed buildup. You start with
+      a Construction Yard ('fact'), one Power Plant ('powr'), and an Allied
+      Barracks ('tent'), plus $4000 cash. Within about 56 turns, you must
+      grow your standing base to at least 4 buildings (any additional
+      production or storage building — a 2nd power plant, a silo, an Ore
+      Refinery, etc. — adds to the count) AND have at least 4 units in the
+      field. Idle cash is wasted; spending it all on units leaves only 3
+      buildings; spending it all on buildings leaves 0 units. The clock
+      bites — sit on the budget and you LOSE.
     starting_cash: 4000
     win_condition:
       all_of:
-      - own_units_gte: 4
-      - building_total_gte: 4
-      - within_ticks: 22000
+        - own_units_gte: 4
+        - building_total_gte: 4
+        - within_ticks: 5000
+    # Defect fix: deadline reachable (5000 ≤ 5403 = 93+90·59) AND
+    # one-tick-past-deadline backstop so a non-finisher LOSES, not
+    # draws. `not has_building:fact` also fires on razed base.
+    fail_condition:
+      any_of:
+        - after_ticks: 5001
+        - not: {has_building: fact}
     max_turns: 60
-  medium:
-    description: 'Tighter budget and clock: the spend must start promptly and the mix must cover both
-      fielded units and a power-dependent structure within the deadline.
 
-      '
+  # ── MEDIUM ── breadth + a NEW building-category requirement: the
+  # tent is pre-placed, but the unit count requires a more deliberate
+  # tempo (5 units = 500cr at the cheapest). The starting cash drops
+  # to 2400 so the budget barely covers a 2nd powr (300) + ~5 e1 (500)
+  # + a 3rd building of some kind (silo 150, or `bracketing` a 2nd
+  # tent for parallel-prod 500). max_turns 70 ⇒ ceiling 6303; deadline
+  # 5500. The `has_building:tent` clause is degenerate (pre-placed) —
+  # we use `building_total_gte:4` instead so the model MUST add at
+  # least one new building.
+  medium:
+    description: >
+      Commander, this is a tighter fixed-budget buildup. You start with the
+      same Construction Yard, Power Plant, and Allied Barracks plus $2400
+      cash. Within about 61 turns, your base must grow to at least 4
+      standing buildings (any added category — a 2nd power plant, an Ore
+      Silo, an Ore Refinery, a 2nd barracks — counts) AND you must field
+      at least 5 trained units. The budget covers exactly this mix; idling
+      or spending it on a single line LOSES. Start the build chain early —
+      serial build times eat the clock.
     starting_cash: 2400
     win_condition:
       all_of:
-      - own_units_gte: 5
-      - has_building: tent
-      - building_total_gte: 4
-      - within_ticks: 16000
+        - own_units_gte: 5
+        - building_total_gte: 4
+        - within_ticks: 5500
+    fail_condition:
+      any_of:
+        - after_ticks: 5501
+        - not: {has_building: fact}
     max_turns: 70
-  hard:
-    description: 'Lean budget, short clock, attrition cap: every credit and tick must convert to fielded
-      force plus a standing economy while losing nothing.
 
-      '
-    starting_cash: 1500
+  # ── HARD ── breadth + tempo + ZERO-ATTRITION. Budget 1700 is tight
+  # (covers ~3-4 units cheap + 1 added building like silo 150 + 2nd
+  # powr 300). Win requires 6 units + 5 buildings + 0 losses. The
+  # bar bites every direction: idling LOSES; spending all on units
+  # LOSES on the building total; spending all on buildings LOSES on
+  # the unit count; getting any unit killed LOSES on `units_lost_lte`.
+  # max_turns 80 ⇒ ceiling 7203; deadline 6500. The enemy e1 is
+  # stance:0 (HoldFire) and far in the corner — there is no incoming
+  # combat, so the units_lost_lte clause is gated purely on the agent
+  # not throwing units into self-killing situations (e.g. an attack
+  # against the lone hostile that doesn't return fire but the e1 won't
+  # die in one volley either — the safe play is to leave it alone).
+  hard:
+    description: >
+      Commander, this is the leanest budget under the shortest clock with
+      a zero-attrition cap. You start with a Construction Yard, Power
+      Plant, and Allied Barracks plus $1700 cash. Within about 71 turns,
+      your base must grow to at least 5 standing buildings AND you must
+      field at least 6 trained units WITHOUT losing a single one. The
+      budget covers a coherent serial build chain — every credit and
+      every tick must convert into deployed structure or fielded unit.
+      Spam, overspend, or any battlefield casualty LOSES.
+    starting_cash: 1700
     win_condition:
       all_of:
-      - own_units_gte: 6
-      - building_total_gte: 5
-      - units_lost_lte: 0
-      - within_ticks: 12000
+        - own_units_gte: 6
+        - building_total_gte: 5
+        - units_lost_lte: 0
+        - within_ticks: 6500
+    fail_condition:
+      any_of:
+        - after_ticks: 6501
+        - not: {has_building: fact}
+        - not: {units_lost_lte: 0}
     max_turns: 80

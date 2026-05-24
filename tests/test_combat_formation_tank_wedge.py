@@ -78,13 +78,13 @@ def _ctx(units_xy=(), tick=1000, killed=0, lost=0):
 def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
     # 4 tanks AT objective (within radius 6 of 80,20) — WIN
-    at_obj4 = [(78, 19), (80, 20), (82, 21), (80, 18)]
+    at_obj4 = [(44, 19), (46, 20), (48, 21), (46, 18)]
     # 3 tanks at objective + 2 elsewhere — own ≥4 ok but region n<4 fails
-    at_obj3 = [(78, 19), (80, 20), (82, 21), (6, 18), (6, 19)]
+    at_obj3 = [(44, 19), (46, 20), (48, 21), (6, 18), (6, 19)]
     # 4 tanks at objective + 1 elsewhere — 5 alive total, region n=4 ok
-    at_obj4_plus = [(78, 19), (80, 20), (82, 21), (80, 18), (6, 18)]
+    at_obj4_plus = [(44, 19), (46, 20), (48, 21), (46, 18), (6, 18)]
     # 2 tanks at objective — region predicate fails
-    at_obj2 = [(78, 19), (80, 20)]
+    at_obj2 = [(44, 19), (46, 20)]
 
     # Intended: ≥4 at objective, ≥4 alive, in time → WIN
     assert evaluate(c.win_condition, _ctx(at_obj4_plus, tick=3000))
@@ -107,9 +107,9 @@ def test_predicates_medium_relaxed_three_survive_bar():
     5 tanks at objective, not the strict 5-of-5. The discriminator is
     column-vs-wedge survival differential, not absolute counts."""
     c = compile_level(load_pack(PACK_PATH), "medium")
-    at_obj3 = [(78, 19), (80, 20), (82, 21)]
-    at_obj3_plus = [(78, 19), (80, 20), (82, 21), (6, 18)]
-    at_obj2 = [(78, 19), (80, 20)]
+    at_obj3 = [(44, 19), (46, 20), (48, 21)]
+    at_obj3_plus = [(44, 19), (46, 20), (48, 21), (6, 18)]
+    at_obj2 = [(44, 19), (46, 20)]
 
     # Intended: ≥3 at objective, ≥3 alive, ≥3 kills, in time → WIN
     assert evaluate(c.win_condition, _ctx(at_obj3, tick=3000, killed=3))
@@ -124,8 +124,8 @@ def test_predicates_medium_relaxed_three_survive_bar():
 
 def test_predicates_hard_two_blockers():
     c = compile_level(load_pack(PACK_PATH), "hard")
-    at_obj3 = [(78, 19), (80, 20), (82, 21)]
-    at_obj2 = [(78, 19), (80, 20)]
+    at_obj3 = [(44, 19), (46, 20), (48, 21)]
+    at_obj2 = [(44, 19), (46, 20)]
 
     # Intended: ≥3 at objective, ≥3 alive, ≥4 kills, in time → WIN
     assert evaluate(c.win_condition, _ctx(at_obj3, tick=3000, killed=4))
@@ -188,7 +188,7 @@ def _targets(enemies):
 
 def _stall_policy(rs, Command):
     """Stall: only observe. Region bar never met (the agent never
-    moves toward (80,20)) → after_ticks LOSS."""
+    moves toward (46,20)) → after_ticks LOSS."""
     return [Command.observe()]
 
 
@@ -197,14 +197,14 @@ def _brute_column_policy(rs, Command):
     through the corridor on the engagement axis; rocket-soldier fire
     from the bracket(s) focuses on the lead, then inherits down the
     line — the column busts the survival bar before reaching
-    (80,20)."""
+    (46,20)."""
     units = rs.get("units_summary", []) or []
     if not units:
         return [Command.observe()]
     cmds = []
     for u in units:
         cmds.append(
-            Command.attack_move([str(u["id"])], target_x=110, target_y=20)
+            Command.attack_move([str(u["id"])], target_x=53, target_y=20)
         )
     return cmds
 
@@ -217,7 +217,7 @@ def _intended_wedge_policy(rs, Command):
     objective. The column policy that just attack_moves straight east
     along y=20 sits inside Dragon range of BOTH brackets at once and
     bleeds itself dry; the wedge eliminates the off-axis threat first,
-    so the residual drive to (80,20) is uncontested.
+    so the residual drive to (46,20) is uncontested.
 
     Phases:
       1. brackets alive & lead still west of the corridor → advance the
@@ -225,7 +225,7 @@ def _intended_wedge_policy(rs, Command):
       2. brackets alive & lead at the corridor → turn EVERY tank onto
          its nearest rocket soldier (focus-fire the brackets end-on).
       3. brackets cleared → attack_move the surviving wedge to the
-         objective region centred on (80, 20).
+         objective region centred on (46, 20).
     """
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
@@ -235,7 +235,7 @@ def _intended_wedge_policy(rs, Command):
     e3s = [e for e in targs if (e.get("type") or "").lower() == "e3"]
     lead_x = max(u["cell_x"] for u in units)
     cmds = []
-    if e3s and lead_x >= 30:
+    if e3s and lead_x >= 15:
         # Phase 2 — turn the wedge onto the brackets, end-on.
         for u in units:
             ux, uy = u["cell_x"], u["cell_y"]
@@ -250,14 +250,14 @@ def _intended_wedge_policy(rs, Command):
         for u in units:
             cmds.append(
                 Command.move_units(
-                    [str(u["id"])], target_x=38, target_y=u["cell_y"]
+                    [str(u["id"])], target_x=18, target_y=u["cell_y"]
                 )
             )
         return cmds
     # Phase 3 — brackets cleared; drive the survivors to the objective.
     for u in units:
         cmds.append(
-            Command.attack_move([str(u["id"])], target_x=80, target_y=20)
+            Command.attack_move([str(u["id"])], target_x=46, target_y=20)
         )
     return cmds
 
@@ -308,7 +308,7 @@ def test_intended_wedge_wins(level, seed):
     """Intended wedge cycle WINS on every level and every hard seed:
     the formation advances to the corridor mouth, turns onto the
     off-axis rocket-soldier brackets and dismantles them end-on, then
-    drives the survivors uncontested to (80,20). Recalibrated
+    drives the survivors uncontested to (46,20). Recalibrated
     2026-05-20 after the engine movement fixes (moving units take
     fire en route; attack_unit closes at real speed): engaging the
     brackets end-on keeps 5-of-5 (easy, medium) / ≥4-of-5 (hard)

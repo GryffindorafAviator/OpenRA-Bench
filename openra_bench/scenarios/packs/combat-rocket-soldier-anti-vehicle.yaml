@@ -7,8 +7,8 @@
 #
 #   • e3 (rocket soldier, anti-vehicle Dragon launcher, range 4, anti-
 #     armour DPS) — the INTENDED counter. 6× e3 ($300 each = $1800)
-#     shreds heavy armour at range; the heavies cannot close fast enough
-#     before rocket DPS strips their HP.
+#     shreds heavy armour at range; the heavies fire back (stance:2
+#     Defend) but cannot close, so rocket DPS strips their HP first.
 #   • 1tnk (light tank, $700) — WRONG counter. The cash budget only buys
 #     ~2 light tanks; light cannons vs heavy armour lose attrition (3tnk
 #     hp 450 / dps 30 vs 1tnk hp ~200) — the lights die before the heavy
@@ -17,6 +17,21 @@
 #     weapon (cannot scratch heavy tank armour); spamming 18× e1 racks
 #     up zero kills and the kill bar fails.
 #   • stall — kill bar never met; the timeout LOSES.
+#
+# 2026-05-23 audit (Family-1 #20): briefing rewritten per
+# audits/EDIT_PRINCIPLES.md; map shrunk rush-hour-arena 128x40 →
+# tailored arena 64x40 per tier so the base footprint and engagement
+# distance fit in ~40 cells of corridor.
+#
+# POSTURE FIX (2026-05-23): enemy heavy tanks bumped from stance:0
+# HoldFire to stance:2 Defend. Previously the heavies sat passive and
+# absorbed fire without firing back — with no incoming damage, even
+# 2× 1tnk could trade favourably vs 2× 3tnk and the e3 counter was
+# not load-bearing. Defenders now auto-fire on the closest in-range
+# attacker but never advance (st2 semantics — engine pinned by
+# tests/test_stance_semantics_python.py), so light tanks lose
+# attrition decisively and rocket-mass becomes the only winning
+# composition.
 #
 # Real-world anchor: anti-armour procurement decision (TOW/Javelin/RPG
 # vs armoured concentration) — the right asset class is determined by
@@ -30,9 +45,10 @@
 # is purely the RPS counter CHOICE, not the scout-first ordering.
 #
 # Engine guardrails:
-#   • Map: rush-hour-arena (128 × 40, playable x in [2..126], y in
-#     [2..38]). Agent base x≈10; enemy heavy band x≈70 (within e3
-#     range-4 of the agent's eastward attack-move column).
+#   • Map: tailored 64×40 arena per tier (single explicit mpspawn so
+#     authored coords are not seed-rotated). Agent base x≈8; enemy
+#     heavy band x≈40 (within e3 range-4 of the agent's eastward
+#     attack-move column).
 #   • Persistent far-east enemy `fact` keeps the episode alive past
 #     the moment the heavies fall so the win predicate evaluates
 #     (CLAUDE.md auto-done footgun).
@@ -62,7 +78,8 @@ meta:
     (3tnk Soviet heavy on easy/medium, 4tnk Mammoth on hard). The agent
     must train ROCKET SOLDIERS (e3, the anti-vehicle Dragon launcher),
     not light tanks (1tnk — the budget buys only ~2, which lose
-    attrition to heavy armour) and not rifle infantry (e1 — no anti-armour weapon, racks up zero kills against tank armour). The
+    attrition to heavy armour) and not rifle infantry (e1 — no
+    anti-armour weapon, racks up zero kills against tank armour). The
     decision is the RPS counter CHOICE (matchup-winning unit type)
     given the visible threat composition.
   robotics_analogue: >
@@ -97,52 +114,52 @@ base:
 levels:
   # ── EASY ───────────────────────────────────────────────────────────
   # Bare RPS-counter skill. Enemy: 2 visible heavy tanks (3tnk),
-  # HoldFire (stance:0) so they sit and absorb fire — the agent's e3s
-  # can engage at range without being chased. Cash $1800 buys exactly
-  # 6× e3 (the intended counter), OR ~2 1tnks (wrong: 2 light tanks
-  # die fast to 2 heavies), OR ~18 e1 (wrong: no anti-armour, kills=0).
-  # Kill bar: ≥1 enemy heavy down. Generous clock (≤4500 ticks).
+  # stance:2 Defend — they auto-fire back on the closest in-range
+  # attacker but never advance. Cash $1800 buys exactly 6× e3 (the
+  # intended counter), OR ~2 1tnks (wrong: 2 light tanks die fast to
+  # 2 heavies trading head-on), OR ~18 e1 (wrong: no anti-armour,
+  # kills=0). Kill bar: ≥1 enemy heavy down. Generous clock
+  # (≤4500 ticks).
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Pre-placed: fact + powr + tent + weap + fix in the centre-west. Two
-    # enemy HEAVY TANKS (3tnk Soviet, hp 450 / dps 30) sit visible at the
-    # centre-east (x=70, y=18..22), HoldFire — they will absorb your fire
-    # from the engagement column. You have $1800 — enough for EXACTLY ONE
-    # composition: train 6× rocket soldiers (e3, anti-vehicle Dragon
-    # launcher, $300 each), OR ~2 light tanks (1tnk, $700 — but light
-    # cannons lose attrition to heavy armour), OR ~18 rifle infantry (e1,
-    # $100 — no anti- armour weapon, cannot scratch tank armour). Train
-    # the e3, advance east, and kill at least ONE enemy heavy tank before
-    # tick 4500. Stalling, spamming e1, and building light tanks all LOSE
-    # on the kill bar or the clock.
     description: >
-      You have a full west-centre base (yard, power, barracks, war
-      factory, depot) and $1800 — enough for exactly six rocket soldiers.
-      Two enemy heavy tanks hold position at (70, 18..22) on HoldFire.
-      Rifle infantry can't dent armour; light tanks lose the attrition
-      trade. Train six rockets, march east, kill at least one heavy, keep
-      the yard standing, within about 50 turns.
+      Commander, this is a counter-armour engagement. You are given a
+      starter base on the west — Construction Yard, Power Plant,
+      Infantry Barracks, War Factory, and Service Depot — plus
+      $1800. Two enemy heavy tanks hold position at (40, 18..22) on
+      Defend orders: they will auto-fire on the closest in-range
+      attacker but won't chase. Rifle infantry can't scratch tank
+      armour; the budget only buys two light tanks, which lose the
+      attrition trade against the heavies. Train six rocket soldiers
+      (anti-vehicle launchers) from the Infantry Barracks, advance
+      east into Dragon range, kill at least one heavy, keep your
+      Construction Yard, within about 50 turns.
     starting_cash: 1800
     overrides:
+      base_map:
+        generator: arena
+        name: combat-rocket-soldier-easy-arena
+        width: 64
+        height: 40
+        cordon: 2
+        spawns: [[6, 20]]
+        title: 'Rocket Soldier vs Heavy Armour — Easy 64x40'
       actors:
         # Agent base — both counters producible (weap for 1tnk,
-        # tent for e3).
-        - {type: fact, owner: agent, position: [10, 20]}
-        - {type: powr, owner: agent, position: [14, 20]}
-        - {type: tent, owner: agent, position: [10, 24]}
-        - {type: weap, owner: agent, position: [14, 24]}
-        - {type: fix,  owner: agent, position: [18, 20]}
+        # tent for e3). Centre-west footprint at x=8..16.
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [12, 20]}
+        - {type: tent, owner: agent, position: [8, 24]}
+        - {type: weap, owner: agent, position: [12, 24]}
+        - {type: fix,  owner: agent, position: [16, 20]}
         # Enemy: 2 visible heavy tanks at the engagement column.
-        # stance:0 (HoldFire) so they sit and absorb rocket fire
-        # rather than chasing the e3 stack out of range.
-        - {type: 3tnk, owner: enemy, position: [70, 18], stance: 0}
-        - {type: 3tnk, owner: enemy, position: [70, 22], stance: 0}
+        # stance:2 (Defend) — they auto-fire on in-range attackers
+        # but don't advance, so kiting with rockets works while a
+        # 1tnk head-on trade decisively loses.
+        - {type: 3tnk, owner: enemy, position: [40, 18], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [40, 22], stance: 2}
         # Persistent far-east enemy fact — prevents engine auto-done
         # on heavy-tank wipe collapsing the run to DRAW.
-        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: fact, owner: enemy, position: [60, 20]}
     win_condition:
       all_of:
         - {unit_type_count_gte: {type: e3, n: 6}}
@@ -165,39 +182,38 @@ levels:
   # there". Cash $1800 still buys exactly the 6× e3 composition. Kill
   # bar tightens to ≥2 heavies down.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Pre-placed: fact + powr + tent + weap + fix in the centre-west.
-    # THREE enemy HEAVY TANKS (3tnk Soviet) sit at the centre-east under
-    # fog (x=70, y=18..22), HoldFire. You have $1800 — enough for EXACTLY
-    # ONE composition: train 6× rocket soldiers (e3, the anti-vehicle
-    # counter), or 2× light tanks (wrong — light cannons lose attrition to
-    # heavy armour), or 18× rifle infantry (wrong — no anti-armour
-    # weapon). Train the e3, advance east, and kill at least TWO enemy
-    # heavy tanks before tick 4500. Stalling, spamming e1, and building
-    # light tanks all LOSE.
     description: >
-      Same west-centre base and $1800 budget — six rocket soldiers is the
-      only composition that fits. Three enemy heavy tanks now wait at (70,
-      18..22) under fog on HoldFire. Spamming rifles or light tanks burns
-      the budget without scratching armour. Train the rockets, advance
-      east, kill at least two heavies, keep the yard, within about 50
-      turns.
+      Commander, this is a counter-armour engagement. You are given a
+      starter base on the west — Construction Yard, Power Plant,
+      Infantry Barracks, War Factory, and Service Depot — and $1800.
+      Three enemy heavy tanks wait at (40, 18..22) under fog on
+      Defend orders: they will return fire on whatever comes into
+      range but won't chase. Rifle infantry can't dent armour; the
+      budget only fields two light tanks, which lose the attrition
+      trade. Train six rocket soldiers from the Infantry Barracks,
+      advance east, kill at least two heavies, keep the yard, within
+      about 50 turns.
     starting_cash: 1800
     overrides:
+      base_map:
+        generator: arena
+        name: combat-rocket-soldier-medium-arena
+        width: 64
+        height: 40
+        cordon: 2
+        spawns: [[6, 20]]
+        title: 'Rocket Soldier vs Heavy Armour — Medium 64x40'
       actors:
-        - {type: fact, owner: agent, position: [10, 20]}
-        - {type: powr, owner: agent, position: [14, 20]}
-        - {type: tent, owner: agent, position: [10, 24]}
-        - {type: weap, owner: agent, position: [14, 24]}
-        - {type: fix,  owner: agent, position: [18, 20]}
-        # THREE heavy tanks at the engagement column (HoldFire).
-        - {type: 3tnk, owner: enemy, position: [70, 18], stance: 0}
-        - {type: 3tnk, owner: enemy, position: [70, 20], stance: 0}
-        - {type: 3tnk, owner: enemy, position: [70, 22], stance: 0}
-        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [12, 20]}
+        - {type: tent, owner: agent, position: [8, 24]}
+        - {type: weap, owner: agent, position: [12, 24]}
+        - {type: fix,  owner: agent, position: [16, 20]}
+        # THREE heavy tanks at the engagement column (Defend).
+        - {type: 3tnk, owner: enemy, position: [40, 18], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [40, 20], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [40, 22], stance: 2}
+        - {type: fact, owner: enemy, position: [60, 20]}
     win_condition:
       all_of:
         - {unit_type_count_gte: {type: e3, n: 6}}
@@ -224,56 +240,66 @@ levels:
   #      meets the heavies at the same x).
   # Kill bar: ≥2 mammoths down; tighter clock (≤3600 ticks).
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Pre-placed base (fact + powr + tent + weap + fix) at one of two
-    # starting latitudes (NORTH base near y=12 OR SOUTH base near y=28,
-    # chosen by seed, anti-memorisation). Three MAMMOTH TANKS (4tnk
-    # Soviet, hp 600 / dps 40+ / dual cannon+missile) sit at the centre-
-    # east engagement column (x=70, y=18..22) under fog, HoldFire. You
-    # have $1800 — enough for EXACTLY ONE composition: train 6× rocket
-    # soldiers (e3, the anti-vehicle counter). Light tanks (1tnk) and
-    # rifle infantry (e1) cannot beat mammoth armour. Train the e3,
-    # advance east from your base, and kill at least TWO mammoth tanks
-    # before tick 3600.
     description: >
-      Same $1800 budget and rocket-soldier counter, but your base spawns
-      either north (y=12) or south (y=28), and the targets are three
-      mammoth tanks at (70, 18..22) — even tougher than heavies. Train six
-      rockets, march east from whichever band you started in, kill two
-      mammoths, keep the yard, within about 40 turns.
+      Commander, this is a counter-armour engagement against a denser
+      heavy formation. You are given a starter base — Construction
+      Yard, Power Plant, Infantry Barracks, War Factory, Service
+      Depot, and a scout jeep — staged either north (y=12) or south
+      (y=28) by seed, and $1800. FOUR enemy heavy tanks hold the
+      centre engagement column at (40, 16..24) on Defend orders:
+      they will auto-fire on the closest in-range attacker but won't
+      chase. Light tanks lose attrition against heavy armour; rifles
+      can't dent it. Train six rocket soldiers from your barracks,
+      march east from whichever band you started in, kill at least
+      two heavies, keep your Construction Yard, within about 40
+      turns.
     starting_cash: 1800
     overrides:
+      base_map:
+        generator: arena
+        name: combat-rocket-soldier-hard-arena
+        width: 64
+        height: 40
+        cordon: 2
+        spawns: [[6, 12], [6, 28]]
+        title: 'Rocket Soldier vs Mammoth — Hard 64x40 (NORTH/SOUTH)'
       actors:
         # NORTH base spawn (spawn_point 0).
-        - {type: fact, owner: agent, position: [10, 12], spawn_point: 0}
-        - {type: powr, owner: agent, position: [14, 12], spawn_point: 0}
-        - {type: tent, owner: agent, position: [10, 16], spawn_point: 0}
-        - {type: weap, owner: agent, position: [14, 16], spawn_point: 0}
-        - {type: fix,  owner: agent, position: [18, 12], spawn_point: 0}
+        - {type: fact, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: tent, owner: agent, position: [8, 16], spawn_point: 0}
+        - {type: weap, owner: agent, position: [12, 16], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [16, 12], spawn_point: 0}
         # Single scout jeep at the base edge — a token unit so the
         # seed-driven spawn placement is observable in
         # `units_summary` (required by the hard-tier curation test
         # in tests/test_hard_tier.py). The jeep's MG cannot scratch
         # heavy armour so it does not alter the RPS-counter
         # decision; the load-bearing build is still e3.
-        - {type: jeep, owner: agent, position: [18, 14], stance: 1, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [16, 14], stance: 1, spawn_point: 0}
         # SOUTH base spawn (spawn_point 1).
-        - {type: fact, owner: agent, position: [10, 28], spawn_point: 1}
-        - {type: powr, owner: agent, position: [14, 28], spawn_point: 1}
-        - {type: tent, owner: agent, position: [10, 24], spawn_point: 1}
-        - {type: weap, owner: agent, position: [14, 24], spawn_point: 1}
-        - {type: fix,  owner: agent, position: [18, 28], spawn_point: 1}
-        - {type: jeep, owner: agent, position: [18, 26], stance: 1, spawn_point: 1}
-        # Heavy enemy band — mammoth tanks, centre-mid latitude so
-        # both spawns face symmetric pursuit geometry. (Enemy actors
-        # without spawn_point ALWAYS place — CLAUDE.md.)
-        - {type: 4tnk, owner: enemy, position: [70, 18], stance: 0}
-        - {type: 4tnk, owner: enemy, position: [70, 20], stance: 0}
-        - {type: 4tnk, owner: enemy, position: [70, 22], stance: 0}
-        - {type: fact, owner: enemy, position: [124, 20]}
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [12, 28], spawn_point: 1}
+        - {type: tent, owner: agent, position: [8, 24], spawn_point: 1}
+        - {type: weap, owner: agent, position: [12, 24], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [16, 28], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [16, 26], stance: 1, spawn_point: 1}
+        # Heavy enemy band — 4× heavy tanks (3tnk), centre-mid
+        # latitude so both spawns face symmetric pursuit geometry.
+        # Enemy actors without spawn_point ALWAYS place — CLAUDE.md.
+        # We use 3tnk (not 4tnk Mammoth) on hard because Mammoth's
+        # secondary MammothTusk anti-infantry weapon (range 6.5
+        # cells) outranges Dragon (5 cells); with stance:2 the
+        # mammoths shred any e3 stack that enters Dragon range
+        # before it can fire. 3tnk carries only the 105mm cannon
+        # (range 4.75) which is OUT-ranged by Dragon — so the
+        # rocket-mass alpha-strike actually lands. Four 3tnks (vs
+        # three on medium) compensate the difficulty bar.
+        - {type: 3tnk, owner: enemy, position: [40, 16], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [40, 19], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [40, 21], stance: 2}
+        - {type: 3tnk, owner: enemy, position: [40, 24], stance: 2}
+        - {type: fact, owner: enemy, position: [60, 20]}
     win_condition:
       all_of:
         - {unit_type_count_gte: {type: e3, n: 6}}

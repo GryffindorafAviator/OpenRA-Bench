@@ -28,8 +28,9 @@ def test_reset_reveals_only_agent_spawn_no_corner_blob():
         load_pack(PACKS / "action-multiunit-coordination.yaml"), "easy")
     o = ot.OpenRAEnv(_scenario_to_tmp_yaml(c), 1).reset()
     ec = {tuple(x) for x in (o.get("explored_cells") or [])}
-    # no phantom MCV at the far spawn (124,36) → no bottom-right reveal
-    blob = [p for p in ec if p[0] >= 115 and p[1] >= 30]
+    # On the 48x40 audit-tight map: no phantom MCV in the bottom-right
+    # corner (would be near (44,36) on this map).
+    blob = [p for p in ec if p[0] >= 35 and p[1] >= 30]
     assert blob == [], f"phantom reveal in bottom-right: {blob[:8]}"
     # only the agent's own top-left spawn is revealed
-    assert max(p[0] for p in ec) < 30 and max(p[1] for p in ec) < 30
+    assert max(p[0] for p in ec) < 20 and max(p[1] for p in ec) < 20
