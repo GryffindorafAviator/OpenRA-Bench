@@ -128,6 +128,46 @@ BUILD_SEC = {
 
 BUILD_TOOLS = {'build','place_building','deploy','start_production'}
 
+# Production-queue category for each buildable slug. The engine tracks
+# FIVE independent queues per player (Building / Defense / Vehicle /
+# Infantry / Aircraft / Ship). Build-times serialize WITHIN a queue
+# but the queues advance IN PARALLEL — so the build-time-in-budget
+# check must group chain steps by queue and compare the MAX queue
+# time against `max_turns`, not the sum across queues.
+#
+# Mapping rules (mirror engine `World::item_queue_type` in
+# openra-sim/src/world.rs:5559):
+#   ActorKind::Infantry        → Infantry queue (fed by tent/barr)
+#   ActorKind::Vehicle / Mcv   → Vehicle queue (fed by weap)
+#   ActorKind::Aircraft        → Aircraft queue (fed by hpad/afld)
+#   ActorKind::Ship            → Ship queue (fed by spen/syrd)
+#   ActorKind::Building, fp(1,1) → Defense queue (fed by construction yard)
+#   ActorKind::Building, fp!=(1,1) → Building queue (fed by construction yard)
+# Building AND Defense are both fed by the construction yard but are
+# DISTINCT queues — they run in parallel with each other (you can
+# build a pbox WHILE the construction yard makes a powr).
+#
+# Slug → queue mapping below is derived from openra-sim/src/gamerules.rs
+# (ActorKind + footprint). `silo` is not in gamerules.rs (loaded from
+# the vendored YAML) but is a 1×2 storage building → Building queue.
+QUEUE = {
+    # Infantry (tent/barr-gated)
+    'e1':'infantry','e2':'infantry','e3':'infantry','e4':'infantry',
+    'e6':'infantry','e7':'infantry','thf':'infantry',
+    # Vehicle (weap-gated)
+    'jeep':'vehicle','1tnk':'vehicle','2tnk':'vehicle','3tnk':'vehicle',
+    'mtnk':'vehicle','harv':'vehicle','mcv':'vehicle',
+    # Defense (construction-yard-gated, 1×1 footprint)
+    'pbox':'defense','hbox':'defense','gun':'defense','tsla':'defense',
+    'sam':'defense','ftur':'defense',
+    # Building (construction-yard-gated, larger footprint)
+    'fact':'building','tent':'building','barr':'building','powr':'building',
+    'apwr':'building','proc':'building','weap':'building','fix':'building',
+    'silo':'building','dome':'building','atek':'building','stek':'building',
+    'spen':'building','syrd':'building','afld':'building','hpad':'building',
+    'kenn':'building',
+}
+
 # ---------------------------------------------------------------------------
 # Hand-curated table: what the intended-capability play MUST build for each
 # pack. Derived by reading each pack's EASY briefing + win_condition.
@@ -429,8 +469,23 @@ def emit(pid: str):
     projected = cash + income_per_turn * turns
     afford_by_deadline = projected >= chain_cost
 
-    # build_in_budget: sum of build seconds ≤ max_turns
-    chain_secs = sum(BUILD_SEC.get(b, 0) for b in buildables)
+    # build_in_budget: PER-QUEUE build-second sum ≤ max_turns. The
+    # engine runs Building / Defense / Vehicle / Infantry / Aircraft /
+    # Ship queues IN PARALLEL — chain steps in DIFFERENT queues do
+    # NOT serialize. A pack that needs (powr, proc) (both Building) AND
+    # (2tnk) (Vehicle) and AND (e3) (Infantry) sees the Building queue
+    # take powr+proc seconds; the Vehicle queue takes 2tnk seconds;
+    # the Infantry queue takes e3 seconds; the binding constraint is
+    # the LONGEST queue, not the sum across queues. Engine pin:
+    # openra-sim/src/world.rs:5559 (item_queue_type maps each item to
+    # its queue) + openra-sim/tests/test_parallel_production.rs (two
+    # weap roughly double vehicle throughput).
+    per_queue: dict[str, int] = {}
+    for b in buildables:
+        q = QUEUE.get(b, 'building')
+        per_queue[q] = per_queue.get(q, 0) + BUILD_SEC.get(b, 0)
+    chain_secs = max(per_queue.values()) if per_queue else 0
+    chain_secs_total = sum(per_queue.values())  # diagnostic only
     build_in_budget = chain_secs <= turns
 
     # Faction mismatch: any buildable that's faction-locked to a different
@@ -449,7 +504,15 @@ def emit(pid: str):
     elif not afford_at_start:
         issues.append(f'tight-cash:need={chain_cost},have={cash}')
     if not build_in_budget:
-        issues.append(f'build-time-over-budget:{chain_secs}s>{turns}t')
+        # Per-queue breakdown so a reviewer can see WHICH queue is
+        # the binding constraint (e.g. "vehicle=46s" means the
+        # Vehicle queue alone overflows, independent of the
+        # construction yard queue).
+        bottleneck = max(per_queue, key=per_queue.get)
+        issues.append(
+            f'build-time-over-budget:{bottleneck}={per_queue[bottleneck]}s>{turns}t'
+            f' (per-queue={per_queue}, serial-total={chain_secs_total}s)'
+        )
     if fac_mismatch:
         issues.append(f'faction-mismatch:{",".join(fac_mismatch)}')
     hd = hard_diffs(pack, present)
