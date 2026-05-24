@@ -243,26 +243,49 @@ introduces a handful of family-specific leak shapes to watch for:
 
 ## §67. Tick-budget bound for F10 packs
 
-The F1 audit convention is `tick_budget = max_turns × 90 + 3` (the
-interrupt-mode empirical step count). Several F10 packs are
-non-interrupt-mode (no `interrupts:` block) so the engine advances
-exactly 30 ticks/turn — at `max_turns: 22`, the tick at the deadline
-is 660, not 1980. Verify per-pack:
+Correct per-CLAUDE.md formula for the reachable tick at the deadline:
+
+  `tick_at_max_turns ≈ 93 + 90·(max_turns − 1)`
+
+This is the empirical interrupt-mode advance (the bench eval loop
+calls `step_until_event` whenever the pack declares any
+`interrupts:`, and the harness's `max_ticks` default + scheduling
+overhead converges on roughly 90 ticks per decision turn after a
+93-tick first turn). For NON-interrupt-mode packs (no `interrupts:`
+block) the engine instead advances exactly
+`DEFAULT_TICKS_PER_STEP = 30` ticks per `env.step()` call
+(`openra-train/src/env.rs:33`), so `reachable_tick = 30 · max_turns`
+— much tighter. PRIOR EDITS to this section used a flat
+`30 × max_turns` for every pack, which is wrong for interrupt-mode
+packs; the corrected formula above (and the interrupt/non-interrupt
+split below) is what to audit against.
+
+Both forms in one line — pick the one that matches the pack's
+`interrupts:` declaration:
+
+  • non-interrupt (no `interrupts:` block): tick ≈ 30 · max_turns
+  • interrupt-mode (any `interrupts:`):     tick ≈ 93 + 90·(max_turns − 1)
+
+CAVEAT: the interrupt-mode formula is an EMPIRICAL approximation
+— `step_until_event` advances 1..`max_ticks` ticks per turn
+(variable, default `max_ticks = 5` in `openra_bench/eval_core.py`)
+and breaks on the first signal. The 90/turn figure is the
+post-warmup steady state; any pack that needs to KNOW the exact
+tick must read `info["ticks_advanced"]` per step rather than rely
+on either closed-form bound. Per-pack verification:
 
 - `spec-engineer-capture` — no `interrupts:` → 30 ticks/turn →
-  max tick = 750/1050/1500 (easy/medium/hard). Within_ticks =
-  2000/3000/4000 are well above the reachable tick → DEFECT?
-  Actually no — these packs declare `termination: {max_ticks:
-  8000}` and `planning: true` in `base:`, and the bench runs them
-  with an effective per-turn advance that varies. Verify by smoke
-  run; flag for engine-followup if a stall policy DRAWS instead of
-  LOSING.
-- `spec-nuke-strike` — declares `interrupts: {enemy_unit_spotted:
-  true}` → interrupt mode → ~1–5 ticks/turn (variable). The
-  `within_ticks: 1800` against `max_turns: 22` is reachable only
-  because the charge gate ENTERS the loop at tick 100, and the
-  agent has ~22 decision turns to fire after. Verify the deadline
-  bites by running stall.
+  max tick = 750/1050/1500 (easy/medium/hard). `within_ticks =
+  2000/3000/4000` are well above the reachable tick → would be a
+  DEFECT for a strict deadline, but these packs declare
+  `termination: {max_ticks: 8000}` and `planning: true` in
+  `base:`. Smoke-verify a stall policy LOSES (not DRAWs); flag
+  for engine-followup otherwise.
+- `spec-nuke-strike` — declares `interrupts:
+  {enemy_unit_spotted: true}` → interrupt mode → ~90 ticks/turn
+  empirical (formula: 93 + 90·21 ≈ 1983 at max_turns 22). The
+  `within_ticks: 1800` is reachable; the `after_ticks: 1801`
+  fail bites a stall before the episode caps. VERIFIED.
 - `spec-tanya-c4-strike` / `spec-thief-steal-cash` / `spec-spy-
   infiltrate` — no `interrupts:` → 30 ticks/turn → the deadline
   bites only if `within_ticks ≤ 30 × max_turns`. Check each row.
@@ -282,8 +305,10 @@ agent_force | enemy_force | enemy_posture | posture_issue |
 briefing_RA | win_condition | lose_condition | max_turns | tick_budget
 ```
 
-Tick-budget convention follows F1 (`max_turns × 90 + 3`), with a note
-that the actual non-interrupt advance is 30 ticks/turn — see §67.
+Tick-budget convention follows the corrected formula in §67:
+interrupt-mode packs use `93 + 90·(max_turns − 1)`, non-interrupt
+packs use `30 × max_turns`. The CSV's `tick_budget` column records
+the formula appropriate to that row's `interrupts:` declaration.
 
 Scope (7 packs, ~21 rows):
 
