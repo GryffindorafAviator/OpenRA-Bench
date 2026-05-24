@@ -301,6 +301,9 @@ levels:
         - {not: {own_units_gte: 3}}
     max_turns: 30
 
+  # NOTE: hard tier max_turns is 120 (NOT 30) to make the within_ticks
+  # 2700 deadline reachable under interrupt mode — see hard.max_turns
+  # comment below.
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 axis vs medium: the strike force (and its construction yard)
   # stage from TWO seed-driven spawn_point groups (NORTH corridor
@@ -393,4 +396,13 @@ levels:
       any_of:
         - {after_ticks: 2701}
         - {not: {own_units_gte: 3}}
-    max_turns: 30
+    # 2026-05-23 audit (Qwen-9B deep-dive, B.1): hard runs in interrupt
+    # mode (interrupts.enemy_unit_spotted + own_unit_destroyed), under
+    # which the engine advances 1-`max_ticks` ticks per turn (variable;
+    # typical 5) rather than the non-interrupt 30. With max_turns 30 the
+    # final tick can land at ~1473 — well BELOW the within_ticks 2700
+    # deadline — so seed:3 DREW (7 of 15 killed, 1 lost, no fail clause
+    # bit). Bump hard max_turns 30 → 120 so the 2700-tick window is
+    # reachable in interrupt mode; the after_ticks 2701 floor still
+    # bites a real timeout LOSS for stall.
+    max_turns: 120
