@@ -382,6 +382,64 @@ def test_intended_silo_wins_every_tier_and_seed(level, seed):
     )
 
 
+def _btype_helper(b):
+    if isinstance(b, dict):
+        return b.get("type")
+    if isinstance(b, (list, tuple)) and b:
+        return b[0]
+    return None
+
+
+def _intended_kills(rs, Command):
+    """KILLS path (alternative to silo): build tent (400, prereq powr
+    pre-placed) + e1 infantry (100), attack-move them at the pre-placed
+    enemy garrison. units_killed_gte:1 latches the any_of clause.
+    Validates that the KILLS spend lane is a real second viable path."""
+    bldgs = rs.get("own_buildings") or []
+    tent = any(_btype_helper(b) == "tent" for b in bldgs)
+    cash = rs.get("cash", 0)
+    if isinstance(cash, dict):
+        cash = cash.get("value", 0)
+    prod = [
+        x.get("item") for x in (rs.get("production") or []) if isinstance(x, dict)
+    ]
+    units = rs.get("units_summary", []) or []
+    infs = [u for u in units if u.get("type") == "e1"]
+    facts = [b for b in bldgs if _btype_helper(b) == "fact"]
+    fy = 18
+    if facts:
+        f = facts[0]
+        fy = (f.get("cell_y") if isinstance(f, dict) else f[2])
+    cmds = []
+    if not tent:
+        if "tent" not in prod and cash >= 400:
+            cmds.append(Command.build("tent"))
+        cmds.append(Command.place_building("tent", 14, int(fy) + 3))
+    elif len(infs) < 3:
+        if "e1" not in prod and cash >= 100:
+            cmds.append(Command.build("e1"))
+    # Push infantry into the enemy garrison cluster.
+    for u in infs:
+        cmds.append(Command.attack_move([str(u["id"])], target_x=40, target_y=18))
+    return cmds if cmds else [Command.observe()]
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_intended_kills_wins_on_easy(seed):
+    """KILLS path WINS on easy — second viable strategic choice (alt
+    to silo). Build tent + e1 + attack the pre-placed garrison; the
+    units_killed_gte clause latches the any_of and the harvest income
+    clears the EV bar inside the loose easy deadline. The other tiers
+    have a tighter within_ticks budget so this slower path is not
+    expected to win there — silo remains the cheap floor everywhere."""
+    _, r = _run("easy", _intended_kills, seed=seed)
+    assert r.outcome == "win", (
+        f"easy/seed{seed}: KILLS path (build tent + e1 + attack) must "
+        f"WIN; got {r.outcome} cash={r.signals.cash} "
+        f"kills={r.signals.units_killed} turns={r.turns}"
+    )
+
+
 def test_outcomes_are_deterministic_per_seed():
     """Same seed + same policy → identical outcome / cash / turn."""
     c = compile_level(load_pack(PACK), "medium")
