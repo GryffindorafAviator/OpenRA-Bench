@@ -114,6 +114,16 @@ Before editing any scenario pack:
 6. If your edit changes a tech-tree-relevant field (new buildings
    added, faction flipped, starting_cash changed), update the
    CSV row.
+7. **If your edit changes a pack's `map_size` / `base_map` /
+   `starting_cash` / actor list, re-run the matching
+   `audits/family<N>_*_build.py` AND
+   `audits/production_tech_audit_build.py` in the same commit and
+   verify the regenerated CSV row matches your edit.** (Without this
+   step the audit doc points at a world that no longer exists — a
+   future agent following step 3 reads a stale `map_fit` /
+   `afford_at_start` row and may re-do work or lose trust in the
+   binding. P0.1 in the PR #30 review documented exactly this
+   failure mode.)
 
 ## Engine facts you must internalise
 
