@@ -38,11 +38,11 @@
 # sees the leg-A band vanish (destroy_actors) and never re-acquires
 # the band at B or C: its discovered-id set stops growing.
 #
-# THE PATH (rush-hour-arena, 128x40, playable bounds (2,2,124,36)):
-#   * Leg A  — band spawns/starts at (38,10)  [NW quadrant]
-#   * Leg B  — at tick T1 the band relocates to (70,20) [centre]
-#   * Leg C  — at tick T2 the band relocates to (96,30) [SE quadrant]
-# Each leg is ~34 cells from the last and in a different quadrant,
+# THE PATH (bespoke 64x40 arena, cordon 2, playable (2,2,60,36)):
+#   * Leg A  — band spawns/starts at (20, 8)  [NW quadrant]
+#   * Leg B  — at tick T1 the band relocates to (36,20) [centre]
+#   * Leg C  — at tick T2 the band relocates to (52,32) [SE quadrant]
+# Each leg is ~17 cells from the last and in a different quadrant,
 # so a stationary scout's ~6-cell vision radius cannot cover two
 # legs at once: the scout MUST travel to follow the army.
 #
@@ -182,12 +182,19 @@ meta:
     - "continuous monitoring"
   author: "openra-bench"
 
-# rush-hour-arena: 128x40, playable bounds (2,2,124,36). Agent
-# base at the WEST (x~12). The enemy army marches A(38,10) ->
-# B(70,20) -> C(96,30): three quadrants, ~34 cells apart, so a
-# stationary ~6-cell-vision scout covers at most one leg. The
+# Bespoke 64x40 arena (post-audit shrink, F4): playable bounds
+# (2,2,60,36). Agent base at the WEST (x~6). The enemy army marches
+# A(20,8) -> B(36,20) -> C(52,32): three quadrants, ~17 cells apart,
+# so a stationary ~6-cell-vision scout covers at most one leg. The
 # tanks intercept the army at its final leg C.
-base_map: rush-hour-arena
+base_map:
+  generator: arena
+  name: scout-track-enemy-movement-64x40
+  width: 64
+  height: 40
+  cordon: 2
+  spawns: [[6, 20]]
+  title: Scout Track Enemy Movement Arena 64x40
 starting_cash: 1000
 
 base:
@@ -245,36 +252,37 @@ levels:
     # finish before tick 4000. Stalling loses on the deadline; scouting
     # the army ONCE loses because the moved army is never re- acquired.
     description: >
-      An enemy army (four rocket soldiers) is on the MARCH — it starts NW
-      at (38,10), relocates to the centre (70,20) at tick 1400, then to
-      the SE (96,30) at tick 2700. Two jeeps and four tanks at your west
-      base. Keep a scout moving WITH the army through every leg, then
-      intercept at its final position. Three / six / nine discoveries
-      cumulatively, two kills, within about 45 turns.
+      Commander, an enemy army (four rocket soldiers) is on the march
+      across the map — it does not hold any one position for long. Two
+      jeep scouts and four medium tanks at your west base, all on
+      hold-fire orders. Keep a scout moving WITH the army through every
+      leg of its march so you always know where it is, then intercept
+      at its final position. Three, six, then nine cumulative
+      discoveries, two kills, within about 45 turns.
     overrides:
       actors:
         # 2 jeep scouts — stance:0 (HoldFire), pure perception.
-        - {type: jeep, owner: agent, position: [13, 18], stance: 0}
-        - {type: jeep, owner: agent, position: [13, 22], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 22], stance: 0}
         # 4 medium tanks — stance:0 (no auto-hunt); the combat
         # arm, committed via attack_move/attack_unit (Kk=2).
-        - {type: 2tnk, owner: agent, position: [12, 17], stance: 0}
-        - {type: 2tnk, owner: agent, position: [12, 19], stance: 0}
-        - {type: 2tnk, owner: agent, position: [12, 21], stance: 0}
-        - {type: 2tnk, owner: agent, position: [12, 23], stance: 0}
+        - {type: 2tnk, owner: agent, position: [7, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [7, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [7, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [7, 23], stance: 0}
         # Partial agent base — `fact` anchors the
         # building_count_gte:fact:1 fail clause.
-        - {type: fact, owner: agent, position: [8, 20]}
-        - {type: proc, owner: agent, position: [8, 16]}
-        - {type: powr, owner: agent, position: [8, 24]}
-        - {type: tent, owner: agent, position: [10, 17]}
-        - {type: weap, owner: agent, position: [10, 23]}
-        # Leg A — the army HOLDS the NW at (38,10), stance:0. It
+        - {type: fact, owner: agent, position: [4, 20]}
+        - {type: proc, owner: agent, position: [4, 16]}
+        - {type: powr, owner: agent, position: [4, 24]}
+        - {type: tent, owner: agent, position: [5, 17]}
+        - {type: weap, owner: agent, position: [5, 23]}
+        # Leg A — the army HOLDS the NW at (20,8), stance:0. It
         # will not advance on its own; it is RELOCATED by the
         # scheduled_events below.
-        - {type: e3, owner: enemy, position: [38, 10], stance: 0, count: 4}
+        - {type: e3, owner: enemy, position: [20, 8], stance: 0, count: 4}
         # Inert enemy `fact` marker far east. Anti-DRAW per CLAUDE.md.
-        - {type: fact, owner: enemy, position: [122, 4]}
+        - {type: fact, owner: enemy, position: [60, 4]}
       # The army's MARCH, scripted with scheduled_events. At each
       # relocation the NEXT leg's band is SPAWNED FIRST and the
       # PREVIOUS leg's band is destroyed 60 ticks LATER. Ordering
@@ -293,24 +301,24 @@ levels:
         - tick: 1400
           type: spawn_actors
           actors:
-            - {type: e3, owner: enemy, position: [70, 20], stance: 0, count: 4}
+            - {type: e3, owner: enemy, position: [36, 20], stance: 0, count: 4}
         - tick: 1460
           type: destroy_actors
           filter:
             owner: enemy
-            region: {x: 38, y: 10, radius: 8}
+            region: {x: 20, y: 8, radius: 5}
         # B -> C: spawn the SE band (the army's final leg — the
         # tanks intercept here) at tick 2700, remove the CENTRE
         # band at tick 2760.
         - tick: 2700
           type: spawn_actors
           actors:
-            - {type: e3, owner: enemy, position: [96, 30], stance: 0, count: 4}
+            - {type: e3, owner: enemy, position: [52, 32], stance: 0, count: 4}
         - tick: 2760
           type: destroy_actors
           filter:
             owner: enemy
-            region: {x: 70, y: 20, radius: 8}
+            region: {x: 36, y: 20, radius: 5}
     win_condition:
       all_of:
         # Ordered: see the army at leg A, then PAST the A->B move
@@ -366,27 +374,29 @@ levels:
     # tick 4000. Stalling, one-shot scouting, and tracking-without-
     # intercept all LOSE.
     description: >
-      A six-rocket-soldier army on a FOUR-leg march: NW (38,10) → NE
-      (70,12) at tick 1100 → SE-centre (70,28) at tick 2000 → SE corner
-      (96,30) at tick 2900. Two jeeps and four tanks at your west base.
-      Track every leg, then intercept. Four / eight / twelve / sixteen
-      cumulative discoveries, three kills, within about 45 turns.
+      Commander, a six-rocket-soldier army is on the march across the
+      map — a four-leg route that crosses through different quadrants
+      and does not hold any one position for long. Two jeep scouts and
+      four medium tanks at your west base, all on hold-fire orders.
+      Keep a scout moving WITH the army through every leg, then
+      intercept. Four, eight, twelve, then sixteen cumulative
+      discoveries, three kills, within about 45 turns.
     overrides:
       actors:
-        - {type: jeep, owner: agent, position: [13, 18], stance: 0}
-        - {type: jeep, owner: agent, position: [13, 22], stance: 0}
-        - {type: 2tnk, owner: agent, position: [12, 17], stance: 0}
-        - {type: 2tnk, owner: agent, position: [12, 19], stance: 0}
-        - {type: 2tnk, owner: agent, position: [12, 21], stance: 0}
-        - {type: 2tnk, owner: agent, position: [12, 23], stance: 0}
-        - {type: fact, owner: agent, position: [8, 20]}
-        - {type: proc, owner: agent, position: [8, 16]}
-        - {type: powr, owner: agent, position: [8, 24]}
-        - {type: tent, owner: agent, position: [10, 17]}
-        - {type: weap, owner: agent, position: [10, 23]}
+        - {type: jeep, owner: agent, position: [8, 18], stance: 0}
+        - {type: jeep, owner: agent, position: [8, 22], stance: 0}
+        - {type: 2tnk, owner: agent, position: [7, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [7, 19], stance: 0}
+        - {type: 2tnk, owner: agent, position: [7, 21], stance: 0}
+        - {type: 2tnk, owner: agent, position: [7, 23], stance: 0}
+        - {type: fact, owner: agent, position: [4, 20]}
+        - {type: proc, owner: agent, position: [4, 16]}
+        - {type: powr, owner: agent, position: [4, 24]}
+        - {type: tent, owner: agent, position: [5, 17]}
+        - {type: weap, owner: agent, position: [5, 23]}
         # Leg A — larger army (6x e3); kill bar Kk=3.
-        - {type: e3, owner: enemy, position: [38, 10], stance: 0, count: 6}
-        - {type: fact, owner: enemy, position: [122, 4]}
+        - {type: e3, owner: enemy, position: [20, 8], stance: 0, count: 6}
+        - {type: fact, owner: enemy, position: [60, 4]}
       # March scripted with scheduled_events. Each leg's band is
       # SPAWNED FIRST, then the previous leg's band is destroyed 60
       # ticks LATER — so the new band carries genuinely fresh ids
@@ -398,33 +408,33 @@ levels:
         - tick: 1100
           type: spawn_actors
           actors:
-            - {type: e3, owner: enemy, position: [70, 12], stance: 0, count: 6}
+            - {type: e3, owner: enemy, position: [36, 12], stance: 0, count: 6}
         - tick: 1160
           type: destroy_actors
           filter:
             owner: enemy
-            region: {x: 38, y: 10, radius: 8}
+            region: {x: 20, y: 8, radius: 5}
         # B -> C: spawn at tick 2000, destroy old at tick 2060.
         - tick: 2000
           type: spawn_actors
           actors:
-            - {type: e3, owner: enemy, position: [70, 28], stance: 0, count: 6}
+            - {type: e3, owner: enemy, position: [36, 28], stance: 0, count: 6}
         - tick: 2060
           type: destroy_actors
           filter:
             owner: enemy
-            region: {x: 70, y: 12, radius: 8}
+            region: {x: 36, y: 12, radius: 5}
         # C -> D: spawn at tick 2900 (final leg — tanks intercept
         # here), destroy old at tick 2960.
         - tick: 2900
           type: spawn_actors
           actors:
-            - {type: e3, owner: enemy, position: [96, 30], stance: 0, count: 6}
+            - {type: e3, owner: enemy, position: [52, 32], stance: 0, count: 6}
         - tick: 2960
           type: destroy_actors
           filter:
             owner: enemy
-            region: {x: 70, y: 28, radius: 8}
+            region: {x: 36, y: 28, radius: 5}
     win_condition:
       all_of:
         # FOUR detection bars (band 6 each leg, -2 grace per leg):
@@ -478,42 +488,44 @@ levels:
     # 4000. Stalling, one-shot scouting, tracking-without-intercept, and
     # base-latitude- memorised openings all LOSE.
     description: >
-      Same four-leg march (NW → NE → SE-centre → SE corner) but your west
-      base's latitude flips by seed. Keep a scout moving WITH the army
-      through every leg, then intercept. Four / eight / twelve / sixteen
-      cumulative discoveries, three kills, within about 45 turns. A
-      memorised opening fails.
+      Commander, a six-rocket-soldier army is on a four-leg march
+      across the map. Two jeep scouts and four medium tanks at your
+      west base, all on hold-fire — your base's latitude varies by
+      seed, so a memorised opening will not generalise. Keep a scout
+      moving WITH the army through every leg, then intercept. Four,
+      eight, twelve, then sixteen cumulative discoveries, three kills,
+      within about 45 turns.
     overrides:
       actors:
         # spawn_point 0 — base shifted NORTH (y=14). Every agent
         # actor is tagged: if ANY agent actor declares spawn_point
         # the agent actors WITHOUT one are filtered out (CLAUDE.md).
-        - {type: jeep, owner: agent, position: [13, 12], stance: 0, spawn_point: 0}
-        - {type: jeep, owner: agent, position: [13, 16], stance: 0, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [12, 11], stance: 0, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [12, 13], stance: 0, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [12, 15], stance: 0, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [12, 17], stance: 0, spawn_point: 0}
-        - {type: fact, owner: agent, position: [8, 14], spawn_point: 0}
-        - {type: proc, owner: agent, position: [8, 10], spawn_point: 0}
-        - {type: powr, owner: agent, position: [8, 18], spawn_point: 0}
-        - {type: tent, owner: agent, position: [10, 11], spawn_point: 0}
-        - {type: weap, owner: agent, position: [10, 17], spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 12], stance: 0, spawn_point: 0}
+        - {type: jeep, owner: agent, position: [8, 16], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [7, 11], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [7, 13], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [7, 15], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [7, 17], stance: 0, spawn_point: 0}
+        - {type: fact, owner: agent, position: [4, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [4, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 18], spawn_point: 0}
+        - {type: tent, owner: agent, position: [5, 11], spawn_point: 0}
+        - {type: weap, owner: agent, position: [5, 17], spawn_point: 0}
         # spawn_point 1 — base shifted SOUTH (y=26). Symmetric.
-        - {type: jeep, owner: agent, position: [13, 24], stance: 0, spawn_point: 1}
-        - {type: jeep, owner: agent, position: [13, 28], stance: 0, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [12, 23], stance: 0, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [12, 25], stance: 0, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [12, 27], stance: 0, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [12, 29], stance: 0, spawn_point: 1}
-        - {type: fact, owner: agent, position: [8, 26], spawn_point: 1}
-        - {type: proc, owner: agent, position: [8, 22], spawn_point: 1}
-        - {type: powr, owner: agent, position: [8, 30], spawn_point: 1}
-        - {type: tent, owner: agent, position: [10, 23], spawn_point: 1}
-        - {type: weap, owner: agent, position: [10, 29], spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 24], stance: 0, spawn_point: 1}
+        - {type: jeep, owner: agent, position: [8, 28], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [7, 23], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [7, 25], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [7, 27], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [7, 29], stance: 0, spawn_point: 1}
+        - {type: fact, owner: agent, position: [4, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [4, 22], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 30], spawn_point: 1}
+        - {type: tent, owner: agent, position: [5, 23], spawn_point: 1}
+        - {type: weap, owner: agent, position: [5, 29], spawn_point: 1}
         # Enemy actors don't honour spawn_point — placed once.
-        - {type: e3, owner: enemy, position: [38, 10], stance: 0, count: 6}
-        - {type: fact, owner: enemy, position: [122, 4]}
+        - {type: e3, owner: enemy, position: [20, 8], stance: 0, count: 6}
+        - {type: fact, owner: enemy, position: [60, 4]}
       # March scripted with scheduled_events — spawn-before-destroy
       # (60-tick overlap) so each relocated band has fresh ids; see
       # the easy/medium-tier notes. scheduled_events don't honour
@@ -522,30 +534,30 @@ levels:
         - tick: 1100
           type: spawn_actors
           actors:
-            - {type: e3, owner: enemy, position: [70, 12], stance: 0, count: 6}
+            - {type: e3, owner: enemy, position: [36, 12], stance: 0, count: 6}
         - tick: 1160
           type: destroy_actors
           filter:
             owner: enemy
-            region: {x: 38, y: 10, radius: 8}
+            region: {x: 20, y: 8, radius: 5}
         - tick: 2000
           type: spawn_actors
           actors:
-            - {type: e3, owner: enemy, position: [70, 28], stance: 0, count: 6}
+            - {type: e3, owner: enemy, position: [36, 28], stance: 0, count: 6}
         - tick: 2060
           type: destroy_actors
           filter:
             owner: enemy
-            region: {x: 70, y: 12, radius: 8}
+            region: {x: 36, y: 12, radius: 5}
         - tick: 2900
           type: spawn_actors
           actors:
-            - {type: e3, owner: enemy, position: [96, 30], stance: 0, count: 6}
+            - {type: e3, owner: enemy, position: [52, 32], stance: 0, count: 6}
         - tick: 2960
           type: destroy_actors
           filter:
             owner: enemy
-            region: {x: 70, y: 28, radius: 8}
+            region: {x: 36, y: 28, radius: 5}
     win_condition:
       all_of:
         - then:

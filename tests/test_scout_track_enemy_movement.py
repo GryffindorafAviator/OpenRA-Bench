@@ -70,9 +70,9 @@ SEEDS = (1, 2, 3, 4)
 # The army's march legs (x, y) and the relocation ticks per tier —
 # mirrors the scheduled_events spawn cells in the pack YAML.
 LEGS = {
-    "easy": [(38, 10), (70, 20), (96, 30)],
-    "medium": [(38, 10), (70, 12), (70, 28), (96, 30)],
-    "hard": [(38, 10), (70, 12), (70, 28), (96, 30)],
+    "easy": [(20, 8), (36, 20), (52, 32)],
+    "medium": [(20, 8), (36, 12), (36, 28), (52, 32)],
+    "hard": [(20, 8), (36, 12), (36, 28), (52, 32)],
 }
 TICKS = {
     "easy": [1400, 2700],
