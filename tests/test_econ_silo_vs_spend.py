@@ -59,7 +59,7 @@ def _pure_hold(rs, Command):
     if not harvs:
         return [Command.observe()]
     return [
-        Command.harvest([str(h["id"])], 22, int(h["cell_y"])) for h in harvs
+        Command.harvest([str(h["id"])], 18, int(h["cell_y"])) for h in harvs
     ]
 
 
@@ -82,7 +82,7 @@ def _intended_silo(rs, Command):
     facts = [b for b in bldgs if _btype(b) == "fact"]
     cmds = []
     for h in harvs:
-        cmds.append(Command.harvest([str(h["id"])], 22, int(h["cell_y"])))
+        cmds.append(Command.harvest([str(h["id"])], 18, int(h["cell_y"])))
     if not has_silo:
         cmds.append(Command.build("silo"))
         if facts:
@@ -420,7 +420,7 @@ def _intended_kills(rs, Command):
             cmds.append(Command.build("e1"))
     # Push infantry into the enemy garrison cluster.
     for u in infs:
-        cmds.append(Command.attack_move([str(u["id"])], target_x=40, target_y=18))
+        cmds.append(Command.attack_move([str(u["id"])], target_x=30, target_y=18))
     return cmds if cmds else [Command.observe()]
 
 
