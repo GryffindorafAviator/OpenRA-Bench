@@ -159,7 +159,7 @@ def _east_only_sweep(rs, Command):
     cmds = []
     for u in units:
         cmds.append(
-            Command.move_units([str(u["id"])], target_x=110, target_y=u["cell_y"])
+            Command.move_units([str(u["id"])], target_x=60, target_y=u["cell_y"])
         )
     return cmds
 
@@ -182,7 +182,7 @@ def _attack_decoys(rs, Command):
     else:
         for u in units:
             cmds.append(
-                Command.move_units([str(u["id"])], target_x=95, target_y=u["cell_y"])
+                Command.move_units([str(u["id"])], target_x=56, target_y=u["cell_y"])
             )
     return cmds
 
