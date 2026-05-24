@@ -52,15 +52,33 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install --upgrade pip maturin
 
+      # The crate uses PyO3 bindings but has no pyproject.toml, so
+      # maturin 1.13+'s autodetect picks cffi-mode and produces a
+      # pure-Python wheel (no .abi3.so → `from openra_train import
+      # OpenRAEnv` fails). Write a minimal pyproject.toml that pins
+      # bindings = "pyo3" so maturin packages the native module.
+      - name: Pin maturin bindings via pyproject.toml
+        run: |
+          cat > OpenRA-Rust/openra-train/pyproject.toml <<'EOF'
+          [build-system]
+          requires = ["maturin>=1.0"]
+          build-backend = "maturin"
+
+          [project]
+          name = "openra_train"
+          version = "0.1.0"
+          requires-python = ">=3.9"
+
+          [tool.maturin]
+          bindings = "pyo3"
+          features = ["pyo3/extension-module"]
+          EOF
+
       - name: Build + install openra_train wheel into venv
-        # `--bindings pyo3` is REQUIRED — maturin 1.13+'s autodetect
-        # picks cffi-mode for this crate and produces a pure-Python
-        # wheel without the native .abi3.so. The crate uses PyO3
-        # bindings; pin the binding type explicitly.
         working-directory: OpenRA-Rust/openra-train
         run: |
           source $GITHUB_WORKSPACE/.venv/bin/activate
-          maturin develop --release --bindings pyo3
+          maturin develop --release
 
       - name: Verify engine wheel loaded
         run: .venv/bin/python -c "from openra_train import OpenRAEnv, Command; print('engine OK')"
