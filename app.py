@@ -1301,7 +1301,7 @@ def _play_minimap(render_state: dict, sel=None, queue=None):
         queued_dest: dict = {}
         for a in queue or []:
             if getattr(a, "mode", "") in (
-                "move", "attack", "attack_move"
+                "move", "attack", "attack_move", "harvest"
             ) and getattr(a, "target", None):
                 for uid in a.units:
                     queued_dest[str(uid)] = (a.target[0], a.target[1])
@@ -1460,6 +1460,23 @@ def _play_render(sess, sel, queue, show_objectives=False):
     )
 
 
+def _nearest_resource_cell(rs: dict, cx: int, cy: int):
+    candidates = []
+    for key in ("resource_cells", "harvest_points"):
+        for cell in rs.get(key) or []:
+            if not isinstance(cell, dict):
+                continue
+            try:
+                rx, ry = int(cell["cell_x"]), int(cell["cell_y"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            candidates.append(((rx - cx) ** 2 + (ry - cy) ** 2, rx, ry))
+    if not candidates:
+        return None
+    _, rx, ry = min(candidates)
+    return rx, ry
+
+
 def _play_start(prev_sess, pack, level, seed, show_objectives=False):
     # Release any prior session's engine env before opening a new one.
     if prev_sess is not None:
@@ -1559,8 +1576,15 @@ def _play_click(
             )
         elif sel:
             mode = "harvest" if harvest_mode else "move"
+            target = (cx, cy)
+            if harvest_mode:
+                snapped = _nearest_resource_cell(rs, cx, cy)
+                if snapped is not None:
+                    target = snapped
+                    if target != (cx, cy):
+                        note += f" → snapped to ore **({target[0]}, {target[1]})**"
             queue = queue + [
-                HumanAction(mode=mode, units=list(sel), target=(cx, cy))
+                HumanAction(mode=mode, units=list(sel), target=target)
             ]
             note += f" — queued **{mode}** of {len(sel)} unit(s) here"
         else:
