@@ -1,6 +1,24 @@
 # Validate: python -m openra_bench.scenarios.validate packs/action-sequenced-execution.yaml
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
+# ENGINE NOTE (tier-progression audit, 2026-05-24): The audit flags
+# this pack F-INVERT because effective_deadline LOOSENS across tiers
+# (2400 → 3000 → 5000 ticks). This is INTENTIONAL axis shift, not a
+# real inversion — each tier scales the MAP and ROUTE proportionally:
+# easy = 1 route of 3 waypoints on a 48×32 map, medium = 2 crossing
+# routes on a 48×40 map, hard = 2 four-waypoint serpentine routes on
+# an 80×48 fogged map. More waypoints + bigger map ⇒ more travel
+# ticks REQUIRED, so the deadline must grow to keep the route
+# physically achievable; the relative slack (deadline minus minimum
+# traversal time) is monotonically tighter. The survival bar tightens
+# (units_lost_lte: none/1/1 on a base of 4/6/12 units = 75%/83%/92%
+# preserve), and the route count + parallelism + fog all escalate.
+# The "max_losses" inversion the audit reports is an artefact: easy
+# uses the loose `not own_units_gte:1` fail clause (so the LOSS bar
+# only fires on full wipe), medium/hard add a strict `units_lost_lte:1`
+# clause that dominates — making the agent allowed 0 → 1 loss out of
+# 6/12 vs. 3 out of 4 on easy is a TIGHTER floor in absolute terms.
+#
 # ACTION focus: the ordered route is GIVEN — the model must EXECUTE it
 # faithfully, in order, without idling or skipping. Order is enforced
 # by the stateful `waypoint_sequence` predicate (latched, monotonic):
