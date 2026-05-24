@@ -110,23 +110,36 @@ levels:
     # (notice the bar, run the pipeline, hit it before the deadline).
     description: >
       Full pipeline already running — yard, refinery, power, barracks, war
-      factory, one harvester. Reach $1500 cash within about 20 turns. Just
-      commit to harvest; no reinvestment needed. Stalling sits at the $600
-      floor; spamming rifles drains every credit. The bar is the bare
-      cash-target reasoning skill.
+      factory, one harvester. Reach $1500 cash AND own at least two
+      harvesters within about 30 turns. The pre-placed harvester auto-
+      harvests on its own, so a stall play passively reaches the cash bar
+      — the 2-harvester requirement forces an explicit harv build (cost
+      $1400 from the war factory). Spamming rifles drains every credit
+      and never funds the 2nd harv. Build the 2nd harvester as soon as
+      cash allows and the doubled income clears the bar by the deadline.
     starting_cash: 600
     win_condition:
       all_of:
         - cash_gte: 1500
-        - within_ticks: 1800
-    # within_ticks ≤ 93+90·20 = 1893 ⇒ deadline bites inside max_turns;
-    # after_ticks=1801 ⇒ non-finisher is a real LOSS, not a draw.
+        - unit_type_count_gte: {type: harv, n: 2}
+        - within_ticks: 2700
+    # within_ticks ≤ 93+90·29 = 2703 ⇒ deadline bites inside max_turns;
+    # after_ticks=2701 ⇒ non-finisher is a real LOSS, not a draw.
+    # The 2-harv clause is the anti-stall floor (family-2 §14): the
+    # pre-placed harv auto-harvests near a pre-placed proc, so a pure
+    # stall reaches the cash bar (~1600 by tick 633) trivially — the
+    # 2-harv requirement forces an explicit harv build (cost 1400, ~6
+    # turns to complete). The 2700-tick deadline gives just enough
+    # window for: starting 600 + auto-harvest to 1400 (tick ~1000) →
+    # build harv (drops to 0, completes ~tick 1500) → harvest to 1500
+    # (tick ~2500). Intended (+1 harv) WINS by tick ~2500; stall and
+    # army-drain LOSE on the 2-harv clause.
     fail_condition:
       any_of:
-        - after_ticks: 1801
+        - after_ticks: 2701
         - not: {has_building: fact}
         - not: {unit_type_count_gte: {type: harv, n: 1}}
-    max_turns: 21
+    max_turns: 30
   medium:
     # Original (pre-verbosity-sweep) description preserved for
     # contributors. The trimmed version below removes scripted-policy
@@ -143,18 +156,26 @@ levels:
     # treads water at ~starting_cash and LOSES; baseline (no reinvestment)
     # just misses and LOSES. Reinvestment WINS.
     description: >
-      Same pipeline, but the bar rises to $5500 within about 50 turns —
-      the pre-placed harvester alone plateaus at ~5600 just past the
-      deadline and loses. Reinvest: build an extra harvester ($1100) early
-      so post-warmup income roughly doubles and the bar clears by tick
-      ~2900.
+      Same pipeline, bar rises to $5500 cash AND ≥ 2 harvesters within
+      about 50 turns. The pre-placed harvester auto-cycles even without
+      orders so the cash bar is reachable by stalling — the 2-harv
+      requirement forces an explicit harv build. Build the 2nd harvester
+      early ($1400 from the war factory) so the doubled income covers
+      the capex and clears the cash bar by tick ~3500.
     starting_cash: 600
     win_condition:
       all_of:
         - cash_gte: 5500
+        - unit_type_count_gte: {type: harv, n: 2}
         - within_ticks: 4500
     # within_ticks ≤ 93+90·50 = 4593 ⇒ reachable in max_turns;
     # after_ticks=4501 ⇒ non-finisher is a real LOSS.
+    # The 2-harv clause is the anti-stall floor: pre-placed harv +
+    # auto-harvest hit cash=5600 by tick 3153 without any orders;
+    # without forcing a 2nd harv build the cash target was trivially
+    # stallable. The intended capital-allocation decision (build 2nd
+    # harv ⇒ 2-harv income covers the $1400 capex AND clears the $5500
+    # bar by tick ~3513) still WINS comfortably inside 4500 ticks.
     fail_condition:
       any_of:
         - after_ticks: 4501
@@ -176,11 +197,13 @@ levels:
     # every seed); stall and army-drain LOSE on every seed; reinvesting
     # into ≥1 extra harv WINS on every seed by tick ≤3800.
     description: >
-      Same reinvest decision, but the base spawns NORTH (y=10..14) or
-      SOUTH (y=28..32) by seed and the bar is $6500 within about 45 turns.
-      The baseline pipeline plateaus at ~4100 cash and loses; build at
-      least one extra harvester at YOUR base and you clear the bar by tick
-      ~3800.
+      Same reinvest decision, base spawns NORTH (y=10..14) or SOUTH
+      (y=28..32) by seed, bar is $6500 cash AND ≥ 2 harvesters within
+      about 45 turns. The pre-placed harvester auto-cycles so cash is
+      stallable, but the 2-harv clause forces an explicit harv build
+      (cost $1400 from the war factory). Build the 2nd harvester
+      immediately and the doubled income clears the cash bar by tick
+      ~3963 — comfortably inside the 4000-tick deadline.
     starting_cash: 600
     overrides:
       actors:
@@ -210,9 +233,15 @@ levels:
     win_condition:
       all_of:
         - cash_gte: 6500
+        - unit_type_count_gte: {type: harv, n: 2}
         - within_ticks: 4000
     # within_ticks ≤ 93+90·45 = 4143 ⇒ reachable in max_turns;
     # after_ticks=4001 ⇒ non-finisher is a real LOSS.
+    # The 2-harv clause is the anti-stall floor (stall hit cash=6600 by
+    # tick 3873 just from the pre-placed harv); the intended decision is
+    # to build a 2nd harv early so the doubled income covers both the
+    # $1400 capex AND clears the $6500 bar by tick ~3963 (verified
+    # scripted policy across seeds 1-4 on both spawn groups).
     fail_condition:
       any_of:
         - after_ticks: 4001
