@@ -31,7 +31,7 @@ def _load(mod: str):
 
 _BRIEF = _load("briefing_v2")          # format_state_briefing_v2(state)
 _MM = _load("minimap_v2")              # render(obs, terrain, w, h, bounds, hist)
-_SYSTEM_TMPL = (_VENDOR / "system_v2.txt").read_text()
+_SYSTEM_TMPL = (_VENDOR / "system_v2.txt").read_text(encoding="utf-8")
 
 
 # Curated RA codex: cost / hp / range(cells) / dps / sight(cells) /
