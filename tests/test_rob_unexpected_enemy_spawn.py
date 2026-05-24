@@ -90,16 +90,18 @@ def stall(rs, C):
 
 def forward_rush(rs, C):
     """Defeat-first-only-relax taken to its degenerate limit: chase
-    the visible enemies all the way to the Wave-2 fog corner (90, 8).
-    Wave 1 from the centre walks PAST the base (the agent centroid
-    is now far east); the screen takes attrition bombardment from the
-    converged hunter swarm and either gets wiped (`own_units_gte:1`
-    fail) or fails to meet the kill bar before the `after_ticks:5401`
-    deadline → LOSS on every level + seed."""
+    the visible Wave-1 cluster all the way to its centre x=80, y=20.
+    The screen is pulled FAR east of the base; when Wave 2 INJECTS
+    mid-episode at the NE fog corner (90, 8) at tick 1500, the screen
+    has already wandered east of the base and is engaged in melee
+    bombardment from Wave 1. The screen takes attrition and either
+    gets wiped (`own_units_gte:1` fail) or fails to meet the kill
+    bar before the `after_ticks:5401` deadline → LOSS on every level
+    + seed."""
     own = _own_ids(rs)
     if not own:
         return [C.observe()]
-    return [C.attack_move(own, 90, 8)]
+    return [C.attack_move(own, 80, 20)]
 
 
 def make_intended():

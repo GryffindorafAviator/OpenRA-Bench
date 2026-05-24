@@ -1,17 +1,20 @@
 # rob-unexpected-enemy-spawn.yaml
 #
 # REASONING capability — Wave-6 ROBUSTNESS / adversarial robustness:
-# surprise SECOND wave from an UNEXPECTED direction. The agent has
-# an obvious 4-unit hunter cluster (Wave 1) closing in from the centre
-# on its starting vision row; a SECOND wave was PRE-PLACED at a fog
-# corner (NE on easy/medium, both NE+SE on hard) and closes in by
-# ~tick 1500 in a hunt pattern from a different bearing than Wave 1.
-# Winning requires defeating BOTH waves (`units_killed_gte`),
-# keeping the base (`has_building:fact`), AND keeping enough force
-# alive (`own_units_gte:2`). The relevant capability is RESERVING
-# capacity for a follow-on attack — keeping the defender screen
-# centred on the base instead of chasing routers to the corner and
-# leaving the base exposed.
+# surprise SECOND wave INJECTED MID-EPISODE. The agent has an obvious
+# 4-unit hunter cluster (Wave 1) closing in from the centre on its
+# starting vision row; a SECOND wave is INJECTED via
+# `scheduled_events: spawn_actors` at tick 1500 at a fog corner (NE
+# on easy/medium, both NE+SE on hard) and closes in by hunt pattern
+# from a different bearing than Wave 1. The briefing does NOT
+# pre-disclose the second wave — the agent must DISCOVER it via
+# `enemy_unit_spotted` interrupt + the live `units_summary` channel
+# once the new actors appear. Winning requires defeating BOTH waves
+# (`units_killed_gte`), keeping the base (`has_building:fact`), AND
+# keeping enough force alive (`own_units_gte:2`). The relevant
+# capability is RESERVING capacity for a follow-on attack — keeping
+# the defender screen centred on the base instead of chasing routers
+# to the corner and leaving the base exposed.
 #
 # Real-world / benchmark anchors:
 #   - Adversarial robustness: surprise wave / follow-on attack handling.
@@ -37,31 +40,38 @@
 #     handing a stall a free WIN. stance:2 keeps the stall baseline
 #     genuinely passive so the reserve-capacity skill is load-bearing.)
 #
-#   • forward-rush (chase the visible enemies all the way to the fog
-#     corner): the defender screen attack-moves to the Wave-2 fog
-#     corner (90, 8); en route Wave 1 from the centre walks PAST the
-#     base (5 e1 hunters bee-line to the agent centroid which is now
-#     east of the fact); the corner-bound defenders take attrition
-#     bombardment from the converged hunter swarm, and either die out
-#     (`own_units_gte:1` fail) or fail to reach the kill bar inside
-#     the `after_ticks:5401` deadline → LOSS.
+#   • forward-rush (chase Wave 1 deep east the moment it is spotted):
+#     the defender screen attack-moves east into open ground; Wave 1
+#     gets pulled into a long-range trade well east of the base,
+#     defenders take attrition, and when Wave 2 INJECTS at tick 1500
+#     at the fog corner the screen is no longer near the base — the
+#     follow-on closes uncontested and finishes the depleted screen
+#     before the kill bar is met → `own_units_gte:1` or
+#     `after_ticks:5401` LOSS.
 #
-#   • intended prepare-for-2nd-wave: engage closest threat with
-#     `attack_move`, but CAP the chase distance so defenders never
-#     stray more than ~12 cells from the fact. When the 2nd wave
-#     closes in from the fog corner the screen is already pulled
-#     back to base-adjacent range and intercepts it before fact
-#     contact. Both waves dead (kill bar met), fact alive,
-#     own_units_gte:2 satisfied → WIN.
+#   • intended discover-then-rebalance: engage Wave 1 with
+#     `attack_move` but KEEP the screen base-adjacent (~12 cells
+#     from the fact). When the `enemy_unit_spotted` interrupt fires
+#     on the Wave-2 injection at ~tick 1500, redirect the surviving
+#     screen to intercept the new bearing before fact contact. Both
+#     waves dead (kill bar met), fact alive, own_units_gte:2
+#     satisfied → WIN.
 #
 # ENGINE FACTS (CLAUDE.md / SCENARIO_QUALITY.md):
 #   - Bot `hunt` (openra-sim/src/scripted_bot.rs::Hunt): each enemy
 #     unit pursues the NEAREST agent target. Hunt-driven e1 cover
 #     ~1 cell per 1.8 ticks, so the centre cluster at x=80 reaches
 #     the defender outpost at x=14 in ~120 ticks (well before tick
-#     200); the fog-corner Wave-2 squads at (90, 8) reach the base
-#     latitude in ~tick 400..1000 depending on path congestion —
-#     close to the "~tick 1500" spec target.
+#     200); the Wave-2 squads INJECTED at tick 1500 at (90, 8)
+#     reach the base latitude in ~tick 1900..2300 depending on
+#     path congestion — well inside the 5400 win window.
+#   - Scheduled `spawn_actors` (Wave-9 engine feature): Wave 2 is
+#     INJECTED at tick 1500, NOT pre-placed at t=0. The briefing
+#     does not pre-disclose the second wave; the model must DISCOVER
+#     it via the `enemy_unit_spotted` interrupt (fires the instant
+#     the new actors close into vision) and the live `units_summary`
+#     channel. This is a genuine discovery test, not a pre-told-rule
+#     reaction test.
 #   - The defender screen is 3× 2tnk (medium tank, durable + dual-
 #     purpose anti-armor / anti-infantry cannon) + 2× e3 (rocket
 #     soldier, range 7, high anti-vehicle DPS) on easy/medium, and
@@ -97,11 +107,11 @@
 #     infantry — the binding decision is RESERVING the starting
 #     force, not out-producing the threat.
 #   - hard tier: 2 agent spawn_point groups (NORTH base y=12 /
-#     SOUTH base y=28) so the corner the surprise wave comes FROM
-#     flips per seed; symmetric Wave-2 squads at BOTH corners
-#     always place (enemy actors ignore spawn_point — CLAUDE.md),
-#     so a single memorised "expect Wave 2 from NE" disposition
-#     cannot generalise.
+#     SOUTH base y=28) so which corner has the same-latitude
+#     follow-on flips per seed; both Wave-2 squads are injected at
+#     tick 1500 (scheduled_events fire identically across seeds,
+#     independent of spawn_point), so a single memorised "expect
+#     Wave 2 from NE" disposition cannot generalise.
 
 meta:
   id: rob-unexpected-enemy-spawn
@@ -110,23 +120,26 @@ meta:
   real_world_meaning: >
     Adversarial robustness on the temporal axis: the obvious threat
     (a 4-unit cluster near the agent's starting vision) is just the
-    OPENING; a SECOND wave was pre-placed at a fog corner and closes
-    in from an unexpected bearing by ~tick 1500 in a hunt pattern.
-    Winning requires destroying BOTH waves AND keeping the base AND
-    keeping enough force alive. The relevant capability is RESERVING
-    capacity for a follow-on attack — not committing every defender
-    to the visible battle and chasing routers far from the base.
-    "Battle finished, push deep" is the canonical military / SRE
-    failure mode this trains against.
+    OPENING; an UNDISCLOSED follow-on wave is injected mid-episode
+    from an unexpected bearing in a hunt pattern. The agent must
+    DISCOVER the second wave from the live observation channel rather
+    than from a pre-announced rule. Winning requires destroying both
+    threats AND keeping the base AND keeping enough force alive. The
+    relevant capability is RESERVING capacity for the follow-on — not
+    committing every defender to the visible battle and chasing
+    routers far from the base. "Battle finished, push deep" is the
+    canonical military / SRE failure mode this trains against.
   robotics_analogue: >
     Incident-after-incident triage: a fresh page arrives from a
     different subsystem the moment the operator resolves the visible
-    incident; the operator must keep enough on-call capacity in
-    reserve to handle the follow-on instead of fully committing
-    every responder to the first symptom. Adversarial robustness:
-    treating the first observable threat as ground truth and
-    over-fitting the response to it leaves the system exposed when
-    the adversary stages a second engagement from a different angle.
+    incident; the operator was NOT pre-warned about the second
+    incident and must detect it from the live telemetry. The
+    operator must keep enough on-call capacity in reserve to handle
+    the follow-on instead of fully committing every responder to
+    the first symptom. Adversarial robustness: treating the first
+    observable threat as ground truth and over-fitting the response
+    to it leaves the system exposed when the adversary stages a
+    second engagement from a different angle.
   benchmark_anchor:
     - 'adversarial robustness: surprise wave handling'
     - 'military follow-on wave doctrine'
@@ -185,27 +198,21 @@ levels:
     #
     # Adversarial robustness — surprise second wave (easy). An obvious
     # 4-unit rifle cluster sits at the centre of the arena and closes in
-    # on your base; a SECOND smaller wave (3 rifles) is pre-placed at a
-    # fog corner and will close in from an unexpected bearing in a hunt
-    # pattern by ~tick 1500. Your 5 pre-placed defenders (3 medium tanks +
-    # 2 rocket soldiers) are your ENTIRE force — you have no barracks and
-    # no cash so you cannot train replacements. To WIN you must, before
-    # tick 5400, kill ≥7 enemy units across BOTH waves AND still have your
-    # construction yard (fact) standing AND still have ≥2 of your own
-    # units alive. The defenders auto-fire on whatever enters their arc
-    # but never advance on their own — you must actively command them to
-    # concentrate fire and intercept each wave. Stalling (passive defence
-    # — the garrison is swarmed piecemeal and wiped before it can clear
-    # both waves), chasing the visible cluster all the way to the fog
-    # corner (Wave 1 walks past your base while your screen is far
-    # afield), or busting the attrition floor all LOSE.
+    # on your base. Your 5 pre-placed defenders (3 medium tanks + 2 rocket
+    # soldiers) are your ENTIRE force — you have no barracks and no cash
+    # so you cannot train replacements. To WIN you must, before tick 5400,
+    # kill ≥7 enemy units AND still have your construction yard (fact)
+    # standing AND still have ≥2 of your own units alive. The defenders
+    # auto-fire on whatever enters their arc but never advance on their
+    # own — you must actively command them to concentrate fire. Stalling
+    # (passive defence — the garrison is swarmed piecemeal and wiped) or
+    # busting the attrition floor LOSE.
     description: >
-      An obvious 4-rifle cluster centred on the arena charges your base; a
-      SECOND 3-rifle wave hidden at a fog corner closes from an unexpected
-      bearing around tick 1500. Your five defenders (three tanks plus two
-      rocket soldiers) are your ENTIRE force — no barracks, no cash.
-      Actively concentrate fire and intercept both waves. Seven kills,
-      yard alive, two units alive, within about 60 turns.
+      An obvious 4-rifle cluster centred on the arena charges your base.
+      Your five defenders (three tanks plus two rocket soldiers) are your
+      ENTIRE force — no barracks, no cash. Actively concentrate fire and
+      hold the line. Seven kills, yard alive, two units alive, within
+      about 60 turns.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
@@ -235,14 +242,23 @@ levels:
         # at the agent centroid; they arrive at the defender
         # outpost by ~tick 150.
         - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 4}
-        # Wave 2 — SMALLER (3 e1) pre-placed at NE fog corner. Hunt
-        # bot closes in from y=8 (out of agent's initial vision row);
-        # arrives at base latitude ~tick 600..1000.
-        - {type: e1, owner: enemy, position: [90, 8], stance: 3, count: 3}
         # Inert enemy `fact` marker far east (anti-DRAW): keeps the
         # episode alive past the last killed hunter so the win/fail
         # evaluator runs.
         - {type: fact, owner: enemy, position: [120, 20]}
+      # Wave 2 — SMALLER (3 e1) INJECTED at tick 1500 at the NE fog
+      # corner via scheduled_events. The agent has NO briefing
+      # pre-disclosure of the second wave; discovery comes from the
+      # `enemy_unit_spotted` interrupt firing once the hunt-bot
+      # injectees close into vision, plus the live `units_summary`
+      # channel. Hunt-bot e1 inject at y=8 (out of the centred
+      # defender screen's initial fog) and arrive at base latitude
+      # ~tick 1900..2300 — well inside the 5400 win window.
+      scheduled_events:
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [90, 8], stance: 3, count: 3}
     win_condition:
       all_of:
         - units_killed_gte: 7
@@ -271,23 +287,18 @@ levels:
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
     # Adversarial robustness — surprise second wave (medium). An obvious
-    # 4-unit rifle cluster sits at the centre and closes in on your base;
-    # a SECOND wave OF EQUAL SIZE (4 rifles) is pre-placed at a fog corner
-    # and closes in from an unexpected bearing in a hunt pattern by ~tick
-    # 1500. Your 5 pre-placed defenders (3 medium tanks + 2 rocket
-    # soldiers) are your ENTIRE force — no barracks, no cash. To WIN you
-    # must, before tick 5400, kill ≥8 enemy units across BOTH waves AND
-    # still have your construction yard (fact) standing AND still have ≥2
-    # of your own units alive. The defenders auto-fire in their arc but
-    # never advance on their own — you must actively command them.
-    # Stalling (the passive garrison is swarmed and wiped), chasing the
-    # visible cluster all the way to the fog corner, or attrition-busting
-    # all LOSE.
+    # 4-unit rifle cluster sits at the centre and closes in on your base.
+    # Your 5 pre-placed defenders (3 medium tanks + 2 rocket soldiers) are
+    # your ENTIRE force — no barracks, no cash. To WIN you must, before
+    # tick 5400, kill ≥8 enemy units AND still have your construction yard
+    # (fact) standing AND still have ≥2 of your own units alive. The
+    # defenders auto-fire in their arc but never advance on their own —
+    # you must actively command them. Stalling (the passive garrison is
+    # swarmed and wiped) or attrition-busting LOSE.
     description: >
-      Same obvious 4-rifle centre wave; the surprise second wave grows to
-      4 rifles at a fog corner, also arriving around tick 1500. Same five
-      defenders, no reinforcements. Command both interceptions actively.
-      Eight kills, yard alive, two units alive, within about 60 turns.
+      Same obvious 4-rifle centre wave. Same five defenders, no
+      reinforcements. Command interceptions actively. Eight kills, yard
+      alive, two units alive, within about 60 turns.
     overrides:
       actors:
         - {type: fact, owner: agent, position: [10, 20]}
@@ -302,9 +313,15 @@ levels:
         - {type: e3,   owner: agent, position: [16, 21], stance: 2}
         # Wave 1 — 4-unit cluster (canonical spec count).
         - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 4}
-        # Wave 2 — EQUAL size (4 e1) at NE fog corner.
-        - {type: e1, owner: enemy, position: [90, 8], stance: 3, count: 4}
         - {type: fact, owner: enemy, position: [120, 20]}
+      # Wave 2 — EQUAL size (4 e1) INJECTED at tick 1500 at the NE
+      # fog corner via scheduled_events. No briefing pre-disclosure —
+      # discovery comes from `enemy_unit_spotted` + `units_summary`.
+      scheduled_events:
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [90, 8], stance: 3, count: 4}
     win_condition:
       all_of:
         - units_killed_gte: 8
@@ -339,27 +356,20 @@ levels:
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
     # Adversarial robustness — surprise second wave (hard). The obvious
-    # 4-unit cluster sits at the centre; TWO Wave-2 squads are pre-placed
-    # at OPPOSITE fog corners (NE and SE) and the one at the SAME latitude
-    # as your base arrives FIRST while the OPPOSITE corner one is the
-    # long-haul late follow-on. Your base round-robins between a NORTH and
-    # a SOUTH latitude so which corner the surprise wave arrives from
+    # 4-unit cluster sits at the centre. Your base round-robins between a
+    # NORTH and a SOUTH latitude per seed so the spatial disposition
     # cannot be memorised. Your 7 pre-placed defenders (4 medium tanks + 3
     # rocket soldiers) are your ENTIRE force — no barracks, no cash. To
-    # WIN you must, before tick 5400, kill ≥9 enemy units across BOTH
-    # waves AND still have your construction yard (fact) standing AND
-    # still have ≥2 of your own units alive. The defenders auto-fire on
-    # whatever enters their arc but never advance on their own — you must
-    # actively command them to concentrate fire and intercept each wave.
-    # Stalling (the passive garrison is swarmed piecemeal and wiped),
-    # chasing one fog corner deep, or attrition bust all LOSE.
+    # WIN you must, before tick 5400, kill ≥9 enemy units AND still have
+    # your construction yard (fact) standing AND still have ≥2 of your
+    # own units alive. The defenders auto-fire on whatever enters their
+    # arc but never advance on their own — you must actively command them
+    # to concentrate fire. Stalling (the passive garrison is swarmed
+    # piecemeal and wiped) or attrition bust LOSE.
     description: >
-      Obvious 4-rifle centre wave plus TWO Wave-2 squads at opposite fog
-      corners (NE and SE); the same-latitude squad arrives first, the
-      opposite one is the long-haul follow-on. Your base flips north/south
-      by seed so the surprise bearing can't be memorised. Seven defenders,
-      no reinforcements. Nine kills, yard alive, two units alive, within
-      about 60 turns.
+      Obvious 4-rifle centre wave. Your base flips north/south by seed.
+      Seven defenders, no reinforcements. Command interceptions actively.
+      Nine kills, yard alive, two units alive, within about 60 turns.
     overrides:
       actors:
         # ── spawn_point 0 — NORTH base (y=12). ─────────────────────
@@ -395,15 +405,20 @@ levels:
         # whichever base is occupied, after a ~one-second detour
         # toward the mid-latitude.
         - {type: e1, owner: enemy, position: [80, 20], stance: 3, count: 4}
-        # Wave 2 — TWO 4-unit squads pre-placed at BOTH fog corners
-        # (NE y=8 and SE y=32). Enemy actors ignore spawn_point so
-        # BOTH always place; whichever corner is at the same
-        # latitude as the agent reaches the base FIRST (the EARLY
-        # surprise), the OPPOSITE-latitude squad arrives LATER
-        # (the LATE follow-on).
-        - {type: e1, owner: enemy, position: [90, 8],  stance: 3, count: 4}
-        - {type: e1, owner: enemy, position: [90, 32], stance: 3, count: 4}
         - {type: fact, owner: enemy, position: [120, 20]}
+      # Wave 2 — TWO 4-unit squads INJECTED at tick 1500 at BOTH fog
+      # corners (NE y=8 and SE y=32) via scheduled_events. No briefing
+      # pre-disclosure — discovery comes from `enemy_unit_spotted` +
+      # `units_summary`. Whichever corner is at the same latitude as
+      # the agent's spawn group reaches the base FIRST (the EARLY
+      # surprise), the OPPOSITE-latitude squad arrives LATER (the
+      # LATE follow-on).
+      scheduled_events:
+        - tick: 1500
+          type: spawn_actors
+          actors:
+            - {type: e1, owner: enemy, position: [90, 8],  stance: 3, count: 4}
+            - {type: e1, owner: enemy, position: [90, 32], stance: 3, count: 4}
     win_condition:
       all_of:
         - units_killed_gte: 9
