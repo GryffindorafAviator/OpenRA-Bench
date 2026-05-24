@@ -76,7 +76,7 @@ def _ctx(units_xy=(), tick=1000, killed=0, lost=0, fact=True):
 
 def test_predicates_easy():
     c = compile_level(load_pack(PACK_PATH), "easy")
-    tanks4 = [(6, 18), (6, 19), (6, 20), (6, 21)]
+    tanks4 = [(4, 18), (4, 19), (4, 20), (4, 21)]
     tanks3 = tanks4[:3]
     tanks2 = tanks4[:2]
 
@@ -96,15 +96,15 @@ def test_predicates_easy():
     # Fact destroyed → fail clause fires
     assert evaluate(c.fail_condition, _ctx(tanks4, tick=3000, killed=4, lost=0, fact=False))
     # Past deadline → real loss, reachable within max_turns
-    assert evaluate(c.fail_condition, _ctx(tanks4, tick=4502, killed=0, lost=0))
-    assert 4501 <= 93 + 90 * (c.max_turns - 1), (
-        "after_ticks 4501 must be reachable within max_turns"
+    assert evaluate(c.fail_condition, _ctx(tanks4, tick=3002, killed=0, lost=0))
+    assert 3001 <= 93 + 90 * (c.max_turns - 1), (
+        "after_ticks 3001 must be reachable within max_turns"
     )
 
 
 def test_predicates_medium_eight_kill_three_survive_bar():
     c = compile_level(load_pack(PACK_PATH), "medium")
-    tanks4 = [(6, 18), (6, 19), (6, 20), (6, 21)]
+    tanks4 = [(4, 18), (4, 19), (4, 20), (4, 21)]
     tanks3 = tanks4[:3]
     tanks2 = tanks4[:2]
 
@@ -120,27 +120,27 @@ def test_predicates_medium_eight_kill_three_survive_bar():
     # Fact destroyed → fail clause fires
     assert evaluate(c.fail_condition, _ctx(tanks4, tick=3000, killed=8, lost=0, fact=False))
     # Past deadline → real loss, reachable
-    assert evaluate(c.fail_condition, _ctx(tanks4, tick=4502, killed=0, lost=0))
-    assert 4501 <= 93 + 90 * (c.max_turns - 1)
+    assert evaluate(c.fail_condition, _ctx(tanks4, tick=3002, killed=0, lost=0))
+    assert 3001 <= 93 + 90 * (c.max_turns - 1)
 
 
-def test_predicates_hard_eight_kill_three_survive_bar():
+def test_predicates_hard_nine_kill_three_survive_bar():
     c = compile_level(load_pack(PACK_PATH), "hard")
-    # NORTH staging (spawn_point 0): y=10..13.
-    tanks4_n = [(6, 10), (6, 11), (6, 12), (6, 13)]
+    # NORTH staging (spawn_point 0): y=4..7.
+    tanks4_n = [(4, 4), (4, 5), (4, 6), (4, 7)]
 
-    # Intended: 8 kills, ≥3 alive, fact survives, in time → WIN
-    assert evaluate(c.win_condition, _ctx(tanks4_n, tick=3000, killed=8, lost=0))
+    # Intended: 9 kills (three 3-unit teams), ≥3 alive, fact survives → WIN
+    assert evaluate(c.win_condition, _ctx(tanks4_n, tick=3000, killed=9, lost=0))
     # 2 tanks remaining → predicate fails
     assert not evaluate(
-        c.win_condition, _ctx(tanks4_n[:2], tick=3000, killed=8, lost=2)
+        c.win_condition, _ctx(tanks4_n[:2], tick=3000, killed=9, lost=2)
     )
-    # 7 kills only → predicate fails
-    assert not evaluate(c.win_condition, _ctx(tanks4_n, tick=3000, killed=7, lost=0))
+    # 8 kills only → predicate fails (need ≥9 on hard)
+    assert not evaluate(c.win_condition, _ctx(tanks4_n, tick=3000, killed=8, lost=0))
     # Past deadline → real loss, reachable
-    assert evaluate(c.fail_condition, _ctx(tanks4_n, tick=4502, killed=0, lost=0))
-    assert 4501 <= 93 + 90 * (c.max_turns - 1), (
-        "hard after_ticks 4501 must be reachable within max_turns"
+    assert evaluate(c.fail_condition, _ctx(tanks4_n, tick=3002, killed=0, lost=0))
+    assert 3001 <= 93 + 90 * (c.max_turns - 1), (
+        "hard after_ticks 3001 must be reachable within max_turns"
     )
 
 
@@ -182,8 +182,8 @@ def test_timeout_loss_is_reachable_on_every_level():
     pack = load_pack(PACK_PATH)
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(pack, lvl)
-        assert 4501 <= 93 + 90 * (c.max_turns - 1), (
-            f"{lvl}: after_ticks 4501 not reachable within max_turns"
+        assert 3001 <= 93 + 90 * (c.max_turns - 1), (
+            f"{lvl}: after_ticks 3001 not reachable within max_turns"
         )
 
 
@@ -219,7 +219,7 @@ def _brute_attack_move_policy(rs, Command):
     cmds = []
     for u in units:
         cmds.append(
-            Command.attack_move([str(u["id"])], target_x=110, target_y=u["cell_y"])
+            Command.attack_move([str(u["id"])], target_x=58, target_y=u["cell_y"])
         )
     return cmds
 
