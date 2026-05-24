@@ -11,12 +11,12 @@
 #
 # Concretely: the agent owns a mixed column — JEEPS and MEDIUM TANKS
 # (2tnk) — at the west edge (x=8, y∈[18..22]). The brief says:
-#   "Move the JEEP units to (90, 20). Do NOT move the TANK units."
+#   "Move the JEEP units to (24, 20). Do NOT move the TANK units."
 # The win predicate uses the type-filtered region predicate
 # `units_of_type_in_region_gte` to check BOTH halves of the
 # instruction simultaneously:
 #
-#   1. ≥3 JEEPS in region around (90, 20) — the positive instruction.
+#   1. ≥3 JEEPS in region around (24, 20) — the positive instruction.
 #   2. ≥3 TANKS still in region around (8, 20) — the negative
 #      instruction (the tanks must remain at their start).
 #
@@ -30,18 +30,18 @@
 # the moment the agent acts on the prohibited group.
 #
 # Failure modes (all real, reachable LOSSES; no draw degeneracy):
-#   • STALL (only `observe`): jeeps never reach (90,20); the
+#   • STALL (only `observe`): jeeps never reach (24,20); the
 #     within_ticks deadline fires → after_ticks fail.
 #   • MOVE-ALL (the model treats the order as "move everything east"
 #     and ignores the carve-out): the tanks leave the start cluster
 #     within a few turns → `not units_of_type_in_region_gte 2tnk` fail
 #     fires as soon as <3 tanks remain near (8,20). Even if the jeeps
-#     reach (90,20), the run is forfeit — the brief said "do NOT move
+#     reach (24,20), the run is forfeit — the brief said "do NOT move
 #     the tanks" and the agent moved them.
 #   • TANKS-ONLY (the model fixates on the wrong half — only
 #     tanks moved): the tanks leave the start AND the jeeps never
 #     reach the goal → both fail clauses fire.
-#   • INTENDED (move JEEPS east to (90,20), issue NO order to the
+#   • INTENDED (move JEEPS east to (24,20), issue NO order to the
 #     tanks): jeeps arrive on time, tanks remain at start → WIN.
 #
 # Real-world anchor: IFBench / instruction-precision benchmarks
@@ -62,9 +62,9 @@
 # Tick budget note: ~90 ticks/turn (tick ≈ 93 + 90·(turn-1)). With
 # max_turns=55 the reachable max tick is 4953, so the fail
 # `after_ticks: 4501` bites well within the budget (no draw). The
-# intended jeep convoy travels ~82 cells; jeep speed is ~12 cells/turn
-# so it arrives in ~7-10 turns (~tick 700-1000), well under the
-# deadline.
+# intended jeep convoy travels ~16 cells (west edge x=8 to goal x=24);
+# jeep speed is ~12 cells/turn so it arrives in ~2 turns (~tick 200),
+# well under the deadline.
 #
 # Hard-tier curation: hard defines 2 agent spawn_point groups for the
 # JEEPS (NW vs SW staging — y=8 vs y=32), round-robined by seed; the
@@ -122,12 +122,12 @@ levels:
   # ── EASY ─────────────────────────────────────────────────────────
   # The bare selective-action skill: ONLY the positive clause is
   # tested. 3 jeeps + 3 tanks at the west edge; jeeps must reach
-  # (90,20); no negative-clause teeth. A naive "move everything"
+  # (24,20); no negative-clause teeth. A naive "move everything"
   # policy CAN win on easy — easy is the calibration tier (the
   # capability is the difficulty step on medium).
   easy:
     description: >
-      Move ALL THREE JEEP units to the region around (90, 20) within
+      Move ALL THREE JEEP units to the region around (24, 20) within
       radius 6, before tick 4500. The TANK units may be ignored
       (easy tier: no negative-instruction teeth). Stalling and
       timeout LOSE.
@@ -143,7 +143,7 @@ levels:
     win_condition:
       all_of:
         - {units_of_type_in_region_gte:
-            {type: jeep, x: 90, y: 20, radius: 6, n: 3}}
+            {type: jeep, x: 24, y: 20, radius: 6, n: 3}}
         - {within_ticks: 4500}
     fail_condition:
       any_of:
@@ -165,7 +165,7 @@ levels:
     # contributors. The trimmed version below removes scripted-policy
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
-    # Move ALL THREE JEEP units to the region around (90, 20) within
+    # Move ALL THREE JEEP units to the region around (24, 20) within
     # radius 6, before tick 4500. Do NOT move the TANK units — all three
     # TANK (2tnk) units must remain in the start region around (8, 20)
     # within radius 6. Issuing ANY move order to a tank breaks the tank-
@@ -173,7 +173,7 @@ levels:
     # mission immediately. Stalling, moving a tank, force-loss, and
     # timeout all LOSE.
     description: >
-      Move ALL THREE jeeps to the disc at (90,20). Do NOT move the THREE
+      Move ALL THREE jeeps to the disc at (24,20). Do NOT move the THREE
       tanks — they must stay inside the disc at (8,20). Issuing any move
       order to a tank breaks the tank-at-start clause as soon as it leaves
       the cluster and fails the run instantly. Within about 50 turns.
@@ -188,7 +188,7 @@ levels:
     win_condition:
       all_of:
         - {units_of_type_in_region_gte:
-            {type: jeep, x: 90, y: 20, radius: 6, n: 3}}
+            {type: jeep, x: 24, y: 20, radius: 6, n: 3}}
         - {units_of_type_in_region_gte:
             {type: 2tnk, x: 8, y: 20, radius: 6, n: 3}}
         - {within_ticks: 4500}
@@ -214,7 +214,7 @@ levels:
     # contributors. The trimmed version below removes scripted-policy
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
-    # Move ALL THREE JEEP units to the region around (90, 20) within
+    # Move ALL THREE JEEP units to the region around (24, 20) within
     # radius 6, before tick 4500 — your jeeps may start at the NORTHWEST
     # (y≈8) OR SOUTHWEST (y≈32) corner depending on the seed; route
     # accordingly. Do NOT move the TANK units — all three TANK (2tnk)
@@ -224,7 +224,7 @@ levels:
     # immediately. Stalling, moving a tank, force-loss, and timeout all
     # LOSE.
     description: >
-      Same selective-action task — three jeeps to (90,20), three tanks
+      Same selective-action task — three jeeps to (24,20), three tanks
       held in the (8,20) disc — but the jeeps may spawn NW (y≈8) or SW
       (y≈32) by seed. Route the jeeps accordingly; any move order on a
       tank is an instant fail. Within about 50 turns.
@@ -252,7 +252,7 @@ levels:
     win_condition:
       all_of:
         - {units_of_type_in_region_gte:
-            {type: jeep, x: 90, y: 20, radius: 6, n: 3}}
+            {type: jeep, x: 24, y: 20, radius: 6, n: 3}}
         - {units_of_type_in_region_gte:
             {type: 2tnk, x: 8, y: 20, radius: 6, n: 3}}
         - {within_ticks: 4500}

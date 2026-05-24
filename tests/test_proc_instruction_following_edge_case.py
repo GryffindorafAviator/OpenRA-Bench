@@ -2,11 +2,11 @@
 instruction adherence (selective-action discipline).
 
 The brief carries an EXPLICIT CONDITIONAL RULE — "move the JEEP units
-to (90,20); do NOT move the TANK units." The bench measures whether
+to (24,20); do NOT move the TANK units." The bench measures whether
 the agent honours BOTH halves of the instruction. The win predicate
 checks:
 
-  1. ≥3 jeeps in the goal region around (90,20).
+  1. ≥3 jeeps in the goal region around (24,20).
   2. ≥3 tanks STILL in the start region around (8,20).
 
 The fail predicate mirrors clause 2 as a `not` clause so a single tank
@@ -54,7 +54,7 @@ def _fail_clauses(c):
 
 def test_easy_has_positive_clause_only():
     """Easy is the calibration tier — only the positive instruction
-    (jeeps reach (90,20)) is in the win predicate. Moving the tanks
+    (jeeps reach (24,20)) is in the win predicate. Moving the tanks
     is harmless on easy (the negative teeth come in on medium)."""
     c = compile_level(load_pack(PACK), "easy")
     win = _win_clauses(c)
@@ -66,7 +66,7 @@ def test_easy_has_positive_clause_only():
 @pytest.mark.parametrize("level", ["medium", "hard"])
 def test_medium_and_hard_enforce_both_halves_of_the_instruction(level):
     """Medium and hard MUST encode BOTH:
-      - positive: ≥3 jeeps at goal (90,20) and
+      - positive: ≥3 jeeps at goal (24,20) and
       - negative: ≥3 tanks still at start (8,20).
     Anything less and the bench fails to enforce the carve-out."""
     c = compile_level(load_pack(PACK), level)
@@ -75,8 +75,8 @@ def test_medium_and_hard_enforce_both_halves_of_the_instruction(level):
     by_type = {cl["units_of_type_in_region_gte"]["type"]: cl["units_of_type_in_region_gte"]
                for cl in type_clauses}
     assert "jeep" in by_type, f"{level}: missing positive jeep clause"
-    assert by_type["jeep"]["x"] == 90 and by_type["jeep"]["y"] == 20, (
-        f"{level}: jeep goal must be (90,20), got "
+    assert by_type["jeep"]["x"] == 24 and by_type["jeep"]["y"] == 20, (
+        f"{level}: jeep goal must be (24,20), got "
         f"({by_type['jeep']['x']},{by_type['jeep']['y']})"
     )
     assert by_type["jeep"]["n"] >= 3, f"{level}: jeep clause needs n>=3"
@@ -235,9 +235,9 @@ def _move_all(rs, C):
     jeeps, tanks = _split(rs)
     cmds = []
     if jeeps:
-        cmds.append(C.move_units(jeeps, 90, 20))
+        cmds.append(C.move_units(jeeps, 24, 20))
     if tanks:
-        cmds.append(C.move_units(tanks, 90, 20))
+        cmds.append(C.move_units(tanks, 24, 20))
     return cmds or [C.observe()]
 
 
@@ -248,7 +248,7 @@ def _jeeps_only(rs, C):
     jeeps, _ = _split(rs)
     if not jeeps:
         return [C.observe()]
-    return [C.move_units(jeeps, 90, 20)]
+    return [C.move_units(jeeps, 24, 20)]
 
 
 # Seeds 1..4 = held-out seed contract from CLAUDE.md.
