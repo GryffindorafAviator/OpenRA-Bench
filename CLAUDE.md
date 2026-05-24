@@ -18,20 +18,11 @@ A scenario is defective if any of the following hold:
    advertised capability (the "laziest play wins" inversion).
 2. `within_ticks` or `after_ticks` is set above the tick reachable
    within `max_turns`; the deadline never bites ⇒ the episode times
-   out as a **DRAW**, not a LOSS. **Reachable max tick ≈
-   `93 + 90·(max_turns − 1)`** — the bench advances ~90 ticks per
-   decision turn in non-interrupt mode (the engine constant
-   `DEFAULT_TICKS_PER_STEP = 30` in `openra-train/src/env.rs:33` is
-   advanced 3× per `env.step()` via internal `process_frame` calls
-   in the bench's step path; net effect is ~90 ticks/turn). The
-   bench test suite enforces this formula via the
-   `test_timeout_reachable_inside_max_turns` helper used in 12+
-   pack tests (search for `93 + 90 * (max_turns`). Interrupt-mode
-   runs (any pack with a non-empty `interrupts:` block) advance
-   variable ticks per turn (`max_ticks` defaults to 5 in the bench
-   call site `openra_bench/eval_core.py`), so per-turn tick advance
-   is non-constant — read the actual value from
-   `info["ticks_advanced"]` instead of assuming it.
+   out as a **DRAW**, not a LOSS. **Reachable max tick = `93 + 90·
+   (max_turns − 1)`** for non-interrupt mode; interrupt-mode packs
+   advance 1-5 ticks per turn (variable). See the full "Ticks/turn"
+   note in "Engine facts you must internalise" below for the
+   complete formula + common pitfall.
 3. There is no `fail_condition`, or it only triggers on full
    force-wipe; a stall / preserve / partial outcome silently draws.
 4. The intended capability is not solvable inside the declared budget
@@ -127,19 +118,32 @@ Before editing any scenario pack:
 
 ## Engine facts you must internalise
 
-- **Ticks/turn:** non-interrupt mode advances ~90 ticks per
-  decision turn (the engine constant
-  `DEFAULT_TICKS_PER_STEP = 30` in `openra-train/src/env.rs:33` is
-  advanced 3× per `env.step()` via internal `process_frame` calls
-  in the bench's step path). **Reachable max tick ≈
-  `93 + 90·(max_turns − 1)`** — the bench test suite enforces this
-  formula via the `test_timeout_reachable_inside_max_turns` helper
-  used in 12+ pack tests (search for `93 + 90 * (max_turns`).
-  Interrupt mode (`step_until_event`, used whenever `interrupts:`
-  is non-empty) advances variable ticks per turn — read
-  `info["ticks_advanced"]` rather than computing arithmetically.
-  Any `within_ticks` / `after_ticks` above the reachable tick is
-  **inert** (won't bite) ⇒ draw degeneracy.
+- **Ticks/turn — the empirical numbers** (confirmed by 3+ audit
+  passes and 12+ in-tree test files):
+  - **Non-interrupt mode**: **~90 ticks per decision turn**. Reachable
+    max tick = **`93 + 90·(max_turns − 1)`** (≈ `90·max_turns`).
+    This is the formula the test suite enforces — every pack ships
+    a `test_timeout_loss_is_reachable` test using exactly
+    `93 + 90 * (max_turns − 1)` (`grep -lE '93 \+ 90 \*' tests/`).
+  - **Interrupt mode** (any pack with a non-empty `interrupts:`
+    block, dispatching through `step_until_event`): **1-5 ticks per
+    decision turn**, breaking on the first interrupt signal. The
+    bench's call site (`openra_bench/eval_core.py:348`) passes
+    `max_ticks=5` explicitly, so per-turn tick advance is variable
+    in `[1, 5]`. Read `info["ticks_advanced"]` rather than computing
+    arithmetically. **Reachable max tick ≤ `5·max_turns`** in the
+    worst case (no early signal), but the agent typically sees far
+    fewer because the interrupt fires.
+  - **Common pitfall** (the reason this section is long): the engine
+    constant `DEFAULT_TICKS_PER_STEP = 30` in
+    `openra-train/src/env.rs:33` is NOT the per-decision-turn value.
+    The bench advances frames 3× per `env.step()` (search
+    `process_frame` in `env.rs`), giving the ~90 figure above.
+    Don't quote the `30` figure — it's an internal constant, not
+    the budget every audit needs.
+  - **Defect rule**: any `within_ticks` / `after_ticks` above the
+    reachable tick is **inert** (won't bite) ⇒ DRAW degeneracy
+    (CLAUDE.md "no defect, no cheat" criterion #2).
 - **Engine auto-done:** the engine sets `done=True` when all enemy
   actors are eliminated, or sometimes when an agent unit reaches an
   enemy-key location. Without a persistent enemy actor a win-by-reach
