@@ -1,62 +1,48 @@
 """def-with-ambush scenario pack — Rust engine full loop.
 
 REASONING capability — FOG-AMBUSH doctrine: 2tnk flankers pre-placed
-in concealment OFF the direct enemy axis (at (40,16)/(40,24) on
-easy/medium; at the corresponding off-row positions for the
-seed-chosen base latitude on hard) must HOLD their hidden crossfire
-positions and let the rusher band advance into the L-ambush. Breaking
-the ambush — charging the flankers forward to meet the band in the
-open, or piling them back onto the construction yard — abandons the
-crossfire envelope: the thin force is out-attritioned head-on / ground
-down against the building.
+in concealment OFF the direct enemy axis on stance:0 (HoldFire) so
+they sit silent. The agent's load-bearing decision is WHEN to
+TRIGGER the ambush — flip the flankers from HoldFire (stance:0) to
+AttackAnything (stance:3) once the enemy column has walked into the
+L-ambush crossfire envelope. A stall / observe-only policy keeps the
+flankers silent → no engagement, no kills, the band rolls over the
+rifleman screen and razes the construction yard. The intended play
+is a single reactive `set_stance(<flanker_ids>, 3)` once the band
+closes into the kill zone.
 
-Engine recalibration note (movement fixes): the engine fixes —
-attack_unit on out-of-sight targets paths at real speed (no teleport)
-and a moving unit fires AND takes fire en route (no
-sprint-invincibility) — shifted combat balance bench-wide. The old
-"centralise to the choke" wrong policy inverted: a tank cluster
-funnelled at a choke is now genuinely strong play, so it was retired.
-The pack now discriminates the held crossfire ambush against the two
-wrong plays the engine fixes leave load-bearing:
+Wrong-play taxonomy (every level + every hard seed must LOSE):
 
-* CHARGE — attack-move all flankers EAST at the band. With no
+* STALL — observe-only. stance:0 flankers stay silent forever; the
+  band reaches the base unopposed → kill bar missed, fact razed or
+  deadline bites. LOSS.
+* CHARGE — attack-move the flankers EAST out of the crossfire
+  positions to meet the band in the open. With no
   sprint-invincibility the charging tanks take fire while closing,
   string out, and meet the heavier band head-on with no crossfire →
-  out-attritioned, kill bar missed.
-* PILE-ON-FACT — pull the flankers back and stack them on the
-  construction yard. The crossfire envelope is abandoned; the thin
-  stacked force is crowded against the building and ground down →
-  kill bar missed / fact razed / attrition cap busted.
-
-The load-bearing discriminator is POSITIONAL DISCIPLINE — the intended
-policy KEEPS the flankers at their starting cells (do nothing, or
-explicitly stop). The flankers carry stance:2 (Defend) — they hold
-their post and auto-fire on any enemy that enters weapon range; the
-crossfire rows are placed 4 cells off the band's lane (inside the
-~4-cell 2tnk weapon range) so the band walks into auto-engage range
-as it passes. The model does NOT need to issue attack orders; it ONLY
-needs to NOT MOVE the flankers.
+  out-attritioned, kill bar missed. LOSS.
+* PILE-ON-FACT — move the flankers OUT of the hidden crossfire
+  positions and stack them on the construction yard. The crossfire
+  envelope at the lane is abandoned; the thin force is crowded
+  against the building and ground down → kill bar missed / fact
+  razed / attrition cap busted. LOSS.
 
 The bar:
 
 * `building_count_gte:{type: fact, n: 1}` — fact must survive.
 * `units_killed_gte: K` — real engagement bar matched per tier
-  (6 easy, 8 medium, 8 hard) so an active-HOLD crossfire clears it
-  while a charging / piled-on force cannot.
+  (6 easy, 8 medium, 8 hard) so a triggered crossfire clears it
+  while stall / charge / pile-on cannot.
 * `units_lost_lte: N` — the attrition cap (2 easy, 3 medium/hard)
-  that bites CHARGE and PILE-ON, both of which trade ≥3/≥4 tanks
-  while a clean HOLD trades only ~2.
+  that bites CHARGE and PILE-ON.
 * `within_ticks: 2400` paired with `after_ticks: 2401` — a non-
   finisher is a real reachable timeout LOSS, never a draw.
-* `not building_count_gte:{type:fact,n:1}` and `not units_lost_lte:N`
-  in the fail clause — fact-razed and over-attrition are real LOSSES.
 
 These tests prove deterministically (no model / no network):
 
-* the intended HOLD-ambush-positions play WINS every level + every
-  hard seed;
-* charge and pile-on-fact both LOSE every level and every hard seed
-  (a real LOSS, not a draw);
+* the intended TRIGGER play WINS every level + every hard seed;
+* stall, charge, and pile-on-fact each LOSE every level and every
+  hard seed (a real LOSS, not a draw);
 * the hard tier defines ≥2 spawn_point groups so a memorised
   absolute crossfire cell cannot generalise.
 """
@@ -82,16 +68,33 @@ SEEDS = (1, 2, 3, 4)
 # ── scripted policies ────────────────────────────────────────────────
 
 
-def hold(rs, C):
-    """HOLD the ambush positions — observe-only. stance:2 (Defend)
-    on the pre-placed 2tnk flankers means each tank holds its post
-    and auto-fires on any enemy that enters weapon range; the
-    crossfire rows are 4 cells off the band lane, INSIDE the
-    ~4-cell 2tnk weapon range, so the engine auto-engages the band
-    from BOTH flanks as it walks past. The model only needs to NOT
-    MOVE the flankers — the intended capability is positional
-    discipline, not active micro. WINS every level + every hard
-    seed."""
+def stall(rs, C):
+    """STALL — observe-only. stance:0 flankers stay silent forever;
+    the band advances unopposed, razes the rifleman screen, and runs
+    out the kill-bar / attrition / deadline clock. LOSS every level +
+    every seed."""
+    return [C.observe()]
+
+
+def intended_ambush(rs, C):
+    """Trigger the ambush: flip every 2tnk flanker from stance:0
+    (HoldFire) to stance:3 (AttackAnything) once any visible enemy
+    has closed within ~10 cells of any flanker (i.e. into the
+    crossfire envelope). The engine then auto-engages the band from
+    both flanks. WINS every level + every hard seed."""
+    units = rs.get("units_summary") or []
+    flankers = [u for u in units if (u.get("type") or "").lower() == "2tnk"]
+    if not flankers:
+        return [C.observe()]
+    enemies = rs.get("enemy_summary") or []
+    for f in flankers:
+        for e in enemies:
+            if abs(f["cell_x"] - e["cell_x"]) + abs(
+                f["cell_y"] - e["cell_y"]
+            ) <= 10:
+                return [
+                    C.set_stance([str(u["id"]) for u in flankers], 3)
+                ]
     return [C.observe()]
 
 
@@ -100,44 +103,32 @@ def charge(rs, C):
     EAST at the band. The crossfire envelope is abandoned on turn
     1; with the engine no-sprint-invincibility fix the charging
     tanks take fire while closing, string out along the lane, and
-    meet the heavier band head-on with no crossfire support. They
-    are out-attritioned every level — kill bar missed, ≥3 tanks
-    lost → LOSS every level + every hard seed."""
+    meet the heavier band head-on with no crossfire support. LOSS
+    every level + every hard seed."""
     units = [
         u for u in rs.get("units_summary", []) if u.get("type") == "2tnk"
     ]
     if not units:
         return [C.observe()]
     ids = [str(u["id"]) for u in units]
-    # Pick the east edge of the playable arena relative to the flanker
-    # row so the order is reachable on both the legacy 128x40 layout
-    # and the post-shrink 80x40 layout.
     east_target_x = max((u["cell_x"] for u in units), default=40) + 40
     flank_y = units[0]["cell_y"]
-    # Aim east on the band lane (base row, which is the y nearest 20
-    # or the hard-tier latitude — use the closest enemy's y when
-    # available, else the flanker row).
     enemies = rs.get("enemy_summary", []) or []
     target_y = enemies[0]["cell_y"] if enemies else flank_y
     return [C.attack_move(ids, target_x=east_target_x, target_y=target_y)]
 
 
 def pile_on_fact(rs, C):
-    """Pile the flankers back onto the construction yard — move
-    every 2tnk to the fact cell (the "defend the high-value asset"
-    pattern). The crossfire envelope at the lane is abandoned; the
-    thin force is stacked against the building, crowded so it
-    cannot bring all its weapons to bear, and is ground down by the
-    band — kill bar missed / fact razed / attrition cap busted →
-    LOSS every level + every hard seed."""
+    """Pile the flankers back onto the construction yard. The
+    crossfire envelope at the lane is abandoned; the thin force is
+    stacked against the building and ground down by the band. LOSS
+    every level + every hard seed."""
     units = [
         u for u in rs.get("units_summary", []) if u.get("type") == "2tnk"
     ]
     if not units:
         return [C.observe()]
     ids = [str(u["id"]) for u in units]
-    # Target the agent fact's actual cell (works for both NORTH and
-    # SOUTH spawn on hard); fall back to (10,20).
     facts = [
         b for b in (rs.get("own_buildings", []) or [])
         if (b.get("type") or "").lower() == "fact"
@@ -158,13 +149,9 @@ def test_pack_loads_and_metadata_is_complete():
     assert pack.meta.capability == "reasoning"
     anchors = [str(a).lower() for a in (pack.meta.benchmark_anchor or [])]
     assert anchors, "benchmark_anchor must be non-empty"
-    # The brief's three explicit anchors.
     assert any("sc2" in a and "hidden" in a for a in anchors), anchors
     assert any("ambush" in a for a in anchors), anchors
     assert any("fog" in a for a in anchors), anchors
-    # rusher bot wired through to the engine for every level (centroid
-    # concentration is what makes the band drive WEST on the base row
-    # past the crossfire cells).
     for lvl in LEVELS:
         c = compile_level(pack, lvl)
         assert c.map_supported
@@ -176,11 +163,39 @@ def test_pack_loads_and_metadata_is_complete():
         assert str(bot).lower() == "rusher", (lvl, bot)
 
 
+def test_set_stance_is_in_base_tools():
+    """The agent must be able to TRIGGER the ambush via set_stance —
+    that's the load-bearing verb. Without it, no policy can flip the
+    stance:0 flankers to stance:3, so no policy can win."""
+    pack = load_pack(PACK)
+    base = pack.base if isinstance(pack.base, dict) else {}
+    tools = set(base.get("tools", []) or [])
+    assert "set_stance" in tools, f"set_stance must be in base tools; got {tools}"
+
+
+def test_flankers_start_on_holdfire():
+    """The 2tnk flankers must be pre-placed at stance:0 (HoldFire) so
+    a stall / observe-only policy collects ZERO kills. If they ship
+    on stance:2 (Defend) the engine auto-fires for free and the
+    no-cheat bar collapses (the original PR #46 defect)."""
+    pack = load_pack(PACK)
+    for lvl in LEVELS:
+        c = compile_level(pack, lvl)
+        flankers = [
+            a for a in c.scenario.actors
+            if a.owner == "agent" and a.type == "2tnk"
+        ]
+        assert flankers, f"{lvl}: no agent 2tnk flankers found"
+        for a in flankers:
+            assert a.stance == 0, (
+                f"{lvl}: flanker {a.type}@{a.position} must be stance:0 "
+                f"(HoldFire); got stance:{a.stance}. A stance:2 flanker "
+                f"auto-fires for free and lets stall WIN — defect."
+            )
+
+
 @pytest.mark.parametrize("level", LEVELS)
 def test_every_level_has_a_reachable_timeout_fail(level):
-    """Non-win must be a real LOSS: the `after_ticks` fail must be
-    strictly below the tick reachable at max_turns (~90 ticks/step
-    fixed-step or ~60 in interrupt mode)."""
     c = compile_level(load_pack(PACK), level)
     assert c.fail_condition is not None
     fc = c.fail_condition.model_dump(exclude_none=True)
@@ -198,9 +213,6 @@ def test_every_level_has_a_reachable_timeout_fail(level):
 
 @pytest.mark.parametrize("level", LEVELS)
 def test_every_level_has_fact_survival_in_fail_clause(level):
-    """The fact-razed condition must be a real LOSS clause (a
-    piled-on force on medium/hard lets the band reach and raze the
-    fact)."""
     c = compile_level(load_pack(PACK), level)
     fc = c.fail_condition.model_dump(exclude_none=True)
     flat = str(fc)
@@ -209,10 +221,6 @@ def test_every_level_has_fact_survival_in_fail_clause(level):
 
 @pytest.mark.parametrize("level", LEVELS)
 def test_every_level_has_attrition_cap_in_win_and_fail(level):
-    """Every tier carries a `units_lost_lte` attrition cap in BOTH
-    the win and fail clauses — the cap is the load-bearing
-    discriminator that makes CHARGE / PILE-ON a real LOSS (they
-    trade more tanks than a clean HOLD)."""
     c = compile_level(load_pack(PACK), level)
     win = c.win_condition.model_dump(exclude_none=True)
     fail = c.fail_condition.model_dump(exclude_none=True)
@@ -231,8 +239,6 @@ def test_every_level_has_attrition_cap_in_win_and_fail(level):
 
 @pytest.mark.parametrize("level", LEVELS)
 def test_every_level_enforces_fact_survival_in_win(level):
-    """Win must require the fact to survive — the brief-specified
-    `building_count_gte:{type:fact,n:1}` clause."""
     c = compile_level(load_pack(PACK), level)
     win = c.win_condition.model_dump(exclude_none=True)
     flat = str(win)
@@ -241,60 +247,67 @@ def test_every_level_enforces_fact_survival_in_win(level):
 
 
 def test_hard_has_two_spawn_point_groups():
-    """Hard-tier contract: ≥2 distinct seed-driven spawn_point groups
-    so the base latitude (and the matching crossfire cells) flips
-    per seed — a memorised absolute "(40,16)/(40,24)" plan cannot
-    generalise; the hold-the-hidden-position doctrine must."""
     c = compile_level(load_pack(PACK), "hard")
     groups = {
         a.spawn_point for a in c.scenario.actors
         if a.owner == "agent" and a.spawn_point is not None
     }
     assert groups == {0, 1}, groups
-    # The enemy band declares the matching spawn_point so exactly one
-    # concentrated band places at the active base latitude.
     enemy_groups = {
         a.spawn_point for a in c.scenario.actors
         if a.owner == "enemy" and a.spawn_point is not None
     }
     assert enemy_groups == {0, 1}, enemy_groups
-    # In-bounds check (rush-hour-arena playable y ≈ 2..38).
     for a in c.scenario.actors:
         x, y = a.position
         assert 2 <= x <= 126 and 2 <= y <= 38, (a.type, a.position)
 
 
-# ── solvency: intended HOLD WINS every level + every hard seed ───────
+# ── solvency: intended TRIGGER WINS every level + every hard seed ────
 
 
 @pytest.mark.parametrize("level", LEVELS)
-def test_hold_wins_every_level_and_seed(level):
-    """HOLD-ambush (observe-only — stance:2 + crossfire geometry
-    does the work) WINS every level on every seed. This is the
-    load-bearing solvency check: the intended capability is
-    reachable inside the tick budget on every seed."""
+def test_intended_ambush_trigger_wins(level):
+    """The intended capability — a reactive set_stance from stance:0
+    (HoldFire) to stance:3 (AttackAnything) once the band closes
+    into the crossfire envelope — WINS every level + every hard
+    seed. Load-bearing solvency check for the ambush-trigger
+    capability."""
     c = compile_level(load_pack(PACK), level)
     for seed in SEEDS:
-        r = run_level(c, hold, seed=seed)
+        r = run_level(c, intended_ambush, seed=seed)
         assert r.outcome == "win", (
-            f"{level} seed{seed}: HOLD-ambush must WIN; got "
-            f"{r.outcome} (tick={r.signals.game_tick}, "
+            f"{level} seed{seed}: intended ambush-trigger must WIN; "
+            f"got {r.outcome} (tick={r.signals.game_tick}, "
             f"kills={r.signals.units_killed}, "
             f"lost={r.signals.units_lost})"
         )
 
 
-# ── no-cheat: every wrong / break-the-ambush policy LOSES ────────────
+# ── no-cheat: every lazy / wrong policy LOSES every level + seed ─────
+
+
+@pytest.mark.parametrize("level", LEVELS)
+def test_stall_loses_every_tier_and_seed(level):
+    """STALL (observe-only) MUST LOSE every level + every hard seed.
+    With flankers at stance:0 the engine never auto-engages on its
+    own; a stall policy collects zero kills and the band reaches the
+    base. This is the PR #46 defect inversion: a stance:2 flanker
+    auto-fired for free and let stall WIN — the no-cheat bar
+    collapsed. The fix (stance:0) restores the bar."""
+    c = compile_level(load_pack(PACK), level)
+    for seed in SEEDS:
+        r = run_level(c, stall, seed=seed)
+        assert r.outcome == "loss", (
+            f"{level} seed{seed}: stall must LOSE (real fail, not "
+            f"draw); got {r.outcome} (tick={r.signals.game_tick}, "
+            f"kills={r.signals.units_killed}, "
+            f"lost={r.signals.units_lost})"
+        )
 
 
 @pytest.mark.parametrize("level", LEVELS)
 def test_charge_loses_every_level_and_seed(level):
-    """Charge attack-moves the flankers EAST out of the crossfire
-    positions to meet the band in the open. With no
-    sprint-invincibility they take fire while closing, string out,
-    and fight the heavier band head-on with no crossfire — out-
-    attritioned, kill bar missed. LOSS every level + every seed
-    (a real LOSS, not a draw)."""
     c = compile_level(load_pack(PACK), level)
     for seed in SEEDS:
         r = run_level(c, charge, seed=seed)
@@ -309,12 +322,6 @@ def test_charge_loses_every_level_and_seed(level):
 
 @pytest.mark.parametrize("level", LEVELS)
 def test_pile_on_fact_loses_every_level_and_seed(level):
-    """Pile-on-fact moves the flankers OUT of the hidden crossfire
-    positions and stacks them on the construction yard. The
-    crossfire envelope is abandoned; the thin force is crowded
-    against the building and ground down by the band (kill bar
-    missed / fact razed / attrition cap busted). LOSS every level
-    + every seed (a real LOSS, not a draw)."""
     c = compile_level(load_pack(PACK), level)
     for seed in SEEDS:
         r = run_level(c, pile_on_fact, seed=seed)
@@ -330,10 +337,10 @@ def test_pile_on_fact_loses_every_level_and_seed(level):
 # ── determinism ──────────────────────────────────────────────────────
 
 
-def test_hold_run_is_deterministic_on_medium():
+def test_intended_run_is_deterministic_on_medium():
     c = compile_level(load_pack(PACK), "medium")
-    a = run_level(c, hold, seed=2)
-    b = run_level(c, hold, seed=2)
+    a = run_level(c, intended_ambush, seed=2)
+    b = run_level(c, intended_ambush, seed=2)
     assert (a.outcome, a.turns) == (b.outcome, b.turns), (
         "same seed must be deterministic"
     )

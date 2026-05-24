@@ -1,34 +1,43 @@
 # def-with-ambush.yaml
 #
 # REASONING capability — FOG-AMBUSH doctrine: hidden flanking
-# defenders pre-positioned OFF the direct enemy axis, holding their
-# concealed crossfire positions, catch the enemy band in an L-ambush
-# from BOTH flanks as it advances down the lane toward the
-# construction yard. The held crossfire shreds the strung-out
-# enemy column before it can consolidate; BREAKING the ambush —
-# charging the flankers forward or piling them back onto the
-# construction yard — abandons the crossfire geometry and a thin
-# defender force is out-attritioned.
+# defenders pre-positioned OFF the direct enemy axis on HoldFire
+# (stance:0), concealed in silence. The agent's load-bearing
+# decision is WHEN to TRIGGER the ambush — flip the flankers from
+# HoldFire to AttackAnything (stance:3) once the enemy column has
+# walked into the L-ambush crossfire envelope. A premature trigger
+# fires through the screen at long range and trades poorly; a
+# missed trigger leaves the flankers silent while the band rolls
+# over the rifleman screen and razes the construction yard. The
+# intended play is reactive: hold silence until the band is in the
+# kill zone, THEN flip stance and let the engine's auto-engage do
+# the work.
 #
-# Engine recalibration note (movement fixes): the engine movement
-# fixes — (A) attack_unit on an out-of-sight target paths at real
-# speed instead of teleporting, and (B) a moving unit fires AND
-# takes fire en route (no sprint-invincibility) — shifted combat
-# balance bench-wide. The pack now discriminates the held crossfire
-# ambush against the two genuine wrong plays the engine fixes leave
-# load-bearing:
-#   • CHARGE — attack-move the flankers forward out of the
-#     ambush to meet the band in the open. With no
-#     sprint-invincibility the charging tanks take fire while
-#     closing, string out, and meet the heavier band head-on
+# Engine recalibration note (movement + stance fixes): the engine
+# movement fixes — (A) attack_unit on an out-of-sight target paths
+# at real speed instead of teleporting, and (B) a moving unit fires
+# AND takes fire en route (no sprint-invincibility) — combined with
+# the four-stance semantics (stance:0 HoldFire never auto-engages
+# even when attacked) make a TRIGGER pack expressible: the flankers
+# are placed at stance:0 so a stall / observe-only policy collects
+# zero kills and the band reaches the base. The agent must issue
+# `set_stance(<flanker_ids>, 3)` to open the engagement.
+#
+# Wrong-play taxonomy (every cell, every seed must LOSE):
+#   • STALL — observe-only. stance:0 flankers stay silent; the
+#     band walks past them, razes the rifleman screen, and either
+#     destroys the fact or runs out the clock with zero kills.
+#   • CHARGE — attack-move the flankers forward into the open.
+#     With no sprint-invincibility the charging tanks take fire
+#     while closing, string out, and meet the heavier band head-on
 #     with no crossfire → out-attritioned, kill bar missed.
 #   • PILE-ON-FACT — pull the flankers back and stack them on
 #     the construction yard. The crossfire envelope at the lane
 #     is abandoned; the thin stacked force is crowded against
 #     the building and ground down by the band → kill bar
 #     missed / fact razed / attrition cap busted.
-# The intended HOLD play keeps the flankers in their concealed
-# crossfire positions and WINS every level + seed.
+# The intended TRIGGER play (set_stance → 3 once the band closes
+# into the crossfire envelope) WINS every level + seed.
 #
 # Real-world anchors:
 #   - StarCraft 2 hidden defense / proxy-ambush doctrine.
@@ -106,10 +115,12 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Bare ambush-HOLD skill: ONE light rusher band on y=20. Four
-  # 2tnk flankers — two at (35,16)/(36,16) and two at (35,24)/(36,24)
-  # — auto-fire from a HELD post (stance:2 Defend; 4 cells off the
-  # y=20 lane is inside the ~4-cell 2tnk weapon range).
+  # Bare ambush-TRIGGER skill: ONE light rusher band on y=20. Four
+  # 2tnk flankers — two at (35,17) and two at (35,23) — sit on
+  # stance:0 (HoldFire). The agent must `set_stance(flankers, 3)`
+  # once the band has walked into the crossfire envelope (within
+  # the ~4-cell 2tnk weapon range of the flankers) to open the
+  # engagement. Stall keeps stance:0 → no kills → LOSS.
   easy:
     description: >
       Your Construction Yard sits at the west edge. A single rifleman
@@ -130,11 +141,11 @@ levels:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: e1, owner: agent, position: [15, 20], stance: 1}
         # Flankers — NORTH at (35,16)/(36,16) (4 cells off y=20).
-        - {type: 2tnk, owner: agent, position: [35, 17], stance: 2}
-        - {type: 2tnk, owner: agent, position: [36, 17], stance: 2}
+        - {type: 2tnk, owner: agent, position: [35, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [36, 17], stance: 0}
         # Flankers — SOUTH at (35,24)/(36,24).
-        - {type: 2tnk, owner: agent, position: [35, 23], stance: 2}
-        - {type: 2tnk, owner: agent, position: [36, 23], stance: 2}
+        - {type: 2tnk, owner: agent, position: [35, 23], stance: 0}
+        - {type: 2tnk, owner: agent, position: [36, 23], stance: 0}
         # Rusher band — 4× 1tnk + 4× e3 + 4× e1 (12 total).
         - {type: 1tnk, owner: enemy, position: [65, 20], stance: 3, count: 4}
         - {type: e3, owner: enemy, position: [67, 20], stance: 3, count: 4}
@@ -177,12 +188,12 @@ levels:
         - {type: fact, owner: agent, position: [10, 20]}
         - {type: e1, owner: agent, position: [15, 20], stance: 1}
         # 6 flankers — 3 NORTH + 3 SOUTH (wider arc, more burst).
-        - {type: 2tnk, owner: agent, position: [34, 17], stance: 2}
-        - {type: 2tnk, owner: agent, position: [35, 17], stance: 2}
-        - {type: 2tnk, owner: agent, position: [36, 17], stance: 2}
-        - {type: 2tnk, owner: agent, position: [34, 23], stance: 2}
-        - {type: 2tnk, owner: agent, position: [35, 23], stance: 2}
-        - {type: 2tnk, owner: agent, position: [36, 23], stance: 2}
+        - {type: 2tnk, owner: agent, position: [34, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [35, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [36, 17], stance: 0}
+        - {type: 2tnk, owner: agent, position: [34, 23], stance: 0}
+        - {type: 2tnk, owner: agent, position: [35, 23], stance: 0}
+        - {type: 2tnk, owner: agent, position: [36, 23], stance: 0}
         # HEAVY band — 3× 1tnk + 6× e3 + 6× e1 (15 total). Lighter on
         # anti-vehicle so 6 flankers can sustain the crossfire long
         # enough to clear the kill bar without busting attrition.
@@ -232,21 +243,21 @@ levels:
         - {type: e1, owner: agent, position: [15, 8], stance: 1, spawn_point: 0}
         # 6 flankers — 3 north of the base row + 3 south of it
         # (3 cells off the base row).
-        - {type: 2tnk, owner: agent, position: [34, 5], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [35, 5], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [36, 5], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [34, 11], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [35, 11], stance: 2, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [36, 11], stance: 2, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [34, 5], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [35, 5], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [36, 5], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [34, 11], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [35, 11], stance: 0, spawn_point: 0}
+        - {type: 2tnk, owner: agent, position: [36, 11], stance: 0, spawn_point: 0}
         # ── spawn_point 1 — SOUTH base at y=32 ─────────────────
         - {type: fact, owner: agent, position: [10, 32], spawn_point: 1}
         - {type: e1, owner: agent, position: [15, 32], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [34, 29], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [35, 29], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [36, 29], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [34, 35], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [35, 35], stance: 2, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [36, 35], stance: 2, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [34, 29], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [35, 29], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [36, 29], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [34, 35], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [35, 35], stance: 0, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [36, 35], stance: 0, spawn_point: 1}
         # ── Enemy band per latitude, tagged with matching
         # spawn_point so exactly ONE band places at the active
         # latitude.
