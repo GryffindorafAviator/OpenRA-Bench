@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import struct
+import threading
 import zipfile
 from pathlib import Path
 from typing import Any, Callable
@@ -332,13 +334,53 @@ def materialize(spec: dict) -> str:
     mid = spec_id(spec)
     out = _maps_dir() / f"{mid}.oramap"
     blob = io.BytesIO()
+    # Deterministic zip: pin every entry's date_time to a fixed epoch so
+    # successive `materialize()` calls with identical content produce
+    # byte-identical archives. Without this, `zipfile.writestr` stamps
+    # each entry with the current wall-clock time, the idempotent
+    # `read_bytes() == data` check always fails, and every test run
+    # rewrites every .oramap. Under `pytest -n auto` multiple workers
+    # then race-write the same file mid-read on other workers, surfacing
+    # as transient parse failures in tests that compile many packs
+    # (e.g. test_lh_recovery_after_mid_game_loss, test_manual_review_flow).
+    _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
     with zipfile.ZipFile(blob, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("map.yaml", _map_yaml(map_size, bounds, spawns, title))
-        zf.writestr("map.bin", _map_bin(grid))
-        zf.writestr("map.png", _map_png(grid))
+        for name, payload in (
+            ("map.yaml", _map_yaml(map_size, bounds, spawns, title).encode()),
+            ("map.bin", _map_bin(grid)),
+            ("map.png", _map_png(grid)),
+        ):
+            info = zipfile.ZipInfo(filename=name, date_time=_ZIP_EPOCH)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, payload)
     data = blob.getvalue()
-    if not (out.exists() and out.read_bytes() == data):
-        out.write_bytes(data)
+    # Idempotent: skip rewrite when on-disk bytes already match. With
+    # the deterministic zip above this branch is hit on every call after
+    # the first, eliminating the write race.
+    if out.exists():
+        try:
+            if out.read_bytes() == data:
+                return mid
+        except OSError:
+            # A concurrent writer truncated the file mid-read; fall
+            # through to the atomic-replace write below.
+            pass
+    # Atomic write: stage to a unique temp file then `os.replace` into
+    # place. `os.replace` is atomic on POSIX/Windows, so a concurrent
+    # reader either sees the previous complete archive or the new one,
+    # never a half-written file.
+    tmp = out.with_suffix(
+        out.suffix + f".tmp-{os.getpid()}-{threading.get_ident()}"
+    )
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, out)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
     return mid
 
 
