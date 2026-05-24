@@ -65,14 +65,24 @@ meta:
     - "intel ops: gather then withdraw"
   author: "openra-bench"
 
-# Tailored 128x40 arena with TWO water bands at y=10..11 and y=29..30
-# spanning x=54..67 — the inner detour bands the medium/hard tiers
-# describe in prose are now PHYSICALLY closed by terrain. The central
-# picket band (y=14..24, x=58..62) and the FAR-edge corridors (y<10
-# above, y>30 below) remain clear so the geometry the scenario prose
-# describes is enforced by the map, not by the optimism of the model.
-# Single mpspawn at (6, 5) keeps actor coords stable across seeds.
-base_map: scout-and-report-arena
+# Bespoke 80x40 arena (post-audit shrink, F4) with TWO water bands at
+# y=10..11 and y=29..30 spanning x=34..47 — the inner detour bands the
+# medium/hard tiers describe in prose are now PHYSICALLY closed by
+# terrain. The central picket band (y=14..24, x=38..42) and the FAR-
+# edge corridors (y<10 above, y>30 below) remain clear so the
+# geometry the scenario prose describes is enforced by the map.
+# Single mpspawn at (10, 20) keeps actor coords stable across seeds.
+base_map:
+  generator: arena
+  name: scout-and-report-80x40
+  width: 80
+  height: 40
+  cordon: 2
+  spawns: [[10, 20]]
+  obstacles:
+    - {x: 34, y: 10, w: 14, h: 2}
+    - {x: 34, y: 29, w: 14, h: 2}
+  title: Scout and Report Arena 80x40
 
 base:
   # The advertised tool surface includes attack_unit (the model CAN
@@ -114,25 +124,26 @@ levels:
     # the discovery in enemy territory loses on the n:2 return clause;
     # stalling loses on the clock.
     description: >
-      Two jeep scouts at (10,20). The discovery target — a far enemy yard
-      — sits at (110,20). Two enemy rifles block the direct east lane near
-      (60,20). Drive around the pickets, reveal the yard, bring BOTH jeeps
-      back into the (10,20) disc. ZERO losses, within about 50 turns.
+      Commander, two jeep scouts at your west base. A specific far
+      enemy yard is the discovery target — surface it with vision.
+      Two enemy rifles block the direct east lane partway across.
+      Drive around the pickets, reveal the yard, bring BOTH jeeps
+      back into the start disc. ZERO losses, within about 50 turns.
       Bruting the pickets bleeds a jeep.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [10, 20], stance: 1, count: 2}
         # Two stationary pickets directly on the y=20 lane — react
         # if approached but don't push (stance:1).
-        - {type: e1, owner: enemy, position: [60, 20], stance: 1}
-        - {type: e1, owner: enemy, position: [62, 21], stance: 1}
+        - {type: e1, owner: enemy, position: [40, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [42, 21], stance: 1}
         # Discovery target — the FAR fact (unarmed, persistent so
         # the episode does not auto-end on accidental nearby kills).
-        - {type: fact, owner: enemy, position: [110, 20]}
+        - {type: fact, owner: enemy, position: [68, 20]}
         # A second persistent enemy building so destroying the fact
         # alone can't auto-`done` the run before the return + no-
         # loss clauses are evaluated.
-        - {type: barr, owner: enemy, position: [113, 22]}
+        - {type: barr, owner: enemy, position: [71, 22]}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
@@ -168,10 +179,12 @@ levels:
     # loses; the central lane is closed. Stalling loses on the clock; one-
     # way commits that strand a jeep east lose on the n:2 return.
     description: >
-      Two jeeps at (10,20), discovery target at (110,20). Four rifles now
-      form a bottleneck across (58..62, 16..22) — the central lane is
-      closed. Detour above y<14 or below y>26, surface the yard, return
-      BOTH jeeps to the (10,20) disc. Zero losses, within about 50 turns.
+      Commander, two jeep scouts at your west base. A specific far
+      enemy yard is the discovery target. FOUR enemy rifles now form
+      a defended bottleneck across the central lane partway across —
+      the direct east route is closed. Detour above the bottleneck
+      or below it, surface the yard, return BOTH jeeps to the start
+      disc. Zero losses, within about 50 turns.
     overrides:
       actors:
         - {type: jeep, owner: agent, position: [10, 20], stance: 1, count: 2}
@@ -179,12 +192,12 @@ levels:
         # stance:1 — react/defend in place; they don't pursue out
         # of range, but a jeep that walks into the cluster eats
         # four-on-one and dies.
-        - {type: e1, owner: enemy, position: [58, 18], stance: 1}
-        - {type: e1, owner: enemy, position: [60, 20], stance: 1}
-        - {type: e1, owner: enemy, position: [62, 22], stance: 1}
-        - {type: e1, owner: enemy, position: [60, 16], stance: 1}
-        - {type: fact, owner: enemy, position: [110, 20]}
-        - {type: barr, owner: enemy, position: [113, 22]}
+        - {type: e1, owner: enemy, position: [38, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [40, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [42, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [40, 16], stance: 1}
+        - {type: fact, owner: enemy, position: [68, 20]}
+        - {type: barr, owner: enemy, position: [71, 22]}
     win_condition:
       all_of:
         - {buildings_discovered_gte: 1}
@@ -229,12 +242,13 @@ levels:
     # loses; the wrong-corner edge attrites the jeeps before they cross;
     # stalling loses on the clock.
     description: >
-      Four jeeps stage at the NORTH (10,8) or SOUTH (10,32) corner by
-      seed. Discovery target at (110,20). Six rifles thicken the central
-      bottleneck and two flank pickets contest the inner detour bands too.
-      Route the FAR edge matching your spawn (y≈4 for NORTH or y≈35 for
-      SOUTH), surface the yard, return BOTH jeeps to the matched corner
-      disc. Zero losses, within about 50 turns.
+      Commander, your jeep scout team stages at the NORTH or SOUTH
+      west corner by seed. A specific far enemy yard is the discovery
+      target. SIX enemy rifles thicken the central bottleneck and
+      two flank pickets contest the inner detour bands. Only the
+      far edge of the map matching your spawn corner clears the
+      bottleneck. Surface the yard, return BOTH jeeps to the matched
+      corner disc. Zero losses, within about 50 turns.
     overrides:
       actors:
         # Two seed-varied agent spawn corners (N vs S). count:2 at
@@ -246,12 +260,12 @@ levels:
         # inner detour bands (y≈12 / y≈28) cannot weave through in
         # e1's react range (~5 cells). The far-edge bands at
         # y≈4..5 (north) and y≈34..35 (south) remain safely clear.
-        - {type: e1, owner: enemy, position: [58, 18], stance: 1}
-        - {type: e1, owner: enemy, position: [60, 20], stance: 1}
-        - {type: e1, owner: enemy, position: [62, 22], stance: 1}
-        - {type: e1, owner: enemy, position: [60, 16], stance: 1}
-        - {type: e1, owner: enemy, position: [60, 14], stance: 1}
-        - {type: e1, owner: enemy, position: [60, 24], stance: 1}
+        - {type: e1, owner: enemy, position: [38, 18], stance: 1}
+        - {type: e1, owner: enemy, position: [40, 20], stance: 1}
+        - {type: e1, owner: enemy, position: [42, 22], stance: 1}
+        - {type: e1, owner: enemy, position: [40, 16], stance: 1}
+        - {type: e1, owner: enemy, position: [40, 14], stance: 1}
+        - {type: e1, owner: enemy, position: [40, 24], stance: 1}
         # Second scattered defender group — one forward picket per
         # band at x≈50, placed in the INNER detour band (y=12 /
         # y=28) so they punish a near-edge weave (y≈10 / y≈30) but
@@ -260,10 +274,10 @@ levels:
         # y=28 → y=35 is 7 cells (clear), both well past the
         # ~5-cell e1 react radius. A scout that tries to cut a
         # shorter inner detour walks right into them.
-        - {type: e1, owner: enemy, position: [50, 12], stance: 1}
-        - {type: e1, owner: enemy, position: [50, 28], stance: 1}
-        - {type: fact, owner: enemy, position: [110, 20]}
-        - {type: barr, owner: enemy, position: [113, 22]}
+        - {type: e1, owner: enemy, position: [30, 12], stance: 1}
+        - {type: e1, owner: enemy, position: [30, 28], stance: 1}
+        - {type: fact, owner: enemy, position: [68, 20]}
+        - {type: barr, owner: enemy, position: [71, 22]}
     # Hard win: discover + return BOTH jeeps to the spawn-matching
     # corner. `any_of` over the two corners — the team returns to
     # its OWN corner. The full-team-intact bar (units_lost_lte:0)
