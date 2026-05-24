@@ -117,15 +117,19 @@ Before editing any scenario pack:
 
 ## Engine facts you must internalise
 
-- **Ticks/turn:** non-interrupt mode advances exactly
-  `DEFAULT_TICKS_PER_STEP = 30` ticks per `env.step()`
-  (`openra-train/src/env.rs:33`). Max tick at `max_turns` ≈
-  `30·max_turns`. Interrupt mode (`step_until_event`, used whenever
-  `interrupts:` is non-empty) advances 1–`max_ticks` ticks per turn
-  (variable; default `max_ticks = 5`) and breaks on the first signal
-  — read `info["ticks_advanced"]` rather than computing
-  arithmetically. Any `within_ticks` / `after_ticks` above the
-  reachable tick is **inert** (won't bite) ⇒ draw degeneracy.
+- **Ticks/turn:** non-interrupt mode advances ~90 ticks per
+  decision turn (the engine constant
+  `DEFAULT_TICKS_PER_STEP = 30` in `openra-train/src/env.rs:33` is
+  advanced 3× per `env.step()` via internal `process_frame` calls
+  in the bench's step path). **Reachable max tick ≈
+  `93 + 90·(max_turns − 1)`** — the bench test suite enforces this
+  formula via the `test_timeout_reachable_inside_max_turns` helper
+  used in 12+ pack tests (search for `93 + 90 * (max_turns`).
+  Interrupt mode (`step_until_event`, used whenever `interrupts:`
+  is non-empty) advances variable ticks per turn — read
+  `info["ticks_advanced"]` rather than computing arithmetically.
+  Any `within_ticks` / `after_ticks` above the reachable tick is
+  **inert** (won't bite) ⇒ draw degeneracy.
 - **Engine auto-done:** the engine sets `done=True` when all enemy
   actors are eliminated, or sometimes when an agent unit reaches an
   enemy-key location. Without a persistent enemy actor a win-by-reach
