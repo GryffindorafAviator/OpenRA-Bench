@@ -558,3 +558,109 @@ if any fire):
 7. **Engine-gap pre-flight** (§78) — does the pack rely on an
    untested engine path (`build('hpad')`, `build('syrd')`, AA
    defenders, scheduled-air-spawn)?
+
+---
+
+## §79. `termination.enemy_units_killed: false` is MANDATORY for building-kill predicates
+
+Surfaced by the F11 POC validation on `f11-vertical-strike-ground-air`.
+
+If the win predicate gates on `enemy_buildings_destroyed_gte: N` (or any
+building-count clause), the engine MUST be told to keep running past an
+enemy-unit wipe. Otherwise: the agent's combined-arms strike kills all
+the enemy COMBAT UNITS first, the engine auto-`done`s (because enemy
+units == 0), and the `enemy_buildings_destroyed_gte` clause never has a
+chance to latch on the surviving buildings → **DRAW**.
+
+Mandatory for EVERY F11 pack whose win clause includes
+`enemy_buildings_destroyed_gte` or `enemy_key_buildings_destroyed_in_region`:
+
+```yaml
+base:
+  termination:
+    enemy_units_killed: false
+```
+
+This is the same engine flag CLAUDE.md documents under "Engine
+auto-`done`" (criterion #5). The F11 POC verified that omitting it
+produces a DRAW on the very first scripted-policy test (the intended
+combined-arms policy kills the enemy garrison's 1 rifleman before
+razing buildings, engine auto-dones, win clause unsatisfied → DRAW).
+
+The mirror flag `termination.agent_units_killed: false` is needed only
+for sacrifice/forlorn-hope idioms (e.g.,
+`combat-suicide-charge-mission`) — F11 packs don't use it.
+
+## §80. AA position is load-bearing — geometric tuning per pack
+
+Surfaced by the F11 POC. The `agun` (anti-air) position determines
+whether the "all-air LOSES" wrong-arm trap actually works while the
+intended combined-arms policy still wins. Naïve placement breaks the
+discrimination.
+
+**Rule**: place `agun` such that:
+- ✓ It reaches at least ONE enemy building the intended policy needs to
+  raze (so `all-air` heli alone enters its kill arc when going for that
+  building).
+- ✗ It is OUTSIDE the corridor the intended combined-arms policy uses
+  (so a coordinated ground+air push can split fire — air engages a
+  different target while ground absorbs the AA arc).
+
+The POC needed `agun` at `(104, 12)` not `(101, 20)`:
+- At `(101, 20)`: ranged the y=20 enemy building → all-air heli ate the
+  AA burst → trap worked, BUT the intended policy's hard NORTH-spawn
+  heli also took heavy losses → intended LOST on NORTH seeds.
+- At `(104, 12)`: ranges only the y=18 enemy building → all-air heli
+  still enters the arc when going for that building, but a combined-arms
+  push can engage the y=22 building with ground while the heli avoids
+  the AA → both traps work AND intended wins.
+
+Tune per pack. For naval/full-combined-arms variants, the same geometric
+rule applies to the AA's relationship with the heli approach corridor.
+
+## §81. Cash budgets — recalibrated for heli=$2000 + pre-placed tech
+
+Surfaced by the F11 POC. The original §73 budgets assumed heli=$1200
+(corrected to $2000) AND no pre-placed tech-chain. The POC ended up at:
+
+| Tier | starting_cash | Why higher than original §73 |
+|---|---|---|
+| easy | **$5500** | heli $2000 (was $1200) + buy weap+hpad+2tnk+heli |
+| medium | **$8000** | + wave attrition (build more units than the kill quota) |
+| hard | **$15000** | + tri-wave attrition + tech-overhead + seed-rotation reserve |
+
+**Update §73 ranges** based on POC empirical:
+- easy: starting_cash $5000-6500 (was $4000-5000)
+- medium: $7000-9000 (was $5000-6000)
+- hard: $12000-16000 (was $6000-7500)
+
+These higher floors reflect:
+- Vendor heli cost ($2000), correctly applied this time.
+- Pre-placed tech building cost AMORTIZATION: when the pack pre-places
+  `atek + dome + fix` (to focus the test on combined-arms not full
+  tech-chain), those buildings are "free" but their cost would have been
+  $1500 + $1500 + $1200 = $4200; without pre-placing the agent would
+  need to fund them.
+- Wave attrition: hard tier waves typically destroy 2-3 units of the
+  agent's force; the agent must over-produce to satisfy the kill quota
+  AT THE FINAL FRAME after attrition.
+
+**Capability-explicit pre-placing** (§81a): each F11 pack chooses
+which tech-chain buildings to pre-place based on which capability it
+tests:
+- **Combined-arms test** (vertical-strike-ground-air / -naval /
+  -full-combined-arms): pre-place `atek + dome + fix` so the test is
+  about the ARM-PICKING decision, not the tech chain.
+- **Full-game test** (econ-tech-army-strike): leave `weap + fix` to be
+  built (the tech chain IS part of the test).
+- **Defense-then-counter** (defense-then-counter): pre-place
+  `tent + weap` so the agent can immediately recruit defenders; the
+  counter-phase tech chain (hpad, fix) is built after survival.
+- **Rebuild-after-attrition** (rebuild-after-attrition): pre-place
+  EVERYTHING; the test is about rebuilding what's destroyed.
+- **Pivot-on-scout** (pivot-on-scout): pre-place `tent + weap +
+  hpad + syrd` so the model can pivot between any arm in ≤1 build cycle;
+  the test is the RE-SCOUT-RE-PIVOT decision.
+
+Document the pre-placing choice in each pack's `# ENGINE NOTE` block
+so future readers know what capability is under test.
