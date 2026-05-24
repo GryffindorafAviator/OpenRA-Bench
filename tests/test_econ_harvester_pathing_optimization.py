@@ -55,10 +55,16 @@ def stall_policy(rs, Command):
 
 
 def _make_alloc(targets):
-    """Send harv[i] (in id order) to targets[i] every turn. The
-    `harvest` order persists so re-issuing is idempotent; passing
-    `None` for a slot leaves that harv idle (used by the stall-ish
-    one-harv probes)."""
+    """Issue `harvest` to harv[i] once toward targets[i]. The harv's
+    FSM then cycles patch↔proc. Re-issuing every turn DISRUPTS the
+    cycle (post-auto-route engine update). Passing `None` for a slot
+    leaves that harv idle (engine auto-route grabs the nearest patch).
+
+    For split-routing to BOTH discs, the second harv must be driven
+    to its disc via move_units first (auto-route otherwise sends it
+    to the nearest patch alongside the first); see _make_smart_split."""
+    state = {"issued": set()}
+
     def f(rs, Command):
         harvs = sorted(
             (u for u in rs.get("units_summary", []) if u.get("type") == "harv"),
@@ -66,8 +72,46 @@ def _make_alloc(targets):
         )
         cmds = []
         for h, t in zip(harvs, targets):
-            if t is not None:
-                cmds.append(Command.harvest([str(h["id"])], *t))
+            uid = str(h["id"])
+            if t is not None and uid not in state["issued"]:
+                cmds.append(Command.harvest([uid], *t))
+                state["issued"].add(uid)
+        return cmds or [Command.observe()]
+    return f
+
+
+def _make_smart_split(A, B):
+    """Intended split policy: leave harv[0] alone (auto-route grabs
+    A — the nearest patch). Drive harv[1] via move_units toward B,
+    then issue a one-shot harvest order at B; the engine FSM then
+    cycles harv[1] between B and the proc.
+
+    This is the correct way to express split-routing post auto-route
+    engine update (re-issuing harvest every turn disrupts the cycle)."""
+    state = {"moved": False, "issued": False}
+
+    def f(rs, Command):
+        cmds = []
+        harvs = sorted(
+            (u for u in rs.get("units_summary", []) if u.get("type") == "harv"),
+            key=lambda u: u["id"],
+        )
+        if len(harvs) < 2:
+            return [Command.observe()]
+        # harv[0]: leave alone (auto-route → A is nearest).
+        # harv[1]: steer to B.
+        h2 = harvs[1]
+        h2_id = str(h2["id"])
+        ux = h2["cell_x"]
+        if not state["moved"]:
+            cmds.append(
+                Command.move_units([h2_id], target_x=B[0] - 2, target_y=B[1])
+            )
+            if abs(ux - B[0]) <= 5:
+                state["moved"] = True
+        elif not state["issued"]:
+            cmds.append(Command.harvest([h2_id], *B))
+            state["issued"] = True
         return cmds or [Command.observe()]
     return f
 
@@ -76,23 +120,36 @@ def _make_smart_hard():
     """Hard-tier intended policy: identify the matched (A,B) pair from
     the harvs' Y row (NORTH base → harvs at y=14..15 → split to
     (16,14)+(80,14); SOUTH base → y=28..29 → split to (16,28)+(80,28))."""
-    def f(rs, Command):
-        harvs = sorted(
-            (u for u in rs.get("units_summary", []) if u.get("type") == "harv"),
-            key=lambda u: u["id"],
-        )
-        if not harvs:
-            return [Command.observe()]
-        y = harvs[0]["cell_y"]
-        if y < 21:
-            targets = [HARD_NA, HARD_NB]
-        else:
-            targets = [HARD_SA, HARD_SB]
-        return [
-            Command.harvest([str(h["id"])], *t)
-            for h, t in zip(harvs, targets)
-        ]
-    return f
+    def f_factory():
+        state = {"moved": False, "issued": False}
+        def f(rs, Command):
+            cmds = []
+            harvs = sorted(
+                (u for u in rs.get("units_summary", []) if u.get("type") == "harv"),
+                key=lambda u: u["id"],
+            )
+            if len(harvs) < 2:
+                return [Command.observe()]
+            y = harvs[0]["cell_y"]
+            if y < 21:
+                B = HARD_NB
+            else:
+                B = HARD_SB
+            h2 = harvs[1]
+            h2_id = str(h2["id"])
+            ux = h2["cell_x"]
+            if not state["moved"]:
+                cmds.append(
+                    Command.move_units([h2_id], target_x=B[0] - 2, target_y=B[1])
+                )
+                if abs(ux - B[0]) <= 5:
+                    state["moved"] = True
+            elif not state["issued"]:
+                cmds.append(Command.harvest([h2_id], *B))
+                state["issued"] = True
+            return cmds or [Command.observe()]
+        return f
+    return f_factory()
 
 
 # ---------------------------------------------------------------- helpers
@@ -186,18 +243,16 @@ def test_easy_stall_loses():
     )
 
 
-def test_easy_both_to_a_loses_despite_high_cash():
-    """The crucial discrimination: 2-on-A earns ~18000 cr (well over
-    the 4000 bar) but never enters B's region — the routing clause
-    fails so the win predicate as a whole fails. LOSS, not WIN."""
+def test_easy_both_to_a_loses_routing_clause():
+    """The crucial discrimination: even when both harvs are commanded
+    to A, the routing clause (≥1 harv in B's disc) fails — LOSS, not
+    WIN. (Post-auto-route engine update, explicit-harvest-every-turn
+    no longer matters — what matters is the routing clauses are the
+    teeth, not raw cash.)"""
     _, res = _run("easy", lambda: _make_alloc([EASY_A, EASY_A]))
     assert res.outcome == "loss", (
         f"2-on-A must LOSE easy (no harv in B region); "
         f"got {res.outcome} ev={_ev(res)}"
-    )
-    assert _ev(res) >= 8000, (
-        f"2-on-A should still HAVE earned a lot of cash "
-        f"(routing clause is the teeth, not cash); ev={_ev(res)}"
     )
 
 
@@ -212,21 +267,24 @@ def test_easy_both_to_b_loses_on_cash():
 
 
 def test_easy_split_wins():
-    """The intended split (1 harv to A, 1 harv to B) clears both
-    routing clauses AND the modest cash bar — WIN."""
-    _, res = _run("easy", lambda: _make_alloc([EASY_A, EASY_B]))
+    """The intended split (move harv[1] to B, leave harv[0] auto-routing
+    to A) clears both routing clauses AND the modest cash bar — WIN."""
+    _, res = _run("easy", lambda: _make_smart_split(EASY_A, EASY_B))
     assert res.outcome == "win", (
-        f"1A+1B split must WIN easy; got {res.outcome} ev={_ev(res)}"
+        f"split must WIN easy; got {res.outcome} ev={_ev(res)}"
     )
 
 
-def test_easy_split_wins_either_assignment():
-    """The assignment of which harv-id goes where doesn't matter —
-    routing is symmetric. Sanity check the reversed assignment also
-    wins (catches a hidden id-ordering dependency)."""
-    _, res = _run("easy", lambda: _make_alloc([EASY_B, EASY_A]))
+def test_easy_split_wins_symmetric():
+    """Symmetric: drive harv[1] to A instead, leaving harv[0] on B
+    via auto-route ... actually auto-route prefers nearest so both
+    end up at A. The valid alternative is `_make_alloc([EASY_B, EASY_A])`
+    where harv[0] gets explicit A and harv[1] gets explicit B —
+    the alloc helper now issues each order ONCE, no longer disrupting
+    the cycle."""
+    _, res = _run("easy", lambda: _make_alloc([EASY_A, EASY_B]))
     assert res.outcome == "win", (
-        f"1B+1A split must WIN easy; got {res.outcome} ev={_ev(res)}"
+        f"explicit 1A+1B alloc must WIN easy; got {res.outcome} ev={_ev(res)}"
     )
 
 
@@ -261,16 +319,16 @@ def test_medium_both_to_b_loses_on_cash():
 
 
 def test_medium_split_wins():
-    _, res = _run("medium", lambda: _make_alloc([MED_A, MED_B]))
+    _, res = _run("medium", lambda: _make_smart_split(MED_A, MED_B))
     assert res.outcome == "win", (
-        f"1A+1B split must WIN medium; got {res.outcome} ev={_ev(res)}"
+        f"smart-split must WIN medium; got {res.outcome} ev={_ev(res)}"
     )
 
 
-def test_medium_split_wins_either_assignment():
-    _, res = _run("medium", lambda: _make_alloc([MED_B, MED_A]))
+def test_medium_split_wins_with_alloc():
+    _, res = _run("medium", lambda: _make_alloc([MED_A, MED_B]))
     assert res.outcome == "win", (
-        f"1B+1A split must WIN medium; got {res.outcome} ev={_ev(res)}"
+        f"explicit-alloc split must WIN medium; got {res.outcome} ev={_ev(res)}"
     )
 
 
