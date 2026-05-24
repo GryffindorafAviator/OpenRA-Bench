@@ -114,6 +114,15 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .game-units .priority-cell{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.02em}
 .game-units .enemy-actions{white-space:nowrap;width:1%}
 .game-units .enemy-actions button{padding:3px 7px;font-size:12px;margin-right:4px}
+.game-build{display:none;margin:0 0 12px;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(15,17,21,.35)}
+.game-build.visible{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap}
+.game-build label{font-size:12px;color:var(--muted)}
+.game-build input{width:120px;padding:5px 8px;font-size:13px}
+.game-build .place-active{outline:2px solid var(--accent)}
+.game-build-note{flex-basis:100%;font-size:12px;color:var(--muted);text-align:center;line-height:1.35}
+.game-build-note b{color:#cfd3da}
+.game-production{margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(15,17,21,.45);font-size:13px;color:var(--muted)}
+.game-production b{color:#cfd3da}
 .game-log{font-size:12px;color:var(--muted);max-height:90px;overflow-y:auto;margin-top:12px;font-family:monospace;padding:8px;background:var(--bg);border-radius:6px}
 .server-config{display:flex;gap:8px;align-items:center;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--border);font-size:13px}
 .server-config input{font-size:13px;padding:4px 8px;width:200px}
@@ -225,6 +234,19 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
             <span><i class="legend-mark selected"></i> selected</span>
             <span><i class="legend-mark arrow"></i> queued order</span>
             <span><b>number</b> stacked units</span>
+          </div>
+          <div class="game-build" id="game-build-panel">
+            <label for="game-build-item">Build item</label>
+            <input id="game-build-item" list="game-build-suggestions" placeholder="powr, e3, harv, pbox">
+            <datalist id="game-build-suggestions">
+              <option value="powr"><option value="e3"><option value="e1"><option value="harv">
+              <option value="proc"><option value="pbox"><option value="tent"><option value="weap">
+              <option value="silo"><option value="apwr"><option value="2tnk"><option value="1tnk">
+            </datalist>
+            <button class="btn-secondary btn-sm" onclick="gameQueueBuild()">Build</button>
+            <button class="btn-secondary btn-sm" id="game-place-btn" onclick="gameArmPlaceBuilding()">Place</button>
+            <span id="game-build-hint" style="font-size:12px;color:var(--muted)"></span>
+            <div class="game-build-note"><b>Structures</b> need Build, wait until listed as ready, then Place on the map. <b>Units</b> only need Build. Common structures: powr, proc, pbox, tent, weap, silo. Common units: e1, e3, harv, 1tnk, 2tnk.</div>
           </div>
           <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
             <button class="btn-secondary btn-sm" onclick="gameSelectAll()">Select All</button>
@@ -534,6 +556,7 @@ function esc(s){const d=document.createElement("div");d.textContent=s||"";return
 let gameSession=null, gameServerUrl="", gameServerOk=false;
 let gameSelected=new Set(), gameQueue=[], gameState=null;
 let gameRepeatAction=null;
+let gamePlaceItem="";
 
 async function checkServer(){
   const url=document.getElementById("server-url").value.replace(/\/$/,"");
@@ -573,7 +596,7 @@ async function gameStart(){
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
     gameState=await r.json();
     gameSession=gameState.session_id;
-    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null;
+    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
     document.getElementById("game-body").style.display="";
     document.getElementById("game-start-btn").style.display="none";
     document.getElementById("game-stop-btn").style.display="";
@@ -593,7 +616,7 @@ async function gameStop(){
     await fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"});
   }catch(e){}
   gameSession=null; gameState=null;
-  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null;
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
   document.getElementById("game-body").style.display="none";
   document.getElementById("game-start-btn").style.display="";
   document.getElementById("game-stop-btn").style.display="none";
@@ -615,7 +638,8 @@ async function gameEndTurn(){
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
     gameState=await r.json();
     if(gameQueue.length){
-      gameRepeatAction={...gameQueue[gameQueue.length-1]};
+      const last=gameQueue[gameQueue.length-1];
+      gameRepeatAction=last.mode==="attack"?{...last}:null;
     }
     if(gameRepeatAction&&gameState&&gameState.enemies){
       const tid=gameRepeatAction.target_id;
@@ -701,6 +725,12 @@ function gameMinimapClick(e){
   if(!gameState||gameState.done)return;
   const p=gameEventToCell(e);
   if(!p)return;
+  if(gamePlaceItem){
+    gameQueueBuildPlacement(gamePlaceItem,p.cx,p.cy);
+    gamePlaceItem="";
+    gameRender();
+    return;
+  }
   const ownHere=gameNearestStack(gameState.units,p.cx,p.cy,2.6);
   const enemyHere=gameNearestStack(gameState.enemies,p.cx,p.cy,3.8);
   if(gameSelected.size>0&&enemyHere.length>0){
@@ -737,7 +767,7 @@ function gameClearSelection(){
 }
 
 function gameClearQueue(){
-  gameQueue=[]; gameRepeatAction=null;
+  gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
   gameLog("Queued and repeating orders cancelled.");
   gameRender();
 }
@@ -752,6 +782,53 @@ function gameQueueOrder(order){
   }
   next.push(order);
   gameQueue=next;
+}
+
+function gameQueueAction(action){
+  gameQueue=[...gameQueue,action];
+}
+
+function gameCanBuild(){
+  const tools=(gameState&&gameState.tools)||[];
+  return tools.includes("build")||tools.includes("place_building");
+}
+
+function gameProductionItems(){
+  return [...new Set([...(gameState&&gameState.production||[])].map(String).filter(Boolean))];
+}
+
+function gameBuildItemValue(){
+  return (document.getElementById("game-build-item")?.value||"").trim().toLowerCase();
+}
+
+function gameSetBuildHint(text){
+  const el=document.getElementById("game-build-hint");
+  if(el)el.textContent=text||"";
+}
+
+function gameQueueBuild(){
+  if(!gameState)return;
+  const item=gameBuildItemValue();
+  if(!item){gameSetBuildHint("Enter an item like powr or e3.");return;}
+  gameQueueAction({mode:"build",building_type:item});
+  gamePlaceItem="";
+  gameLog("Queued BUILD "+item+".");
+  gameRender();
+}
+
+function gameArmPlaceBuilding(){
+  if(!gameState)return;
+  const item=gameBuildItemValue();
+  if(!item){gameSetBuildHint("Enter a building item, then click Place.");return;}
+  gamePlaceItem=item;
+  gameLog("Place mode: click the map cell for "+item+".");
+  gameRender();
+}
+
+function gameQueueBuildPlacement(item,x,y){
+  if(!item)return;
+  gameQueueAction({mode:"place_building",building_type:item,target_x:x,target_y:y});
+  gameLog("Queued PLACE "+item+" at ("+x+","+y+").");
 }
 
 function gameQueueAttack(target, all=false){
@@ -808,8 +885,25 @@ function gameRender(){
     img.style.display="none"; ph.style.display="flex";
     ph.textContent="No minimap available";
   }
+  gameRenderBuildPanel();
   gameRenderLegend();
   gameRenderUnits();
+}
+
+function gameRenderBuildPanel(){
+  const panel=document.getElementById("game-build-panel");
+  const btn=document.getElementById("game-place-btn");
+  if(!panel)return;
+  const visible=gameCanBuild()&&!gameState.done;
+  panel.classList.toggle("visible",visible);
+  if(btn)btn.classList.toggle("place-active",!!gamePlaceItem);
+  if(!visible)gamePlaceItem="";
+  if(visible){
+    const ready=gameProductionItems();
+    gameSetBuildHint(gamePlaceItem
+      ? ("Click map to place "+gamePlaceItem+".")
+      : (ready.length?("Ready: "+ready.join(", ")):"Build queues production; units finish automatically."));
+  }
 }
 
 function gameRenderAsciiMinimap(ascii){
@@ -844,11 +938,19 @@ function gameRenderAsciiMinimap(ascii){
   gameDrawAxes(ctx,mw,mh,scale);
 
   for(const a of gameQueue){
-    const units=(gameState.units||[]).filter(u=>a.unit_ids.includes(u.id));
+    const ids=a.unit_ids||[];
+    const units=(gameState.units||[]).filter(u=>ids.includes(u.id));
     if(!units.length||a.target_x==null||a.target_y==null)continue;
     const sx=units.reduce((m,u)=>m+u.cell_x,0)/units.length;
     const sy=units.reduce((m,u)=>m+u.cell_y,0)/units.length;
     gameDrawArrow(ctx,sx,sy,a.target_x,a.target_y,scale,a.mode==="attack"?"#ff8a4c":"#ffe45c");
+  }
+  if(gamePlaceItem){
+    ctx.strokeStyle="#7497db";
+    ctx.lineWidth=2;
+    ctx.setLineDash([4,3]);
+    ctx.strokeRect(1,1,canvas.width-2,canvas.height-2);
+    ctx.setLineDash([]);
   }
 
   gameDrawStacks(ctx,gameState.enemies||[],scale,"enemy");
@@ -1006,6 +1108,12 @@ function gameEnemyPriorityLabel(e){
   if(p===2)return "building";
   return "infantry";
 }
+function gameActionLabel(a){
+  const item=a.building_type||a.unit_type||a.item||"";
+  if(a.mode==="build")return "build "+item;
+  if(a.mode==="place_building")return "place "+item+"("+a.target_x+","+a.target_y+")";
+  return a.mode+'('+((a.target_x!=null)?a.target_x+','+a.target_y:'')+')';
+}
 function gameRenderLegend(){
   const el=document.getElementById("game-legend");
   if(!el||!gameState)return;
@@ -1070,12 +1178,17 @@ function gameRenderUnits(){
   html+='</table>';
   if(gameQueue.length){
     html+='<div style="margin-top:8px;font-size:12px;color:var(--accent)">Queued: '+
-      gameQueue.map(a=>a.mode+'('+((a.target_x!=null)?a.target_x+','+a.target_y:'')+')'
-      ).join(', ')+'</div>';
+      gameQueue.map(gameActionLabel).join(', ')+'</div>';
   }else if(gameRepeatAction){
     html+='<div style="margin-top:8px;font-size:12px;color:var(--accent)">Repeating: '+
       gameRepeatAction.mode+' '+(gameRepeatAction.target_id?('target '+gameRepeatAction.target_id):'')+
       ' on End Turn</div>';
+  }
+  if(gameCanBuild()){
+    const ready=gameProductionItems();
+    html+='<div class="game-production"><b>Production ready:</b> '+
+      (ready.length?ready.map(esc).join(", "):"none")+
+      '<br><span>Ready structures can be placed with Place. Units appear automatically when production completes.</span></div>';
   }
   el.innerHTML=html;
 }
