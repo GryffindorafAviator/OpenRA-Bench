@@ -132,7 +132,7 @@ def _single_column_tour(rs, C):
         return [C.observe()]
     in_a = sum(1 for u in us
                if (u["cell_x"] - 115) ** 2 + (u["cell_y"] - 6) ** 2 <= 64)
-    target = (20, 36) if in_a >= 1 else (115, 6)
+    target = (20, 34) if in_a >= 1 else (115, 6)
     return [C.move_units(ids, *target)]
 
 
@@ -145,7 +145,7 @@ def _intended_2(rs, C):
         return [C.observe()]
     h = len(ids) // 2
     return [C.move_units(ids[:h], 115, 6),
-            C.move_units(ids[h:], 20, 36)]
+            C.move_units(ids[h:], 20, 34)]
 
 
 def _intended_3(rs, C):
@@ -156,7 +156,7 @@ def _intended_3(rs, C):
         return [C.observe()]
     t = len(ids) // 3
     return [C.move_units(ids[:t], 115, 6),
-            C.move_units(ids[t:2 * t], 20, 36),
+            C.move_units(ids[t:2 * t], 20, 34),
             C.move_units(ids[2 * t:], 115, 34)]
 
 
