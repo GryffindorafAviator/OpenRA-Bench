@@ -221,7 +221,7 @@ levels:
       Four medium tanks face a larger centre squad: an eight-strong
       rifle-infantry shield wall backed by TWO anti-tank rocket
       soldiers. Kill all ten enemies with ZERO tanks lost, within
-      about 30 turns. The rocket soldiers are the priority threat.
+      about 45 turns. The rocket soldiers are the priority threat.
     overrides:
       actors:
         # Strike force staged at x=60 — one cell outside the x=71
@@ -271,7 +271,19 @@ levels:
         - {after_ticks: 2701}
         - {not: {units_lost_lte: 0}}
         - {not: {own_units_gte: 1}}
-    max_turns: 30
+    # 2026-05-24 audit (Qwen 9B v3 deep triage, S.1): medium runs in
+    # interrupt mode (interrupts.enemy_unit_spotted +
+    # own_unit_destroyed); under the per-event tick clamp the engine
+    # advances 1-`max_ticks` ticks per turn rather than the
+    # non-interrupt 30. With the prior max_turns 30 the final tick
+    # landed ABOVE the within_ticks 2700 deadline but max_turns ran
+    # out FIRST — so a near-win seed (kills=8, lost=0) could not
+    # close inside the turn budget and the deadline never bit ⇒
+    # DRAW. Bump max_turns 30 → 45 so the 2700-tick window is
+    # reachable in interrupt mode (parallels the hard-tier bump from
+    # 30 → 120 in the earlier B.1 fix); the after_ticks 2701 floor
+    # still bites a real timeout LOSS for stall.
+    max_turns: 45
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +2 axes vs medium:
