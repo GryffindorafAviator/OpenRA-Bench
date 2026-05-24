@@ -50,10 +50,12 @@
 #   defense-rush-survive). The grenadier-led band hits the centroid
 #   cluster (proc + defenders + pbox) — fact tucked safely to the
 #   south-east of the centroid avoids the rusher charge.
-# - Enemy actors do NOT honour `spawn_point` (CLAUDE.md oramap.rs
-#   footgun): hard's 2 spawn_point groups round-robin only the AGENT
-#   base latitude; both north and south enemy bands always place and
-#   the on-latitude band converges on the active base.
+# - Enemy actors DO honour `spawn_point` per-owner (Wave-9 engine
+#   feature). The hard tier ties each attacker band to the SAME
+#   spawn_point as the agent base: spawn_point:0 (NORTH base + north
+#   attackers at y=3), spawn_point:1 (SOUTH base + south attackers
+#   at y=36). One band fires per seed; no off-latitude friendly-fire
+#   splash artefacts on the smaller 56x40 arena.
 # - The unarmed enemy `fact` at (120,20) prevents engine auto-DRAW on
 #   enemy-elim once the rusher band dies (without it a clean win
 #   defence collapses to DRAW).
@@ -92,7 +94,19 @@ meta:
     - "repair-order triage"
   author: openra-bench
 
-base_map: rush-hour-arena
+# Tailored 56×40 defense arena — shrunk from rush-hour-arena 128×40
+# per F3 §25 / F1 §10 map-resize rule. Decision-relevant geometry
+# (proc + defenders + rusher band closing from y=4 or y=38) preserved
+# 1:1; the 60+ cells of empty east traversal eliminated. The anti-DRAW
+# enemy marker moves from (120,20) to (52,20) (still off-axis from the
+# proc cluster so the rusher centroid stays on the proc).
+base_map:
+  generator: arena
+  name: def-engineer-repair-under-fire-arena
+  width: 56
+  height: 40
+  cordon: 2
+  title: Engineer Repair Under Fire 56x40
 starting_cash: 600
 
 base:
@@ -149,11 +163,15 @@ levels:
     # tick 3600. If the proc falls, the construction yard falls, or the
     # kill bar is not met before the clock, you lose.
     description: >
-      Your base — refinery, yard, pillbox, depot — is under attrition from
-      a grenadier-led band closing from the north, and the forward
-      refinery is taking focused damage. Toggle repair on the refinery
-      while your defenders engage. Keep the refinery and yard alive and
-      put down at least four attackers, within about 32 turns.
+      Your base sits on the west. The refinery (ore refinery) is pushed
+      forward toward the north edge and is the most-exposed building; the
+      construction yard is tucked safely to the south-east. Six rifle
+      defenders stand next to the refinery on HOLD-FIRE orders (they will
+      not engage on their own, even when shot at). A pillbox covers an
+      off-axis southern lane. A grenadier-led band — two grenadiers plus
+      three riflemen — is closing on the refinery from the north.
+      Refinery and construction yard must still be standing, and four of
+      the attackers must be down, within about 32 turns.
     overrides:
       actors:
         # proc is the most-FORWARD, most-critical building, exposed
@@ -187,7 +205,7 @@ levels:
         - {type: e1, owner: enemy, position: [12, 4], stance: 3, count: 3}
         # Unarmed high-HP enemy fact far east — prevents engine
         # auto-DRAW on enemy-elim before within_ticks opens.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [52, 20]}
     win_condition:
       all_of:
         - building_count_gte: {type: proc, n: 1}
@@ -223,10 +241,12 @@ levels:
     # expires with the kill bar unmet. Stalling, attack-only, and repair-
     # only all lose.
     description: >
-      A heavier grenadier band closes on the same base. The exposed
-      refinery starts to bleed almost immediately. Toggle repair the
-      moment damage shows and commit the defenders to the attackers. Six
-      kills, refinery and yard standing, within about 30 turns.
+      Same base layout — forward refinery, hold-fire defenders next to it,
+      off-axis pillbox, depot, safe construction yard. A heavier
+      grenadier-led band — three grenadiers plus four riflemen — is
+      closing from the north and the refinery starts to bleed almost
+      immediately. Refinery and construction yard standing, six attackers
+      down, within about 30 turns.
     overrides:
       actors:
         - {type: proc, owner: agent, position: [10, 8]}
@@ -237,7 +257,7 @@ levels:
         # Heavier northern attrition: 3 grenadiers + 4 rifle.
         - {type: e2, owner: enemy, position: [10, 4], stance: 3, count: 3}
         - {type: e1, owner: enemy, position: [12, 4], stance: 3, count: 4}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [52, 20]}
     win_condition:
       all_of:
         - building_count_gte: {type: proc, n: 1}
@@ -253,16 +273,13 @@ levels:
 
   # ── HARD ── +1 controlled variable: TWO spawn_point groups round-
   # robin the AGENT base latitude (NORTH y=8 cluster / SOUTH y=32
-  # cluster) per seed (a single memorised opening cannot generalise)
-  # AND two attrition vectors (one at the NORTH edge y=2, one at the
-  # SOUTH edge y=38 — both always place, enemy actors don't honour
-  # spawn_point). The on-latitude band converges on the active proc;
-  # the off-latitude band drifts inward and adds late pressure. Kill
-  # bar matched at ≥6 (achievable from the on-latitude band alone).
-  # within_ticks 2700; max_turns 50 → in interrupt mode (~60 ticks/
-  # turn for this pack) the after_ticks 2701 timeout fail is reached
-  # around turn ~46, well inside max_turns — so a stall whose proc
-  # happens to survive the two-band attrition still loses on the
+  # cluster) per seed (a single memorised opening cannot generalise);
+  # the matching enemy attrition band (north y=3 / south y=36) is
+  # tagged with the same spawn_point so one band fires per seed at
+  # the live proc. Kill bar matched at ≥6 (achievable from the on-
+  # latitude band alone). within_ticks 2700; max_turns 50 → the
+  # after_ticks 2701 timeout fail is reached well inside max_turns,
+  # so a stall whose proc happens to survive still loses on the
   # clock (kill bar unmet) rather than degenerating to a DRAW.
   hard:
     # Original (pre-verbosity-sweep) description preserved for
@@ -280,11 +297,12 @@ levels:
     # unmet at the clock. Stalling, attack-only, repair-only, and single-
     # axis defence all lose.
     description: >
-      Two grenadier vectors hit your base from opposite latitudes, and
-      your base spawns in either by seed — so the lane that matters
-      varies. Repair the refinery as it bleeds and commit defenders to
-      whichever axis is live. Six kills, refinery and yard standing,
-      within about 30 turns.
+      Your base — forward refinery, hold-fire defenders next to it, off-
+      axis pillbox, depot, safe construction yard — spawns in either the
+      NORTH or SOUTH band by seed. A grenadier-led attrition band hits
+      from the matching latitude (three grenadiers plus four riflemen
+      closing on the live refinery). Refinery and construction yard
+      standing, six attackers down, within about 30 turns.
     overrides:
       actors:
         # NORTH base group (spawn_point 0). Proc exposed at (10,8);
@@ -295,30 +313,39 @@ levels:
         # filtered OUT (CLAUDE.md oramap.rs footgun).
         - {type: proc, owner: agent, position: [10, 8],  spawn_point: 0}
         - {type: e1,   owner: agent, position: [12, 10], stance: 0, count: 6, spawn_point: 0}
-        - {type: pbox, owner: agent, position: [14, 16], spawn_point: 0}
+        # Decoy pbox SE-adjacent to the safe construction yard at
+        # (40, 36) — NOT on the off-latitude band's north→south path
+        # (which threads the x=10..14 column). On the smaller 56x40
+        # arena, a (14, 16) decoy would intercept the off-latitude
+        # band as it crosses y≈16; moving it to (38, 36) keeps it
+        # decorative for THIS attack (range 4 disc covers (34..42,
+        # 32..40), nowhere near the attacker columns).
+        - {type: pbox, owner: agent, position: [38, 36], spawn_point: 0}
         - {type: fix,  owner: agent, position: [14, 12], spawn_point: 0}
         - {type: fact, owner: agent, position: [40, 36], spawn_point: 0}
         # SOUTH base group (spawn_point 1) — mirror across y=20.
         - {type: proc, owner: agent, position: [10, 32], spawn_point: 1}
         - {type: e1,   owner: agent, position: [12, 30], stance: 0, count: 6, spawn_point: 1}
-        - {type: pbox, owner: agent, position: [14, 24], spawn_point: 1}
+        - {type: pbox, owner: agent, position: [38,  4], spawn_point: 1}
         - {type: fix,  owner: agent, position: [14, 28], spawn_point: 1}
         - {type: fact, owner: agent, position: [40,  4], spawn_point: 1}
-        # Two attrition vectors — one above each candidate proc
-        # latitude (north band at y=2 over NORTH proc; south band
-        # at y=38 below SOUTH proc). Both always place (enemy
-        # actors don't honour spawn_point — CLAUDE.md). The on-
-        # latitude band converges directly on the exposed proc;
-        # the off-latitude band drifts inward under the rusher
-        # bot's centroid-pursuit. Total enemy presence (12) supports
-        # the ≥6 kill bar comfortably from the on-latitude band
-        # alone — the off-latitude band drifts inward but may not
-        # converge in time.
-        - {type: e2, owner: enemy, position: [10, 2],  stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [12, 2],  stance: 3, count: 3}
-        - {type: e2, owner: enemy, position: [10, 38], stance: 3, count: 3}
-        - {type: e1, owner: enemy, position: [12, 38], stance: 3, count: 3}
-        - {type: fact, owner: enemy, position: [120, 20]}
+        # Per-spawn-group attrition band — the on-latitude band
+        # always converges on the active proc (grenadiers chip the
+        # proc; rifle component supplies the kill floor for the
+        # intended policy). Enemy actors do honour spawn_point per-
+        # owner (Wave-9), so we tag the bands to match the agent
+        # base group: north attackers (y=3) fire on the NORTH proc;
+        # south attackers (y=36) fire on the SOUTH proc.
+        - {type: e2, owner: enemy, position: [10, 3],  stance: 3, count: 3, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [12, 3],  stance: 3, count: 4, spawn_point: 0}
+        - {type: e2, owner: enemy, position: [10, 36], stance: 3, count: 3, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [12, 36], stance: 3, count: 4, spawn_point: 1}
+        # Anti-DRAW marker duplicated across both enemy spawn groups
+        # (enemy spawn_point filter is per-owner — without the
+        # duplicate the marker is filtered out on whichever seed it
+        # lacks).
+        - {type: fact, owner: enemy, position: [52, 20], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [52, 20], spawn_point: 1}
     win_condition:
       all_of:
         - building_count_gte: {type: proc, n: 1}
