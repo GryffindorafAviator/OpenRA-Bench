@@ -42,31 +42,30 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: Install maturin + cffi
-        # cffi is needed by `maturin build` to generate cffi declarations
-        # at wheel-pack time even though the bench's Python boundary is
-        # PyO3 (not cffi). Without cffi, maturin fails with
-        # "Failed to generate cffi declarations".
-        run: pip install maturin cffi
+      # `maturin develop` requires a virtualenv. Create one explicitly
+      # so the PyO3 wheel installs into the same env pytest will run in.
+      # Earlier attempts: (1) `maturin develop` with system Python failed
+      # (no venv); (2) `maturin build --out dist && pip install` packaged
+      # only the Python stub, missing the .abi3.so native binding.
+      - name: Create venv + install maturin
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip maturin
 
-      # `maturin develop` requires a virtualenv. CI uses the runner's
-      # system Python via setup-python@v5 — no venv. Build the wheel
-      # explicitly and install via pip into the same Python env.
-      - name: Build openra_train wheel
+      - name: Build + install openra_train wheel into venv
         working-directory: OpenRA-Rust/openra-train
-        run: maturin build --release --out dist
-
-      - name: Install openra_train wheel
-        run: pip install --force-reinstall OpenRA-Rust/openra-train/dist/openra_train-*.whl
+        run: |
+          source $GITHUB_WORKSPACE/.venv/bin/activate
+          maturin develop --release
 
       - name: Verify engine wheel loaded
-        run: python -c "import openra_train; print('engine OK:', openra_train.__file__)"
+        run: .venv/bin/python -c "from openra_train import OpenRAEnv, Command; print('engine OK')"
 
       # ── bench deps + tests ────────────────────────────────────────
-      - name: Install bench dependencies
+      - name: Install bench dependencies (into the same venv as the wheel)
         run: |
-          pip install pytest
-          pip install -r requirements.txt
+          .venv/bin/pip install pytest
+          .venv/bin/pip install -r requirements.txt
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: .venv/bin/python -m pytest tests/ -v
