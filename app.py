@@ -9,6 +9,7 @@ Run locally:
 Deploy on HuggingFace Spaces:
     Push app.py, requirements.txt, data/, and README.md to your HF Space.
 """
+from __future__ import annotations
 
 import csv
 import html

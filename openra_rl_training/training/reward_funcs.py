@@ -8,6 +8,7 @@ Per-scenario weighting: When ``scenario_weights`` is present in kwargs
 reward by the scenario-specific weight for its signal.  This lets combat-
 focused scenarios boost combat reward while economy scenarios boost economy.
 """
+from __future__ import annotations
 
 from collections import defaultdict
 
