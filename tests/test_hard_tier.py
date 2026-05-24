@@ -163,6 +163,9 @@ UPGRADED = [
     "lh-opening-to-tech-to-army",
     "lh-tech-pivot-attack",
     "lh-credit-only-final-phase",
+    # Family-11 (full-game) — first POC pack: combined-arms ground
+    # + air vertical strike with seed-rotated NORTH/SOUTH base.
+    "f11-vertical-strike-ground-air",
     "mfb-tech-base-vs-economy-base",
     "combat-harass-balanced-hit-and-run",
     "tech-aggro-all-in",
