@@ -146,9 +146,9 @@ def _stall(_rs, Command):
 
 
 def _scout_once(rs, Command):
-    """One-shot scout: jeeps push to the swarm at (58,20) until
+    """One-shot scout: jeeps push to the swarm at (30,20) until
     tick 800, then retreat to base and stay. Tanks attack the e3
-    swarm. The deep-fog reinforcement at (78,20) is never re-
+    swarm. The deep-fog reinforcement at (46,20) is never re-
     scouted → the third `then:` clause never latches."""
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
@@ -159,11 +159,11 @@ def _scout_once(rs, Command):
     for u in jeeps:
         if tick < 800:
             cmds.append(
-                Command.move_units([str(u["id"])], target_x=58, target_y=20)
+                Command.move_units([str(u["id"])], target_x=30, target_y=20)
             )
         else:
             cmds.append(
-                Command.move_units([str(u["id"])], target_x=12, target_y=20)
+                Command.move_units([str(u["id"])], target_x=6, target_y=20)
             )
     e3 = [e for e in enemies if str(e.get("type", "")).lower() == "e3"]
     if e3:
@@ -175,9 +175,9 @@ def _scout_once(rs, Command):
 
 
 def _scout_cycle(rs, Command):
-    """Intended policy: jeep 0 is cycled OUT to (76,20) deep fog so
-    it has vision of the (78,20) reinforcement when it spawns at
-    tick 1500; jeep 1 holds near the swarm at (58,20). The 3 tanks
+    """Intended policy: jeep 0 is cycled OUT to (44,20) deep fog so
+    it has vision of the (46,20) reinforcement when it spawns at
+    tick 1500; jeep 1 holds near the swarm at (30,20). The 3 tanks
     are committed to kill the e3 swarm for the K bar."""
     units = rs.get("units_summary", []) or []
     enemies = rs.get("enemy_summary", []) or []
@@ -189,11 +189,11 @@ def _scout_cycle(rs, Command):
     cmds = []
     if jeeps:
         cmds.append(
-            Command.move_units([str(jeeps[0]["id"])], target_x=76, target_y=20)
+            Command.move_units([str(jeeps[0]["id"])], target_x=44, target_y=20)
         )
     if len(jeeps) > 1:
         cmds.append(
-            Command.move_units([str(jeeps[1]["id"])], target_x=58, target_y=20)
+            Command.move_units([str(jeeps[1]["id"])], target_x=30, target_y=20)
         )
     e3 = [e for e in enemies if str(e.get("type", "")).lower() == "e3"]
     if e3:
