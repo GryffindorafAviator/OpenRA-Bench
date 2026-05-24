@@ -118,7 +118,13 @@ base:
   planning: true
   interrupts: {}
   termination:
-    max_ticks: 10000
+    # Engine commit 493898e wires `termination.max_ticks` through
+    # end-to-end; the historical 10000-tick hard cap is removed.
+    # Hard tier restores the original `audits/family11_full_game.csv`
+    # design at max_turns 160 / within_ticks 14000 / reachable max
+    # 14403. Easy / medium stay at their POC-validated budgets so
+    # this single ceiling covers all three.
+    max_ticks: 14500
     agent_units_killed: true
     # §79 MANDATORY: win clause gates on
     # `enemy_buildings_destroyed_gte`; without this the engine auto-
@@ -345,15 +351,15 @@ levels:
       the observation. Each spawn holds a Construction Yard, a
       Power Plant, an Ore Refinery, a Barracks, a War Factory,
       one Harvester, and three pre-placed medium tanks. Cash on
-      hand: $13000. Five enemy medium tanks are closing on a hunt
+      hand: $8500. Five enemy medium tanks are closing on a hunt
       order; a rocket-soldier rush arrives around tick 1500 and a
       second tank wave around tick 3000. The enemy base sits at
       (82,20). Win bar: SURVIVE through the third wave with your
       Construction Yard intact AND at least one Harvester alive,
       BUILD a Service Depot AND field at least five medium tanks,
       AND raze at least one enemy production building — all within
-      about 110 turns.
-    starting_cash: 13000
+      about 160 turns.
+    starting_cash: 8500
     overrides:
       base_map:
         generator: arena
@@ -443,13 +449,17 @@ levels:
               - {unit_type_count_gte: {type: harv, n: 1}}
               - {unit_type_count_gte: {type: 2tnk, n: 5}}
               - {enemy_buildings_destroyed_gte: 1}
-        # max_turns 110 ⇒ reachable max = 93+90·109 = 9903;
-        # deadline 9800 leaves ~100-tick buffer.
-        - {within_ticks: 9800}
+        # max_turns 160 ⇒ reachable max = 93+90·159 = 14403;
+        # deadline 14000 leaves a ~400-tick buffer. Engine commit
+        # 493898e removed the historical 10000-tick max_ticks cap,
+        # so `base.termination.max_ticks: 14500` is honoured
+        # end-to-end and this is the original
+        # audits/family11_full_game.csv design budget.
+        - {within_ticks: 14000}
         - {building_count_gte: {type: fact, n: 1}}
     fail_condition:
       any_of:
-        - {after_ticks: 9801}
+        - {after_ticks: 14001}
         - {not: {building_count_gte: {type: fact, n: 1}}}
         - {not: {own_units_gte: 1}}
-    max_turns: 110
+    max_turns: 160
