@@ -452,7 +452,7 @@ function gameResetForMissionSwitch(){
     fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"}).catch(()=>{});
   }
   gameSession=null; gameState=null;
-  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null;
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePoweredDown.clear(); gameSelectedBuildings.clear();
   const body=document.getElementById("game-body");
   if(body)body.style.display="none";
   const start=document.getElementById("game-start-btn");
@@ -557,6 +557,8 @@ let gameSession=null, gameServerUrl="", gameServerOk=false;
 let gameSelected=new Set(), gameQueue=[], gameState=null;
 let gameRepeatAction=null;
 let gamePlaceItem="";
+let gamePoweredDown=new Set();
+let gameSelectedBuildings=new Set();
 
 async function checkServer(){
   const url=document.getElementById("server-url").value.replace(/\/$/,"");
@@ -596,7 +598,7 @@ async function gameStart(){
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
     gameState=await r.json();
     gameSession=gameState.session_id;
-    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
+    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem=""; gamePoweredDown.clear(); gameSelectedBuildings.clear();
     document.getElementById("game-body").style.display="";
     document.getElementById("game-start-btn").style.display="none";
     document.getElementById("game-stop-btn").style.display="";
@@ -732,16 +734,26 @@ function gameMinimapClick(e){
     return;
   }
   const ownHere=gameNearestStack(gameState.units,p.cx,p.cy,2.6);
+  const ownBldgHere=gameNearestStack(gameState.own_buildings||[],p.cx,p.cy,3.8);
   const enemyHere=gameNearestStack(gameState.enemies,p.cx,p.cy,3.8);
   if(gameSelected.size>0&&enemyHere.length>0){
     gameQueueAttack(enemyHere[0]);
   }else if(ownHere.length>0){
+    gameSelectedBuildings.clear();
     const allSelected=ownHere.every(u=>gameSelected.has(u.id));
     ownHere.forEach(u=>{
       if(allSelected)gameSelected.delete(u.id);
       else gameSelected.add(u.id);
     });
     gameLog((allSelected?"Deselected ":"Selected ")+ownHere.length+" unit(s) at ("+ownHere[0].cell_x+","+ownHere[0].cell_y+").");
+  }else if(ownBldgHere.length>0){
+    gameSelected.clear();
+    const allSel=ownBldgHere.every(b=>gameSelectedBuildings.has(b.id));
+    ownBldgHere.forEach(b=>{
+      if(allSel)gameSelectedBuildings.delete(b.id);
+      else gameSelectedBuildings.add(b.id);
+    });
+    gameLog((allSel?"Deselected ":"Selected ")+ownBldgHere.length+" building(s) at ("+ownBldgHere[0].cell_x+","+ownBldgHere[0].cell_y+").");
   }else if(gameSelected.size>0){
     const n=gameSelected.size;
     gameQueueOrder({mode:"move",unit_ids:[...gameSelected],target_x:p.cx,target_y:p.cy});
@@ -869,6 +881,7 @@ function gameRender(){
     <div class="game-stat"><div class="label">Kills</div><div class="value">${gameState.units_killed}</div></div>
     <div class="game-stat"><div class="label">Lost</div><div class="value">${gameState.units_lost}</div></div>
     <div class="game-stat"><div class="label">Cash</div><div class="value">${gameState.cash}</div></div>
+    ${(gameState.power_provided||0)>0||gamePoweredDown.size>0?(()=>{const est=gameEstimatedPower(),pp=est.provided,pd=est.drained,surplus=pp-pd,pending=gamePoweredDown.size>0;return`<div class="game-stat"><div class="label">Power${pending?" (est.)":""}</div><div class="value" style="color:${surplus>=0?"#4caf50":"#e05252"}">${pp}⚡ / ${pd}🔌 (${surplus>=0?"+":""}${surplus})</div></div>`})():""}
   `;
   const img=document.getElementById("game-minimap-img");
   const ph=document.getElementById("game-minimap-ph");
@@ -988,6 +1001,17 @@ function gameDrawAxes(ctx,mw,mh,scale){
   ctx.restore();
 }
 
+const gamePowerTable={powr:100,apwr:200,proc:-30,tent:-20,barr:-20,weap:-30,dome:-40,fix:-30,hpad:-10,spen:-30,syrd:-30,atek:-40,stek:-40,tsla:-40,gap:-40,iron:-40,mslo:-40,agun:-40,sam:-20,pbox:-10,hbox:-10,gun:-20};
+function gameEstimatedPower(){
+  if(!gameState)return null;
+  let pp=gameState.power_provided||0,pd=gameState.power_drained||0;
+  for(const b of gameState.own_buildings||[]){
+    if(!gamePoweredDown.has(b.id))continue;
+    const pw=gamePowerTable[gameTypeKey(b.type)]||0;
+    if(pw>0)pp-=pw; else pd+=pw;
+  }
+  return{provided:Math.max(0,pp),drained:Math.max(0,pd)};
+}
 function gameTypeKey(type){return String(type||"?").toLowerCase();}
 function gameTypeLabel(type){
   const t=gameTypeKey(type);
@@ -1033,11 +1057,13 @@ function gameDrawStacks(ctx,items,scale,side){
     const u=group[0];
     const x=(u.cell_x+.5)*scale, y=(u.cell_y+.5)*scale;
     const isOwn=side==="own";
-    const isBuilding=side==="own-building"||!!u.is_building;
-    const selected=isOwn&&group.some(g=>gameSelected.has(g.id));
+    const isOwnBuilding=side==="own-building";
+    const isBuilding=isOwnBuilding||!!u.is_building;
+    const selected=(isOwn&&group.some(g=>gameSelected.has(g.id)))||(isOwnBuilding&&group.some(g=>gameSelectedBuildings.has(g.id)));
     const shape=gameShapeFor(u.type,isBuilding);
     ctx.save();
-    ctx.fillStyle=gameColorFor(side,isBuilding,u.type);
+    const isPwrOff=isOwnBuilding&&group.some(g=>gamePoweredDown.has(g.id));
+    ctx.fillStyle=isPwrOff?"#e05252":gameColorFor(side,isBuilding,u.type);
     ctx.strokeStyle=selected?"#fff":"rgba(0,0,0,.65)";
     ctx.lineWidth=selected?3:1.5;
     const r=selected?6:5;
@@ -1156,9 +1182,15 @@ function gameRenderUnits(){
   }
   if((gameState.own_buildings||[]).length){
     html+='<tr><th colspan="6" style="color:var(--accent);padding-top:8px">Own Buildings</th></tr>';
+    if(gameSelectedBuildings.size>0){
+      html+='<tr><td colspan="6" style="padding:6px 12px"><button class="btn-sm" style="background:var(--orange);color:#fff;margin-right:6px" onclick="gamePowerDownSelected()">Power Down</button><button class="btn-secondary btn-sm" onclick="gameSelectedBuildings.clear();gameRender()">Deselect</button></td></tr>';
+    }
     for(const b of gameState.own_buildings){
-      html+=`<tr><td>■</td><td>${b.id}</td><td>${b.type}</td>
-        <td>(${b.cell_x},${b.cell_y})</td><td style="${gameHpClass(b.hp)}">${gameHpText(b.hp)}</td><td>building</td></tr>`;
+      const isPD=gamePoweredDown.has(b.id);
+      const bSel=gameSelectedBuildings.has(b.id);
+      html+=`<tr class="${bSel?'selected':''}" style="${isPD?'opacity:.55':''}" onclick="gameToggleBuilding('${b.id}')">
+        <td>${bSel?'▶':isPD?'⏻':'■'}</td><td>${b.id}</td><td>${b.type}</td>
+        <td>(${b.cell_x},${b.cell_y})</td><td style="${gameHpClass(b.hp)}">${gameHpText(b.hp)}</td><td>${isPD?'<span style="color:var(--red)">powered down</span>':'building'}</td></tr>`;
     }
   }
   html+='<tr><th colspan="6" style="color:var(--red);padding-top:8px">Visible Enemies</th></tr>';
@@ -1191,6 +1223,23 @@ function gameRenderUnits(){
       '<br><span>Ready structures can be placed with Place. Units appear automatically when production completes.</span></div>';
   }
   el.innerHTML=html;
+}
+
+function gameToggleBuilding(bid){
+  if(gameSelectedBuildings.has(bid))gameSelectedBuildings.delete(bid);
+  else{gameSelectedBuildings.add(bid);gameSelected.clear();}
+  gameRender();
+}
+function gamePowerDownSelected(){
+  if(!gameState||gameState.done||!gameSelectedBuildings.size)return;
+  for(const bid of gameSelectedBuildings){
+    if(gamePoweredDown.has(bid))gamePoweredDown.delete(bid);
+    else gamePoweredDown.add(bid);
+    gameQueueOrder({mode:"power_down",unit_ids:[bid]});
+    gameLog((gamePoweredDown.has(bid)?"POWER DOWN":"POWER ON")+" building "+bid+".");
+  }
+  gameSelectedBuildings.clear();
+  gameRender();
 }
 
 function gameToggleUnit(uid){
