@@ -166,6 +166,10 @@ UPGRADED = [
     # Family-11 (full-game) — first POC pack: combined-arms ground
     # + air vertical strike with seed-rotated NORTH/SOUTH base.
     "f11-vertical-strike-ground-air",
+    # Family-11 reactive-idiom pack: enemy SWITCHES arm mid-episode
+    # via scheduled_events.spawn_actors; hard tier seed-rotates
+    # NORTH/SOUTH base.
+    "f11-pivot-on-scout",
     "mfb-tech-base-vs-economy-base",
     "combat-harass-balanced-hit-and-run",
     "tech-aggro-all-in",
