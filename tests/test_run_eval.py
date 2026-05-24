@@ -109,7 +109,29 @@ def test_concurrency_is_deterministic_and_isolated():
 def test_unsupported_map_is_skipped_not_crashed(tmp_path):
     """A pack on a non-Rust map must be reported as skipped, not raise."""
     pack = (PACKS / "perception-frontier-reading.yaml").read_text()
-    pack = pack.replace("base_map: rush-hour-arena", "base_map: some-future-map")
+    # The cadence's packs all use a generator dict (`base_map: \n
+    # generator: arena …`); rewrite that block to a single string
+    # naming a future-only map so the loader marks the pack as
+    # unsupported and the harness skips it without crashing. Strip
+    # the dict's indented body line-by-line until the next top-level
+    # key.
+    lines = pack.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.rstrip() == "base_map:":
+            out.append("base_map: some-future-map\n")
+            i += 1
+            # Skip indented continuation lines (the generator dict body).
+            while i < len(lines) and (
+                lines[i].startswith(" ") or lines[i].startswith("\t")
+            ):
+                i += 1
+            continue
+        out.append(line)
+        i += 1
+    pack = "".join(out)
     f = tmp_path / "future.yaml"
     f.write_text(pack)
     stats = evaluate(packs=[f], levels=["easy"], seeds=[1])

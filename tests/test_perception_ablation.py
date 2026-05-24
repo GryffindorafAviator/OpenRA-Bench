@@ -136,7 +136,10 @@ def test_perception_labels_are_friendly_and_unique():
     assert labels, "expected labels for own + enemy actors"
     # Each engine id maps to a distinct legible handle.
     assert len(set(labels.values())) == len(labels)
-    assert any(v.startswith("tank-") for v in labels.values())
+    # perception-count-the-threat (medium) puts JEEPS not tanks on
+    # the agent side. The friendly-handle rule is "type-word + N";
+    # for this pack that's `jeep-N` (not `tank-N`).
+    assert any(v.startswith("jeep-") for v in labels.values())
     assert any(v.startswith("enemy-") for v in labels.values())
 
 
