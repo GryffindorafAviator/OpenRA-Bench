@@ -450,7 +450,7 @@ def test_interactive_session_adds_play_hints_for_exact_objectives():
         types = {u.get("type") for u in rs.get("units_summary") or []}
         assert {"1tnk", "2tnk"} <= types
         regions = rs.get("objective_regions") or []
-        assert {r["x"] for r in regions} == {110}
-        assert {r["y"] for r in regions} == {6, 33}
+        assert {r["x"] for r in regions} == {44}
+        assert {r["y"] for r in regions} == {4, 34}
     finally:
         sess.close()

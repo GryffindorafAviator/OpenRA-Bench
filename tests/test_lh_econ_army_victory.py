@@ -156,7 +156,7 @@ def _intended_phased_policy(level: str):
         fresh = [u for u in strike if u["id"] not in issued_attack]
         if fresh:
             ids = [u["id"] for u in fresh]
-            cmds.append(Cmd.attack_move(ids, 80, 30))
+            cmds.append(Cmd.attack_move(ids, 70, 20))
             for uid in ids:
                 issued_attack.add(uid)
         if not cmds:
