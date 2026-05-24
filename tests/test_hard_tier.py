@@ -872,15 +872,6 @@ UPGRADED = [
     # and a memorised "place silo at (14,18)" opening cannot generalise
     # across seeds.
     "econ-silo-vs-spend",
-    # Wave-7 Group D combat-micro / formation pack: military tank-wedge
-    # doctrine / SC2 formation micro / combined-arms anchor. Hard tier
-    # defines two agent spawn_point groups (NORTH staging y=10..14 /
-    # SOUTH staging y=26..30) round-robined by seed; the bracketing
-    # corridor (e3 brackets at y=16 and y=24 plus two on-axis 1tnk
-    # blockers) is symmetric across y=20 so either spawn faces an
-    # equivalent column-vs-wedge decision from a flipped bearing — a
-    # memorised "form wedge from y=14" opening cannot generalise.
-    "combat-formation-tank-wedge",
     # Wave-7 Group D combat-micro pack: SC2 mirror micro / Lanchester
     # square law / concentration-of-force doctrine. ASYMMETRIC geometry
     # (3 agent tanks bunched at (30,*) vs 3 enemy tanks spread across
@@ -923,11 +914,6 @@ UPGRADED = [
     # memorised "always flank via the north" opening cannot
     # generalise across seeds.
     "combat-prevent-retreat",
-    # a single central raider at y=20 always places (enemy actors
-    # don't honour spawn_point — CLAUDE.md) and beelines on whichever
-    # harv exists, so each spawn defends its OWN supply lane on its
-    # OWN y-band and a memorised opening cannot generalise.
-    "econ-protect-harvester-route",
     # Wave-8 ACTION pack — timed-stance-flip ambush trigger discipline
     # (military ROE ambush doctrine / SC2 stance micro / USMC FM 7-8
     # linear-ambush anchor). 4× 2tnk pre-staged at a choke on stance:0
