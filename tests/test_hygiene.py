@@ -97,7 +97,10 @@ def test_default_evaluate_excludes_quarantine_keeps_active(monkeypatch):
 
 
 def test_quarantined_pack_still_loads_when_named_explicitly():
-    p = load_pack(PACKS / "adversarial-siege.yaml")
+    # Archived packs live under `_archive/` on disk and load via the
+    # explicit path — `--packs <path>` keeps them runnable for
+    # historical reference.
+    p = load_pack(PACKS / "_archive" / "adversarial-siege.yaml")
     assert (
         p.meta.status == "quarantine"
         and p.meta.id == "adversarial-siege"

@@ -30,6 +30,8 @@ ACTOR_GLOSSARY: dict[str, str] = {
     "medi": "field medic (heals nearby infantry; unarmed)",
     "spy": "spy (infiltrates enemy buildings)",
     "thf": "thief (steals enemy credits)",
+    "tanya": "Tanya (Allied hero commando; pistol vs infantry, "
+    "C4 vs buildings)",
     # vehicles
     "jeep": "ranger/jeep (fast, light, ideal scout)",
     "1tnk": "light tank (medium armour, anti-vehicle)",
@@ -41,6 +43,11 @@ ACTOR_GLOSSARY: dict[str, str] = {
     "harv": "ore harvester (gathers ore for credits; unarmed)",
     "mcv": "mobile construction vehicle (deploys into a fact)",
     "lst": "landing craft / transport",
+    # naval
+    "dd": "destroyer (Allied naval; ranged shore bombardment)",
+    # aircraft
+    "heli": "Hind attack helicopter (flies over terrain/buildings; "
+    "anti-ground)",
     # buildings
     "fact": "construction yard (builds structures; LOSS-CRITICAL base)",
     "powr": "power plant (supplies power to structures)",
@@ -58,6 +65,8 @@ ACTOR_GLOSSARY: dict[str, str] = {
     "brik": "concrete wall (inert obstacle; no weapon — channels but does not kill)",
     "tsla": "Tesla coil (powerful anti-everything defence)",
     "sam": "SAM site (anti-air defence)",
+    "mslo": "missile silo (Soviet superweapon; launches a single "
+    "high-damage nuke at a target cell after a charge cycle)",
 }
 
 GAME_MODEL = (
@@ -333,17 +342,18 @@ _DIRECTION_ZH = {
 _ACTOR_ZH = {
     "e1": "步枪兵", "e2": "掷弹兵", "e3": "火箭兵",
     "e6": "工程师", "dog": "军犬", "medi": "医疗兵",
-    "spy": "间谍", "thf": "小偷",
+    "spy": "间谍", "thf": "小偷", "tanya": "谭雅",
     "jeep": "吉普车", "1tnk": "轻型坦克", "2tnk": "中型坦克",
     "3tnk": "重型坦克", "4tnk": "猛犸坦克",
     "apc": "装甲运兵车", "arty": "火炮", "harv": "采矿车",
     "mcv": "基地车", "lst": "登陆艇",
+    "dd": "驱逐舰", "heli": "雌鹿武装直升机",
     "fact": "建造厂", "powr": "发电厂", "apwr": "高级发电厂",
     "proc": "矿石精炼厂", "barr": "苏军兵营", "tent": "盟军兵营",
     "weap": "战车工厂", "fix": "维修站", "dome": "雷达",
     "silo": "矿石仓库", "mine": "矿场",
     "gun": "防御炮塔", "pbox": "碉堡", "tsla": "磁暴线圈",
-    "sam": "防空导弹",
+    "sam": "防空导弹", "mslo": "核弹发射井",
 }
 
 

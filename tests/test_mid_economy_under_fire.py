@@ -66,6 +66,7 @@ def _ctx(
     cash=0,
     resources=0,
     lost=0,
+    kills=0,
     own_buildings=(),
 ):
     """Synthesize a WinContext for predicate-level checks."""
@@ -73,7 +74,7 @@ def _ctx(
 
     sig = types.SimpleNamespace(
         game_tick=tick,
-        units_killed=0,
+        units_killed=kills,
         units_lost=lost,
         cash=cash,
         resources=resources,
@@ -95,20 +96,25 @@ def test_easy_predicates():
         {"cell_x": 14, "cell_y": 20, "type": "harv"},
         {"cell_x": 14, "cell_y": 22, "type": "harv"},
     ]
-    # Intended: EV ≥ 2000, 2+ harvs alive, in time → WIN
+    # Intended: EV ≥ 2000, 2+ harvs alive, ≥1 kill, in time → WIN
     assert evaluate(
         c.win_condition,
-        _ctx(units=three_harvs, tick=2000, cash=2000),
+        _ctx(units=three_harvs, tick=2000, cash=2000, kills=1),
     )
     # EV under bar → not a win
     assert not evaluate(
         c.win_condition,
-        _ctx(units=three_harvs, tick=2000, cash=1500),
+        _ctx(units=three_harvs, tick=2000, cash=1500, kills=1),
     )
     # Only 1 harv alive (rest dead) → not a win (need ≥2)
     assert not evaluate(
         c.win_condition,
-        _ctx(units=three_harvs[:1], tick=2000, cash=2500),
+        _ctx(units=three_harvs[:1], tick=2000, cash=2500, kills=1),
+    )
+    # No kills (raider still alive) → not a win
+    assert not evaluate(
+        c.win_condition,
+        _ctx(units=three_harvs, tick=2000, cash=2500, kills=0),
     )
     # All harvs dead → real fail (capability collapses)
     assert evaluate(
@@ -129,20 +135,25 @@ def test_medium_predicates():
         {"cell_x": 14, "cell_y": 20, "type": "harv"},
         {"cell_x": 14, "cell_y": 22, "type": "harv"},
     ]
-    # Intended: EV ≥ 3000, ≥2 harvs → WIN
+    # Intended: EV ≥ 3000, ≥2 harvs, ≥2 kills → WIN
     assert evaluate(
         c.win_condition,
-        _ctx(units=three_harvs, tick=3000, cash=3000),
+        _ctx(units=three_harvs, tick=3000, cash=3000, kills=2),
     )
     # Bar=2999 (just under) → not a win
     assert not evaluate(
         c.win_condition,
-        _ctx(units=three_harvs, tick=3000, cash=2999),
+        _ctx(units=three_harvs, tick=3000, cash=2999, kills=2),
     )
     # Only 1 harv alive → not a win
     assert not evaluate(
         c.win_condition,
-        _ctx(units=three_harvs[:1], tick=3000, cash=4000),
+        _ctx(units=three_harvs[:1], tick=3000, cash=4000, kills=2),
+    )
+    # Only 1 kill (need ≥2) → not a win
+    assert not evaluate(
+        c.win_condition,
+        _ctx(units=three_harvs, tick=3000, cash=4000, kills=1),
     )
 
 
@@ -153,19 +164,19 @@ def test_hard_predicates_attrition_cap():
         {"cell_x": 14, "cell_y": 16, "type": "harv"},
         {"cell_x": 14, "cell_y": 18, "type": "harv"},
     ]
-    # Intended: EV ≥ 4000, ≥2 harvs, lost ≤2 → WIN
+    # Intended: EV ≥ 4000, ≥2 harvs, ≥3 kills, lost ≤2 → WIN
     assert evaluate(
         c.win_condition,
-        _ctx(units=three_harvs, tick=3000, cash=4000, lost=2),
+        _ctx(units=three_harvs, tick=3000, cash=4000, kills=3, lost=2),
     )
     # Lost 3 (cap is 2) → fail
     assert evaluate(
         c.fail_condition,
-        _ctx(units=three_harvs, tick=3000, cash=4000, lost=3),
+        _ctx(units=three_harvs, tick=3000, cash=4000, kills=3, lost=3),
     )
     assert not evaluate(
         c.win_condition,
-        _ctx(units=three_harvs, tick=3000, cash=4000, lost=3),
+        _ctx(units=three_harvs, tick=3000, cash=4000, kills=3, lost=3),
     )
 
 

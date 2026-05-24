@@ -196,5 +196,4 @@ class TestSiteIndexExists:
         html = (ROOT / "site" / "index.html").read_text()
         assert "OpenRA-Bench Missions" in html
         assert "scenario-card" in html
-        assert "annotation" in html.lower()
         assert "Chinese" in html or "zh" in html

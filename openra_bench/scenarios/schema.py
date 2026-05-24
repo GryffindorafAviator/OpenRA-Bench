@@ -212,6 +212,20 @@ class CompiledLevel(BaseModel):
     # world-build time. ScenarioDefinition (training) doesn't know
     # about this field so it's preserved on the CompiledLevel and
     # re-attached at YAML-write time, mirroring `scheduled_events`.
+    #
+    # Engine clamp footgun (`openra-sim/src/resource.rs`,
+    # `seed_ore_patch`): per-cell density is
+    # `clamp(ceil(amount / passable_cells), 1, 12)`. The cap of 12
+    # ore/cell means a small patch with a big `amount` is wasted —
+    # `amount: 2000, radius: 2` (~13 cells) yields only ~156 total ore
+    # = ~3900 cash ceiling. To get a useful econ patch, choose
+    # `amount` so that `amount >= passable_cells * 12` (i.e. fill the
+    # disc to the cap), then GROW the disc via `radius` rather than
+    # the per-cell `amount`. Recommended ratio: `amount =~ 12 * pi *
+    # radius^2 * 1.2` (the 1.2 covers cells on the disc that turn out
+    # to be impassable). At 50 cr/ore the cash ceiling of a patch is
+    # `12 * passable_cells * 50 = 600 * passable_cells`. Triaged in
+    # ENGINE_FOLLOWUPS_TRIAGE.md finding #2.
     ore_patches: list[dict[str, Any]] = Field(default_factory=list)
     # Naval-MVP overlay: explicit `water_cells:` (list of `[x, y]`) and
     # `water_rect:` (a single `[x, y, w, h]`) blocks declare WATER

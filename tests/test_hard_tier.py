@@ -28,7 +28,8 @@ UPGRADED = [
     "adversarial-duel",
     # adversarial-skirmish/-siege consolidated into adversarial-duel
     # (quarantined) — see SCENARIO_QUALITY.md de-dup.
-    "artofwar-decoy-sacrifice",
+    # artofwar-decoy-sacrifice archived (moved to _archive/, status:
+    # quarantine); the sister art-of-war packs cover the idiom.
     "artofwar-indirect-approach",
     "artofwar-lure-the-tiger",
     "artofwar-sequenced-citadel",
@@ -1488,6 +1489,13 @@ UPGRADED = [
     # diagonal corner (SE (88,30) for NW spawn / NE (88,8) for SW
     # spawn) so a single memorised placement cannot generalise.
     "econ-second-base-race",
+    # Hard-tier seed-driven spawn variation packs (verified ≥2 distinct
+    # spawn_point groups in the YAML overrides; one line each).
+    "combat-tanya-vs-rush",  # hard: 2 enemy spawn_point groups (rush flank flips)
+    "spec-nuke-strike",  # hard: 2 enemy/agent spawn_point groups (NE/SW silo cluster)
+    "combat-heli-flank",  # hard: 2 agent spawn_point groups (north/south heli staging)
+    "econ-harvester-defense-raid",  # hard: 2 agent spawn_point groups (north/south base)
+    "econ-mine-and-grow",  # hard: 2 agent spawn_point groups (north/south base)
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
@@ -1569,6 +1577,36 @@ NOT_APPLICABLE = {
     "destroying the fact and converting the recovery test into a "
     "fact-defence test. Spawn variation would compete with the "
     "recovery-discipline signal for attribution.",
+    # Hard tiers without a seed-varied spawn axis — each pack tightens a
+    # different controlled variable (extra defender, tighter clock, more
+    # difficult terrain) on a fixed map geometry. Adding spawn_point
+    # variation would dilute the single-axis attribution.
+    "def-bridge-chokepoint": "hard adds a third bridge + a third "
+    "attacker squad (21 attackers vs 14) and three procs to defend; the "
+    "controlled variable is the multi-bridge split-and-flip-stance "
+    "discipline. Adding spawn variation would dilute the bridge-split "
+    "signal.",
+    "spec-spy-infiltrate": "hard adds a south-flank stance:2 defender "
+    "and three cover clusters that force the spy onto a single safe "
+    "corridor; controlled variable is the cover-vs-defender threading "
+    "decision. Spawn variation would dilute the corridor-reading signal.",
+    "spec-thief-steal-cash": "hard adds a stance:2 defender at the silo "
+    "AND requires TWO thief steals (cash bar 800 vs 400); controlled "
+    "variable is the redundancy + survival-under-fire discipline on a "
+    "fixed corridor map.",
+    "spec-tanya-c4-strike": "hard adds two stance:2 e1 defenders "
+    "covering the proc; controlled variable is the survive-the-trade "
+    "decision (Tanya's HP absorbs the trade) on a fixed geometry. Spawn "
+    "variation would dilute the commit-direct-strike signal.",
+    "spec-engineer-capture": "hard introduces two staggered water-"
+    "obstacle clusters that force a serpentine route + a stance:2 "
+    "south-of-proc defender + redundant 2nd engineer; the controlled "
+    "variable is the serpentine pathing discipline on a tailored "
+    "obstacle map (geometry IS the discriminator).",
+    "combat-naval-shore-strike": "hard adds an e3 (rocket soldier) "
+    "to the shore garrison and tightens the kill bar; controlled "
+    "variable is the priority-target focus on a fixed naval-channel "
+    "geometry. Spawn variation would dilute the priority-target signal.",
 }
 
 # No-adversary maps: spawn variation applies but a force-loss

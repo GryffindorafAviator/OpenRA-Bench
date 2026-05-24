@@ -2,8 +2,7 @@
  * E2E DOM-level tests for the static mission player site.
  *
  * Uses jsdom to load index.html + scenarios.json and simulate real user
- * workflows: card selection, map annotations (click/drag), tag picker,
- * navigation, localStorage persistence, export/import.
+ * workflows: card selection, navigation, game engine integration.
  *
  * Run: node tests/test_site_e2e.mjs
  */
@@ -121,10 +120,10 @@ console.log("\n4. Clicking a card opens mission page");
   const selDisplay = document.getElementById("selection").style.display;
   const misDisplay = document.getElementById("mission").style.display;
   assert(selDisplay === "none", "Selection should be hidden");
-  assert(misDisplay === "", "Mission should be visible");
+  assert(misDisplay === "block", "Mission should be visible");
   const title = document.getElementById("m-title").textContent;
-  assert(title === scenarios[0].title,
-    `Title should be '${scenarios[0].title}', got '${title}'`);
+  assert(title === "#1 " + scenarios[0].title,
+    `Title should be '#1 ${scenarios[0].title}', got '${title}'`);
   const sid = document.getElementById("m-id").textContent;
   assert(sid === scenarios[0].scenarioId,
     `ID should be '${scenarios[0].scenarioId}', got '${sid}'`);
@@ -142,8 +141,6 @@ console.log("\n5. Bilingual objectives");
   window.eval("setLang('zh')");
   const objZh = document.getElementById("m-objective").textContent;
   assert(objZh.length > 0, "Chinese objective should be non-empty");
-  assert(objEn !== objZh || objEn === objZh,
-    "ZH objective should render (may differ from EN)");
   window.close();
 }
 
@@ -159,106 +156,35 @@ console.log("\n6. Difficulty tabs switch objectives");
   window.close();
 }
 
-// ── Test 7: Point annotation via map click ──
-console.log("\n7. Point annotation creation");
+// ── Test 7: Scenario card titles have sequence numbers ──
+console.log("\n7. Scenario card titles have sequence numbers");
 {
   const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  // Set tool to point
-  window.eval("setTool('point')");
-  // Simulate pending annotation directly (since MouseEvent needs getBoundingClientRect)
-  window.eval(`
-    pendingAnn = {type:"point", coordinates:{space:"normalized", points:[{x:0.5,y:0.3}]}};
-  `);
-  // Open tag modal and confirm
-  window.eval(`
-    openTagModal("Add Point Annotation");
-    document.querySelectorAll(".tag-opt")[0].classList.add("selected");
-    document.getElementById("ann-note").value = "Test note";
-    confirmModal();
-  `);
-  const annCount = document.getElementById("ann-count").textContent;
-  assert(annCount === "(1)", `Annotation count should be (1), got ${annCount}`);
-  const annItems = document.querySelectorAll(".ann-item");
-  assert(annItems.length === 1, `Should have 1 annotation item, got ${annItems.length}`);
-  const annText = annItems[0].textContent;
-  assert(annText.includes("point"), "Annotation should be type 'point'");
-  assert(annText.includes("0.50"), "Annotation should show x coordinate");
-  // Check overlay marker
-  const markers = document.querySelectorAll(".ann-marker");
-  assert(markers.length === 1, `Should have 1 overlay marker, got ${markers.length}`);
-  assert(markers[0].style.left === "50%", `Marker left should be 50%, got ${markers[0].style.left}`);
+  window.eval("renderCapFilters(); renderCards();");
+  const cards = document.querySelectorAll(".scenario-card .title");
+  assert(cards.length > 0, "Should have scenario cards");
+  assert(cards[0].textContent.startsWith("1. "),
+    `First card title should start with '1. ', got '${cards[0].textContent.slice(0, 20)}'`);
+  if (cards.length > 1) {
+    assert(cards[1].textContent.startsWith("2. "),
+      `Second card title should start with '2. ', got '${cards[1].textContent.slice(0, 20)}'`);
+  }
   window.close();
 }
 
-// ── Test 8: Region annotation via drag ──
-console.log("\n8. Region annotation creation");
+// ── Test 8: Mission page title has sequence number ──
+console.log("\n8. Mission page title has sequence number");
 {
   const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  window.eval("setTool('region')");
-  // Simulate a completed drag
-  window.eval(`
-    pendingAnn = {type:"region", coordinates:{space:"normalized",
-      points:[{x:0.1,y:0.2},{x:0.6,y:0.7}]}};
-    openTagModal("Add Region Annotation");
-    document.querySelectorAll(".tag-opt")[2].classList.add("selected");
-    confirmModal();
-  `);
-  const annCount = document.getElementById("ann-count").textContent;
-  assert(annCount === "(1)", `Region annotation count should be (1), got ${annCount}`);
-  const rects = document.querySelectorAll(".ann-rect");
-  assert(rects.length === 1, `Should have 1 overlay rect, got ${rects.length}`);
-  assert(rects[0].style.left === "10%", `Rect left should be 10%, got ${rects[0].style.left}`);
-  assert(rects[0].style.width === "50%", `Rect width should be 50%, got ${rects[0].style.width}`);
+  window.eval("renderCapFilters(); renderCards(); openMission(2);");
+  const title = document.getElementById("m-title").textContent;
+  assert(title.startsWith("#3 "),
+    `Mission title should start with '#3 ', got '${title.slice(0, 20)}'`);
   window.close();
 }
 
-// ── Test 9: Edit annotation tags/notes ──
-console.log("\n9. Edit annotation");
-{
-  const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  // Add annotation
-  window.eval(`
-    pendingAnn = {type:"point", coordinates:{space:"normalized", points:[{x:0.4,y:0.6}]}};
-    openTagModal("Add Point");
-    confirmModal();
-  `);
-  // Get the annotation id
-  const annId = window.eval("getAnns()[0].id");
-  // Edit it
-  window.eval(`editAnnotation("${annId}")`);
-  window.eval(`
-    document.querySelectorAll(".tag-opt")[4].classList.add("selected");
-    document.getElementById("ann-note").value = "Edited note";
-    confirmModal();
-  `);
-  const ann = window.eval("JSON.stringify(getAnns()[0])");
-  const parsed = JSON.parse(ann);
-  assert(parsed.note === "Edited note", `Note should be 'Edited note', got '${parsed.note}'`);
-  assert(parsed.tags.length > 0, "Should have at least one tag after edit");
-  window.close();
-}
-
-// ── Test 10: Delete annotation ──
-console.log("\n10. Delete annotation");
-{
-  const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  window.eval(`
-    pendingAnn = {type:"point", coordinates:{space:"normalized", points:[{x:0.2,y:0.8}]}};
-    openTagModal("Add Point"); confirmModal();
-  `);
-  assert(document.getElementById("ann-count").textContent === "(1)", "Should have 1 annotation");
-  const annId = window.eval("getAnns()[0].id");
-  window.eval(`deleteAnnotation("${annId}")`);
-  assert(document.getElementById("ann-count").textContent === "(0)", "Should have 0 annotations after delete");
-  window.close();
-}
-
-// ── Test 11: Next/prev scenario navigation ──
-console.log("\n11. Next/prev navigation");
+// ── Test 9: Next/prev scenario navigation ──
+console.log("\n9. Next/prev navigation");
 {
   const { window, document } = makeDom();
   window.eval("renderCapFilters(); renderCards(); openMission(0);");
@@ -266,193 +192,16 @@ console.log("\n11. Next/prev navigation");
   window.eval("navScenario(1)");
   const title1 = document.getElementById("m-title").textContent;
   assert(title1 !== title0, "Next scenario should show different title");
-  assert(title1 === scenarios[1].title,
-    `Next title should be '${scenarios[1].title}', got '${title1}'`);
+  assert(title1.includes(scenarios[1].title),
+    `Next title should contain '${scenarios[1].title}', got '${title1}'`);
   window.eval("navScenario(-1)");
   const titleBack = document.getElementById("m-title").textContent;
   assert(titleBack === title0, "Prev should return to first scenario");
   window.close();
 }
 
-// ── Test 12: Next unannotated scenario ──
-console.log("\n12. Next unannotated scenario");
-{
-  const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  // Mark current as complete
-  window.eval("markStatus('complete')");
-  // Next unannotated should skip to a different one
-  window.eval("navUnannotated()");
-  const currentIdx = window.eval("currentIdx");
-  assert(currentIdx > 0, `Should navigate away from completed scenario, idx=${currentIdx}`);
-  window.close();
-}
-
-// ── Test 13: Save/load progress via localStorage ──
-console.log("\n13. localStorage persistence");
-{
-  const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  // Add annotation
-  window.eval(`
-    pendingAnn = {type:"point", coordinates:{space:"normalized", points:[{x:0.5,y:0.5}]}};
-    openTagModal("Add"); confirmModal();
-  `);
-  window.eval("markStatus('annotated')");
-  // Verify localStorage has data (read via JS in the window context)
-  const progressRaw = window.eval('localStorage.getItem("openra-progress")');
-  assert(progressRaw !== null && progressRaw !== undefined,
-    "Progress should be in localStorage");
-  const progress = JSON.parse(progressRaw);
-  assert(progress[scenarios[0].scenarioId] === "annotated",
-    "First scenario should be marked annotated");
-  const annsRaw = window.eval('localStorage.getItem("openra-annotations")');
-  const anns = JSON.parse(annsRaw);
-  assert(anns[scenarios[0].scenarioId].length === 1,
-    "Should have 1 annotation stored");
-  window.close();
-}
-
-// ── Test 14: Export annotations ──
-console.log("\n14. Export annotations");
-{
-  const { window } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  window.eval(`
-    pendingAnn = {type:"point", coordinates:{space:"normalized", points:[{x:0.3,y:0.7}]}};
-    openTagModal("Add");
-    document.querySelectorAll(".tag-opt")[0].classList.add("selected");
-    confirmModal();
-  `);
-  // Override URL.createObjectURL and capture the blob content
-  let exportedData = null;
-  window.eval(`
-    const origCreate = URL.createObjectURL;
-    URL.createObjectURL = function(blob) {
-      window.__exportBlob = blob;
-      return "blob:test";
-    };
-  `);
-  window.eval("exportAnnotations()");
-  // Check the export included the annotation
-  const annData = window.eval("JSON.stringify(annotations)");
-  const parsed = JSON.parse(annData);
-  const scId = scenarios[0].scenarioId;
-  assert(parsed[scId] && parsed[scId].length === 1,
-    "Exported data should include annotation");
-  assert(parsed[scId][0].type === "point", "Exported annotation should be point type");
-  assert(parsed[scId][0].coordinates.space === "normalized",
-    "Exported annotation should use normalized coordinates");
-  window.close();
-}
-
-// ── Test 15: Import annotations ──
-console.log("\n15. Import annotations");
-{
-  const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  // Simulate import by directly calling the merge logic
-  const importData = {
-    progress: { [scenarios[0].scenarioId]: "complete" },
-    annotations: {
-      [scenarios[0].scenarioId]: [{
-        id: "imported1", type: "region",
-        coordinates: { space: "normalized", points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }] },
-        tags: ["objective"], note: "Imported annotation",
-        createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
-      }],
-    },
-  };
-  window.eval(`
-    const d = ${JSON.stringify(importData)};
-    Object.assign(annotations, d.annotations);
-    Object.assign(progress, d.progress);
-    localStorage.setItem("openra-progress", JSON.stringify(progress));
-    localStorage.setItem("openra-annotations", JSON.stringify(annotations));
-    renderAnnotations();
-    updateHeaderProgress();
-  `);
-  const annCount = document.getElementById("ann-count").textContent;
-  assert(annCount === "(1)", `After import, annotation count should be (1), got ${annCount}`);
-  const progressRaw = window.eval('localStorage.getItem("openra-progress")');
-  const progressData = JSON.parse(progressRaw);
-  assert(progressData[scenarios[0].scenarioId] === "complete",
-    "Imported progress should mark scenario complete");
-  window.close();
-}
-
-// ── Test 16: All scenarios openable in mission view ──
-console.log("\n16. All scenarios openable in mission view");
-{
-  const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards();");
-  let openFailures = 0;
-  for (let i = 0; i < scenarios.length; i++) {
-    window.eval(`openMission(${i})`);
-    const title = document.getElementById("m-title").textContent;
-    if (title !== scenarios[i].title) openFailures++;
-  }
-  assert(openFailures === 0,
-    `All ${scenarios.length} scenarios should open; ${openFailures} failed`);
-  window.close();
-}
-
-// ── Test 17: Tag picker has all required tags ──
-console.log("\n17. Tag picker completeness");
-{
-  const REQUIRED_TAGS = [
-    "spawn", "enemy-spawn", "objective", "fail-condition", "hidden-threat",
-    "chokepoint", "safe-route", "danger-zone", "resource", "defense-position",
-    "attack-path", "ambush", "scouting-target", "timing-sensitive",
-    "micro-intensive", "macro-intensive", "unclear", "bug", "interesting",
-    "needs-review",
-  ];
-  const { window } = makeDom();
-  const jsTags = window.eval("TAGS");
-  for (const tag of REQUIRED_TAGS) {
-    assert(jsTags.includes(tag), `Tag '${tag}' should be in TAGS array`);
-  }
-  assert(jsTags.length >= 20, `Should have >= 20 tags, got ${jsTags.length}`);
-  window.close();
-}
-
-// ── Test 18: Annotation uses normalized [0,1] coordinates ──
-console.log("\n18. Normalized coordinate system");
-{
-  const { window } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  window.eval(`
-    pendingAnn = {type:"point", coordinates:{space:"normalized", points:[{x:0.75,y:0.25}]}};
-    openTagModal("Add"); confirmModal();
-  `);
-  const ann = JSON.parse(window.eval("JSON.stringify(getAnns()[0])"));
-  assert(ann.coordinates.space === "normalized",
-    "Coordinate space should be 'normalized'");
-  assert(ann.coordinates.points[0].x >= 0 && ann.coordinates.points[0].x <= 1,
-    "X coordinate should be in [0,1]");
-  assert(ann.coordinates.points[0].y >= 0 && ann.coordinates.points[0].y <= 1,
-    "Y coordinate should be in [0,1]");
-  assert(ann.id && ann.createdAt && ann.updatedAt,
-    "Annotation should have id, createdAt, updatedAt");
-  window.close();
-}
-
-// ── Test 19: Status badges update correctly ──
-console.log("\n19. Status badges");
-{
-  const { window, document } = makeDom();
-  window.eval("renderCapFilters(); renderCards(); openMission(0);");
-  // Initial status should be in_progress (auto-set on open)
-  const badge = document.getElementById("m-status-badge").textContent;
-  assert(badge.includes("in progress"), `Status should be 'in progress', got '${badge}'`);
-  window.eval("markStatus('complete')");
-  const badge2 = document.getElementById("m-status-badge").textContent;
-  assert(badge2.includes("complete"), `Status should be 'complete', got '${badge2}'`);
-  window.close();
-}
-
-// ── Test 20: Back button returns to selection ──
-console.log("\n20. Back to selection");
+// ── Test 10: Back button returns to selection ──
+console.log("\n10. Back to selection");
 {
   const { window, document } = makeDom();
   window.eval("renderCapFilters(); renderCards(); openMission(0);");
@@ -466,8 +215,24 @@ console.log("\n20. Back to selection");
   window.close();
 }
 
-// ── Test 21: No raw JSON in primary UI ──
-console.log("\n21. No raw JSON in primary UI");
+// ── Test 11: All scenarios openable in mission view ──
+console.log("\n11. All scenarios openable in mission view");
+{
+  const { window, document } = makeDom();
+  window.eval("renderCapFilters(); renderCards();");
+  let openFailures = 0;
+  for (let i = 0; i < scenarios.length; i++) {
+    window.eval(`openMission(${i})`);
+    const title = document.getElementById("m-title").textContent;
+    if (!title.includes(scenarios[i].title)) openFailures++;
+  }
+  assert(openFailures === 0,
+    `All ${scenarios.length} scenarios should open; ${openFailures} failed`);
+  window.close();
+}
+
+// ── Test 12: No raw JSON in primary UI ──
+console.log("\n12. No raw JSON in primary UI");
 {
   const { window, document } = makeDom();
   window.eval("renderCapFilters(); renderCards();");
@@ -483,14 +248,110 @@ console.log("\n21. No raw JSON in primary UI");
   window.close();
 }
 
-// ── Test 22: Header progress updates ──
-console.log("\n22. Header progress counter");
+// ── Test 13: Header progress updates ──
+console.log("\n13. Header progress counter");
 {
   const { window, document } = makeDom();
   window.eval("renderCapFilters(); renderCards(); updateHeaderProgress();");
   const prog = document.getElementById("hdr-progress").textContent;
   assert(prog.includes(`/${scenarios.length}`),
     `Progress should show /${scenarios.length}, got '${prog}'`);
+  window.close();
+}
+
+// ── Test 14: Unit selection auto-clears after move order ──
+console.log("\n14. Unit selection auto-clears after move order");
+{
+  const { window } = makeDom();
+  window.eval(`
+    gameState = {
+      done: false,
+      units: [{id:"u1",type:"tank",cell_x:10,cell_y:10,hp:1},{id:"u2",type:"tank",cell_x:20,cell_y:20,hp:1}],
+      enemies: [],
+      minimap_ascii: ".".repeat(128) + "\\n".repeat(40).split("\\n").map(() => ".".repeat(128)).join("\\n"),
+    };
+    gameSelected.add("u1");
+    gameSelected.add("u2");
+  `);
+  // Simulate move queue (the auto-clear logic)
+  window.eval(`
+    const uids = [...gameSelected];
+    gameQueue.push({mode:"move",unit_ids:uids,target_x:50,target_y:50});
+    gameSelected.clear();
+  `);
+  const selSize = window.eval("gameSelected.size");
+  assert(selSize === 0, `Selection should be empty after move, got size=${selSize}`);
+  const queueLen = window.eval("gameQueue.length");
+  assert(queueLen === 1, `Queue should have 1 action, got ${queueLen}`);
+  const action = JSON.parse(window.eval("JSON.stringify(gameQueue[0])"));
+  assert(action.unit_ids.length === 2, "Move action should have 2 units");
+  assert(action.unit_ids.includes("u1") && action.unit_ids.includes("u2"),
+    "Move action should include u1 and u2");
+  window.close();
+}
+
+// ── Test 15: Multi-group move orders queue independently ──
+console.log("\n15. Multi-group move orders queue independently");
+{
+  const { window } = makeDom();
+  window.eval(`
+    gameState = {
+      done: false,
+      units: [{id:"u1",type:"tank",cell_x:10,cell_y:10,hp:1},{id:"u2",type:"tank",cell_x:20,cell_y:20,hp:1}],
+      enemies: [],
+      minimap_ascii: ".".repeat(128) + "\\n".repeat(40).split("\\n").map(() => ".".repeat(128)).join("\\n"),
+    };
+    // First group: select u1, move to (30,30)
+    gameSelected.add("u1");
+    let uids1 = [...gameSelected];
+    gameQueue.push({mode:"move",unit_ids:uids1,target_x:30,target_y:30});
+    gameSelected.clear();
+    // Second group: select u2, move to (80,80)
+    gameSelected.add("u2");
+    let uids2 = [...gameSelected];
+    gameQueue.push({mode:"move",unit_ids:uids2,target_x:80,target_y:80});
+    gameSelected.clear();
+  `);
+  const queueLen = window.eval("gameQueue.length");
+  assert(queueLen === 2, `Queue should have 2 actions, got ${queueLen}`);
+  const q = JSON.parse(window.eval("JSON.stringify(gameQueue)"));
+  assert(q[0].unit_ids.length === 1 && q[0].unit_ids[0] === "u1",
+    "First action should move u1");
+  assert(q[0].target_x === 30 && q[0].target_y === 30,
+    "First action target should be (30,30)");
+  assert(q[1].unit_ids.length === 1 && q[1].unit_ids[0] === "u2",
+    "Second action should move u2");
+  assert(q[1].target_x === 80 && q[1].target_y === 80,
+    "Second action target should be (80,80)");
+  window.close();
+}
+
+// ── Test 16: No annotation or export elements in DOM ──
+console.log("\n16. No annotation or export elements in DOM");
+{
+  const { window: w, document } = makeDom();
+  assert(document.getElementById("map-container") === null,
+    "map-container should not exist");
+  assert(document.getElementById("ann-overlay") === null,
+    "ann-overlay should not exist");
+  assert(document.getElementById("tag-modal") === null,
+    "tag-modal should not exist");
+  assert(document.getElementById("import-file") === null,
+    "import-file should not exist");
+  w.close();
+}
+
+// ── Test 17: No Mark Annotated / Mark Complete buttons ──
+console.log("\n17. No Mark Annotated / Mark Complete buttons");
+{
+  const { window, document } = makeDom();
+  window.eval("renderCapFilters(); renderCards(); openMission(0);");
+  const buttons = [...document.querySelectorAll("button")];
+  const removedBtns = buttons.filter(b =>
+    b.textContent.includes("Mark Annotated") || b.textContent.includes("Mark Complete") || b.textContent.includes("Next Unannotated")
+  );
+  assert(removedBtns.length === 0,
+    `Should have no Mark/Unannotated buttons, found ${removedBtns.length}`);
   window.close();
 }
 

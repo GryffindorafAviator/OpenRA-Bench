@@ -403,10 +403,11 @@ def test_hard_has_two_spawn_point_groups_and_fact_flips():
         }
     )
     assert fact_ys == [14, 26], fact_ys
-    # In-bounds check (rush-hour-arena playable y ≈ 2..38, x ≈ 2..126).
+    # In-bounds check — the per-tier 112×48 walls-vs-towers arena
+    # (cordon=2) has playable x ∈ [2, 109], y ∈ [2, 45].
     for a in c.scenario.actors:
         x, y = a.position
-        assert 2 <= x <= 126 and 2 <= y <= 38, (a.type, a.position)
+        assert 2 <= x <= 109 and 2 <= y <= 45, (a.type, a.position)
 
 
 # ── solvency: intended per-tier doctrine wins every seed ─────────────

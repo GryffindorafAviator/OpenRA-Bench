@@ -105,8 +105,40 @@ def _fixup_game_terms(zh: str) -> str:
 
 
 def _translate_objective_zh(en: str) -> str:
-    """Translate a full objective text to Chinese via Google Translate."""
-    return _google_translate_zh(en)
+    """Translate a full objective text to Chinese.
+
+    Canonicalises the load-bearing objective prefixes ("WIN WHEN:" /
+    "YOU LOSE IF:") deterministically — the Google Translate output
+    drifts across runs ("获胜时间" / "如果您失败" / "胜利条件" all
+    appear depending on context) — then forwards the rest of each line
+    to Google Translate so non-prefix wording stays natural.
+    """
+    if not en or not en.strip():
+        return en
+    out_lines: list[str] = []
+    for line in en.split("\n"):
+        out_lines.append(_translate_line_zh(line))
+    return "\n".join(out_lines)
+
+
+def _translate_line_zh(line: str) -> str:
+    """Translate one line, with deterministic prefix replacement for
+    the canonical objective markers."""
+    stripped = line.lstrip()
+    indent = line[: len(line) - len(stripped)]
+    # Canonical prefixes: replace the English head with the canonical
+    # Chinese head and only Google-translate the remainder. Mirrors the
+    # objective_brief output in openra_bench/game_knowledge.py.
+    PREFIXES = (
+        ("WIN WHEN:", "胜利条件："),
+        ("YOU LOSE IF:", "失败条件："),
+    )
+    for en_pref, zh_pref in PREFIXES:
+        if stripped.startswith(en_pref):
+            rest = stripped[len(en_pref):].strip()
+            zh_rest = _google_translate_zh(rest) if rest else ""
+            return f"{indent}{zh_pref}{zh_rest}"
+    return _google_translate_zh(line) if line.strip() else line
 
 
 def _annotator_hints_en(pack) -> list[str]:

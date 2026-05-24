@@ -54,6 +54,38 @@ python evaluate.py \
     --server http://localhost:8000
 ```
 
+### Run an LLM scenario eval
+
+`python -m openra_bench.run_eval` drives the Rust engine through the
+scenario packs in `openra_bench/scenarios/packs/` against an LLM
+agent. Supported providers: `openrouter`, `vllm`, `openai`,
+`together`, `bedrock`.
+
+```bash
+# OpenRouter / OpenAI / vLLM (set the matching API_KEY env var first):
+python -m openra_bench.run_eval \
+    --packs openra_bench/scenarios/packs/perception-target-vs-fog.yaml \
+    --levels easy --seeds 1 \
+    --provider openrouter --model anthropic/claude-3.5-sonnet \
+    --out eval_stats.json
+
+# AWS Bedrock — Claude Sonnet 4.6 via the cross-region inference profile.
+# Auth is the standard boto3 credential chain (env / shared config /
+# role); never hardcoded. The on-demand model id throws
+# ValidationException; only the profile id below is callable.
+aws sts get-caller-identity   # confirm credentials
+python -m openra_bench.run_eval \
+    --packs openra_bench/scenarios/packs/perception-target-vs-fog.yaml \
+    --levels easy --seeds 1 \
+    --provider bedrock \
+    --model us.anthropic.claude-sonnet-4-6 \
+    --bedrock-region us-west-2 \
+    --out eval_stats.json
+```
+
+A 5-pack end-to-end smoke test of the Bedrock path lives in
+[`docs/BEDROCK_SMOKE.md`](docs/BEDROCK_SMOKE.md).
+
 ### Submit results
 
 **Via CLI (recommended):**

@@ -3,7 +3,7 @@
 Saves, per scenario episode, everything needed to *replay what
 happened*: the full model⇄env message transcript (system / user /
 assistant, including the minimap image as a data-URL), a per-turn
-record (tick, commands issued, signal snapshot, ASCII minimap), and a
+record (tick, commands issued, signal snapshot, units, enemies, and goal progress), and a
 manifest with scenario meta + outcome + score. Written under a
 dedicated folder so people can inspect every run.
 
@@ -83,7 +83,6 @@ class Playback:
             "tick": getattr(signals, "game_tick", None),
             "interrupt": interrupt,
             "commands": [repr(c) for c in cmds],
-            "ascii_minimap": render_state.get("minimap", ""),
             "signals": _jsonable(
                 {
                     "cash": getattr(signals, "cash", 0),
