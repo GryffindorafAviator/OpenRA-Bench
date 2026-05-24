@@ -8,8 +8,8 @@ every level and every hard seed (1-4); STALL (pure observe) and a
 BRUTE `attack_move` drive straight INTO the enemy position LOSE on
 every level and every hard seed. Non-win is a real reachable timeout
 LOSS via the `after_ticks` fail clause (within_ticks 2400 +
-after_ticks 2401 on easy/medium with max_turns 30; within_ticks 1200
-+ after_ticks 1201 on hard with max_turns 15).
+after_ticks 2401 on easy/medium with max_turns 30; within_ticks 1500
++ after_ticks 1501 on hard with max_turns 20).
 
 Recalibrated after the engine movement fixes (moving units take fire
 en route; `attack_unit` on out-of-sight targets paths normally at
@@ -31,7 +31,7 @@ re-tuned:
     ≥3 of the 4 enemy tanks while keeping ≥2 of its own; a brute
     drive-in eats 4-tank crossfire and wipes before killing 3.
   * HARD — 3-vs-3 with a tight kill-speed deadline (within_ticks
-    1200) and two seed-driven spawn corridors (NORTH / SOUTH).
+    1500) and two seed-driven spawn corridors (NORTH / SOUTH).
 
 Validation is scripted (no model / network).
 """
@@ -149,17 +149,17 @@ def test_hard_predicates():
     # Kill bar unmet → not a win
     assert not evaluate(c.win_condition, _ctx(units=_alive(3), tick=900, kills=2, lost=0))
     # Outside tight tick budget (kills met but slow) → not a win
-    assert not evaluate(c.win_condition, _ctx(units=_alive(3), tick=1300, kills=3, lost=0))
+    assert not evaluate(c.win_condition, _ctx(units=_alive(3), tick=1600, kills=3, lost=0))
     # Force wipe → fail
     assert evaluate(c.fail_condition, _ctx(units=[], tick=900, kills=3, lost=3))
-    # Timeout → fail (tight after_ticks 1201)
-    assert evaluate(c.fail_condition, _ctx(units=_alive(3), tick=1202, kills=2, lost=0))
+    # Timeout → fail (tight after_ticks 1501)
+    assert evaluate(c.fail_condition, _ctx(units=_alive(3), tick=1502, kills=2, lost=0))
 
 
 def test_timeout_reachable_inside_max_turns():
     """No draw degeneracy: after_ticks ≤ 93 + 90·(max_turns-1)."""
     pack = load_pack(PACK_PATH)
-    for lvl, want_after in [("easy", 2401), ("medium", 2401), ("hard", 1201)]:
+    for lvl, want_after in [("easy", 2401), ("medium", 2401), ("hard", 1501)]:
         c = compile_level(pack, lvl)
         max_tick = 93 + 90 * (c.max_turns - 1)
         assert want_after <= max_tick, (
