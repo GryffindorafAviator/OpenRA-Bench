@@ -31,13 +31,28 @@ this defence:
 > objective fact has already been razed and within_ticks is still
 > satisfied — collapsing the win into a draw.
 
-**The flag is INERT.** A grep across the bench (`openra_bench/`) AND the
-engine (`OpenRA-Rust/`) finds no consumer of `agent_units_killed` /
-`enemy_units_killed`. The flag exists only in 3 YAMLs
+**RESOLVED 2026-05-24:** The flag IS now wired (commit `1d53c85`
+"engine: wire termination.{agent,enemy}_units_killed in env.rs done-
+eval"). The engine's done-evaluator now consults the scenario's
+`termination:` block before declaring DRAW: with
+`termination.agent_units_killed: false`, the engine no longer
+auto-`done`s on agent-unit wipe, so the suicide-charge fact-loss path
+now satisfies the fail clause as a real LOSS rather than collapsing
+to DRAW. The 5-draw cluster documented below is the historical Wave-12
+state; subsequent reruns on the same pack:level:seed produce the
+expected LOSS outcomes.
+
+The original analysis is kept verbatim below as the public record of
+the diagnosis path — it is no longer the current behavior.
+
+(Historical: as of the Wave-12 audit pass that wrote this doc, the
+flag was inert. A grep across the bench (`openra_bench/`) AND the
+engine (`OpenRA-Rust/`) found no consumer of `agent_units_killed` /
+`enemy_units_killed`. The flag existed only in 3 YAMLs
 (`combat-suicide-charge-mission`, `strategy-dilemma`, `strategy-twobody`,
-`rush-hour`); the engine ignores it and `done=True` from the env breaks
+`rush-hour`); the engine ignored it and `done=True` from the env broke
 the loop at `openra_bench/eval_core.py:453` regardless. Whichever path
-the agent takes that wipes the strike package collapses to DRAW.
+the agent took that wiped the strike package collapsed to DRAW.)
 
 Per-cell evidence:
 
