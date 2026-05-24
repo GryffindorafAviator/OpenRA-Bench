@@ -166,6 +166,10 @@ UPGRADED = [
     # Family-11 (full-game) — first POC pack: combined-arms ground
     # + air vertical strike with seed-rotated NORTH/SOUTH base.
     "f11-vertical-strike-ground-air",
+    # Family-11 combined-arms ground + naval: water channel forces
+    # syrd to be built adjacent to water; the dd + tank force
+    # composition; hard tier seed-rotates NORTH/SOUTH coastal base.
+    "f11-vertical-strike-naval",
     # Family-11 reactive-idiom pack: enemy SWITCHES arm mid-episode
     # via scheduled_events.spawn_actors; hard tier seed-rotates
     # NORTH/SOUTH base.
