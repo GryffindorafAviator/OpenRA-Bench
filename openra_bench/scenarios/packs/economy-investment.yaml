@@ -20,9 +20,9 @@ meta:
     trade in an autonomous foraging fleet, where a hedged (split)
     budget yields neither and the mission deadline is missed.
   benchmark_anchor:
-    - "StarCraft build order"
-    - "PlanBench"
-    - "capital allocation under indivisible budget"
+    - "SC2 capital allocation"
+    - "PlanBench indivisible budget commit"
+    - "fleet capital allocation depth-vs-breadth"
   author: autonomous-loop
 
 # ENGINE NOTE (verified 2026-05-19, scripted run_level seeds 1-4):
@@ -40,7 +40,18 @@ meta:
 # (verified: naive non-scattering builder stalls at ~14 units; a
 # scatter policy reaches 26+). The full harvest-throughput version is
 # specified in SCENARIO_BRAINSTORM.md, gated on engine S0/S1.
-base_map: rush-hour-arena
+# MAP — per-scenario (replaces the generic rush-hour-arena 128x40).
+# The decision under test is PURELY base-internal capital allocation
+# (build a 2nd proc + 2nd powr, OR train a deep infantry force) — no
+# traversal. A 48x40 bespoke arena cuts the empty pre-engagement corridor
+# entirely. Cordon 2 ⇒ playable (2..44, 2..36).
+base_map:
+  generator: arena
+  name: economy-investment-48x40
+  width: 48
+  height: 40
+  cordon: 2
+  title: Economy Investment Arena 48x40
 starting_cash: 1700
 
 base:
@@ -56,7 +67,7 @@ base:
     - stop
   planning: true
   termination:
-    max_ticks: 40000
+    max_ticks: 12000
   actors:
     - type: fact
       owner: agent
@@ -74,9 +85,12 @@ base:
     - type: tent
       owner: agent
       position: [14, 22]
+    # Persistent inert enemy marker — far east of the small arena,
+    # HoldFire so it can't attack. Keeps ConquestVictoryConditions from
+    # auto-`done`-ing on enemy-wipe before the win/fail evaluator runs.
     - type: e1
       owner: enemy
-      position: [118, 34]
+      position: [42, 34]
       stance: 0
 
 levels:
@@ -91,11 +105,11 @@ levels:
     # spent on units instead leaves too little to finish both structures —
     # a split budget builds neither in time.
     description: >
-      Your budget is exactly the cost of a second refinery ($1400) plus
-      its supporting power plant ($300) — $1700 total. Build and place
-      both. Any credit spent on units leaves too little to finish both
-      structures in time. Two refineries, two power plants, within about
-      22 turns.
+      Commander, this is a one-shot capital allocation. You hold a
+      Construction Yard (fact), an Ore Refinery (proc), one Power Plant
+      (powr) and an Allied Barracks (tent), with $1700 cash. Within
+      about 24 turns, own at least two Ore Refineries and at least two
+      Power Plants.
     starting_cash: 1700
     win_condition:
       all_of:
@@ -120,11 +134,12 @@ levels:
     # diversion) overspends and the second refinery never completes in
     # time.
     description: >
-      Same wide-expansion budget plus three infantry ($1700 + $300 =
-      $2000). Build the second refinery, second power plant, AND train
-      three rifles. A fourth unit or any diversion overspends and the
-      second refinery never completes. Three units alive, within about 24
-      turns.
+      Commander, this is a capital-allocation drill with a small
+      utilising force. You hold a Construction Yard (fact), an Ore
+      Refinery (proc), a Power Plant (powr) and an Allied Barracks
+      (tent), with $2000 cash. Within about 26 turns, own at least two
+      Ore Refineries, at least two Power Plants, and field at least
+      three units.
     starting_cash: 2000
     win_condition:
       all_of:
@@ -146,11 +161,13 @@ levels:
     # credits the force needs and the bar is missed. Newly produced units
     # must be moved clear of the barracks or production stalls.
     description: >
-      DEEP path: convert the entire budget ($2200) into a forward force —
-      keep the single refinery and field 22 infantry. Building a second
-      refinery or power plant drains the credits the army needs and busts
-      the bar. Move newly produced units clear of the barracks or
-      production stalls. 22 units alive, within about 30 turns.
+      Commander, this is a deep capital-allocation drill — convert
+      the budget into a forward force. You hold a Construction Yard
+      (fact), a single Ore Refinery (proc), a Power Plant (powr) and
+      an Allied Barracks (tent), with $2200 cash. Within about 32
+      turns, field at least 22 units and keep your Refinery standing.
+      Newly produced units must be moved clear of the barracks exit
+      cells or production stalls.
     starting_cash: 2200
     win_condition:
       all_of:

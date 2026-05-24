@@ -55,7 +55,7 @@
 #     satisfied → WIN.
 #
 # Why the spec works (engine combat sheet, per CLAUDE.md):
-#   • pbox = pillbox (anti-infantry base defence; cost 600cr; dps very
+#   • pbox = pillbox (anti-infantry base defence; cost 400cr; dps very
 #     high vs rifle infantry; 1×1 footprint, easy to band). The defense
 #     queue is SEPARATE from infantry so it builds without contention.
 #   • The two band regions have non-overlapping radii (FRONT and REAR
@@ -110,7 +110,19 @@ meta:
     - 'MicroRTS defense'
   author: 'openra-bench'
 
-base_map: rush-hour-arena
+# Tailored 72×40 defense arena — shrunk from rush-hour-arena 128×40
+# per F3 §25 / F1 §10 map-resize rule. The decision-relevant geometry
+# (fact + base + front band x=35 + rear band x=20 + wave x=60) is
+# preserved 1:1; the 60+ cells of empty east traversal east of the
+# wave spawn cell are eliminated. The anti-DRAW enemy marker moves
+# from (120,20) to (65,20) (5 cells east of the wave staging line).
+base_map:
+  generator: arena
+  name: def-in-depth-vs-single-arena
+  width: 72
+  height: 40
+  cordon: 2
+  title: Defense In Depth vs Single Wall 72x40
 
 base:
   agent: {faction: allies}
@@ -149,8 +161,9 @@ levels:
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
     # A heavy rusher wave of rifle infantry charges your construction yard
-    # (fact, at (10,20)). Build 4 pillboxes (pbox — 600cr each, budget
-    # exactly 2400) and split them across TWO DEPTH BANDS: 2 in the FRONT
+    # (fact, at (10,20)). Build 4 pillboxes (pbox — 400cr each, budget
+    # 2400 funds 4 pbox + 800 residual) and split them across TWO DEPTH
+    # BANDS: 2 in the FRONT
     # band near (35,20) AND 2 in the REAR band near (20,20), so the front
     # line thins the wave and the rear line shreds whatever breaks
     # through. A single thick wall — all 4 pboxes massed in one band — has
@@ -158,12 +171,12 @@ levels:
     # fact. Stall, pure-army, and single-wall layouts all LOSE. The fact
     # must survive; at least 4 enemy units must die before tick 5400.
     description: >
-      A heavy rifle rush charges your construction yard at (10,20). Your
-      $2400 budget covers exactly four pillboxes. Split them across two
-      depth bands — two in the front near (35,20), two in the rear near
-      (20,20) — so anything that breaks the front gets killed by the rear.
-      One thick wall has no depth. Yard intact, four kills, within about
-      60 turns.
+      A heavy rifle rush of six attackers drives west on the y=20 lane
+      toward your construction yard at (10,20). Your base — yard,
+      barracks, power plant, three rifle defenders — is already in place;
+      $2400 covers exactly four pillboxes (anti-infantry stationary
+      turret, 600cr each). Yard intact, four kills, within about 60
+      turns. See the win condition for the required pillbox positions.
     starting_cash: 2400
     overrides:
       actors:
@@ -187,7 +200,7 @@ levels:
         - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 6}
         # Unarmed high-HP marker (anti-DRAW): keeps the episode alive
         # past full wave elimination so the win/fail check fires.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [65, 20]}
     win_condition:
       all_of:
         - {building_count_gte: {type: pbox, n: 4}}
@@ -215,7 +228,8 @@ levels:
     #
     # A heavier rusher wave — 8 rifle infantry plus 2 rocket soldiers —
     # charges your construction yard (fact, at (10,20)). Build 4 pillboxes
-    # (budget exactly 2400cr = 4 pbox at 600 each) and split them across
+    # (budget 2400cr funds 4 pbox at 400 each = 1600cr + 800 residual)
+    # and split them across
     # TWO DEPTH BANDS: 2 in the FRONT band near (35,20) AND 2 in the REAR
     # band near (20,20). A single thick wall — all 4 massed in one band —
     # meets a naive count but has no depth: the heavier wave punches
@@ -223,11 +237,12 @@ levels:
     # single-wall layouts all LOSE. The fact must survive; at least 7
     # enemy units must die before tick 5400.
     description: >
-      Same yard at (10,20), but the rush now includes two rocket soldiers
-      behind eight rifles. The $2400 still buys exactly four pillboxes;
-      split 2-front (35,20), 2-rear (20,20). A single wall meets the count
-      but lets the rockets-led punch through. Yard intact, seven kills,
-      within about 60 turns.
+      Same yard at (10,20); heavier wave — eight rifle infantry plus two
+      rocket soldiers driving west on the y=20 lane. Your base — yard,
+      barracks, power plant, four rifle defenders — is in place; $2400
+      covers exactly four pillboxes. Yard intact, seven kills, within
+      about 60 turns. See the win condition for the required pillbox
+      positions.
     starting_cash: 2400
     overrides:
       actors:
@@ -247,7 +262,7 @@ levels:
         - {type: e1, owner: enemy, position: [60, 20], stance: 3, count: 8}
         - {type: e3, owner: enemy, position: [62, 20], stance: 3, count: 2}
         # Anti-DRAW marker.
-        - {type: fact, owner: enemy, position: [120, 20]}
+        - {type: fact, owner: enemy, position: [65, 20]}
     win_condition:
       all_of:
         - {building_count_gte: {type: pbox, n: 4}}
@@ -281,8 +296,8 @@ levels:
     #
     # The agent construction yard (fact) flips between NORTH (y=14) and
     # SOUTH (y=26) by seed; both depth bands must follow. Build 4
-    # pillboxes (budget 2400cr = 4 pbox at 600 each) and split them across
-    # TWO DEPTH BANDS at the CURRENT latitude: 2 in the FRONT band near
+    # pillboxes (budget 2400cr funds 4 pbox at 400 each = 1600cr + 800
+    # residual) and split them across TWO DEPTH BANDS at the CURRENT latitude: 2 in the FRONT band near
     # (35,fact_y) AND 2 in the REAR band near (20,fact_y) — read fact_y
     # from the observation. A single thick wall, a split at the wrong
     # latitude, or any plan that does not follow the fact FAILS a region
@@ -290,10 +305,13 @@ levels:
     # single-wall layouts all LOSE. The fact must survive; at least 6
     # enemy units must die before tick 5400.
     description: >
-      Heavy rifle-plus-rocket wave drives at your construction yard, whose
-      latitude flips north or south by seed. Build four pillboxes split
-      into a front band and a rear band. Keep the yard, kill six, within
-      about 60 turns.
+      Your base — construction yard, barracks, power plant, four rifle
+      defenders — spawns in either the NORTH (y=14) or SOUTH (y=26) band
+      by seed; the construction yard's latitude is therefore seed-driven.
+      A heavy wave (eight rifles plus two rocket soldiers) drives at the
+      live yard from the matching latitude. $2400 covers exactly four
+      pillboxes. Yard intact, six kills, within about 60 turns. See the
+      win condition for the required pillbox positions.
     starting_cash: 2400
     overrides:
       actors:
@@ -323,10 +341,10 @@ levels:
         # an un-tagged enemy actor).
         - {type: e1, owner: enemy, position: [60, 14], stance: 3, count: 6, spawn_point: 0}
         - {type: e3, owner: enemy, position: [62, 14], stance: 3, count: 2, spawn_point: 0}
-        - {type: fact, owner: enemy, position: [120, 14], spawn_point: 0}
+        - {type: fact, owner: enemy, position: [65, 14], spawn_point: 0}
         - {type: e1, owner: enemy, position: [60, 26], stance: 3, count: 6, spawn_point: 1}
         - {type: e3, owner: enemy, position: [62, 26], stance: 3, count: 2, spawn_point: 1}
-        - {type: fact, owner: enemy, position: [120, 26], spawn_point: 1}
+        - {type: fact, owner: enemy, position: [65, 26], spawn_point: 1}
     win_condition:
       all_of:
         - {building_count_gte: {type: pbox, n: 4}}

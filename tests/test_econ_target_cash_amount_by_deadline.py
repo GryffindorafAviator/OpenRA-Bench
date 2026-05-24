@@ -1,20 +1,24 @@
 """No-cheat + solvency proof for `econ-target-cash-amount-by-deadline`.
 
 The capability: reach an exact SPENDABLE CASH bar (`cash_gte: N`, not
-EV) by a hard tick deadline. The model must reason whether the
-pre-placed pipeline will clear the bar on time and reinvest into
-harvesting capacity if not — without draining cash into army units
-that don't grow income.
+EV) AND a 2-harvester floor by a hard tick deadline. The model must
+reason whether the pre-placed pipeline will clear the bar on time and
+reinvest into harvesting capacity (the 2nd harv) — without draining
+cash into army units that don't grow income.
+
+The 2-harv structural clause is the anti-stall floor (family-2 §14):
+the pre-placed harv auto-harvests near the pre-placed proc, so a
+cash-only bar would be trivially stallable on every tier. The 2-harv
+clause forces an explicit harv build (cost $1400 from the war factory)
+on every tier.
 
 For every level (and every hard seed 1-4) the no-cheat bar holds:
 
-  - STALL (only `observe`)              → LOSS  (idles at starting_cash)
-  - ARMY-DRAIN (harvest + spam `e1`)    → LOSS  (income ≈ unit cost)
-  - BASELINE (1 harv, no reinvest)      → LOSS  on medium+hard
-                                          (income too slow; deadline
-                                          bites)            — WIN on easy
-                                          (loose bar; bare commitment
-                                          suffices, by design)
+  - STALL (only `observe`)              → LOSS  (2-harv clause unmet)
+  - ARMY-DRAIN (harvest + spam `e1`)    → LOSS  (cash drained + no
+                                                 2nd harv)
+  - BASELINE (1 harv, no reinvest)      → LOSS  on every tier
+                                                 (2-harv clause unmet)
   - INTENDED (1 harv + build harv)      → WIN   on every level / seed
 
 Plus tick/turn alignment, fail-condition reachability, hard spawn
@@ -56,60 +60,119 @@ def stall(rs, Command):
     return [Command.observe()]
 
 
-def _harv_only(rs, Command):
-    """Pre-placed harv only, no reinvestment (the BASELINE)."""
-    ids = [
-        str(u["id"])
-        for u in rs.get("units_summary", []) or []
-        if u.get("type") == "harv"
-    ]
-    if not ids:
-        return [Command.observe()]
-    cmds = []
-    for i, uid in enumerate(ids):
-        mx, my = ALL_NEAR_MINES[i % len(ALL_NEAR_MINES)]
-        cmds.append(Command.harvest([uid], mx, my))
-    return cmds
+# Engine quirk (CLAUDE.md / startup-from-scratch / recover-from-zero-cash):
+# re-issuing `Command.harvest(...)` every turn cancels the auto-cycle and
+# the harv oscillates near the proc, dropping income to near-zero. The
+# correct idiom is a ONE-SHOT harvest order per harv id (the engine's
+# auto-cycle then carries the harv through the deposit→mine loop on its
+# own). All scripted policies below use a `_sent` set to gate the order.
 
 
-def _army_drain(rs, Command):
-    """Harvest with the pre-placed harv AND spam `e1` every turn that
-    cash >= 100. e1 is ~100cr and income from one harv after warmup is
-    ~100cr/turn, so cash treads water near starting_cash and never
-    clears the bar — the "spend on the wrong line item" decoy."""
-    cmds = []
-    ids = [
-        str(u["id"])
-        for u in rs.get("units_summary", []) or []
-        if u.get("type") == "harv"
-    ]
-    for i, uid in enumerate(ids):
-        mx, my = ALL_NEAR_MINES[i % len(ALL_NEAR_MINES)]
-        cmds.append(Command.harvest([uid], mx, my))
-    if rs.get("cash", 0) >= 100:
-        cmds.append(Command.build("e1"))
-    return cmds if cmds else [Command.observe()]
+def _nearest_mine_for(harv_y: int) -> tuple[int, int]:
+    """Pick the mine cell on the same latitude as the harv. Hard tier
+    has two spawn latitudes (NORTH y=10..14, SOUTH y=28..32), each
+    with its own near-patch pair. Easy/medium have patches at y=18/22.
+    Returning the closest mine row keeps the harvest order targeted
+    at a real ore cell so the auto-cycle engages."""
+    candidates = [(22, 10), (22, 14), (22, 18), (22, 22), (22, 28), (22, 32)]
+    return min(candidates, key=lambda m: abs(m[1] - harv_y))
 
 
-def _intended_factory(extra_harv: int):
-    """Reinvestment factory: harvest with all harvs AND queue `extra_harv`
-    additional harvesters (each costs 1100, prereq fact+powr+weap).
-    Closure-local state so each test invocation starts fresh."""
+def _harv_only_factory():
+    """Pre-placed harv only, no reinvestment (the BASELINE). One-shot
+    harvest per harv id (targeted at the nearest mine row) so the
+    auto-cycle is allowed to run."""
 
     def make():
-        queued = [0]
+        sent = set()
+
+        def p(rs, Command):
+            harvs = [
+                u for u in rs.get("units_summary", []) or []
+                if u.get("type") == "harv"
+            ]
+            cmds = []
+            for u in harvs:
+                uid = str(u["id"])
+                if uid in sent:
+                    continue
+                mx, my = _nearest_mine_for(int(u.get("cell_y", 18)))
+                cmds.append(Command.harvest([uid], mx, my))
+                sent.add(uid)
+            return cmds if cmds else [Command.observe()]
+
+        return p
+
+    return make
+
+
+# Back-compat alias for tests that still want a module-level callable.
+def _harv_only(rs, Command):
+    if not hasattr(_harv_only, "_policy"):
+        _harv_only._policy = _harv_only_factory()()
+    return _harv_only._policy(rs, Command)
+
+
+def _army_drain_factory():
+    """Harvest with the pre-placed harv (one-shot order) AND spam `e1`
+    every turn that cash >= 100. e1 is ~100cr; the unit-cost drain
+    treads cash near starting_cash and the 2-harv clause stays unmet —
+    LOSS on every tier."""
+
+    def make():
+        sent = set()
 
         def p(rs, Command):
             cmds = []
-            ids = [
-                str(u["id"])
-                for u in rs.get("units_summary", []) or []
+            harvs = [
+                u for u in rs.get("units_summary", []) or []
                 if u.get("type") == "harv"
             ]
-            for i, uid in enumerate(ids):
-                mx, my = ALL_NEAR_MINES[i % len(ALL_NEAR_MINES)]
+            for u in harvs:
+                uid = str(u["id"])
+                if uid in sent:
+                    continue
+                mx, my = _nearest_mine_for(int(u.get("cell_y", 18)))
                 cmds.append(Command.harvest([uid], mx, my))
-            if queued[0] < extra_harv and rs.get("cash", 0) >= 1100:
+                sent.add(uid)
+            if rs.get("cash", 0) >= 100:
+                cmds.append(Command.build("e1"))
+            return cmds if cmds else [Command.observe()]
+
+        return p
+
+    return make
+
+
+def _army_drain(rs, Command):
+    if not hasattr(_army_drain, "_policy"):
+        _army_drain._policy = _army_drain_factory()()
+    return _army_drain._policy(rs, Command)
+
+
+def _intended_factory(extra_harv: int):
+    """Reinvestment factory: one-shot harvest order per harv id
+    (targeted at the nearest-row mine) AND queue `extra_harv`
+    additional harvesters (cost 1400 each, prereq fact+powr+weap)."""
+
+    def make():
+        queued = [0]
+        sent = set()
+
+        def p(rs, Command):
+            cmds = []
+            harvs = [
+                u for u in rs.get("units_summary", []) or []
+                if u.get("type") == "harv"
+            ]
+            for u in harvs:
+                uid = str(u["id"])
+                if uid in sent:
+                    continue
+                mx, my = _nearest_mine_for(int(u.get("cell_y", 18)))
+                cmds.append(Command.harvest([uid], mx, my))
+                sent.add(uid)
+            if queued[0] < extra_harv and rs.get("cash", 0) >= 1400:
                 cmds.append(Command.build("harv"))
                 queued[0] += 1
             return cmds if cmds else [Command.observe()]
@@ -124,12 +187,15 @@ def _intended_factory(extra_harv: int):
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_easy_intended_wins(seed):
-    """Easy bar (1500 by tick 1800) is reachable just by harvesting —
-    no reinvestment needed. Run the BASELINE; it must WIN."""
+    """Easy bar ($1500 cash AND ≥2 harvesters by tick 1800). The 2-harv
+    clause is the anti-stall floor (family-2 §14) — without it the
+    auto-harvested pre-placed harv would clear the cash bar by stall.
+    Build 1 extra harv ⇒ the 2-harv clause is met and the doubled
+    income clears the $1500 bar inside 1800 ticks."""
     c = compile_level(load_pack(PACK_PATH), "easy")
-    r = run_level(c, _harv_only, seed=seed)
+    r = run_level(c, _intended_factory(1)(), seed=seed)
     assert r.outcome == "win", (
-        f"easy baseline seed={seed} should WIN, got {r.outcome} "
+        f"easy intended (+1 harv) seed={seed} should WIN, got {r.outcome} "
         f"(cash={r.signals.cash}, tick={r.signals.game_tick})"
     )
 
@@ -148,14 +214,15 @@ def test_medium_intended_wins(seed):
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_hard_intended_wins_every_seed(seed):
-    """Hard bar (6500 by tick 4000) on each of two spawn groups needs
-    reinvestment. Run the INTENDED policy (build 2 extra harvs for
-    safety margin against the tighter clock); it must WIN on every
-    seed."""
+    """Hard bar ($6500 cash AND ≥2 harvs by tick 4000) on each of two
+    spawn groups. Build 1 extra harv: the doubled income covers the
+    $1400 capex AND clears the cash bar by tick ~3963 (verified on
+    seeds 1-4). Queueing >1 extra harv wastes capex relative to the
+    deadline and falls short — the optimal reinvest is exactly +1."""
     c = compile_level(load_pack(PACK_PATH), "hard")
-    r = run_level(c, _intended_factory(2)(), seed=seed)
+    r = run_level(c, _intended_factory(1)(), seed=seed)
     assert r.outcome == "win", (
-        f"hard intended (+2 harv) seed={seed} should WIN, got "
+        f"hard intended (+1 harv) seed={seed} should WIN, got "
         f"{r.outcome} (cash={r.signals.cash}, tick={r.signals.game_tick})"
     )
 
@@ -190,29 +257,30 @@ def test_army_drain_loses_on_every_level(level):
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_medium_baseline_no_reinvest_loses(seed):
-    """The pre-placed pipeline alone reaches ~5600 cash but only at
-    tick ≥4500 — the deadline bites first. Baseline (no reinvest)
-    LOSES on every seed: this is what makes the medium tier a
+    """Baseline (1 pre-placed harv, no reinvest) LOSES on every seed —
+    the 2-harv structural clause is unmet regardless of how much cash
+    the auto-cycle accumulates. This is what makes the medium tier a
     capex-decision test."""
     c = compile_level(load_pack(PACK_PATH), "medium")
     r = run_level(c, _harv_only, seed=seed)
     assert r.outcome == "loss", (
-        f"medium baseline seed={seed} must LOSE (deadline bites "
-        f"before bar reached), got {r.outcome} "
-        f"(cash={r.signals.cash}, tick={r.signals.game_tick})"
+        f"medium baseline seed={seed} must LOSE (2-harv clause unmet), "
+        f"got {r.outcome} (cash={r.signals.cash}, "
+        f"tick={r.signals.game_tick})"
     )
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_hard_baseline_no_reinvest_loses(seed):
-    """Hard target (6500 in 4000 ticks) is well above what 1 harv
-    can produce in time (~4100 cash by tick 4053). Baseline LOSES
-    on every seed."""
+    """Baseline (1 pre-placed harv, no reinvest) LOSES on every seed —
+    the 2-harv structural clause is unmet regardless of how much cash
+    the auto-cycle accumulates inside the 4000-tick deadline."""
     c = compile_level(load_pack(PACK_PATH), "hard")
     r = run_level(c, _harv_only, seed=seed)
     assert r.outcome == "loss", (
-        f"hard baseline seed={seed} must LOSE, got {r.outcome} "
-        f"(cash={r.signals.cash}, tick={r.signals.game_tick})"
+        f"hard baseline seed={seed} must LOSE (2-harv clause unmet), "
+        f"got {r.outcome} (cash={r.signals.cash}, "
+        f"tick={r.signals.game_tick})"
     )
 
 

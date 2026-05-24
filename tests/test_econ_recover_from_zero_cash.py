@@ -82,45 +82,16 @@ def _stall(rs, Command):
 
 
 def _harvest_only_factory():
-    """Run the starting harv but never build anything. WINS easy (the
-    floor — bar 1500 is reachable with one harv) but LOSES medium/hard
-    (the 2-harv / 3-harv structural clause fails regardless of EV)."""
+    """Run the starting harv and queue a minimum-cost power plant (the
+    easy-tier building bar). WINS easy (one harv income + powr clears
+    the 1500 EV bar AND the building_count_gte:powr clause) but LOSES
+    medium/hard (the 2-harv / 3-harv structural clause fails regardless
+    of EV). The pre-placed harv auto-harvests once it has line-of-sight
+    to the patch; we issue a single explicit `harvest` order to nudge
+    the auto-cycle (re-issuing move/harvest every turn cancels the
+    auto-cycle and stalls income — engine quirk noted in pack header)."""
 
-    state = {"moved": set()}
-
-    def policy(rs, Command):
-        units = rs.get("units_summary", []) or []
-        bldgs = rs.get("own_buildings", []) or []
-        fact_b = _own_fact(bldgs)
-        if fact_b is None:
-            return [Command.observe()]
-        patches = _patches_for_fact(fact_b["cell_y"])
-        harvs = [
-            (u["id"], u.get("cell_x"), u.get("cell_y"))
-            for u in units
-            if str(u.get("type", "")).lower() == "harv"
-        ]
-        cmds = []
-        for i, (uid, cx, cy) in enumerate(harvs):
-            uid_s = str(uid)
-            px, py = patches[i % len(patches)]
-            if uid_s not in state["moved"]:
-                cmds.append(Command.move_units([uid_s], target_x=px, target_y=py))
-                if abs(cx - px) <= 3 and abs(cy - py) <= 3:
-                    state["moved"].add(uid_s)
-            else:
-                cmds.append(Command.harvest([uid_s], px, py))
-        return cmds if cmds else [Command.observe()]
-
-    return policy
-
-
-def _build_army_factory():
-    """Harvest a bit, then powr → tent → spam e1 instead of weap+harv.
-    Without weap, no harv can be built → 2-harv clause fails → LOSS on
-    every tier (even easy, where the army spend drains the EV bar)."""
-
-    state = {"moved": set()}
+    state = {"sent": set()}
 
     def policy(rs, Command):
         units = rs.get("units_summary", []) or []
@@ -139,15 +110,58 @@ def _build_army_factory():
             if str(u.get("type", "")).lower() == "harv"
         ]
         cmds = []
-        for i, (uid, cx, cy) in enumerate(harvs):
+        for i, (uid, _cx, _cy) in enumerate(harvs):
             uid_s = str(uid)
             px, py = patches[i % len(patches)]
-            if uid_s not in state["moved"]:
-                cmds.append(Command.move_units([uid_s], target_x=px, target_y=py))
-                if abs(cx - px) <= 3 and abs(cy - py) <= 3:
-                    state["moved"].add(uid_s)
-            else:
+            if uid_s not in state["sent"]:
                 cmds.append(Command.harvest([uid_s], px, py))
+                state["sent"].add(uid_s)
+        # Build a single cheap powr to clear the easy-tier building bar.
+        if "powr" not in own_types:
+            if cash >= 300 and "powr" not in prod:
+                cmds.append(Command.build("powr"))
+            cmds.append(Command.place_building("powr", fx + 2, fy - 3))
+        return cmds if cmds else [Command.observe()]
+
+    return policy
+
+
+def _build_army_factory():
+    """Harvest a bit (one-shot order — repeated orders cancel the
+    auto-cycle, see engine quirk in pack header), then powr → tent →
+    spam e1 instead of weap+harv. Without weap, no harv can be built →
+    2-harv clause fails → LOSS on every tier (even easy, where the
+    army spend drains the EV bar and the building bar requires powr
+    AND nothing else gates the army track — the policy still queues
+    powr because tent's prereq IS powr, so the easy building-bar
+    failure has to come from the EV bar instead: army spending pulls
+    cash below the EV floor before the 70-turn clock runs out)."""
+
+    state = {"sent": set()}
+
+    def policy(rs, Command):
+        units = rs.get("units_summary", []) or []
+        bldgs = rs.get("own_buildings", []) or []
+        own_types = {b["type"] for b in bldgs}
+        prod = rs.get("production", []) or []
+        cash = rs.get("cash", 0)
+        fact_b = _own_fact(bldgs)
+        if fact_b is None:
+            return [Command.observe()]
+        fx, fy = fact_b["cell_x"], fact_b["cell_y"]
+        patches = _patches_for_fact(fy)
+        harvs = [
+            (u["id"], u.get("cell_x"), u.get("cell_y"))
+            for u in units
+            if str(u.get("type", "")).lower() == "harv"
+        ]
+        cmds = []
+        for i, (uid, _cx, _cy) in enumerate(harvs):
+            uid_s = str(uid)
+            px, py = patches[i % len(patches)]
+            if uid_s not in state["sent"]:
+                cmds.append(Command.harvest([uid_s], px, py))
+                state["sent"].add(uid_s)
         if "powr" not in own_types:
             if cash >= 300 and "powr" not in prod:
                 cmds.append(Command.build("powr"))
@@ -164,12 +178,12 @@ def _build_army_factory():
 
 
 def _build_too_soon_factory():
-    """Harvest, then spend the FIRST accumulated cash on a SECOND
-    refinery (the wrong scaling asset) instead of weap+harv. The
-    income channel does NOT scale (single harv still) → the 2-harv
+    """Harvest (one-shot), then spend the FIRST accumulated cash on a
+    SECOND refinery (the wrong scaling asset) instead of weap+harv.
+    The income channel does NOT scale (single harv still) → the 2-harv
     clause fails on medium/hard → LOSS."""
 
-    state = {"moved": set()}
+    state = {"sent": set()}
 
     def policy(rs, Command):
         units = rs.get("units_summary", []) or []
@@ -187,15 +201,12 @@ def _build_too_soon_factory():
             if str(u.get("type", "")).lower() == "harv"
         ]
         cmds = []
-        for i, (uid, cx, cy) in enumerate(harvs):
+        for i, (uid, _cx, _cy) in enumerate(harvs):
             uid_s = str(uid)
             px, py = patches[i % len(patches)]
-            if uid_s not in state["moved"]:
-                cmds.append(Command.move_units([uid_s], target_x=px, target_y=py))
-                if abs(cx - px) <= 3 and abs(cy - py) <= 3:
-                    state["moved"].add(uid_s)
-            else:
+            if uid_s not in state["sent"]:
                 cmds.append(Command.harvest([uid_s], px, py))
+                state["sent"].add(uid_s)
         # Always try to queue a second proc and place it — the engine
         # may block on prereqs but that's the point (spending intent on
         # the wrong asset, not weap/harv).
@@ -211,11 +222,13 @@ def _build_too_soon_factory():
 
 def _intended_factory():
     """Intended recovery chain: harvest with starting harv → save 2000 →
-    build('weap') + place → save 1400 → build('harv') → move new harv to
-    patch → harvest. On hard, build a 3rd harv after the 2nd. WINS
+    build('weap') + place → save 1400 → build('harv') → harvest the new
+    harv (one-shot). On hard, build a 3rd harv after the 2nd. Also
+    builds a single powr to satisfy the easy-tier building bar (no-op
+    cost on medium/hard since powr isn't a win clause there). WINS
     every tier × every seed."""
 
-    state = {"moved": set()}
+    state = {"sent": set()}
 
     def policy(rs, Command):
         units = rs.get("units_summary", []) or []
@@ -235,19 +248,22 @@ def _intended_factory():
             if str(u.get("type", "")).lower() == "harv"
         ]
         cmds = []
-        # Move each harv to a patch (round-robin) then harvest.
-        for i, (uid, cx, cy) in enumerate(harvs):
+        # One-shot harvest order per harv (repeated orders cancel the
+        # auto-cycle — engine quirk; see pack header note 5).
+        for i, (uid, _cx, _cy) in enumerate(harvs):
             uid_s = str(uid)
             px, py = patches[i % len(patches)]
-            if uid_s not in state["moved"]:
-                cmds.append(Command.move_units([uid_s], target_x=px, target_y=py))
-                if abs(cx - px) <= 3 and abs(cy - py) <= 3:
-                    state["moved"].add(uid_s)
-            else:
+            if uid_s not in state["sent"]:
                 cmds.append(Command.harvest([uid_s], px, py))
-        # Build weap as soon as cash allows; spam place_building each
-        # turn (engine ignores PLACE until production completes — see
-        # econ-startup-from-scratch intended policy).
+                state["sent"].add(uid_s)
+        # Build a cheap powr to clear the easy-tier building bar (no
+        # win-clause cost on medium/hard; the spend is harmless).
+        if "powr" not in own_types:
+            if cash >= 300 and "powr" not in prod:
+                cmds.append(Command.build("powr"))
+            cmds.append(Command.place_building("powr", fx + 2, fy - 3))
+        # Then queue weap as soon as cash allows; spam place_building
+        # each turn (engine ignores PLACE until production completes).
         if "weap" not in own_types:
             if cash >= 2000 and "weap" not in prod:
                 cmds.append(Command.build("weap"))
@@ -265,7 +281,7 @@ def _intended_factory():
 
 def _run(level, policy_or_factory, seed=1):
     c = compile_level(load_pack(PACK), level)
-    assert c.map_supported, "rush-hour-arena must compile"
+    assert c.map_supported, "bespoke 48x40 arena must compile"
     pol = (
         policy_or_factory()
         if callable(policy_or_factory)
@@ -367,14 +383,19 @@ def test_intended_chain_wins(level, seed):
 @pytest.mark.parametrize("level", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
 def test_stall_loses(level, seed):
-    """Stall (only `observe`) must LOSE every tier × every seed — no
-    harvest, EV stays at 0, bar unmet, clock bites as a real LOSS."""
+    """Stall (only `observe`) must LOSE every tier × every seed. Note
+    the engine auto-harvests pre-placed harvs that already sit near a
+    pre-placed proc — so a stall play DOES accrue passive cash (the
+    auto-cycle keeps running). The win predicates have been structured
+    so stall still LOSES on each tier:
+      * easy: building_count_gte:powr (stall never builds powr → LOSS)
+      * medium/hard: unit_type_count_gte:harv 2/3 (stall never builds
+        a 2nd/3rd harv → LOSS)."""
     c, r = _run(level, _stall, seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed{seed} stall must LOSE; got {r.outcome} "
         f"(ev={_ev(r)}, tick={r.signals.game_tick})"
     )
-    assert _ev(r) == 0, f"stall earns nothing; got ev={_ev(r)}"
 
 
 @pytest.mark.parametrize("seed", SEEDS)

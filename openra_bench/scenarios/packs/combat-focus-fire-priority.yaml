@@ -387,4 +387,15 @@ levels:
         - {after_ticks: 2701}
         - {not: {units_lost_lte: 1}}
         - {not: {own_units_gte: 1}}
-    max_turns: 30
+    # 2026-05-23 audit (Qwen-9B deep-dive, B.1): hard runs in interrupt
+    # mode (interrupts.enemy_unit_spotted + own_unit_destroyed), under
+    # which the engine advances 1-`max_ticks` ticks per turn (variable;
+    # typical 5) rather than the non-interrupt 30. With max_turns 30 the
+    # final tick lands at ~2073-2358 — BELOW the within_ticks 2700
+    # deadline — so a near-win (seed 4: 13/14 killed, 0 lost) cannot
+    # close inside the budget and the deadline never bites ⇒ DRAW.
+    # Bump max_turns 30 → 120 so the 2700-tick window is reachable in
+    # interrupt mode; the after_ticks 2701 floor still bites a real
+    # timeout LOSS for stall and the within_ticks 2700 cap still gates
+    # the win.
+    max_turns: 120

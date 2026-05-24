@@ -32,7 +32,12 @@ def _result(outcome, *, explored=0.0, kills=0, lost=0, tick=1000,
         units_lost=lost,
         explored_percent=explored,
         game_tick=tick,
-        outcome={"win": 1.0, "draw": 0.5, "loss": 0.0}[outcome],
+        # After commit b4c694a the bench convention for signals.outcome
+        # numeric is win=1.0, draw=0.0, loss=0.0 (the string in
+        # res.outcome carries the trinary distinction). Match the new
+        # convention to keep the test fixture honest about what
+        # eval_core actually writes.
+        outcome={"win": 1.0, "draw": 0.0, "loss": 0.0}[outcome],
     )
     sig.enemies_seen_ids = set(enemies)
     sig.enemy_buildings_seen_ids = set(buildings)

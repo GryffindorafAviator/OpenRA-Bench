@@ -1,0 +1,679 @@
+"""Builds audits/family8_multifront.csv — Family-8 (multi-front base / MCV /
+coordination) manual audit.
+
+One row per (pack, level). Briefings are SELF-CONTAINED, F1 officer-style:
+mission framing → forces given → objective + constraint. NO solution-leak
+(no "deploy MCV at (15,30) and order defenders onto raiders" — describe
+the situation, not the verb).
+
+Family-8 specifics (see audits/EDIT_PRINCIPLES_FAMILY8.md):
+- `wide-justified` is the new map_fit value: a 160-cell-wide arena CAN
+  be the right size when the inter-base distance IS the test.
+- §48 multi-base roles, §49 MCV deploy load-bearing, §50 coordination
+  joint-arrival predicate shapes, §51 auto-routing-harv defect class,
+  §52 supply-line corridor occupancy idiom.
+"""
+import csv
+from pathlib import Path
+
+OUT = Path(__file__).parent / 'family8_multifront.csv'
+R = []
+
+
+def add(pack, level, cap, map_name, map_size, map_fit, tools, agent, enemy,
+        briefing, win, lose, max_turns, tick_budget,
+        posture='', posture_issue=''):
+    R.append(dict(
+        pack=pack, level=level, capability=cap, map_name=map_name,
+        map_size=map_size, map_fit=map_fit, tools=tools,
+        agent_force=agent, enemy_force=enemy,
+        briefing_RA=briefing, win_condition=win, lose_condition=lose,
+        max_turns=max_turns, tick_budget=tick_budget,
+        enemy_posture=posture, posture_issue=posture_issue,
+    ))
+
+
+# =============================================================================
+# COORD-* (7 packs)
+# =============================================================================
+
+# 1. coord-converge-on-target — three squads converge from N/W/S on a defended yard
+P = 'coord-converge-on-target'; C = 'action'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    '3× medium tank @(70,6) NORTH + 3× @(66,20) WEST + 3× @(70,34) SOUTH (Return-Fire)',
+    'Construction Yard @(100,20) + 3× rifle infantry guards (guard bot; lunge ~16, leash ~18); sentinel fact @(120,4)',
+    "Commander, this is a three-prong convergent strike on a defended enemy Construction Yard. You are given three tank squads — three medium tanks each — staged on the north, west, and south flanks of the target at (100,20). Three leashed riflemen guard the yard: they hold post but lunge at any enemy inside about 16 cells. The yard must fall AND every one of your nine tanks must be inside an 8-cell ring around (100,20) at the same instant for the win to fire. Within about 50 turns.",
+    'All 9 tanks inside the (100,20) ring, yard razed, within 4500 ticks.',
+    'All units dead, or deadline (4501 ticks).',
+    54, 4863)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    '3× medium tank @(70,6) NORTH + 3× @(66,20) WEST + 3× @(70,34) SOUTH (Return-Fire)',
+    'Construction Yard @(100,20) + 4× rifle infantry guards (one per cardinal face, guard bot); sentinel fact @(120,4)',
+    "Commander, this is a three-prong convergent strike on a defended enemy Construction Yard. You are given three tank squads — three medium tanks each — staged on the north, west, and south flanks of the target at (100,20). Four leashed riflemen now guard the yard, one on each cardinal face. The yard must fall AND every one of your nine tanks must be inside an 8-cell ring around (100,20) at the same instant. Within about 50 turns.",
+    'All 9 tanks inside the (100,20) ring, yard razed, within 4500 ticks.',
+    'All units dead, or deadline (4501 ticks).',
+    54, 4863)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated 3-squad staging: sp0 N(70,6)/W(66,20)/S(70,34) or sp1 N(76,5)/W(72,18)/S(76,32), 3× 2tnk each',
+    'Construction Yard @(100,20) + 4× rifle infantry guards (cardinal faces, guard bot); sentinel fact @(120,4)',
+    "Commander, this is a three-prong convergent strike with seed-rotated staging. You are given three tank squads — three medium tanks each — staged on the north, west, and south flanks of the target at (100,20), with the exact staging cells shifted by seed. Four leashed riflemen guard the yard, one on each cardinal face. The yard must fall AND every one of your nine tanks must be inside an 8-cell ring around (100,20) at the same instant. Within about 50 turns.",
+    'All 9 tanks inside the (100,20) ring, yard razed, within 4500 ticks.',
+    'All units dead, or deadline (4501 ticks).',
+    54, 4863)
+
+# 2. coord-cover-and-move — bounding overwatch through a centre fire zone
+P = 'coord-cover-and-move'; C = 'action'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    '6× medium tank in two squads: 3× @(10,15) NW + 3× @(10,25) SW (Return-Fire)',
+    '3× rocket infantry + 2× heavy tank @(49-51,19-21) central fire zone (Defend stance); sentinel fact @(120,20)',
+    "Commander, this is a bounding-overwatch advance through an enemy fire zone. You are given two squads of three medium tanks staged at (10,15) and (10,25). A centre block at (50,20) holds three anti-tank rocket soldiers anchored by two heavy tanks — driving both squads through it head-on burns the loss cap. Get four tanks into a 6-cell ring around (100,20) on the east with at most one loss, within about 50 turns.",
+    '≥4 tanks inside (100,20) ring, ≤1 loss, within 4500 ticks.',
+    'All dead, >1 lost, or deadline (4501 ticks).',
+    50, 4503)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    '6× medium tank in two squads: 3× @(10,15) NW + 3× @(10,25) SW',
+    '4× rocket infantry + 2× heavy tank @(49-51,19-21) central fire zone (Defend); sentinel fact @(120,20)',
+    "Commander, this is a bounding-overwatch advance through a heavier enemy fire zone. You are given two squads of three medium tanks staged at (10,15) and (10,25). The centre block at (50,20) now holds four rocket soldiers and two heavy tanks. Get four tanks into a 6-cell ring around (100,20) on the east with at most one loss, within about 50 turns.",
+    '≥4 tanks inside (100,20) ring, ≤1 loss, within 4500 ticks.',
+    'All dead, >1 lost, or deadline (4501 ticks).',
+    50, 4503)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated 12× 2tnk: sp0 NW corner (y=11-17) or sp1 SW corner (y=23-29)',
+    '4× rocket infantry + 2× heavy tank + 6× rifle screen at (49-51, 13-27) (Defend); sentinel fact @(120,20)',
+    "Commander, this is a bounding-overwatch advance through a defended fire zone. You are given two squads of six medium tanks each, staged on either the north-west or south-west corner by seed. The centre block at (50,20) holds four rocket soldiers, two heavy tanks, and a rifle screen ringed north and south of the heavies. The loss cap is ZERO. Get four tanks into a 6-cell ring around (100,20), within about 50 turns.",
+    '≥4 tanks inside (100,20) ring, 0 losses, within 4500 ticks.',
+    'Any loss, all dead, or deadline (4501 ticks).',
+    50, 4503)
+
+# 3. coord-diversionary-attack — jeeps bait the decoy, tanks hit the real target
+P = 'coord-diversionary-attack'; C = 'reasoning'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    '3× jeep @(6,10) NORTH + 4× medium tank @(6,30) SOUTH (Return-Fire)',
+    'Real yard @(100,10) NE + 1× rifle guard; decoy Power Plant @(100,30) SE + 3× rocket guards (Defend); sentinel fact @(125,38)',
+    "Commander, this is a diversionary strike. You are given 3 jeeps on the north flank at (6,10) and 4 medium tanks on the south flank at (6,30). Two enemy buildings sit deep east: the REAL Construction Yard at (100,10) covered by a single rifleman, and a DECOY Power Plant at (100,30) guarded by three rocket soldiers. Only razing the real yard scores. At most 5 losses, within about 60 turns.",
+    'Real yard @(100,10) razed inside a 6-cell ring, ≤5 losses, within 5400 ticks.',
+    'All dead, >5 lost, or deadline (5401 ticks).',
+    62, 5583)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    '3× jeep @(6,10) + 4× medium tank @(6,30)',
+    'Real yard @(100,10) + 1× rifle; decoy Power Plant @(100,30) + 5× rocket guards (Defend); sentinel fact @(125,38)',
+    "Commander, this is a diversionary strike against a heavier decoy guard. You are given 3 jeeps at (6,10) and 4 medium tanks at (6,30). The real Construction Yard at (100,10) is covered by a single rifleman; the decoy Power Plant at (100,30) is covered by FIVE rocket soldiers — a frontal push there shreds the tanks. Only razing the real yard scores. At most 4 losses, within about 60 turns.",
+    'Real yard @(100,10) razed inside a 6-cell ring, ≤4 losses, within 5400 ticks.',
+    'All dead, >4 lost, or deadline (5401 ticks).',
+    62, 5583)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated: sp0 jeeps@(6,10) + 4×2tnk@(6,14); sp1 jeeps@(6,30) + 4×2tnk@(6,26)',
+    'Real yard @(100,10) + 1× rifle; decoy Power Plant @(100,30) + 5× rocket guards; sentinel fact @(125,38)',
+    "Commander, this is a diversionary strike with seed-rotated staging. You are given 3 jeeps and 4 medium tanks staged on either the north or south flank of the west edge by seed. The real Construction Yard at (100,10) is covered by a single rifleman; the decoy Power Plant at (100,30) is covered by five rocket soldiers. Only razing the real yard scores. At most 4 losses, within about 60 turns.",
+    'Real yard @(100,10) razed, ≤4 losses, within 5400 ticks.',
+    'All dead, >4 lost, or deadline (5401 ticks).',
+    62, 5583)
+
+# 4. coord-mutual-support — keep formation tight through rocket harassers
+P = 'coord-mutual-support'; C = 'action'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    '6× medium tank @(6,17-22) on west edge (Return-Fire)',
+    '3× rocket infantry @(38-40,23) south harasser + 4× rocket infantry around (60,20) objective (Defend); sentinel fact @(120,20)',
+    "Commander, this is a mutual-support advance through layered rocket fire. You are given 6 medium tanks tightly packed at the west edge (y=17..22). A 3-rocket harasser hides south of the lane around (40,23); a 4-rocket cluster covers the objective at (60,20). Each cluster eats concentrated fire only if the squad arrives together; a strung-out column gets picked apart. Pass the (40,20) checkpoint with 5 tanks together, then arrive at (60,20) with 5 tanks together, kill 5, keep ≥5 alive, within about 50 turns.",
+    'Sequenced: ≥5 tanks at (40,20,r=5), then ≥5 at (60,20,r=6); ≥5 kills; ≥5 alive; within 4500 ticks.',
+    '<3 alive, or deadline (4501 ticks).',
+    75, 6753)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    '6× medium tank @(6,17-22)',
+    'Two bracketing rocket clusters (3× e3 @(34-36,24) + 3× e3 @(42-44,16)) + 5× rocket cluster around (60,20); sentinel fact @(120,20)',
+    "Commander, this is a mutual-support advance through bracketing rocket fire. You are given 6 medium tanks tightly packed at the west edge. Two harasser clusters bracket the lane around x=35..44 — three rockets to the north, three to the south — and a 5-rocket cluster covers the objective at (60,20). Keep the formation tight; regroup before each contact. Pass the (40,20) checkpoint with 5 tanks together, then arrive at (60,20) with 5, kill 7, keep ≥5 alive, within about 50 turns.",
+    'Sequenced: ≥5 at (40,20), then ≥5 at (60,20); ≥7 kills; ≥5 alive; within 4500 ticks.',
+    '<3 alive, or deadline (4501 ticks).',
+    75, 6753)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated 12× medium tank: sp0 NORTH (y=10-15) or sp1 SOUTH (y=25-30)',
+    'Three rocket clusters along the route + 4× rocket cluster around (60,20); sentinel fact @(120,20)',
+    "Commander, this is a mutual-support advance with seed-rotated staging. You are given 12 medium tanks tightly packed in either the north (y=10..15) or south (y=25..30) corridor. Three rocket clusters line the route — one south at x=32, one north at x=40, one on-axis at x=46 — plus four more rockets at the (60,20) objective. Keep the ball tight; regroup before every contact. Pass the (43,20) checkpoint with 5 tanks together, then (60,20) with 5, kill 8, keep ≥5 alive, within about 50 turns.",
+    'Sequenced: ≥5 at (43,20), then ≥5 at (60,20); ≥8 kills; ≥5 alive; within 4500 ticks.',
+    '<3 alive, or deadline (4501 ticks).',
+    75, 6753)
+
+# 5. coord-relay-attack — tanks kill the enemy armour FIRST, then rifles mop up
+P = 'coord-relay-attack'; C = 'action'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    '4× medium tank @(15,20) Squad A + 4× rifle infantry @(5,30) Squad B (Defend)',
+    '1× medium tank + 3× rifle infantry @(60-62,20) (Return-Fire); sentinel proc @(120,6)',
+    "Commander, this is a relay-attack mission. You are given two squads on the west: 4 medium tanks at (15,20) and 4 rifle infantry at (5,30). An enemy cluster at (60,20) — 1 medium tank and 3 riflemen — will one-shot your rifles on contact. Engage the enemy tank first with your armour, then commit the rifles to mop up. 4 kills total, no more than 4 losses, within about 30 turns.",
+    'Sequenced: kill enemy tank, then total kills ≥4; ≤4 losses; within 3000 ticks.',
+    'All dead, >4 lost, or deadline (3001 ticks).',
+    36, 3243)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    '4× medium tank @(15,20) + 4× rifle infantry @(5,30)',
+    '2× medium tank + 4× rifle infantry @(60-62,20); sentinel proc @(120,6)',
+    "Commander, this is a relay-attack mission. You are given 4 medium tanks at (15,20) and 4 rifle infantry at (5,30). The enemy cluster at (60,20) is 2 medium tanks and 4 riflemen. Kill both enemy tanks with your armour first, then walk the infantry in for cleanup. 6 kills total, no more than 4 losses, within about 45 turns.",
+    'Sequenced: kill 2 enemy tanks, then total ≥6; ≤4 losses; within 4000 ticks.',
+    'All dead, >4 lost, or deadline (4001 ticks).',
+    45, 4053)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated: sp0 4×2tnk@(15,12) + 4×e1@(5,18); sp1 4×2tnk@(15,28) + 4×e1@(5,34)',
+    '3× medium tank + 5× rifle infantry @(60-62,20); sentinel proc @(120,6)',
+    "Commander, this is a relay-attack mission with seed-rotated staging. You are given 4 medium tanks and 4 rifle infantry on the west, staged either north or south by seed (rifles set back from the tanks). The enemy cluster at (60,20) is 3 medium tanks and 5 riflemen. Kill all 3 enemy tanks with armour first, then mop up with the rifles. 8 kills total, no more than 4 losses, within about 50 turns.",
+    'Sequenced: kill 3 enemy tanks, then total ≥8; ≤4 losses; within 4500 ticks.',
+    'All dead, >4 lost, or deadline (4501 ticks).',
+    50, 4503)
+
+# 6. coord-relay-vision-chain — keep three/four relay regions held at once
+P = 'coord-relay-vision-chain'; C = 'action'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'observe, move_units, stop'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    '4× jeep around (14-16,17-23) on HoldFire + Construction Yard @(10,20)',
+    '2× rocket infantry HIDDEN @(108,20) HoldFire; sentinel fact @(124,5)',
+    "Commander, this is a vision-relay scouting mission. You are given 4 jeeps and a Construction Yard at the west edge near y=20. A hidden enemy cluster sits at (108,20). Three relay regions must be HELD SIMULTANEOUSLY — one at (45,20), one at (75,20), and one all the way at the objective near (108,20). Space your jeeps to keep all three regions occupied at the same instant; discover at least 2 enemies; hold the yard; within about 24 turns.",
+    'Jeep in EACH of (45,20)/(75,20)/(108,20) rings simultaneously; ≥2 enemies discovered; yard alive; within 2400 ticks.',
+    'Yard lost, or deadline (2401 ticks).',
+    30, 2703)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    '4× jeep around (14-16,17-23) HoldFire + Construction Yard @(10,20)',
+    '3× rocket infantry HIDDEN @(108,20) HoldFire; sentinel fact @(124,5)',
+    "Commander, this is a vision-relay scouting mission. You are given 4 jeeps and a Construction Yard on the west. The chain now needs FOUR relay regions held simultaneously — (45,20), (60,20), (75,20), and the objective near (108,20). With exactly four jeeps every scout holds one leg of the chain. Discover at least 3 enemies, hold the yard, within about 21 turns.",
+    'Jeep in EACH of (45/60/75/108, 20) rings simultaneously; ≥3 discovered; yard alive; within 1900 ticks.',
+    'Yard lost, or deadline (1901 ticks).',
+    24, 2163)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated 4×jeep + Construction Yard in NORTH (y=13) or SOUTH (y=27) corridor',
+    '3× rocket infantry HIDDEN @(108,13 OR 108,27) HoldFire; sentinel fact @(124,20)',
+    "Commander, this is a vision-relay scouting mission with seed-rotated corridor. You are given 4 jeeps and a Construction Yard on the west edge, on either the north (y=13) or south (y=27) corridor by seed. Hold all four relay regions on your corridor at once — (45,y), (60,y), (75,y), and the objective near (108,y) — discover 3 enemies, keep the yard. Within about 21 turns. A memorised cell on the wrong corridor fails the chain.",
+    'Jeep in each of 4 relay rings on your corridor simultaneously; ≥3 discovered; yard alive; within 1900 ticks.',
+    'Yard lost, or deadline (1901 ticks).',
+    24, 2163)
+
+# 7. coord-squad-handoff — sequenced jeep→tank→jeep→tank delivery chain
+P = 'coord-squad-handoff'; C = 'action'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    '3× jeep @(5,5) NW Squad A + 3× medium tank @(5,33) SW Squad B',
+    '(none)',
+    "Commander, this is a sequenced squad handoff. You are given 3 jeeps in the north-west at (5,5) and 3 medium tanks in the south-west at (5,33). Two delivery points are required IN ORDER: 3 jeeps inside an 8-cell ring around (50,10), THEN 3 tanks inside an 8-cell ring around (90,30). The order is enforced — Squad B's clause only counts after Squad A's latches. Launch in parallel and time the arrival. Within about 50 turns.",
+    'Sequenced: 3 jeeps at (50,10), then 3 tanks at (90,30); within 4500 ticks.',
+    'All dead, or deadline (4501 ticks).',
+    52, 4683)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    '3× jeep @(5,5) NW + 3× medium tank @(5,33) SW',
+    '(none)',
+    "Commander, this is a three-stage sequenced squad handoff. You are given 3 jeeps in the north-west and 3 medium tanks in the south-west. Three delivery clauses must latch IN ORDER: 3 jeeps at (50,10), then 3 tanks at (90,30), then 3 jeeps at (60,20). Once Squad B lands at P2, redeploy the jeeps from P1 to P3. Within about 50 turns.",
+    'Sequenced: jeeps@P1, tanks@P2, jeeps@P3; within 4500 ticks.',
+    'All dead, or deadline (4501 ticks).',
+    52, 4683)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated 6× jeep + 6× medium tank in NW or SW corner',
+    '(none)',
+    "Commander, this is a four-stage sequenced squad handoff with seed-rotated staging. You are given 6 jeeps and 6 medium tanks on the west, staged in either the north-west or south-west corner by seed. Four sequenced clauses: 3 jeeps at (50,10), then 3 tanks at (90,30), then 3 jeeps at (60,20), then 3 tanks at (100,15). The clauses alternate vehicle type, so a single-squad tour can't cover them. Interleaved parallel dispatch only. Within about 50 turns.",
+    'Sequenced (4 clauses alternating jeep/tank); within 4500 ticks.',
+    'All dead, or deadline (4501 ticks).',
+    52, 4683)
+
+
+# =============================================================================
+# COORDINATION-* (2 packs)
+# =============================================================================
+
+# 8. coordination-ordered-rendezvous — waypoint_sequence chain
+P = 'coordination-ordered-rendezvous'; C = 'action'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'move_units, attack_unit, stop_units'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    '3× medium tank @(5,8) + 3× light tank @(7,32) on HoldFire',
+    '(none)',
+    "Commander, this is an ordered rendezvous mission. You are given 3 medium tanks in the north-west and 3 light tanks in the south-west. Two waypoints must be visited IN ORDER: W1 in the north-east at (110,8), then W2 in the south-east at (110,32). Each waypoint requires at least 2 units inside a 7-cell ring. A single column touring both legs blows the clock — launch parallel columns and let Squad B wait short of W2 until W1 latches. Within about 24 turns.",
+    'Waypoint sequence (W1 NE → W2 SE) with ≥2 units each; within 2200 ticks.',
+    'All dead, or deadline (2201 ticks).',
+    40, 3603)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    '3× medium tank @(5,6) + 3× light tank @(7,10) + 2× jeep @(5,14) on HoldFire',
+    '2× rifle infantry @(55,8) + 2× rifle infantry @(55,32) on Defend; sentinel fact @(115,20)',
+    "Commander, this is a three-stop ordered rendezvous. You are given 3 medium tanks, 3 light tanks, and 2 jeeps on the north-west edge. Three waypoints in order: W1 north-east at (115,6), then a south-west detour at (20,36), then W3 south-east at (115,34). Enemy rifle pickets contest both eastern lanes. A single column can't absorb the south-west detour leg. At most 2 losses, within about 33 turns.",
+    'Waypoint sequence (W1 → W2 SW detour → W3 SE) with ≥2 each; ≤2 losses; within 3000 ticks.',
+    'All dead, >2 lost, or deadline (3001 ticks).',
+    48, 4323)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    '3× medium tank @(5,6) + 3× light tank @(7,10) + 3× jeep @(5,14)',
+    '2× rifle infantry @(55,8) + 2× rocket infantry @(55,32) on Defend; sentinel fact @(115,20)',
+    "Commander, this is a four-stop ordered rendezvous. You are given 3 medium tanks, 3 light tanks, and 3 jeeps on the north-west edge. Four waypoints in order: W1 north-east at (115,6), then south-west at (20,36), then south-east at (115,34), then mid-east at (60,20). Enemy rifles AND rocket soldiers contest the lanes. Even three squads can't tour the chain as a single column; ordered parallel dispatch only. At most 1 loss, within about 36 turns.",
+    'Waypoint sequence (W1 → W2 → W3 → W4) with ≥2 each; ≤1 loss; within 3200 ticks.',
+    'All dead, >1 lost, or deadline (3201 ticks).',
+    52, 4683)
+
+# 9. coordination-staggered-window — simultaneous dock occupation
+P = 'coordination-staggered-window'; C = 'action'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'move_units, attack_unit, stop'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    '3× medium tank @(5,6) + 3× light tank @(7,9) + 2× jeep @(5,12)',
+    '1× Barracks @(115,6) NE + 1× Ore Refinery @(20,36) SW + 1× Power Plant @(60,20)',
+    "Commander, this is a staggered-window dock occupation. You are given 3 medium tanks, 3 light tanks, and 2 jeeps on the north-west. Two docks must be held AT THE SAME INSTANT — an enemy Barracks in the north-east at (115,6) and an enemy Refinery in the south-west at (20,36) — with at least 3 of your units at EACH dock. A single column touring A then B leaves A empty when it arrives at B. Split the force, dispatch both squads in parallel. Within about 30 turns.",
+    '≥3 units at (115,6,r=8) AND ≥3 at (20,36,r=8) simultaneously; within 2700 ticks.',
+    'All dead, or deadline (2701 ticks).',
+    32, 2883)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    '3× medium tank @(5,6) + 3× light tank @(7,9) + 2× jeep @(5,12)',
+    '1× Barracks @(115,6) + 1× Refinery @(20,36) + 1× Power Plant @(60,20)',
+    "Commander, this is a tighter staggered-window dock occupation. Same two docks (NE Barracks, SW Refinery), but the clock tightens to about 24 turns. The NE leg is much longer than the SW, so the NE squad must launch first with the SW squad following promptly. ≥3 units at each dock simultaneously, or the joint clause never co-fires.",
+    '≥3 units at (115,6) AND ≥3 at (20,36) simultaneously; within 2200 ticks.',
+    'All dead, or deadline (2201 ticks).',
+    26, 2343)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated 12× (4×2tnk + 4×1tnk + 4×jeep) in NW (y=6-12) or SW (y=27-33)',
+    '1× Barracks @(115,6) NE + 1× Refinery @(20,36) SW + 1× Power Plant @(115,34) SE + 1× Barracks @(60,20) centre',
+    "Commander, this is a three-way staggered-window dock occupation, no coordinates given. You are given 4 medium tanks, 4 light tanks, and 4 jeeps on the west edge, staged either north (y=6..12) or south (y=27..33) by seed. Three docks must be held at once — find them by building type: an enemy Barracks in the north-east, a Refinery in the south-west, a Power Plant in the south-east. ≥3 units at EACH at the same instant. Three different directions means no single column covers them; genuine three-way parallel dispatch only. Within about 30 turns.",
+    '≥3 at each of NE Barracks / SW Refinery / SE Power Plant simultaneously; within 2700 ticks.',
+    'All dead, or deadline (2701 ticks).',
+    32, 2883)
+
+
+# =============================================================================
+# MCV-* (6 packs)
+# =============================================================================
+
+# 10. mcv-deploy-and-build — deploy + power + barracks chain
+P = 'mcv-deploy-and-build'; C = 'reasoning'; M = 'mcv-deploy-and-build-arena'; SZ = '96x40'
+T = 'observe, deploy, build, place_building, move_units, stop'
+add(P, 'easy', C, M, SZ, 'fit', T,
+    '1× MCV @(20,20) + $1000',
+    'sentinel fact @(88,20) (anti auto-done)',
+    "Commander, this is an MCV deploy-and-build chain. You are given one Mobile Construction Vehicle (MCV) at (20,20) and $1000. Deploying the MCV consumes the vehicle and creates a Construction Yard one cell up-and-left of the deploy site, which re-enables your Building and Defense production queues. From the new yard, queue a Power Plant ($300) adjacent, then a Barracks ($500) adjacent. Within about 50 turns. Failing to deploy in the first 22 turns loses on the early-deploy gate.",
+    'Yard + Power Plant + Barracks owned within 4500 ticks.',
+    'Deadline (4501), or no yard by tick 2000.',
+    55, 4953)
+add(P, 'medium', C, M, SZ, 'fit', T,
+    '1× MCV @(20,20) + $1000',
+    '2× rifle infantry @(60,20-22) on Defend; sentinel fact @(88,20)',
+    "Commander, this is an MCV deploy-and-build chain under light pressure. You are given one MCV at (20,20) and $1000; a 2-rifleman Soviet patrol lurks east at (60,20). Deploy promptly (the deploy creates a Construction Yard one cell up-and-left), then queue a Power Plant and a Barracks adjacent to the new yard. Losing the MCV before deploy loses the run. Within about 28 turns.",
+    'Yard + Power Plant + Barracks within 2500 ticks.',
+    'Deadline (2501), or no yard by tick 800.',
+    30, 2703)
+add(P, 'hard', C, M, SZ, 'fit', T,
+    'Seed-rotated 1× MCV in NW (12,8) or SW (12,32) + $1000',
+    '2× rifle infantry @(60,20-22); sentinel fact @(88,20)',
+    "Commander, this is an MCV deploy-and-build chain with seed-rotated staging and a richer goal. You are given one MCV in either the north-west (12,8) or south-west (12,32) corner by seed, with $1000. Deploy promptly, then build a Power Plant, a Barracks, AND one extra building (a second Power Plant fits the budget). Within about 34 turns. Stopping at three buildings loses the four-building floor.",
+    'Yard + Power Plant + Barracks + ≥4 buildings total, within 3000 ticks.',
+    'Deadline (3001), or no yard by tick 800.',
+    36, 3243)
+
+# 11. mcv-deploy-defensible-site — read terrain, deploy in west pocket behind water
+P = 'mcv-deploy-defensible-site'; C = 'reasoning'; M = 'mcv-deploy-defensible-site-arena'; SZ = '112x40'
+T = 'observe, move_units, deploy, build, place_building, stop'
+add(P, 'easy', C, M, SZ, 'fit', T,
+    '1× MCV @(52,20) at corridor mouth + $1000',
+    '2× rifle infantry @(95,8) east lobe (Return-Fire); sentinel fact @(108,4)',
+    "Commander, this is a defensible-site MCV deploy. The map is split by a water wall with a single corridor near y=20. An enemy detachment sits in the east lobe (the open, terrain-unprotected side). Your MCV starts at the corridor mouth at (52,20). Drive WEST through the corridor into the defensible pocket behind the wall around (15,30), deploy there, then add a Power Plant and a Barracks. Within about 53 turns. Keep at least one unit alive.",
+    'Yard inside (15,30,r=5), Power Plant + Barracks owned, ≥1 unit alive, within 4800 ticks.',
+    'Deadline (4801), no yard by tick 1500, or yard outside the disc by tick 2400.',
+    60, 5403)
+add(P, 'medium', C, M, SZ, 'fit', T,
+    '1× MCV @(52,20) + $1000',
+    '5× rifle infantry @(95,8) east lobe (AttackAnything, rusher bot); sentinel fact @(108,4)',
+    "Commander, this is a defensible-site MCV deploy under heavier pressure. Same chokepoint geometry — water wall split by a single corridor near y=20. A heavier 5-rifleman rusher band is committed from the east lobe and must funnel through the corridor to reach the west side. Drive your MCV WEST through the corridor into the defensible pocket around (15,30) and deploy. Add a Power Plant and a Barracks, keep one unit alive, within about 53 turns.",
+    'Yard inside (15,30,r=5), Power Plant + Barracks, ≥1 unit alive, within 4800 ticks.',
+    'Deadline (4801), no yard by tick 1500, or yard outside the disc by tick 2400.',
+    60, 5403)
+add(P, 'hard', C, M, SZ, 'fit', T,
+    'Seed-rotated 1× MCV @(48,12) NORTH or @(48,28) SOUTH; $1000',
+    '6× rifle infantry @(95,6) + @(95,12) stacked east bands (AttackAnything); sentinel fact @(108,4)',
+    "Commander, this is a defensible-site MCV deploy with seed-rotated staging. Same chokepoint geometry — water wall, single corridor — but your MCV spawns at either (48,12) NORTH or (48,28) SOUTH. The defensible side is the west lobe BEHIND the water wall; the win accepts either the NW pocket (15,10) or the SW pocket (15,30). Two stacked rusher bands hit any east-lobe deploy. Read your start latitude, route to the matching west pocket, deploy, then add Power Plant + Barracks. Within about 60 turns.",
+    'Yard inside NW(15,10) or SW(15,30) disc; Power Plant + Barracks; ≥1 unit alive; within 4800 ticks.',
+    'Deadline (4801), no yard by 1500, or yard outside either disc by 2400.',
+    70, 6303)
+
+# 12. mcv-deploy-near-resource — drive east, deploy adjacent to the ore patch
+P = 'mcv-deploy-near-resource'; C = 'reasoning'; M = 'mcv-deploy-near-resource-arena'; SZ = '96x40'
+T = 'observe, deploy, harvest, move_units, build, place_building, stop'
+add(P, 'easy', C, M, SZ, 'fit', T,
+    '1× Refinery @(50,20) + 1× Harvester @(52,20) + 1× MCV @(20,20)',
+    'sentinel fact @(88,36)',
+    "Commander, this is an econ-first MCV siting decision. You are given a pre-built starter base in the west with a refinery and a working harvester at (50,20), plus a spare MCV at (20,20) and an ore patch at (60,20). Drive the MCV east and deploy it adjacent to the ore patch (within a 6-cell ring around (60,20)). The starter base keeps your cash flowing without further intervention. Within about 60 turns; reach economy value 3000.",
+    'Yard inside (60,20,r=6); economy value ≥3000; within 5400 ticks.',
+    'Deadline (5401 ticks).',
+    62, 5583)
+add(P, 'medium', C, M, SZ, 'fit', T,
+    '1× Refinery @(50,20) + 1× Harvester @(52,20) + 1× MCV @(20,20)',
+    '1× decoy mine @(40,20) mid-map; sentinel fact @(88,36)',
+    "Commander, this is an econ-first MCV siting decision with a decoy. Same starter base in the west with a working refinery and harvester. A SINGLE decoy mineral marker sits halfway east at (40,20) — a tempting near-mid deploy site. The real ore patch is further east at (60,20). Drive the MCV all the way east and deploy in the (60,20) disc. Within about 50 turns; reach economy value 4000.",
+    'Yard inside (60,20,r=6); economy value ≥4000; within 4500 ticks.',
+    'Deadline (4501 ticks).',
+    52, 4683)
+add(P, 'hard', C, M, SZ, 'fit', T,
+    'Seed-rotated starter base + MCV in NORTH (y=12) or SOUTH (y=28)',
+    'sentinel fact @(88,36)',
+    "Commander, this is an econ-first MCV siting decision with seed-rotated row. Your starter base — refinery, harvester, MCV — spawns either at the NORTH (y=12) or SOUTH (y=28) row by seed, and each row has its own ore patch at x=60. A shared far decoy patch sits at (88,20). Read your MCV's row, drive it east, and deploy in the matching row's (60,y) disc. Within about 60 turns; reach economy value 5500.",
+    'Yard inside either (60,12,r=6) or (60,28,r=6); economy value ≥5500; within 5400 ticks.',
+    'Deadline (5401 ticks).',
+    62, 5583)
+
+# 13. mcv-deploy-relocate-under-pressure — MCV is on the killing lane, move it off
+P = 'mcv-deploy-relocate-under-pressure'; C = 'reasoning'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'observe, move_units, deploy'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    'Construction Yard @(10,20) + Barracks + Power Plant; 1× MCV @(60,20) + 2× HoldFire rifles',
+    '4× rifle + 1× rocket @(110-112,20) AttackAnything (rusher); sentinel fact @(125,20)',
+    "Commander, this is a relocate-and-deploy decision under pressure. Your original yard at the western edge is being chewed by a small rusher band coming down the central lane. You have a single MCV parked dead-centre at (60,20) and no cash. The lane centre is a death cell — a deploy in place puts the new yard in the kill zone. Move the MCV off the lane to a safe shoulder — the north shoulder (60,8) or the south shoulder (60,32) — and deploy. Keep one unit alive, within about 60 turns.",
+    'Yard inside (60,8,r=8) OR (60,32,r=8); ≥1 unit alive; within 5400 ticks.',
+    'Deadline (5401), no yard remaining, or no shoulder yard by tick 1800.',
+    60, 5403)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    'Yard + Barracks + Power Plant @(10,20); 1× MCV @(60,20) + 2× HoldFire rifles',
+    '6× rifle + 2× rocket @(110-112,20) AttackAnything; sentinel fact @(125,20)',
+    "Commander, this is a relocate-and-deploy decision under heavier pressure. Same MCV at (60,20), but six riflemen plus two rocket soldiers come down the central lane. The original western yard cannot be held inside the budget, and a fresh yard placed in the central lane is razed on placement. Move the MCV to the north shoulder (60,8) or south shoulder (60,32) and deploy there. Keep one unit alive, within about 60 turns.",
+    'Yard inside (60,8,r=8) OR (60,32,r=8); ≥1 unit alive; within 5400 ticks.',
+    'Deadline (5401), no yard, or no shoulder yard by tick 1800.',
+    60, 5403)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated 1× MCV @(60,20) or (40,20) + Yard+Barracks+Power @(10,20) + HoldFire shoulders',
+    '8× rifle + 2× rocket @(100-102,20) AttackAnything; sentinel fact @(125,20)',
+    "Commander, this is a relocate-and-deploy decision with seed-rotated MCV column. Eight rifles plus two rocket soldiers close fast on the central lane. Your fresh MCV spawns at EITHER (60,20) or (40,20) by seed. Relocate to the north or south shoulder of YOUR starting column — (60,8)/(60,32) or (40,8)/(40,32) — and deploy. The original western yard can't be saved. At most two losses, within about 60 turns.",
+    'Yard inside any of the 4 shoulder discs; ≥1 unit alive; ≤2 losses; within 5400 ticks.',
+    'Deadline (5401), no yard, >2 losses, or no shoulder yard by 1800.',
+    60, 5403)
+
+# 14. mcv-deploy-second-base — drive an MCV east to the briefed expansion disc
+P = 'mcv-deploy-second-base'; C = 'reasoning'; M = 'mcv-deploy-second-base-arena'; SZ = '128x40'
+T = 'observe, deploy, move_units, build, place_building, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'Yard+Barracks+Power+Refinery+Harv @(15,10) west base + 1× MCV @(60,20)',
+    'sentinel fact @(124,4)',
+    "Commander, this is a second-base expansion. Your primary base — Construction Yard, Barracks, Power Plant, Refinery — sits in the west lobe with its own small ore patch. A spare MCV is staged at the corridor mouth in the map centre. A rich ore patch sits in the east lobe, the briefed expansion region centred at (95,30) with radius 8. Drive the MCV east and deploy inside that disc. Within about 60 turns.",
+    'Two yards owned, ≥1 inside (95,30,r=8); within 5400 ticks.',
+    'Deadline (5401), or original yard lost.',
+    70, 6303)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Same west base + 1× MCV @(60,20)',
+    '2× rifle infantry @(100,25) lone patrol Defend; sentinel fact @(124,4)',
+    "Commander, this is a second-base expansion under light contention. Same west primary base and spare MCV at the corridor mouth; same eastern expansion disc at (95,30). A lone enemy patrol now lurks near the target — a careless straight-line approach can intercept the fragile MCV. Drive east, deploy in the disc, within about 50 turns.",
+    'Two yards, ≥1 inside (95,30,r=8); within 4500 ticks.',
+    'Deadline (4501) or original yard lost.',
+    60, 5403)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated MCV @(70,10) NE-leaning or @(70,30) SE-leaning + west base duplicated across both spawn groups',
+    '2× rifle @(100,10) + 2× rifle @(100,30) Defend; sentinel fact @(124,4)',
+    "Commander, this is a second-base expansion with two candidate targets and seed-rotated MCV staging. Two candidate expansion discs — north-east at (95,10) and south-east at (95,30), each with its own ore patch and a small patrol guard. Your spare MCV stages closer to one of them depending on the seed. Drive to the NEAREST candidate and deploy there. Within about 43 turns. Cutting diagonally costs time AND brushes the off-axis patrol.",
+    'Two yards, ≥1 inside either (95,10,r=8) or (95,30,r=8); within 3800 ticks.',
+    'Deadline (3801) or original yard lost.',
+    50, 4503)
+
+# 15. mcv-deploy-third-base — three MCVs, three regions, tri-region footprint
+P = 'mcv-deploy-third-base'; C = 'reasoning'; M = 'mcv-deploy-third-base-arena'; SZ = '160x80'
+T = 'observe, deploy, move_units, build, place_building, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'Yard @(15,40) + 3× MCV pre-positioned at each target: NE (131,16), SE (131,66), S-CENTER (76,71)',
+    'sentinel fact @(150,40)',
+    "Commander, this is a tri-region operational footprint. You are given a starter Construction Yard at (15,40) and three MCVs pre-positioned one cell off each of three target regions — NE (130,15), SE (130,65), and S-CENTER (75,70). Deploy each MCV in place. Three yards total, one inside each region, within about 70 turns. Deploying only some of them leaves a region uncovered and the win unsatisfied.",
+    'Three yards, one inside EACH of NE/SE/S-CENTER discs; within 6300 ticks.',
+    'Deadline (6301), or fewer than 2 yards by tick 4000.',
+    75, 6753)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Yard @(15,40) + 3× MCV clustered at west starter base (20,35-45)',
+    '3× rifle infantry guards near each target region; sentinel fact @(150,40)',
+    "Commander, this is a tri-region operational footprint with central staging. Same three target regions — NE (130,15), SE (130,65), S-CENTER (75,70) — but your three MCVs cluster at your western starter base. Drive each MCV to one of the three regions and deploy. A light rifle patrol sits near every target. Within about 70 turns. Losing an MCV in transit before deploy, or bunching two in one region, loses.",
+    'Three yards, one inside EACH of NE/SE/S-CENTER discs; within 6300 ticks.',
+    'Deadline (6301), or fewer than 2 yards by tick 4500.',
+    75, 6753)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated 3× MCV clustered in WEST (20,35-45) or EAST (145,35-45) corner',
+    'Doubled patrols near each target (2× rifle each); sentinel fact @(150,75)',
+    "Commander, this is a tri-region operational footprint with seed-rotated MCV cluster. Same three target regions — NE (130,15), SE (130,65), S-CENTER (75,70). Your three MCVs cluster either at the WEST or EAST edge of the map by seed. Read each MCV's position and assign it to the target region it can reach fastest. Doubled patrols cover every target. Within about 70 turns.",
+    'Three yards, one inside EACH of NE/SE/S-CENTER discs; within 6300 ticks.',
+    'Deadline (6301), or fewer than 2 yards by tick 4500.',
+    75, 6753)
+
+
+# =============================================================================
+# MFB-* (8 packs)
+# =============================================================================
+
+# 16. mfb-base-1-defend-base-2-build — defend home + drive a fresh MCV east
+P = 'mfb-base-1-defend-base-2-build'; C = 'reasoning'; M = 'mfb-base-1-defend-base-2-build-arena'; SZ = '160x60'
+T = 'observe, deploy, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'Base #1 @(15,30): fact + proc + tent + 3× HoldFire rifles; fresh MCV @(30,30)',
+    '2× grenadiers @(20,30) AttackAnything (rusher bot); sentinel fact @(154,54)',
+    "Commander, this is a secure-and-expand operation under raid pressure. Base #1 in the west holds a Construction Yard, Refinery, Barracks, and three HoldFire rifle defenders (they will NOT engage on their own). Two enemy grenadiers are bearing down on base #1 from the east at (20,30). A fresh MCV waits half-way east at (30,30). Two clauses must satisfy: keep a yard alive (defend base #1) AND stand up a second yard inside the disc at (130,30) on the far east. Within about 70 turns.",
+    'Yard alive + 2nd yard inside (130,30,r=8) + ≥1 unit alive; within 6300 ticks.',
+    'Deadline (6301), no yard, or no units.',
+    72, 6483)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Base #1 same as easy + fresh MCV @(30,30)',
+    '2× grenadiers @(20,30) AttackAnything (rusher); sentinel fact @(154,54)',
+    "Commander, this is the same secure-and-expand operation under a tighter clock. Base #1 in the west — yard + refinery + barracks + 3 HoldFire rifle defenders — is under raid from 2 grenadiers at (20,30). A fresh MCV waits half-way east at (30,30). Defend base #1 (the rifles won't engage on their own) AND stand up a second yard inside the disc at (130,30). Within about 50 turns.",
+    'Yard alive + 2nd yard inside (130,30,r=8) + ≥1 unit alive; within 4500 ticks.',
+    'Deadline (4501), no yard, or no units.',
+    56, 5043)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated MCV @(30,15) or @(30,45) + base #1 duplicated across both spawn groups',
+    '2× grenadiers @(20,30) + 2× rifle pickets @(110,15) and @(110,45); sentinel fact @(154,54)',
+    "Commander, this is a secure-and-expand operation with seed-rotated MCV staging. Base #1 in the west (yard + refinery + barracks + 3 HoldFire rifles) is under raid from 2 grenadiers. A fresh MCV waits at EITHER (30,15) NORTH or (30,45) SOUTH by seed. Two candidate east discs — NE (130,15) and SE (130,45) — either landing wins. Light rifle pickets sit at (110,15) and (110,45). Pick the disc matching your MCV's latitude; the wrong-corner diagonal busts the deadline AND walks the MCV through the off-axis picket. Within about 60 turns.",
+    'Yard alive + 2nd yard inside (130,15) or (130,45) disc + ≥1 unit; within 5400 ticks.',
+    'Deadline (5401), no yard, or no units.',
+    64, 5763)
+
+# 17. mfb-mirror-base-east-west — build mirror infrastructure on both sides under attack
+P = 'mfb-mirror-base-east-west'; C = 'reasoning'; M = 'mfb-mirror-base-east-west-arena'; SZ = '160x60'
+T = 'observe, build, place_building, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'WEST: fact+proc+powr @(15,20) + 3× HoldFire 2tnk @(16,17-23); EAST: fact @(85,20) + 3× HoldFire 2tnk @(84,17-23); $1700',
+    '2× grenadiers @(28,20) west probe + 2× grenadiers @(72,20) east probe (rusher, AttackAnything); sentinel fact @(152,52)',
+    "Commander, this is a mirror-base operation under a two-front probe. You hold a FULLY-BUILT west base — yard, refinery, power plant, and three HoldFire medium tanks — at x=15, and a HALF-BUILT east standby — just a yard plus three HoldFire tanks — at x=85. A coordinated two-grenadier probe hits BOTH bases. $1700 cash. The win requires both yards alive AND a refinery placed inside each base's disc — meaning you must mirror the west's refinery on the east side. Command both tank groups to engage their local probe (they won't fire on their own). Within about 50 turns.",
+    'Two yards + Refinery inside (15,20,r=8) + Refinery inside (85,20,r=8); within 4500 ticks.',
+    'Deadline (4501), or yard count <2.',
+    55, 4953)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Same as easy + 1 extra HoldFire tank per side (4 each)',
+    '3× rifle + 1× rocket on each side (AttackAnything, rusher); sentinel fact @(152,52)',
+    "Commander, this is a mirror-base operation under a heavier two-front probe. Same west primary and east standby — yards, three HoldFire tanks each, plus an extra defender — under probes of three rifles and one rocket soldier on each side. $1700 funds the east mirror (refinery in the east disc) exactly. Command both tank groups to engage their local probe; the rifles won't engage on their own. Both yards alive, both refineries placed, within about 34 turns.",
+    'Two yards + Refinery in west disc + Refinery in east disc; within 3000 ticks.',
+    'Deadline (3001) or yard count <2.',
+    37, 3333)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated NORTH (y=12) or SOUTH (y=28) bands for BOTH bases + 4 HoldFire tanks each',
+    'Same probes as medium; sentinel fact @(152,52)',
+    "Commander, this is a mirror-base operation with seed-rotated latitudes. Same mirror-and-defend pattern, but both bases now spawn either at the NORTH (y=12) or SOUTH (y=28) band by seed — west and east mirror each other on the same row. Read your construction yard positions and build the east refinery inside the matching latitude's disc. Both yards alive, both refineries placed at the matching latitude, within about 34 turns.",
+    'Two yards + Refinery in both west and east discs at matching latitude; within 3000 ticks.',
+    'Deadline (3001) or yard count <2.',
+    37, 3333)
+
+# 18. mfb-redundant-tech-buildings — backup war factory because the forward one will die
+P = 'mfb-redundant-tech-buildings'; C = 'reasoning'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'observe, build, place_building, harvest, move_units, stop'
+add(P, 'easy', C, M, SZ, 'wide', T,
+    'fact+powr+proc+fix+harv @(8-17,18-21) west base + 1× weap @(60,18) forward; $6000',
+    '6× heavy tank @(58-62,16-20) ringing the forward weap (Defend); sentinel fact @(110,30) + ore mine @(22,21)',
+    "Commander, this is a redundant-production / capacity-resilience drill. You inherit a working west base — Construction Yard, Power Plant, Refinery, Service Depot — plus a Harvester and an ore patch, and $6000. One War Factory sits far east at (60,18), ringed by six enemy heavy tanks that will raze it in the opening turns. Build a SECOND War Factory in the safe west base beside the yard, then produce 3 medium tanks. Yard alive, within about 70 turns.",
+    '≥1 weap, ≥3 medium tanks, yard alive; within 6300 ticks.',
+    'Deadline (6301) or yard lost.',
+    70, 6303)
+add(P, 'medium', C, M, SZ, 'wide', T,
+    'Same west base + forward weap @(60,18) + $6000',
+    '6× heavy tank @(58-62,16-20); sentinel fact @(110,30) + ore mine @(22,21)',
+    "Commander, this is a redundant-production drill with a tighter clock. Same inherited west base — yard, power, refinery, depot, harvester — plus an exposed forward War Factory at (60,18) ringed by six heavy tanks, and $6000. Don't wait for the forward factory to fall: commit a backup War Factory beside the yard early, then field 3 medium tanks. Yard alive, within about 60 turns.",
+    '≥1 weap, ≥3 medium tanks, yard alive; within 5400 ticks.',
+    'Deadline (5401) or yard lost.',
+    60, 5403)
+add(P, 'hard', C, M, SZ, 'wide', T,
+    'Seed-rotated west base in NORTH (y=14) or SOUTH (y=26) band; forward weap on same row; $6000',
+    '12× heavy tank ringing both candidate forward weap positions; sentinel fact @(110,33)',
+    "Commander, this is a redundant-production drill with seed-rotated base row. Same redundant-factory task, but your base spawns either north (y≈14) or south (y≈26) by seed and TWELVE enemy heavies ring the exposed forward War Factory. Read the yard's actual cell, build the backup War Factory beside it, then field 3 medium tanks. Yard alive, within about 60 turns.",
+    '≥1 weap, ≥3 medium tanks, yard alive; within 5400 ticks.',
+    'Deadline (5401) or yard lost.',
+    60, 5403)
+
+# 19. mfb-rotating-production-pressure — alternate raids, rotate set_primary
+P = 'mfb-rotating-production-pressure'; C = 'reasoning'; M = 'rush-hour-arena'; SZ = '128x40'
+T = 'observe, build, set_primary, set_rally_point'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'TWO complete bases: WEST fact+weap+fix+proc+powr @(10-15,16-23) + EAST same @(80-85,16-23); $6000',
+    'sentinel fact @(122,4)',
+    "Commander, this is a rotating-production-pressure drill. You own TWO complete bases — a WEST base around x=15 and an EAST base around x=85 — each with a Construction Yard, War Factory, Service Depot, Refinery, and Power Plant. Enemy raids alternate: a band hits WEST around tick 300, then EAST around tick 1500. Finished tanks appear at your PRIMARY War Factory, so set_primary on the west factory first to garrison three tanks there, then rotate the primary to east before the east wave. Four tanks total, both yards alive, within about 60 turns (the win latches AFTER tick 4500 so a too-early finish doesn't count).",
+    '≥4 medium tanks + ≥2 weap + ≥2 yards; after tick 4500; before tick 5400.',
+    'Deadline (5401), or weap/yard count <2.',
+    70, 6303)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Same two-base layout + $6000',
+    'sentinel fact @(122,4)',
+    "Commander, this is a rotating-production-pressure drill with a heavier east raid. Same two complete bases at x=15 (WEST) and x=85 (EAST), same alternating raid schedule (WEST tick 300, EAST tick 1500), but the east raid is heavier. Set the primary on the WEST war factory first to garrison the early band, then rotate to EAST before the east wave hits. Four tanks total, both bases alive, within about 60 turns.",
+    '≥4 medium tanks + ≥2 weap + ≥2 yards; after tick 4500; before tick 5400.',
+    'Deadline (5401), or weap/yard count <2.',
+    70, 6303)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated east base column: x=85 sp0 or x=80 sp1; west fixed; $6000',
+    'sentinel fact @(122,4) or @(122,36) by seed',
+    "Commander, this is a rotating-production-pressure drill with seed-rotated east-base column. Same alternating raid load-balance, but the east base's column varies by seed (around x=80..85). Read its actual position. Set the primary on the WEST war factory first, rotate to EAST in time, garrison both bases. Four tanks total, both bases alive, within about 60 turns.",
+    '≥4 medium tanks + ≥2 weap + ≥2 yards; after tick 4500; before tick 5400.',
+    'Deadline (5401), or weap/yard count <2.',
+    70, 6303)
+
+# 20. mfb-supply-line-link-between-bases — park a tank on the corridor midpoint
+P = 'mfb-supply-line-link-between-bases'; C = 'action'; M = 'mfb-supply-line-corridor-arena'; SZ = '160x60'
+T = 'observe, move_units, attack_unit, attack_move, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'WEST: fact+proc @(15,20); EAST: fact+proc @(85,20); 4× medium tank @(49-51,11-12) on north shoulder (Defend)',
+    '2× rifle infantry @(42,6) north + 2× @(58,34) south (AttackAnything, rusher); sentinel fact @(152,52)',
+    "Commander, this is a supply-line interdiction along an inter-base corridor. Two bases are linked by a supply corridor running along y=20: a Construction Yard plus Refinery in the WEST at (15,20) and the same in the EAST at (85,20). Four medium tanks stage on the north shoulder at (50,11). Two raider bands probe the corridor from the north and the south. Move your tank squad onto the corridor midpoint at (50,20) within radius 6, kill at least 3 raiders, and keep both bases alive. Within about 26 turns.",
+    'Both yards + both refineries; ≥3 kills; ≥1 unit in (50,20,r=6); within 2300 ticks.',
+    'Deadline (2301), or yard count <2.',
+    50, 4503)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Same two bases + 4× medium tank @(49-51,11-12)',
+    '9× rifle infantry across three bands (north, south, central column) AttackAnything; sentinel fact @(152,52)',
+    "Commander, this is a supply-line interdiction under heavier raid pressure. Same two bases linked by the y=20 corridor, but THREE raider bands probe — north, south, and central column — for nine raiders total. Park the four-tank squad on the (50,20) midpoint inside radius 6 to interdict everything. Six kills, both bases intact, within about 26 turns. Splitting 2/2 across bases leaves the corridor open.",
+    'Both yards + both refineries; ≥6 kills; ≥1 unit in (50,20,r=6); within 2300 ticks.',
+    'Deadline (2301) or yard count <2.',
+    50, 4503)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated bases + corridor in NORTH (y=12) or SOUTH (y=28) band',
+    'Three raider bands per latitude; sentinel fact @(152,52)',
+    "Commander, this is a supply-line interdiction with seed-rotated corridor latitude. Two bases linked by a NORTH corridor at y=12 or a SOUTH corridor at y=28 by seed. Three raider bands probe. Read your latitude and put a tank on YOUR corridor's midpoint — (50,12) or (50,28), radius 6. Wrong-latitude camping fails the matching corridor clause. Six kills, both bases intact, within about 26 turns.",
+    'Both yards + both refineries; ≥6 kills; ≥1 unit on matching corridor midpoint; within 2300 ticks.',
+    'Deadline (2301) or yard count <2.',
+    50, 4503)
+
+# 21. mfb-tech-base-vs-economy-base — TECH role at NW, ECON role at SE
+P = 'mfb-tech-base-vs-economy-base'; C = 'reasoning'; M = 'arena 160x80'; SZ = '160x80'
+T = 'observe, build, place_building, harvest, move_units, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'NW pole: fact+powr+mcv+harv @(20-25,18-22); SE pole: fact+powr+mcv @(135-140,58-62); $4000',
+    '4× ore mine markers + sentinel fact @(4,75)',
+    "Commander, this is a tech-vs-econ base-role allocation. Two base sites are pre-built: a NW pole at (20,20) and a SE pole at (140,60), each with a Construction Yard, Power Plant, and idle MCV. One Harvester is parked at the NW pole. A large ore patch sits beside the SE pole — that's the economy site. The shielded NW pole is the tech site. $4000 funds a refinery and a war factory with slack. Build the war factory inside the NW disc (radius 10), the refinery inside the SE disc (radius 10), reach two total harvesters and economy value 2500, within about 70 turns.",
+    'weap inside (20,20,r=10) + proc inside (140,60,r=10) + ≥2 harv + economy_value≥2500; within 6300 ticks.',
+    'Deadline (6301), or yard count <2.',
+    70, 6303)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Same as easy + $4000',
+    '4× ore mine markers + sentinel fact @(4,75)',
+    "Commander, this is a tech-vs-econ base-role allocation under the same kit. Same NW and SE poles. The economy bar requires real harvest income — only the SE refinery clears it inside the clock, because the harvester it spawns hits the big patch immediately. War factory at NW, refinery at SE, two harvesters total, economy value 2500, within about 70 turns. Bunching both buildings on one side fails the role split.",
+    'weap inside NW disc + proc inside SE disc + ≥2 harv + economy_value≥2500; within 6300 ticks.',
+    'Deadline (6301) or yard count <2.',
+    70, 6303)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated: harv may start at NW pole or SE pole; both poles built',
+    '4× ore mine markers + sentinel fact @(4,75)',
+    "Commander, this is a tech-vs-econ base-role allocation with seed-rotated starter harvester. Same role-split decision — war factory at NW, refinery at SE — but the starter harvester may spawn at the NW or SE pole by seed. The large ore patch is still by SE, so refinery-at-SE remains right either way. Read your actual layout. Two harvesters, economy value 2500, within about 60 turns.",
+    'weap inside NW disc + proc inside SE disc + ≥2 harv + economy_value≥2500; within 5400 ticks.',
+    'Deadline (5401) or yard count <2.',
+    60, 5403)
+
+# 22. mfb-third-base-against-clock — third refinery in far-east disc
+P = 'mfb-third-base-against-clock'; C = 'reasoning'; M = 'mfb-third-base-against-clock-arena'; SZ = '128x40'
+T = 'observe, build, place_building, harvest, move_units, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'WEST base @(15,20)+proc+powr; MID base @(50,20)+proc; $2000; ore mines along the route',
+    'sentinel fact @(124,35)',
+    "Commander, this is a third-base ramp-up against a clock. Two pre-built bases: a WEST base at (15,20) and a MID base at (50,20), each with a refinery. Your wallet has $2000, enough for one more refinery with margin. Stand up a THIRD base in the far-east region — build a refinery inside an 8-cell disc around (90,20). Three refineries total, yard alive, within about 70 turns.",
+    'proc inside (90,20,r=8) + ≥3 proc + yard alive; within 6300 ticks.',
+    'Deadline (6301) or yard lost.',
+    72, 6483)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Same two pre-built bases + $2000 + ore mines',
+    'sentinel fact @(124,35)',
+    "Commander, this is a third-base ramp-up against a tighter clock. Same WEST and MID base layout (refineries at (15,20) and (50,20)). $2000 still funds the third refinery with margin. Build it inside the (90,20) disc. Three refineries, yard alive, within about 50 turns. Burning the budget on army forecloses on the third site.",
+    'proc inside (90,20,r=8) + ≥3 proc + yard alive; within 4500 ticks.',
+    'Deadline (4501) or yard lost.',
+    56, 5043)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated two-base latitude (y≈20 or y≈50) on 128x64 arena',
+    'sentinel fact @(124,59)',
+    "Commander, this is a third-base ramp-up with seed-rotated base row. Two pre-built bases sit either at y≈20 or y≈50 by seed; two candidate far-east discs at (90,20) and (90,50). Read your bases' latitude and stand up the third refinery in the matching disc — the off-latitude region needs a cross-map order that may bust the clock. Three refineries, yard alive, within about 60 turns.",
+    'proc inside (90,20) or (90,50) disc + ≥3 proc + yard alive; within 5400 ticks.',
+    'Deadline (5401) or yard lost.',
+    64, 5763)
+
+# 23. mfb-two-base-simultaneous — both refineries built before the clock
+P = 'mfb-two-base-simultaneous'; C = 'reasoning'; M = 'mfb-two-base-simultaneous-arena'; SZ = '160x60'
+T = 'observe, build, place_building, stop'
+add(P, 'easy', C, M, SZ, 'wide-justified', T,
+    'WEST: fact+powr @(15,20); EAST: fact+powr @(85,20); $2800',
+    'sentinel fact @(152,52)',
+    "Commander, this is a two-base concurrent build. Two pre-built yards: a WEST yard at (15,20) and an EAST yard at (85,20), each with a Power Plant. $2800 is exactly two refineries' worth. Build a refinery inside each region (radius 8 around (15,20) and (85,20)). Both yards alive, within about 30 turns. Stalling or doing one base only loses.",
+    'Two yards + Refinery in (15,20,r=8) + Refinery in (85,20,r=8); within 2700 ticks.',
+    'Deadline (2701) or yard lost.',
+    32, 2883)
+add(P, 'medium', C, M, SZ, 'wide-justified', T,
+    'Same as easy + $2800',
+    'sentinel fact @(152,52)',
+    "Commander, this is a two-base concurrent build with a tight clock. Same two yards at (15,20) and (85,20) with the same $2800, but the deadline is about 21 turns. Issue the next build the moment you place the previous one — keep the shared queue saturated. Both refineries placed inside their discs, both yards alive.",
+    'Two yards + Refinery in both discs; within 1850 ticks.',
+    'Deadline (1851) or yard lost.',
+    23, 2073)
+add(P, 'hard', C, M, SZ, 'wide-justified', T,
+    'Seed-rotated NORTH (y=12) or SOUTH (y=28) band for both yards + HoldFire e1 sentinel each side',
+    'sentinel fact @(152,52)',
+    "Commander, this is a two-base concurrent build with seed-rotated latitude. Same concurrent build, but both yards spawn at the NORTH (y=12) or SOUTH (y=28) band by seed. Read the actual yard positions and place each refinery within radius 8 of the matching latitude. Within about 21 turns. Memorised cells fail on the seed flip.",
+    'Two yards + Refinery in both discs at matching latitude; within 1850 ticks.',
+    'Deadline (1851) or yard lost.',
+    23, 2073)
+
+
+# =============================================================================
+# Posture and posture_issue annotations
+# =============================================================================
+POSTURE = {
+    'coord-converge-on-target':           ('guard (bot post-hold; lunge ~16, leash ~18)', ''),
+    'coord-cover-and-move':               ('static (st2 mixed cluster — Defend, never advances)', ''),
+    'coord-diversionary-attack':          ('static (st2 decoy guards + 1 rifle on real yard)', ''),
+    'coord-mutual-support':               ('static (st2 rocket clusters along the lane)', ''),
+    'coord-relay-attack':                 ('reactive (st1 enemy column — ReturnFire, fires back after taking fire)', ''),
+    'coord-relay-vision-chain':           ('passive (st0 HIDDEN rocket cluster — never fires, never moves; pure perception probe)', ''),
+    'coord-squad-handoff':                ('none (no enemies)', ''),
+    'coordination-ordered-rendezvous':    ('static pickets (st2 rifle/rocket along eastern lanes)', ''),
+    'coordination-staggered-window':      ('passive (no bot; buildings as docks)', ''),
+    'mcv-deploy-and-build':               ('static patrol (st2 rifle pair near forward fact)', ''),
+    'mcv-deploy-defensible-site':         ('rusher (st1/st3 east-lobe band funnels through corridor)', ''),
+    'mcv-deploy-near-resource':           ('none (decoy mine only; no combat)', ''),
+    'mcv-deploy-relocate-under-pressure': ('rusher (st3 rifle+rocket lane closer)', ''),
+    'mcv-deploy-second-base':             ('static patrol (st2 rifle pickets near target discs)', ''),
+    'mcv-deploy-third-base':              ('static patrol (st2 rifle pickets near each target region)', ''),
+    'mfb-base-1-defend-base-2-build':     ('rusher (st3 grenadiers commit on base #1 mass) + static far pickets on hard', ''),
+    'mfb-mirror-base-east-west':          ('rusher (st3 grenadier/rifle+rocket probes on both bases)', ''),
+    'mfb-redundant-tech-buildings':       ('static (st2 heavy-tank ring around the forward weap)', ''),
+    'mfb-rotating-production-pressure':   ('hunt (bot; alternating raids per pack notes)', 'NOTE: enemies declared as bot_type:hunt but no enemy combat actors on the actor list — raids may be implicit/scheduled. Verify the raid-injection path on a smoke run.'),
+    'mfb-supply-line-link-between-bases': ('rusher (st3 rifle bands probe from north/south flanks)', ''),
+    'mfb-tech-base-vs-economy-base':      ('none (ore-mine markers only; no combat)', ''),
+    'mfb-third-base-against-clock':       ('none (ore-mine markers + sentinel; no combat)', ''),
+    'mfb-two-base-simultaneous':          ('none (sentinel only)', ''),
+}
+for r in R:
+    p, pi = POSTURE.get(r['pack'], ('', 'UNCATEGORISED'))
+    r['enemy_posture'] = p
+    r['posture_issue'] = pi
+
+
+# =============================================================================
+# Emit CSV
+# =============================================================================
+fields = ['pack', 'level', 'capability', 'map_name', 'map_size', 'map_fit', 'tools',
+          'agent_force', 'enemy_force', 'enemy_posture', 'posture_issue',
+          'briefing_RA', 'win_condition', 'lose_condition',
+          'max_turns', 'tick_budget']
+
+with OUT.open('w', newline='') as f:
+    w = csv.DictWriter(f, fieldnames=fields, quoting=csv.QUOTE_ALL)
+    w.writeheader()
+    for r in R:
+        w.writerow(r)
+
+print(f'Wrote {len(R)} rows to {OUT}')

@@ -103,7 +103,7 @@ def _intended(rs, Command):
 
 def _run(level, policy, seed=1):
     c = compile_level(load_pack(PACK), level)
-    assert c.map_supported, "rush-hour-arena terrain must be present"
+    assert c.map_supported, "bespoke 48x40 arena terrain must be present"
     return c, run_level(c, policy, seed=seed)
 
 

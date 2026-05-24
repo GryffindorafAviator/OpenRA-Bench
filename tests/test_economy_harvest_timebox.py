@@ -32,96 +32,45 @@ PACK_PATH = PACKS_DIR / "economy-harvest-timebox.yaml"
 
 
 def stall(render_state, Command):
-    """Do-nothing — must lose because starting_cash < bar everywhere."""
+    """Do-nothing — but the pre-placed harvester auto-routes (engine
+    `auto_route_idle_harvesters`) so income still flows. Stall must
+    LOSE because the bar is set ABOVE the single-harvester yield."""
     return [Command.observe()]
 
 
-def harv_only_easy(render_state, Command):
-    """Pre-placed harvester only, easy patch coords."""
-    ids = [
-        str(u["id"])
-        for u in render_state.get("units_summary", []) or []
-        if u.get("type") == "harv"
-    ]
-    return [Command.harvest(ids, 22, 18)] if ids else [Command.observe()]
-
-
-def harv_only_any(render_state, Command):
-    """Pre-placed harvester(s) only, try both NW and SW hard cluster
-    coords (engine picks the reachable one for the seed). Used on
-    medium/hard to verify a single-harvester policy still loses."""
-    ids = [
-        str(u["id"])
-        for u in render_state.get("units_summary", []) or []
-        if u.get("type") == "harv"
-    ]
-    if not ids:
-        return [Command.observe()]
-    cmds = []
-    for uid in ids:
-        cmds.append(Command.harvest([uid], 22, 18))
-        cmds.append(Command.harvest([uid], 22, 28))
-    return cmds
-
-
 def greedy_e1_only_medium(render_state, Command):
-    """Spend the budget on infantry (no income). Loses on medium where
-    starting_cash is far below the bar. Medium has no tent/barr so the
-    e1 build is rejected, which still LOSES (no income channel)."""
+    """Spend the budget on infantry (no income channel). Medium has
+    no tent/barr so the e1 build is BLOCKED (no production path);
+    cash sits idle and auto-harvest reaches only the baseline floor,
+    BELOW the medium bar — LOSS."""
     cmds = []
     if render_state.get("cash", 0) >= 100:
         cmds.append(Command.build("e1"))
     return cmds if cmds else [Command.observe()]
 
 
-def intended_medium_factory():
-    """Build ONE extra harvester (cost 1100) and run both on the two
-    pre-placed ore patches — the no-cheat WIN policy on medium."""
-    queued = [False]
+def intended_factory(n_extra):
+    """Build N extra harvesters and let the engine auto-route them.
+    DO NOT issue explicit `Command.harvest(...)` — it disrupts the
+    auto-route cycle."""
+    state = {"queued": 0}
 
     def policy(render_state, Command):
-        cmds = []
-        ids = [
-            str(u["id"])
-            for u in render_state.get("units_summary", []) or []
-            if u.get("type") == "harv"
-        ]
-        for i, uid in enumerate(ids):
-            mx, my = (22, 18) if i % 2 == 0 else (22, 22)
-            cmds.append(Command.harvest([uid], mx, my))
-        if not queued[0] and render_state.get("cash", 0) >= 1100:
-            cmds.append(Command.build("harv"))
-            queued[0] = True
-        return cmds if cmds else [Command.observe()]
+        if (state["queued"] < n_extra
+                and render_state.get("cash", 0) >= 1100):
+            state["queued"] += 1
+            return [Command.build("harv")]
+        return [Command.observe()]
 
     return policy
+
+
+def intended_medium_factory():
+    return intended_factory(1)
 
 
 def intended_hard_factory():
-    """Build TWO extra harvesters (3 total) and feed all three patches
-    — works against both NW (spawn 0) and SW (spawn 1) hard groups,
-    since the harvester routes to whichever patch is reachable."""
-    queued = [0]
-    # All possible mine cluster coordinates for both spawn groups; the
-    # harvester will path to a reachable one for the active seed.
-    mines = [(22, 10), (22, 14), (26, 12), (22, 28), (22, 32), (26, 30)]
-
-    def policy(render_state, Command):
-        cmds = []
-        ids = [
-            str(u["id"])
-            for u in render_state.get("units_summary", []) or []
-            if u.get("type") == "harv"
-        ]
-        for i, uid in enumerate(ids):
-            mx, my = mines[i % len(mines)]
-            cmds.append(Command.harvest([uid], mx, my))
-        if queued[0] < 2 and render_state.get("cash", 0) >= 1100:
-            cmds.append(Command.build("harv"))
-            queued[0] += 1
-        return cmds if cmds else [Command.observe()]
-
-    return policy
+    return intended_factory(2)
 
 
 # ───────────────────────── solvency: intended WINS ────────────────────────
@@ -129,8 +78,10 @@ def intended_hard_factory():
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_easy_intended_wins(seed):
+    """Easy: starting cash $1100 funds exactly one extra harvester;
+    the intended play is build 1 extra harv → 2 in parallel ≥3500."""
     c = compile_level(load_pack(PACK_PATH), "easy")
-    r = run_level(c, harv_only_easy, seed=seed)
+    r = run_level(c, intended_factory(1), seed=seed)
     assert r.outcome == "win", (
         f"easy intended seed={seed} should WIN, got {r.outcome} "
         f"(EV={r.signals.cash + r.signals.resources}, tick={r.signals.game_tick})"
@@ -187,7 +138,7 @@ def test_medium_single_pre_placed_harvester_loses(seed):
     """The pre-placed harvester alone can't hit medium's bar (5500 by
     tick 3000) — must lose. This is the 'failed to expand' policy."""
     c = compile_level(load_pack(PACK_PATH), "medium")
-    r = run_level(c, harv_only_any, seed=seed)
+    r = run_level(c, stall, seed=seed)
     assert r.outcome == "loss", (
         f"medium single-harvester seed={seed} must LOSE, got {r.outcome} "
         f"(EV={r.signals.cash + r.signals.resources})"
@@ -199,7 +150,7 @@ def test_hard_single_pre_placed_harvester_loses(seed):
     """The pre-placed harvester alone can't hit hard's bar (7500 by
     tick 3600) on either spawn — must lose every seed."""
     c = compile_level(load_pack(PACK_PATH), "hard")
-    r = run_level(c, harv_only_any, seed=seed)
+    r = run_level(c, stall, seed=seed)
     assert r.outcome == "loss", (
         f"hard single-harvester seed={seed} must LOSE, got {r.outcome} "
         f"(EV={r.signals.cash + r.signals.resources})"
@@ -324,11 +275,10 @@ def test_income_accrues_within_200_ticks_medium():
     samples: list[int] = []
 
     def harv(render_state, Command):
-        units = render_state.get("units_summary", []) or []
-        ids = [str(u["id"]) for u in units if u.get("type") == "harv"]
+        # Auto-route does all the work; just sample EV each turn.
         ev = render_state.get("cash", 0) + render_state.get("resources", 0)
         samples.append(ev)
-        return [Command.harvest(ids, 22, 18)] if ids else [Command.observe()]
+        return [Command.observe()]
 
     r = run_level(c, harv, seed=1)
     # By end-of-run, harvest income must have moved EV above the

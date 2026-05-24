@@ -133,10 +133,19 @@ def make_intended():
                 # Enemies not yet visible — hold at centre (observe)
                 # until interrupt fires.
                 return [C.observe()]
+            # Detect lanes by enemy y position. The E (head-on) lane is
+            # any visible enemy on the central y band — once the lane is
+            # detected the tanks commit forward to the corresponding
+            # zone, so this also handles the case where the head-on band
+            # has already advanced past the original spawn cell.
             n_band = any(e["cell_y"] < 18 for e in enem)
             s_band = any(e["cell_y"] > 22 for e in enem)
+            # Any visible enemy on the central latitude that is east of
+            # ALL of our tanks counts as the head-on band (a hunt-bot
+            # band closing on the reserve from the east).
+            own_max_x = max((u["cell_x"] for u in own), default=0)
             e_band = any(
-                18 <= e["cell_y"] <= 22 and e["cell_x"] > 60
+                18 <= e["cell_y"] <= 22 and e["cell_x"] > own_max_x + 2
                 for e in enem
             )
             active = []

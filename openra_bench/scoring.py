@@ -109,7 +109,10 @@ def _dimension_values(compiled: CompiledLevel, res: EpisodeResult) -> dict:
     max_ticks = max(1, compiled.scenario.termination.max_ticks)
     tick_frac = _clamp(s.game_tick / max_ticks)
 
-    outcome = {"win": 1.0, "draw": 0.5, "loss": 0.0}[res.outcome]
+    # Draw scores as loss — a non-win is a non-win. The string "draw"
+    # is preserved on res.outcome for audit triage (deadline timeout
+    # vs active fail-condition trigger), but it carries no reward.
+    outcome = {"win": 1.0, "draw": 0.0, "loss": 0.0}[res.outcome]
     # exploration: % of map revealed (0-100 -> 0-1).
     exploration = _clamp(s.explored_percent / 100.0)
     # discovery: enemy units + buildings sighted, soft-capped at 5 contacts.
