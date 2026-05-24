@@ -1,0 +1,488 @@
+# f11-vertical-strike-ground-air — Family-11 (full-game) proof-of-concept.
+#
+# COMBINED-ARMS test: the model must build BOTH a ground production
+# line (war factory) AND an air production pad (helipad), field BOTH
+# medium tanks AND helicopters, then raze enemy buildings — inside a
+# tight tick budget. Single-arm policies fail.
+#
+# Win predicate (per F11 §68 — full-chain `then:` discipline):
+#   P1: build a War Factory (`has_building: weap`)
+#   P2: build a Helipad     (`has_building: hpad`)
+#   P3: field ≥N medium tanks AND ≥M helicopters (per-tier counts)
+#   P4: raze ≥K enemy buildings
+# The `then:` chain forbids "raze first, then claim production" — a
+# starter-force beeline cannot satisfy clause P1/P2 retroactively.
+#
+# Wrong-arm traps (per F11 §72):
+#   - all-ground (only weap + tanks): clause P2 (`has_building: hpad`)
+#     never latches → `then:` stalls forever → deadline LOSS.
+#   - all-air (only hpad + helis): clause P1 (`has_building: weap`)
+#     never latches → `then:` stalls. Additionally on hard, the enemy
+#     AA (`agun`) actively damages a heli-only force during the strike
+#     phase (pinned by tests/test_aa_fires_on_aircraft.py).
+#   - stall (observe-only): no buildings, no force, no kills — `then:`
+#     never advances past P1 → after_ticks LOSS.
+#   - brute (move starter harv east): no production buildings, fails
+#     P1/P2 → after_ticks LOSS.
+#
+# Engine fixtures pinned (CLAUDE.md):
+#   - tests/test_build_heli_roundtrip.py: build('hpad') + place_building
+#     + build('heli') end-to-end with a fact+powr+proc+weap+dome+atek
+#     seed. We pre-place atek+dome+fix so the F11 test is COMBINED-ARMS
+#     (the load-bearing capability), not full tech-chain (that's F6).
+#   - tests/test_aa_fires_on_aircraft.py: enemy `agun` damages agent
+#     `heli` — the load-bearing engine path for the hard-tier AA wrong-
+#     arm trap.
+#   - tests/test_scheduled_events.py: spawn_actors at fixed ticks for
+#     med/hard wave injection.
+#
+# Per-tier shape (calibrated against heli=$2000, weap=$2000,
+# hpad=$500, 2tnk=$850; scripted-policy validated):
+#   easy   — 96×40, static garrison only, $5500 + 1 starter harv,
+#            ≥2 tanks + ≥1 heli + ≥2 enemy kills, within ~95 turns
+#            (deadline 8400 / reachable 8553).
+#   medium — 112×40, +1 mid-game hunt-tank wave (3× 2tnk) @ tick 3000,
+#            $8000 + 2 harvs, ≥3 tanks + ≥1 heli + ≥2 kills,
+#            within ~105 turns (deadline 9300 / reachable 9453;
+#            engine caps max_ticks at 10000).
+#   hard   — 112×40, tri-wave (symmetric hunt-tank pair @ tick 5000,
+#            rocket-soldier garrison reinforce @ tick 6500, heli
+#            garrison @ tick 7500) + enemy AA (`agun` at (104,12),
+#            range-8 covers y=18 building, off the y=22 approach),
+#            $15000 + 2 harvs, seed-rotated NORTH/SOUTH base
+#            (sp 0/1), ≥3 tanks + ≥1 heli + ≥2 kills, within ~110
+#            turns (deadline 9800 / reachable 9903; engine caps
+#            max_ticks at 10000).
+#
+# Engine guardrails (no-defect, no-cheat — CLAUDE.md):
+#   - within_ticks ≤ 93 + 90·(max_turns − 1) on every tier; deadline
+#     bites (`tests/test_f11_vertical_strike_ground_air.py::
+#     test_timeout_loss_is_reachable_on_every_level`).
+#   - Persistent far enemy `fact` sentinel keeps the run alive past
+#     the agent's strike on the main enemy base (without it, killing
+#     2 of 3 enemy buildings could prematurely auto-`done` if the
+#     last remaining enemy building is the one being targeted).
+#   - `termination.enemy_units_killed: false` so the run survives
+#     past "all enemy COMBAT units killed but buildings still
+#     standing" — the win predicate demands
+#     `enemy_buildings_destroyed_gte: N`, which is the load-bearing
+#     outcome. Without this flag the engine auto-`done`s on enemy-
+#     unit wipe and the run DRAWS (CLAUDE.md). `agent_units_killed:
+#     true` is default, paired with a `not: own_units_gte: 1` fail
+#     clause so an agent wipe is a clean LOSS not DRAW.
+#   - Agent base actors carry `spawn_point: 0/1` on hard so seeds 1-4
+#     produce 2 distinct NORTH/SOUTH spawn groups (F1 §10 + F11 §76).
+
+meta:
+  id: f11-vertical-strike-ground-air
+  title: 'F11 Vertical Strike — Ground + Air Combined Arms'
+  capability: reasoning
+  real_world_meaning: >
+    Combined-arms doctrine: a vertical-envelopment strike package
+    requires BOTH a ground manoeuvre arm (medium tanks for armoured
+    push and absorbing direct fire) AND an air arm (helicopters for
+    over-terrain mobility and rapid target engagement). A pure-ground
+    force is slow over open distance and cannot bypass enemy defensive
+    geometry; a pure-air force is shredded by anti-air emplacements
+    without a ground escort to suppress them. The capability under
+    test is allocating cash and tick budget across two production
+    streams in parallel — a war factory AND a helipad — and producing
+    the minimum vertical force composition before the deadline.
+  robotics_analogue: >
+    Heterogeneous fleet composition: a delivery / mapping mission may
+    require both surface robots (high-payload, slow, terrain-bound)
+    and aerial drones (low-payload, fast, terrain-ignoring) to clear
+    a mixed-objective task by deadline. Sending only one modality
+    fails on the objectives the OTHER modality is suited for.
+  benchmark_anchor:
+    - "AirLand Battle combined-arms doctrine"
+    - "vertical envelopment + ground push"
+    - "heterogeneous robot fleet composition"
+  author: openra-bench
+
+base_map:
+  generator: arena
+  name: f11-vertical-strike-ground-air-arena-96
+  width: 96
+  height: 40
+  cordon: 2
+
+base:
+  agent: {faction: allies}
+  enemy: {faction: soviet, bot_type: turtle}
+  tools:
+    - observe
+    - build
+    - place_building
+    - move_units
+    - attack_unit
+    - attack_move
+    - set_stance
+    - stop
+  planning: true
+  # No interrupts — full-game arcs use deterministic 90-tick steps so
+  # `after_ticks` bites cleanly. (Interrupt mode would make
+  # ticks/turn variable in [1,5] and the deadline math impossible to
+  # tune at the per-tier level.)
+  interrupts: {}
+  termination:
+    # The Rust engine caps `max_ticks` at DEFAULT_MAX_TICKS=10000
+    # regardless of this value (verified via env.max_ticks against
+    # the wheel). Every tier's deadline (`within_ticks`) must
+    # therefore be ≤ 9999, and `max_turns ≤ 110` (since reachable
+    # tick = 93+90·(N−1) ≤ 9903 at N=110). This is an engine cap,
+    # not a bench cap.
+    max_ticks: 10000
+    # `agent_units_killed: true` (default): full agent-unit wipe ends
+    # the run; the `not: own_units_gte: 1` fail clause then converts
+    # it to a clean LOSS (not DRAW).
+    # `enemy_units_killed: false`: the agent destroying every enemy
+    # UNIT (without razing buildings) must NOT auto-`done` the run —
+    # the win predicate demands `enemy_buildings_destroyed_gte: N`,
+    # so the engine has to stay alive until the agent reaches the
+    # buildings. This is the canonical fix for the "killed all units
+    # but not the buildings → DRAW" race (CLAUDE.md).
+    agent_units_killed: true
+    enemy_units_killed: false
+  actors: []
+
+levels:
+  # ── EASY ────────────────────────────────────────────────────────────
+  # Static enemy garrison, no scheduled waves. The test is the build-
+  # then-strike chain itself: build weap + hpad, field 2 tanks + 1 heli,
+  # raze 2 enemy buildings — all inside ~90 turns.
+  #
+  # Agent seed: fact + 2× powr + proc + dome + atek + fix + 1 harv +
+  # 2 ore mines near proc (econ ramps up immediately).
+  # Agent must BUILD: weap ($2000) + hpad ($500) + ≥2× 2tnk ($850 each)
+  # + ≥1× heli ($2000) = $6100 minimum BOM. Starting cash $5500 +
+  # ~30-turn harv income covers it.
+  #
+  # Enemy: fact + powr + tent + 1× e1 picket at the eastern base.
+  # Anti-DRAW sentinel: a far enemy `fact` at the corner.
+  # bot_type: turtle keeps the enemy passive (no expansion, no
+  # pre-emptive raid) — the offensive pressure comes only from the
+  # scheduled waves (and on easy there are none).
+  easy:
+    description: >
+      Commander, this is a vertical-strike rehearsal. Your western base
+      at (8,20) has a Construction Yard, Power Plant, Ore Refinery, a
+      Radar Dome, an Advanced Tech Centre, a Service Depot and one
+      starter Harvester. Two ore patches sit just east of your refinery.
+      Cash on hand: $5500. An enemy base sits at (85,20), 77 cells east,
+      lightly guarded by a single rifleman. Build a War Factory AND a
+      Helipad, field at least two medium tanks AND at least one
+      helicopter, then raze at least two enemy buildings — all within
+      about 95 turns. Keep your western Construction Yard standing.
+    starting_cash: 5500
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-vertical-strike-ground-air-arena-96
+        width: 96
+        height: 40
+        cordon: 2
+      actors:
+        # Agent western base — full prereq stack so the model focuses
+        # on COMBINED-ARMS (build weap + hpad, produce 2tnk + heli),
+        # not the tech-chain (that's F6's domain). atek/dome/fix are
+        # NOT in the `then:` chain — only weap and hpad are.
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: dome, owner: agent, position: [12, 22]}
+        - {type: atek, owner: agent, position: [15, 22]}
+        - {type: fix,  owner: agent, position: [4, 14]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        # Ore patches — sustain harv income through the build chain.
+        - {type: mine, owner: neutral, position: [20, 18]}
+        - {type: mine, owner: neutral, position: [20, 22]}
+        # Enemy eastern base — light static garrison.
+        - {type: fact, owner: enemy, position: [85, 20]}
+        - {type: powr, owner: enemy, position: [88, 18]}
+        - {type: tent, owner: enemy, position: [88, 22]}
+        - {type: e1,   owner: enemy, position: [83, 20], stance: 2}
+        # Anti-DRAW sentinel — out-of-reach corner fact keeps the
+        # episode alive past the strike (engine auto-done mitigation).
+        - {type: fact, owner: enemy, position: [92, 38]}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-vertical-strike-ground-air-easy
+            clauses:
+              # P1: ground production up (weap, the war factory).
+              - {has_building: weap}
+              # P2: air production up (hpad, the helipad).
+              - {has_building: hpad}
+              # P3: combined-arms force composition — BOTH arms,
+              # not just one.
+              - all_of:
+                  - {unit_type_count_gte: {type: 2tnk, n: 2}}
+                  - {unit_type_count_gte: {type: heli, n: 1}}
+              # P4: strike home. ≥2 forbids a 1-building incidental
+              # kill from collapsing the chain.
+              - {enemy_buildings_destroyed_gte: 2}
+        # Deadline. max_turns 95 ⇒ reachable max tick = 93+90·94 = 8553;
+        # deadline 8400 leaves a ~150-tick buffer.
+        - {within_ticks: 8400}
+        # Base survival floor — the western fact must still stand.
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 8401}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 95
+
+  # ── MEDIUM ──────────────────────────────────────────────────────────
+  # +1 controlled variable vs easy: scheduled hunt-tank wave at tick
+  # 1500 (3× 2tnk hunters from the east). The model must defend AND
+  # build the combined-arms chain. Heavier enemy garrison: 2× e1 + 1×
+  # e3. Force composition tightens to ≥3 tanks (so the model needs to
+  # sustain production through the wave's disruption).
+  #
+  # Agent seed: 2 harvs so the econ floor is higher (the wave forces
+  # extra production cash; a single harv pack would slowly starve).
+  # Starting cash $7000 + 2-harv income.
+  medium:
+    description: >
+      Commander, this is a vertical strike against a heavier enemy
+      garrison with a mid-game hunt-tank raid. Your western base at
+      (8,20) holds a Construction Yard, Power Plant, Ore Refinery, a
+      Radar Dome, an Advanced Tech Centre, a Service Depot and two
+      starter Harvesters. Three ore patches sit east of your refinery.
+      Cash on hand: $8000. An enemy base sits at (100,20), 92 cells
+      east, defended by riflemen and a rocket soldier, with a hunt-
+      tank raid arriving mid-game around tick 3000. Build a War Factory
+      AND a Helipad, field at least three medium tanks AND at least
+      one helicopter, then raze at least two enemy buildings — all
+      within about 105 turns. Keep your western Construction Yard
+      standing.
+    starting_cash: 8000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-vertical-strike-ground-air-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      actors:
+        - {type: fact, owner: agent, position: [8, 20]}
+        - {type: powr, owner: agent, position: [4, 18]}
+        - {type: powr, owner: agent, position: [4, 22]}
+        - {type: proc, owner: agent, position: [12, 18]}
+        - {type: dome, owner: agent, position: [12, 22]}
+        - {type: atek, owner: agent, position: [15, 22]}
+        - {type: fix,  owner: agent, position: [4, 14]}
+        - {type: harv, owner: agent, position: [16, 18]}
+        - {type: harv, owner: agent, position: [16, 22]}
+        # Three ore patches so 2 harvs sustain through the build chain.
+        - {type: mine, owner: neutral, position: [20, 18]}
+        - {type: mine, owner: neutral, position: [20, 22]}
+        - {type: mine, owner: neutral, position: [22, 20]}
+        # Enemy eastern base — heavier garrison.
+        - {type: fact, owner: enemy, position: [100, 20]}
+        - {type: powr, owner: enemy, position: [103, 18]}
+        - {type: tent, owner: enemy, position: [103, 22]}
+        - {type: e1,   owner: enemy, position: [97, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [97, 22], stance: 2}
+        - {type: e3,   owner: enemy, position: [99, 20], stance: 2}
+        - {type: fact, owner: enemy, position: [108, 38]}
+      scheduled_events:
+        # Mid-game hunt-tank wave: 3× 2tnk spawned ~50 cells east of
+        # the agent base at tick 3000 (~turn 33). They hunt-stance
+        # toward the agent base. The model has time to field its own
+        # ground arm (weap + 2tnk training) and either intercept the
+        # wave en route or absorb it at the base while continuing the
+        # strike. An all-air play has no ground defenders for the
+        # wave breach.
+        - tick: 3000
+          type: spawn_actors
+          actors:
+            - {type: 2tnk, owner: enemy, position: [55, 20], stance: 3, count: 3}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-vertical-strike-ground-air-medium
+            clauses:
+              - {has_building: weap}
+              - {has_building: hpad}
+              - all_of:
+                  - {unit_type_count_gte: {type: 2tnk, n: 3}}
+                  - {unit_type_count_gte: {type: heli, n: 1}}
+              - {enemy_buildings_destroyed_gte: 2}
+        # max_turns 105 ⇒ reachable max = 93+90·104 = 9453; deadline
+        # 9300 leaves a ~150-tick buffer (engine caps max_ticks at
+        # 10000 regardless of `termination.max_ticks` setting).
+        - {within_ticks: 9300}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9301}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 105
+
+  # ── HARD ────────────────────────────────────────────────────────────
+  # +1 controlled variable vs medium: seed-rotated NORTH/SOUTH base
+  # spawn (sp 0/1) so the geometry can't be memorised. Tri-wave
+  # offensive: symmetric hunt-tank pair (one per agent spawn
+  # corridor) @ tick 5000, rocket-soldier reinforcement @ tick 6500,
+  # heli garrison @ tick 7500. Enemy AA (`agun`) sits OFFSET at
+  # (104, 12), in range of an all-air strike package approaching
+  # the y=18 enemy building but OUT OF range of the y=22 building
+  # — so a combined-arms strike can split fire across both wings
+  # while a single-arm air rush eats the AA burst.
+  # Force composition: ≥3 tanks AND ≥1 heli (same minimum as
+  # medium); the load-bearing distinction is the THREAT
+  # environment, not a higher force quota.
+  #
+  # The persistent sentinel `fact` is duplicated across BOTH spawn
+  # groups so it remains visible regardless of which agent corner
+  # places (CLAUDE.md: enemy spawn_point filter is per-owner, but
+  # agent-side filter is per-owner too — when ANY agent actor
+  # declares spawn_point, agent actors WITHOUT spawn_point are
+  # filtered out. So every agent actor needs an explicit spawn_point
+  # on hard.)
+  hard:
+    description: >
+      Commander, this is a vertical strike against a defended enemy
+      base under continuous waves. Your western base spawns NORTH
+      (y=12) or SOUTH (y=28) by seed — read your actual starting band
+      from the observation. Each spawn holds a Construction Yard,
+      Power Plant, Ore Refinery, Radar Dome, Advanced Tech Centre,
+      Service Depot and two starter Harvesters. Three ore patches sit
+      adjacent. Cash on hand: $15000. An enemy base sits at (100,20),
+      defended by riflemen, rocket soldiers, an anti-air emplacement,
+      and three timed waves — hunt-tanks around tick 5000, a rocket-
+      soldier reinforcement around tick 6500, and helicopter
+      interceptors around tick 7500. Build a War Factory AND a
+      Helipad, field at
+      least three medium tanks AND at least one helicopter, then
+      raze at least two enemy buildings — all within about 110
+      turns. Keep your Construction Yard standing.
+    starting_cash: 15000
+    overrides:
+      base_map:
+        generator: arena
+        name: f11-vertical-strike-ground-air-arena-112
+        width: 112
+        height: 40
+        cordon: 2
+      actors:
+        # ─ spawn_point 0 — NORTH base @ y=12 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 10], spawn_point: 0}
+        - {type: powr, owner: agent, position: [4, 14], spawn_point: 0}
+        - {type: proc, owner: agent, position: [12, 10], spawn_point: 0}
+        - {type: dome, owner: agent, position: [12, 14], spawn_point: 0}
+        - {type: atek, owner: agent, position: [15, 14], spawn_point: 0}
+        - {type: fix,  owner: agent, position: [4,  6], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 10], spawn_point: 0}
+        - {type: harv, owner: agent, position: [16, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [20, 10], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [20, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 12], spawn_point: 0}
+        # ─ spawn_point 1 — SOUTH base @ y=28 ────────────────────────
+        - {type: fact, owner: agent, position: [8, 28], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [4, 30], spawn_point: 1}
+        - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: dome, owner: agent, position: [12, 30], spawn_point: 1}
+        - {type: atek, owner: agent, position: [15, 30], spawn_point: 1}
+        - {type: fix,  owner: agent, position: [4, 34], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 26], spawn_point: 1}
+        - {type: harv, owner: agent, position: [16, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [20, 26], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [20, 30], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 28], spawn_point: 1}
+        # ─ Enemy base — no spawn_point on enemy side, so all enemy
+        # actors place every seed (back-compat per CLAUDE.md). ─────
+        - {type: fact, owner: enemy, position: [100, 20]}
+        - {type: powr, owner: enemy, position: [103, 18]}
+        - {type: tent, owner: enemy, position: [103, 22]}
+        - {type: e1,   owner: enemy, position: [97, 18], stance: 2}
+        - {type: e1,   owner: enemy, position: [97, 22], stance: 2}
+        - {type: e3,   owner: enemy, position: [98, 20], stance: 2}
+        # Anti-air emplacement — agun is the engine-pinned AA (see
+        # tests/test_aa_fires_on_aircraft.py). Position OFFSET on
+        # y=14 (off the heli approach corridor y=18-22) so a
+        # combined-arms strike can engage the buildings without
+        # being one-shot, while an all-air strike package still
+        # enters the agun's 8c range and is shredded.
+        - {type: agun, owner: enemy, position: [104, 12]}
+        # Anti-DRAW sentinel corner fact.
+        - {type: fact, owner: enemy, position: [108, 38]}
+      scheduled_events:
+        # Hard tri-wave. Engine `max_ticks` caps at 10000, so all
+        # waves fire ≤ ~7000.
+        #
+        # Wave 1 (tick 3500, 3× hunt-tank) spawns at (60, 20) and
+        # hunts the agent base — punishes all-air (no ground arm
+        # to intercept). The wave's spawn cell is on the y=20
+        # axis, EQUIDISTANT from both NORTH (y=12) and SOUTH (y=28)
+        # agent spawn bases (Chebyshev 8 cells either way) so the
+        # engagement geometry is symmetric across seeds 1-4.
+        # Wave 2 (tick 5500, 3× rocket-soldier) reinforces the
+        # enemy garrison at the eastern base (stance:2 = defend,
+        # no hunt). Punishes a strike package that lacks ground
+        # firepower to break through anti-tank rocket defenders.
+        # Wave 3 (tick 7000, 2× enemy heli) sits at the enemy
+        # base (stance:2 = defend) — together with the agun they
+        # form the anti-air defense the agent's heli must survive.
+        #
+        # The wave count is reduced from "many" so the intended
+        # combined-arms force (3-4 tanks + 1-2 helis) can defend
+        # AND strike. A bigger wave would require defend-first /
+        # attack-later policy intelligence beyond what a simple
+        # build-then-strike scripted policy demonstrates.
+        - tick: 5000
+          type: spawn_actors
+          actors:
+            # Two pairs of hunt-tanks, one per agent spawn corridor
+            # (NORTH y=12 and SOUTH y=28), so engagement geometry is
+            # symmetric across the two seed-rotated agent spawn
+            # groups. Each pair hunts toward its corridor's agent
+            # base.
+            - {type: 2tnk, owner: enemy, position: [60, 12], stance: 3, count: 1}
+            - {type: 2tnk, owner: enemy, position: [60, 28], stance: 3, count: 1}
+        - tick: 6500
+          type: spawn_actors
+          actors:
+            - {type: e3, owner: enemy, position: [100, 18], stance: 2, count: 2}
+            - {type: e3, owner: enemy, position: [100, 22], stance: 2, count: 1}
+        - tick: 7500
+          type: spawn_actors
+          actors:
+            - {type: heli, owner: enemy, position: [100, 20], stance: 2, count: 2}
+    win_condition:
+      all_of:
+        - then:
+            id: f11-vertical-strike-ground-air-hard
+            clauses:
+              - {has_building: weap}
+              - {has_building: hpad}
+              - all_of:
+                  # Same force-composition floor as medium (≥3 tanks
+                  # + ≥1 heli). The hard tier's distinct difficulty
+                  # is the THREAT environment, not the force size:
+                  # (1) the tri-wave offensive (tanks → rockets →
+                  # heli), (2) the enemy `agun` AA emplacement that
+                  # damages a heli-only strike package (the all-air
+                  # wrong-arm trap), and (3) seed-rotated NORTH/
+                  # SOUTH base spawn (geometry cannot be memorised).
+                  - {unit_type_count_gte: {type: 2tnk, n: 3}}
+                  - {unit_type_count_gte: {type: heli, n: 1}}
+              - {enemy_buildings_destroyed_gte: 2}
+        # max_turns 110 ⇒ reachable max = 93+90·109 = 9903; deadline
+        # 9800 leaves a ~100-tick buffer (engine caps max_ticks at
+        # 10000 regardless of `termination.max_ticks` setting).
+        - {within_ticks: 9800}
+        - {building_count_gte: {type: fact, n: 1}}
+    fail_condition:
+      any_of:
+        - {after_ticks: 9801}
+        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - {not: {own_units_gte: 1}}
+    max_turns: 110
