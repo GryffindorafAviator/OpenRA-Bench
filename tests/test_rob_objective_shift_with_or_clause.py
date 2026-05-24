@@ -181,15 +181,25 @@ def _intended_scout_a_pivot_b_policy():
         # NORTH-EAST at B (100,30). Approach from the SOUTH stays
         # out of A's sight line entirely.
         if state["phase"] == 4:
-            if state["tick"] >= 25:
+            if state["tick"] >= 15:
                 state["phase"] = 5
                 return [Cmd.attack_move(ids, B[0], B[1])]
             return [Cmd.observe()]
 
-        # Phase 5: keep pressing B in case the first attack-move
-        # didn't fully engage the picket (re-issue once).
-        if state["phase"] == 5 and state["tick"] >= 45:
-            state["phase"] = 6
+        # Phase 5+: focus-fire the fact directly. Tanks under
+        # ReturnFire stance stop attacking a non-shooting building
+        # once they reach it, so `attack_unit` against the fact is
+        # the reliable verb to finish the kill inside the clock.
+        if state["phase"] == 5:
+            fact_id = None
+            for e in obs.get("enemy_buildings_summary", []) or []:
+                if (e.get("type") == "fact"
+                        and abs(e["cell_x"] - B[0]) <= 6
+                        and abs(e["cell_y"] - B[1]) <= 6):
+                    fact_id = str(e["id"])
+                    break
+            if fact_id is not None:
+                return [Cmd.attack_unit(ids, fact_id)]
             return [Cmd.attack_move(ids, B[0], B[1])]
 
         return [Cmd.observe()]

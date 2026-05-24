@@ -179,26 +179,28 @@ def _stall(_rs, Command):
 
 def _bunched(rs, Command):
     """All jeeps to ONE target — the union footprint is one swath,
-    not the map. Caps near the single-path asymptote (≈50% on
-    easy/medium with 4 jeeps; ≈69% on hard with 5 jeeps)."""
+    not the map. With the pack map at 32x48 the previous x=125
+    targets were silently OOB (jeeps stuck at spawn). Use a near
+    in-bounds cell so bunched stays well under the (now-tighter)
+    easy bar of 48%."""
     units = sorted(rs.get("units_summary", []) or [], key=lambda x: x["id"])
     cmds = []
     for u in units:
         cmds.append(
-            Command.move_units([str(u["id"])], target_x=125, target_y=20)
+            Command.move_units([str(u["id"])], target_x=8, target_y=24)
         )
     return cmds
 
 
 def _single_jeep_only(rs, Command):
     """One jeep scouts to a far corner; the rest are stopped/idle.
-    The lone jeep's footprint caps near ≈38-40% — strictly under
-    the medium (50%) and hard (70%) bars."""
+    With the easy bar raised to 48% the single-jeep asymptote stays
+    strictly under every tier's bar."""
     units = sorted(rs.get("units_summary", []) or [], key=lambda x: x["id"])
     if not units:
         return [Command.observe()]
     cmds = [
-        Command.move_units([str(units[0]["id"])], target_x=125, target_y=5)
+        Command.move_units([str(units[0]["id"])], target_x=28, target_y=5)
     ]
     for u in units[1:]:
         cmds.append(Command.stop([str(u["id"])]))
@@ -209,17 +211,16 @@ def _intended_split_distribute(rs, Command):
     """The intended policy: fan the jeeps to as many distinct
     quadrant corners as we have, with a multi-stage redirect on
     hard's 5-jeep roster (so the second-stage target sweeps a
-    disjoint quadrant from the first). Works for both spawn
-    columns on hard — the same plan-by-position-index sends each
-    jeep to a distinct quadrant regardless of where they started.
+    disjoint quadrant from the first). Map is 32×48 — quadrant
+    corners pinned inside the cordon.
     """
     units = sorted(rs.get("units_summary", []) or [], key=lambda x: x["id"])
     n = len(units)
     if n == 0:
         return [Command.observe()]
-    plan4 = [(125, 5), (125, 36), (65, 5), (65, 36)]
-    plan5_stage1 = [(125, 5), (125, 36), (65, 5), (65, 36), (95, 20)]
-    plan5_stage2 = [(65, 36), (65, 5), (125, 36), (125, 5), (95, 5)]
+    plan4 = [(28, 4), (28, 44), (16, 4), (16, 44)]
+    plan5_stage1 = [(28, 4), (28, 44), (16, 4), (16, 44), (22, 24)]
+    plan5_stage2 = [(16, 44), (16, 4), (28, 44), (28, 4), (22, 4)]
     cmds = []
     for i, u in enumerate(units):
         ux, uy = u["cell_x"], u["cell_y"]
