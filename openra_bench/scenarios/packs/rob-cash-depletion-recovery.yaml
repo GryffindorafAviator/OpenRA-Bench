@@ -13,9 +13,13 @@
 # Pack frame: the agent inherits a NORMAL operating economy (fact +
 # proc + 1 harv + 2 mines + a small 3tnk defender squad), with
 # starting_cash = 1400 — exactly enough to rebuild ONE refinery (proc
-# cost 1400). A scripted enemy `hunt` strike (2-4× 4tnk) charges the
-# refinery early in the episode (medium: proc destroyed ~tick 273;
-# hard: tent destroyed ~tick 183, proc ~tick 273). The agent must:
+# cost 1400). A scripted enemy `hunt` raid (2-4× 4tnk) is INJECTED
+# early-mid-episode at tick 60 via `scheduled_events: spawn_actors`; the
+# raid charges the refinery and destroys it shortly after arrival
+# (medium: ~2 attackers; hard: 4 attackers + tent in attack lane).
+# The injection is NOT briefed; the agent discovers it via the
+# `own_building_destroyed` / `enemy_unit_spotted` interrupts and the
+# live `units_summary` / `own_buildings` channels. The agent must:
 #   1. notice the proc died (no income, harv has no place to refine),
 #   2. `build('proc')` and `place_building` it adjacent to the fact
 #      with the indivisible reserve cash,
@@ -83,19 +87,23 @@
 #     each unit attacks the nearest. With 4tnk attackers placed in
 #     melee range of the proc, the proc becomes the closest enemy
 #     and is engaged on turn 1.
-#  2. Proc strike timing (probe-measured 2026-05-20 against the
-#     post-engine-balance-fix wheel, all attackers at x=14 adjacent
-#     to proc at x=12; defenders carry EXPLICIT stance:2 — see fact
-#     #8):
+#  2. Proc strike timing (defenders carry EXPLICIT stance:2 — see
+#     fact #8). On easy the strike is pre-placed at t=0 (a light
+#     1× 4tnk the defenders intercept before the proc falls — the
+#     no-rebuild floor). On medium/hard the strike is INJECTED via
+#     `scheduled_events: spawn_actors` at tick 60; arrival is in
+#     melee range of the proc at x=12, so the proc engagement
+#     starts the moment the injection lands. Defender ratios are
+#     tuned so:
 #     - easy:  1× 4tnk + 2 own 3tnk @ x=18 → defenders kill 4tnk
-#       first; proc SURVIVES the full episode (verified to tick 6303).
+#       first; proc SURVIVES the full episode.
 #       Discriminator: stall yields 0 income; intended harvest WINS.
-#     - medium: 2× 4tnk + 3 own 3tnk @ x=18 → proc dies tick 273;
-#       4tnks then die to the defender ring so fact and powr SURVIVE
-#       → rebuild is feasible.
-#     - hard: 4× 4tnk + tent at (13,18) + 5 own 3tnk → tent dies
-#       tick 183, proc tick 273; 4tnks die to the defender ring
-#       shortly after; fact and powr SURVIVE to ~tick 6300.
+#     - medium: 2× 4tnk injected at tick 270, 3 own 3tnk @ x=18 →
+#       proc dies shortly after injection; 4tnks then die to the
+#       defender ring so fact and powr SURVIVE → rebuild is feasible.
+#     - hard: 4× 4tnk injected at tick 270, tent at (13,18), 5 own
+#       3tnk → tent dies first then proc; 4tnks die to the defender
+#       ring shortly after; fact and powr SURVIVE to ~tick 6300.
 #     The defender-vs-attacker ratio is tuned so the attackers land
 #     the building kill and then die — preventing the 4tnks from
 #     chain-killing fact after the proc falls (which would convert
@@ -148,13 +156,15 @@ meta:
     Financial recovery after a sudden cash drain caused by an
     emergency outflow that destroys the operation's income channel.
     The agent inherits a normal operating economy with just enough
-    reserve cash for ONE refinery rebuild; an exogenous strike
-    destroys the refinery mid-episode; income halts. The agent must
-    notice the loss, commit the indivisible reserve to rebuilding the
-    refinery, and redirect the harvester back to the patch — fast
-    enough that the revenue bar is still cleared before the deadline.
-    Stalling, ignoring the destruction, or spending the reserve on
-    army units all miss the bar.
+    reserve cash for ONE refinery rebuild; an exogenous strike is
+    INJECTED mid-episode and destroys the refinery; income halts.
+    The destruction is not pre-announced — the agent discovers it
+    from the live observation channel. The agent must notice the
+    loss, commit the indivisible reserve to rebuilding the refinery,
+    and redirect the harvester back to the patch — fast enough that
+    the revenue bar is still cleared before the deadline. Stalling,
+    ignoring the destruction, or spending the reserve on army units
+    all miss the bar.
   robotics_analogue: >
     Post-disaster operations restart after the critical processing
     node is destroyed by an external event mid-mission. The
@@ -300,24 +310,26 @@ levels:
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
     # Same base as easy (fact, powr, proc, 1 harv, 2 mines, $1400 reserve)
-    # but the enemy strike is now TWO heavy tanks adjacent to the
-    # refinery; even with three light-tank defenders, the refinery is
-    # destroyed early in the episode (around tick 270). The harvester
-    # survives but the harvest loop stops because the refinery is gone. To
-    # recover: queue another Refinery (`build` "proc", cost 1400), place
-    # it adjacent to the fact, then re- issue `harvest` to the surviving
-    # harv (the destruction event interrupted the harvest loop). Win =
+    # but an enemy raid party (two heavy tanks) is INJECTED mid-episode
+    # at the refinery; the three light-tank defenders cannot intercept
+    # both before they land building damage and the refinery falls
+    # shortly after the strike arrives. The harvester survives but the
+    # harvest loop stops because the refinery is gone. To recover: queue
+    # another Refinery (`build` "proc", cost 1400), place it adjacent to
+    # the fact, then re-issue `harvest` to the surviving harv (the
+    # destruction event interrupted the harvest loop). Win =
     # economy_value ≥ 2500 AND you own a 'proc' AND a 'fact', before tick
     # 6300. Stalling, ignoring the rebuild, or spending the 1400 reserve
     # on army units (powr/tent/e1) — which starves the proc rebuild — all
     # miss the bar.
     description: >
-      Same base and $1400 reserve, but TWO enemy heavies attack the
-      refinery and overwhelm the defenders — the refinery falls around
-      tick 270 and the harvest loop dies. Queue another refinery (cost
-      $1400 — the reserve covers it exactly), place it beside the yard,
-      then re-issue harvest on the surviving worker. Economy value 2500,
-      refinery and yard alive, within about 70 turns.
+      Same base and $1400 reserve. An exogenous raid hits the refinery
+      mid-episode and the three defenders cannot stop it in time — the
+      refinery falls and the harvest loop dies. Detect the loss, queue
+      another refinery (cost $1400 — the reserve covers it exactly),
+      place it beside the yard, then re-issue harvest on the surviving
+      worker. Economy value 2500, refinery and yard alive, within about
+      70 turns.
     starting_cash: 1400
     overrides:
       actors:
@@ -343,15 +355,22 @@ levels:
         - {type: '3tnk', owner: agent, position: [18, 19], stance: 2}
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 20]}
-        # MEDIUM strike: two 4tnks staged adjacent to the refinery
-        # at (14,17) and (14,19) — in melee range of the proc at
-        # x=12. The 4tnks (combined 80 dps) destroy the proc before
-        # the three defenders (combined 90 dps) can wipe them; the
-        # surviving 4tnk count then falls to zero after the proc
-        # kill so the fact remains intact (probe-verified).
-        - {type: '4tnk', owner: enemy, position: [14, 17]}
-        - {type: '4tnk', owner: enemy, position: [14, 19]}
         - {type: fact, owner: enemy, position: [120, 20]}
+      # MEDIUM strike: two 4tnks INJECTED at tick 270 adjacent to the
+      # refinery at (14,17) / (14,19) — in melee range of the proc at
+      # x=12. The injection is NOT pre-disclosed; the agent discovers
+      # it via the `own_building_destroyed` interrupt + the live
+      # `units_summary` / `own_buildings` channels. Once the strike
+      # lands, the 4tnks (combined 80 dps) destroy the proc before the
+      # three defenders (combined 90 dps) can wipe them; the strike
+      # force then dies to the defender ring so fact and powr remain
+      # intact.
+      scheduled_events:
+        - tick: 60
+          type: spawn_actors
+          actors:
+            - {type: '4tnk', owner: enemy, position: [14, 17]}
+            - {type: '4tnk', owner: enemy, position: [14, 19]}
     win_condition:
       all_of:
         - economy_value_gte: 2500
@@ -397,24 +416,25 @@ levels:
     # contributors. The trimmed version below removes scripted-policy
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
-    # A harder version of the rebuild: FOUR enemy heavy tanks attack the
-    # refinery AND a barracks ('tent') is placed in the attack lane and is
-    # also destroyed early in the episode (tent down by around tick 180,
-    # refinery by around tick 270). Your reserve is still $1400 — exactly
-    # one refinery. To recover: queue another Refinery (`build` "proc"),
-    # place it adjacent to the fact, and re-issue `harvest` to the
-    # surviving harv. The tent rebuild is OPTIONAL (it isn't part of the
-    # win predicate); prioritise the income-restoring proc rebuild even
-    # though more buildings are gone. Win = economy_value ≥ 2500 AND you
-    # own a 'proc' AND a 'fact', before tick 6300. Stalling, ignoring the
-    # rebuild, attempting to rebuild the tent first (no cash left for the
-    # proc), or spending the reserve on army units all miss the bar.
+    # A harder version of the rebuild: an enemy raid party (FOUR heavy
+    # tanks) is INJECTED mid-episode at the refinery AND a barracks
+    # ('tent') sits in the attack lane and is razed alongside the
+    # refinery shortly after the strike arrives. Your reserve is still
+    # $1400 — exactly one refinery. To recover: queue another Refinery
+    # (`build` "proc"), place it adjacent to the fact, and re-issue
+    # `harvest` to the surviving harv. The tent rebuild is OPTIONAL (it
+    # isn't part of the win predicate); prioritise the income-restoring
+    # proc rebuild even though more buildings are gone. Win =
+    # economy_value ≥ 2500 AND you own a 'proc' AND a 'fact', before
+    # tick 6300. Stalling, ignoring the rebuild, attempting to rebuild
+    # the tent first (no cash left for the proc), or spending the
+    # reserve on army units all miss the bar.
     description: >
-      Same recovery, harder: FOUR heavy tanks raze both the refinery AND a
-      barracks early (barracks down ~tick 180, refinery ~tick 270). Reserve is
-      still $1400 — exactly one refinery. Rebuild the refinery first (the
-      barracks isn't on the win predicate), re-issue harvest. Economy
-      value 2500, refinery and yard alive, within about 70 turns.
+      Same recovery, harder: an exogenous four-tank raid razes both the
+      refinery AND a barracks mid-episode. Reserve is still $1400 —
+      exactly one refinery. Detect the loss, rebuild the refinery first
+      (the barracks isn't on the win predicate), re-issue harvest.
+      Economy value 2500, refinery and yard alive, within about 70 turns.
     starting_cash: 1400
     overrides:
       actors:
@@ -446,21 +466,27 @@ levels:
         # Two ore patches east of the proc — sustained harvest target.
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 20]}
-        # HARD strike: FOUR 4tnks staged adjacent to the refinery at
-        # (14,15..18) — in melee range of the proc at x=12 and tent
-        # at x=13. The 4tnks (combined 160 dps) destroy tent first
-        # (lower HP) then proc; the 5 defenders (150 dps) wipe them
-        # shortly after, so fact and powr SURVIVE intact (probe-
-        # verified H3 + extended trace to tick 6303). The agent's
-        # rebuild path: build('proc') (1400) + place adjacent to
-        # fact + re-issue harvest. Tent rebuild is OPTIONAL (not
-        # part of the win clause).
-        - {type: '4tnk', owner: enemy, position: [14, 15]}
-        - {type: '4tnk', owner: enemy, position: [14, 17]}
-        - {type: '4tnk', owner: enemy, position: [14, 19]}
-        - {type: '4tnk', owner: enemy, position: [14, 21]}
         # Persistent far enemy marker — LOSS-not-DRAW guarantee.
         - {type: fact, owner: enemy, position: [120, 20]}
+      # HARD strike: FOUR 4tnks INJECTED at tick 270 adjacent to the
+      # refinery at (14,15..21) — in melee range of the proc at x=12
+      # and tent at x=13. The injection is NOT pre-disclosed; the
+      # agent discovers it via the `own_building_destroyed` interrupt
+      # + the live `units_summary` / `own_buildings` channels. Once
+      # the strike lands, the 4tnks (combined 160 dps) destroy tent
+      # first (lower HP) then proc; the 5 defenders (150 dps) wipe
+      # them shortly after, so fact and powr SURVIVE intact. The
+      # agent's rebuild path: build('proc') (1400) + place adjacent
+      # to fact + re-issue harvest. Tent rebuild is OPTIONAL (not
+      # part of the win clause).
+      scheduled_events:
+        - tick: 60
+          type: spawn_actors
+          actors:
+            - {type: '4tnk', owner: enemy, position: [14, 15]}
+            - {type: '4tnk', owner: enemy, position: [14, 17]}
+            - {type: '4tnk', owner: enemy, position: [14, 19]}
+            - {type: '4tnk', owner: enemy, position: [14, 21]}
     win_condition:
       all_of:
         - economy_value_gte: 2500
