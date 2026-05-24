@@ -32,6 +32,16 @@ pytest.importorskip("openra_train", reason="Rust env wheel not installed")
 
 from openra_train import OpenRAEnv, Command  # type: ignore[import]
 
+# Absolute path to the bundled rush-hour terrain. See test_aa_fires_on_
+# aircraft.py for the rationale — older tests relied on the engine's
+# HOME-dir fallback to OpenRA-RL-Training, which does not exist on CI.
+_BUNDLED_MAP = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "maps"
+    / "rush-hour-arena.oramap"
+)
+
 
 def _scenario_path(scenario: dict) -> str:
     fd = tempfile.NamedTemporaryFile(
@@ -51,7 +61,7 @@ def _make_scenario() -> dict:
     return {
         "name": "build-dd-roundtrip",
         "description": "F11 engine-risk: build(syrd)+build(dd) end-to-end",
-        "base_map": "rush-hour-arena",
+        "base_map": str(_BUNDLED_MAP),
         "starting_cash": 8000,
         "spawn_mcvs": False,
         "agent": {"faction": "allies", "cash": 8000},

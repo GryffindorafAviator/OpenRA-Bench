@@ -22,6 +22,19 @@ pytest.importorskip("openra_train", reason="Rust env wheel not installed")
 
 from openra_train import OpenRAEnv, Command  # type: ignore[import]
 
+# Absolute path to the bundled rush-hour terrain. Older versions of this
+# test referenced `base_map: "rush-hour-arena"` and relied on the Rust
+# engine's HOME-dir fallback to `~/Projects/OpenRA-RL-Training/scenarios/
+# maps/rush-hour-arena.oramap`. That path does not exist on CI runners
+# (or any machine without the legacy OpenRA-RL-Training checkout), so the
+# test now points at the bench's own bundled .oramap.
+_BUNDLED_MAP = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "maps"
+    / "rush-hour-arena.oramap"
+)
+
 
 def _scenario_path(scenario: dict) -> str:
     fd = tempfile.NamedTemporaryFile(
@@ -40,7 +53,7 @@ def _make_scenario() -> dict:
     return {
         "name": "aa-fires-on-aircraft",
         "description": "F11 engine-risk: enemy AA defense damages heli",
-        "base_map": "rush-hour-arena",
+        "base_map": str(_BUNDLED_MAP),
         "starting_cash": 0,
         "spawn_mcvs": False,
         "agent": {"faction": "allies", "cash": 0},

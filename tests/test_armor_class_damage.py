@@ -35,13 +35,23 @@ import yaml
 
 pytest.importorskip("openra_train", reason="Rust env wheel not installed")
 
+# Absolute path to the bundled rush-hour terrain. See test_aa_fires_on_
+# aircraft.py for the rationale — older tests relied on the engine's
+# HOME-dir fallback to OpenRA-RL-Training, which does not exist on CI.
+_BUNDLED_MAP = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "maps"
+    / "rush-hour-arena.oramap"
+)
+
 
 def _scenario(actors: list[dict], max_ticks: int = 6000) -> dict:
     """Minimal arena scenario with explicit actor placement."""
     return {
         "name": "armor-class-test",
         "description": "armor-class damage fixture",
-        "base_map": "rush-hour-arena",
+        "base_map": str(_BUNDLED_MAP),
         "starting_cash": 0,
         "spawn_mcvs": False,
         "agent": {"faction": "allies", "cash": 0},
