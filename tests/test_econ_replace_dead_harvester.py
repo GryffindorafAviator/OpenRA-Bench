@@ -68,20 +68,16 @@ def _replace_only_no_redirect(rs, Command):
 
 
 def _intended(rs, Command):
-    """Replan: re-issue `harvest` to every surviving harv each turn
-    (their loop is interrupted by the kill event); if harv count is
-    below 3, build a replacement. The patches at (22,18) and (22,22)
-    work for every spawn (central geometry on hard)."""
+    """Replan: build a replacement harv when the count drops below 3.
+    The engine's auto_route_idle_harvesters re-installs a Harvest
+    activity on any owned idle harv whose owner owns a proc — so
+    explicit harvest orders are not needed (and issuing them every
+    turn re-interrupts the auto-route loop, starving cash)."""
     units = rs.get("units_summary", []) or []
-    cmds = []
     harvs = [u for u in units if u.get("type") == "harv"]
-    patches = [(22, 18), (22, 22)]
-    for i, h in enumerate(harvs):
-        mx, my = patches[i % len(patches)]
-        cmds.append(Command.harvest([str(h["id"])], mx, my))
     if len(harvs) < 3:
-        cmds.append(Command.build("harv"))
-    return cmds or [Command.observe()]
+        return [Command.build("harv")]
+    return [Command.observe()]
 
 
 # ── helpers ─────────────────────────────────────────────────────────
