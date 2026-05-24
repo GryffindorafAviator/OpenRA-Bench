@@ -45,12 +45,12 @@ def add(pack, level, cap, map_name, map_size, map_fit, tools,
     ))
 
 # ── 1. econ-burn-rate-management ──────────────────────────────────────
-# rush-hour-arena 128x40; decision footprint x=10..40 → ~30 cells. Most
-# of the map (x=40..128) is decision-free padding. Tag large-trivial.
-P='econ-burn-rate-management'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 56x40 (econ-burn-rate-management-56x40). Decision
+# footprint x=10..40 (~30 cells) now fills the arena. Tag fit.
+P='econ-burn-rate-management'; C='reasoning'; M='econ-burn-rate-management-56x40'; SZ='56x40'
 T='observe, build, place_building, harvest, move_units, attack_unit, attack_move, stop'
 POST='static (st2 e1 garrison) + anti-DRAW sentinel'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Full Allied base @(10-18,18-22): fact + proc + 2× powr + tent + weap + fix + 2× harv on 2 near mines + 3× medium tank @(20,19-21) on HOLD-FIRE',
     '3× rifle infantry garrison @(40,20-22) on Defend stance + anti-DRAW enemy fact @(124,36)',
     POST,'',
@@ -61,7 +61,7 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     1500,
     '2 harvs on 2 near patches @(22,18)/(22,20) feed ~190 cr/turn combined; starting cash 1500 + 3 pre-placed medium tanks for kill bar',
     'Stall (observe only) drifts cash above $1800 ceiling with 0 kills → LOSS. Tank-only attack hoards cash above ceiling → LOSS. Chain-build pbox/powr drops cash below $400 floor → LOSS.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Full Allied base @(10-18,18-22): fact + proc + 2× powr + tent + weap + fix + 2× harv on 2 near mines + 3× medium tank @(20,19-21) on HOLD-FIRE',
     '5× rifle infantry garrison @(40,19-23) on Defend stance + anti-DRAW enemy fact @(124,36)',
     POST,'',
@@ -72,7 +72,7 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     1500,
     '2 harvs on 2 near patches @ ~190 cr/turn; 3 pre-placed 2tnk; narrower band 1100 wide vs easy 1400',
     'Stall above $1500 ceiling, 0 kills → LOSS. Chain-build (4+ tanks + extra building) drops cash below $400 → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Full Allied base seed-rotated NORTH (y=14) or SOUTH (y=26) by spawn: fact + proc + 2× powr + tent + weap + fix + 2× harv + 3× medium tank on HOLD-FIRE',
     '6× rifle infantry garrison duplicated at both NORTH (y=14) and SOUTH (y=26) latitudes at x=40 on Defend stance + anti-DRAW enemy fact @(124,36)',
     POST,'',
@@ -85,15 +85,14 @@ add(P,'hard',C,M,SZ,'large-trivial',T,
     'Stall hoards above $1499 → LOSS. Burn-everything crashes below $300 → LOSS. Memorised attack vector misses on wrong spawn → LOSS.')
 
 # ── 2. econ-buy-vs-build-decision ─────────────────────────────────────
-# rush-hour-arena 128x40; engagement at x=10..70 → 60 cells. Wide
-# because rush traverses a long lane (load-bearing for timing) but
-# enemy spawns at lane mouth not far side. Tag wide.
-P='econ-buy-vs-build-decision'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 80x40 (econ-buy-vs-build-80x40). Engagement
+# footprint x=10..70 (60 cells) now fills nearly the whole arena. Tag fit.
+P='econ-buy-vs-build-decision'; C='reasoning'; M='econ-buy-vs-build-80x40'; SZ='80x40'
 T='build, place_building, move_units, attack_unit, attack_move, stop'
 POST='hunter (st3 rusher rifle wave; bot_type:rusher charges agent centroid)'
-add(P,'easy',C,M,SZ,'wide',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(10,20): fact + proc + powr + weap + fix; NO units; $3400 cash',
-    '4× rifle infantry @(70,20) HUNTER (st3) charging fact + anti-DRAW enemy fact @(120,20)',
+    '4× rifle infantry @(70,20) HUNTER (st3) charging fact + anti-DRAW enemy fact @(76,20)',
     POST,'',
     "Commander, this is a capex-vs-opex call under live rush pressure. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), War Factory (weap) and Service Depot (fix), no units, and exactly $3400 in the bank. Four rifle infantry (e1) are charging your yard from the lane mouth NOW. The budget covers EITHER four medium tanks (2tnk, $850 each) from the existing war factory OR a second war factory ($2000, leaving $1400 — one tank). Within about 17 turns, kill at least three enemies and keep your Construction Yard standing. A second factory does not field a defender in time.",
     'Kill ≥3 enemies AND fact standing, within 1499 ticks.',
@@ -102,9 +101,9 @@ add(P,'easy',C,M,SZ,'wide',T,
     3400,
     'No income engine — must spend $3400 on units. Budget = exactly 4× 2tnk OR 1× weap + 1× 2tnk residual',
     'Stall → fact razed by rush → LOSS. Build-weap-first spends $2000, first new tank fields too late → fact razed → LOSS.')
-add(P,'medium',C,M,SZ,'wide',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Allied base @(10,20): fact + proc + powr + weap + fix; NO units; $3400 cash',
-    '5× rifle infantry @(70,20) HUNTER (st3) charging fact + anti-DRAW enemy fact @(120,20)',
+    '5× rifle infantry @(70,20) HUNTER (st3) charging fact + anti-DRAW enemy fact @(76,20)',
     POST,'',
     "Commander, this is a heavier capex-vs-opex call under live rush pressure. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), War Factory (weap) and Service Depot (fix), no units, and exactly $3400 in the bank. Five rifle infantry (e1) are charging your yard from the lane mouth NOW. The budget covers EITHER four medium tanks (2tnk, $850 each) from the existing war factory OR a second war factory ($2000, residual $1400 — one tank). Within about 17 turns, kill at least four enemies and keep your Construction Yard standing. Long-run capacity does not survive the incoming wall.",
     'Kill ≥4 enemies AND fact standing, within 1499 ticks.',
@@ -113,9 +112,9 @@ add(P,'medium',C,M,SZ,'wide',T,
     3400,
     'No income — $3400 budget chooses 4× 2tnk (immediate force) or 1× weap (long-run capacity, 1 residual tank)',
     'Stall → fact razed → LOSS. Build-weap-first → 1 tank fields, fact razed by 5-man rush → LOSS.')
-add(P,'hard',C,M,SZ,'wide',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=14) or SOUTH (y=26): fact + proc + powr + weap + fix + inert spawn-witness e1; NO combat units; $3400 cash',
-    '5× rifle infantry + 1× rocket soldier per matched spawn @(70-72, 14 or 26) HUNTER (st3 rusher) + anti-DRAW enemy fact at matching latitude',
+    '5× rifle infantry + 1× rocket soldier per matched spawn @(70-72, 14 or 26) HUNTER (st3 rusher) + anti-DRAW enemy fact @(76, 14 or 26) at matching latitude',
     POST,'',
     "Commander, this is a capex-vs-opex call with seed-rotated base latitude. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), War Factory (weap) and Service Depot (fix) at either the NORTH (y=14) or SOUTH (y=26) latitude — the seed picks — with no combat units and exactly $3400 cash. Five rifle infantry (e1) and one rocket soldier (e3) are charging your live yard from the lane mouth NOW. The budget covers EITHER four medium tanks (2tnk, $850 each) from the existing war factory OR a second war factory ($2000, residual $1400 — one tank). Within about 19 turns, kill at least five enemies and keep your Construction Yard standing.",
     'Kill ≥5 enemies AND fact standing, within 1649 ticks.',
@@ -126,14 +125,14 @@ add(P,'hard',C,M,SZ,'wide',T,
     'Stall → fact razed → LOSS. Build-weap-first → only 1 tank in time, mixed wave overruns fact → LOSS.')
 
 # ── 3. econ-cash-reserve-management ───────────────────────────────────
-# rush-hour-arena 128x40; decision footprint x=8..22 (~14 cells). Most
-# of map is empty. Tag large-trivial.
-P='econ-cash-reserve-management'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 48x40 (econ-cash-reserve-management-48x40).
+# Decision footprint x=8..22 (~14 cells) sits in a 48-wide arena. Tag fit.
+P='econ-cash-reserve-management'; C='reasoning'; M='econ-cash-reserve-management-48x40'; SZ='48x40'
 T='observe, build, place_building, harvest, move_units, stop'
 POST='passive (st0 anti-DRAW e1 far east) — no enemy interaction'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(10-14,18-22): fact + proc + tent + powr + 2× harv on 2 near mines',
-    '1× anti-DRAW rifle infantry @(120,36) HoldFire',
+    '1× anti-DRAW rifle infantry @(42,4) HoldFire',
     POST,'',
     "Commander, this is a treasury-discipline drill. You hold four buildings — Construction Yard (fact), Ore Refinery (proc), Allied Barracks (tent) and Power Plant (powr) — with two harvesters (harv, unarmed ore trucks) on two near ore patches feeding about $95 per turn, and $1500 starting cash. Within about 60 turns, grow the base to at least five buildings (a second Power Plant at $300 is the cheapest add), keep both harvesters alive, and finish with at least $300 in the bank. Stalling never adds the building; sinking $1400 into a second refinery dips the reserve below the floor at the latch moment.",
     'building_total ≥5 AND cash ≥$300 AND 2 harvs alive, within 5400 ticks.',
@@ -142,9 +141,9 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     1500,
     '2 harvs on 2 near patches @ ~190 cr/turn combined; building_total starts at 4; cheapest add is $300 powr',
     'Stall builds nothing → building bar unmet → LOSS. Over-spend $1400 on 2nd proc dips reserve under $300 → LOSS.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Allied base @(10-14,18-22): fact + proc + tent + powr + 2× harv on 2 near mines',
-    '1× anti-DRAW rifle infantry @(120,36) HoldFire',
+    '1× anti-DRAW rifle infantry @(42,4) HoldFire',
     POST,'',
     "Commander, this is a tighter treasury drill. You hold four buildings — Construction Yard (fact), Ore Refinery (proc), Allied Barracks (tent) and Power Plant (powr) — with two harvesters on two near ore patches feeding roughly $95 per turn, and $1500 starting cash. Within about 9 turns, grow the base to at least six buildings (two more), keep both harvesters alive, and finish with at least $300 in the bank. Two Power Plants at $300 each fit cleanly; a second refinery at $1400 dips cash too low to recover before the clock.",
     'building_total ≥6 AND cash ≥$300 AND 2 harvs alive, within 810 ticks.',
@@ -153,9 +152,9 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     1500,
     '2 harvs ~190 cr/turn; build 2 cheap powr (2×$300) leaves $900; 2nd proc $1400 dips reserve',
     'Stall → 0 new buildings → LOSS. 2nd proc ($1400) dips reserve below $300 within clock → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=14) or SOUTH (y=28): fact + proc + tent + powr + 2× harv on matching latitude patches',
-    '1× anti-DRAW rifle infantry @(120,36) HoldFire',
+    '1× anti-DRAW rifle infantry @(42,4) HoldFire',
     POST,'',
     "Commander, this is the tightest treasury drill with seed-rotated base latitude. You hold a Construction Yard (fact), Ore Refinery (proc), Allied Barracks (tent) and Power Plant (powr) — at either the NORTH (y=14) or SOUTH (y=28) latitude, the seed picks — with two harvesters on matching near ore patches and $1500 starting cash. Within about 12 turns, grow the base to at least seven buildings (three more), keep both harvesters alive, and finish with at least $500 in the bank. Three Power Plants at $300 each leave $600; mixing in a Pillbox or a second refinery busts the larger reserve before income can refill.",
     'building_total ≥7 AND cash ≥$500 AND 2 harvs alive, within 1080 ticks.',
@@ -166,14 +165,15 @@ add(P,'hard',C,M,SZ,'large-trivial',T,
     'Stall → no new buildings → LOSS. 3× pbox ($1800) crashes below $500 reserve → LOSS. 2nd proc ($1400) busts reserve → LOSS.')
 
 # ── 4. econ-contention-with-enemy ──────────────────────────────────────
-# rush-hour-arena 128x40; decision spans agent base x=6..14 to enemy
-# raider attack at x=22 patch (eco visible to x=80). Wide.
-P='econ-contention-with-enemy'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 96x40 (econ-contention-with-enemy-96x40). Decision
+# spans agent base x=6..14 to enemy economy/raid at x=70..92 — full-map
+# use. Tag fit.
+P='econ-contention-with-enemy'; C='reasoning'; M='econ-contention-with-enemy-96x40'; SZ='96x40'
 T='observe, build, place_building, harvest, move_units, attack_unit, attack_move, stop'
 POST='hunter (raider bot — drives at nearest agent harv each turn)'
-add(P,'easy',C,M,SZ,'wide',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied west base @(8-14,18-20): fact + proc + 2× harv + 2× medium tank @(6,19/21) on Defend stance',
-    '1× enemy heavy tank @(40,20) (raider bot) + visible enemy economy proc @(80,20) + 2× enemy harv @(76,18/22) + anti-DRAW enemy fact @(120,20)',
+    '1× enemy heavy tank @(40,20) (raider bot) + visible enemy economy proc @(80,20) + 2× enemy harv @(76,18/22) + anti-DRAW enemy fact @(92,20)',
     POST,'',
     "Commander, this is a contested-economy drill. Your Construction Yard (fact), Ore Refinery (proc) and two harvesters (harv, unarmed ore trucks) sit at the west base, with two medium tanks (2tnk) on garrison. A shared ore patch lies just east at x=22; an enemy heavy tank (3tnk) is approaching from mid-map and targeting your harvesters. Your tanks are too far back to see the patch from garrison. Within about 50 turns, drive the defenders forward to intercept the raider at the patch while the harvesters keep mining (they auto-route once a refinery exists). Win requires economy value 1500, at least one kill, and both harvesters still alive.",
     'economy_value ≥$1500 AND 2 harvs alive AND ≥1 kill, within 4500 ticks.',
@@ -182,9 +182,9 @@ add(P,'easy',C,M,SZ,'wide',T,
     500,
     '2 harvs auto-cycle near patch @(22,18)/(22,20); starting cash 500; 2× 2tnk defenders at base x=6 (too far back to cover patch)',
     'Stall → raider kills both harvs at patch → harv bar fails → LOSS. Pure defense (no harvest setup) loses time bar. Pure harvest no intercept → harvs die.')
-add(P,'medium',C,M,SZ,'wide',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Allied west base @(8-14,18-20): fact + proc + 2× harv + 3× heavy tank @(6,18/20/22) on Defend stance',
-    '2× enemy heavy tank @(70,18/22) (raider bot, two-axis) + visible enemy economy proc @(80,20) + 2× enemy harv + anti-DRAW enemy fact',
+    '2× enemy heavy tank @(70,18/22) (raider bot, two-axis) + visible enemy economy proc @(80,20) + 2× enemy harv + anti-DRAW enemy fact @(92,20)',
     POST,'',
     "Commander, this is a contested-economy drill with two raiders. Your Construction Yard (fact), Ore Refinery (proc) and two harvesters (harv, unarmed ore trucks) sit at the west base, with three heavy tanks (3tnk) on garrison. A shared ore patch lies just east at x=22; two enemy heavy tanks are approaching from the east on two separate latitudes (y=18 and y=22), each targeting your harvesters. Your garrison cannot see the patch from base. Within about 50 turns, drive the defenders forward to intercept both raiders while the harvesters auto-mine. Win requires economy value 2200, at least two kills, and both harvesters still alive.",
     'economy_value ≥$2200 AND 2 harvs alive AND ≥2 kills, within 4500 ticks.',
@@ -193,9 +193,9 @@ add(P,'medium',C,M,SZ,'wide',T,
     500,
     '2 harvs auto-cycle near patch; 3× 3tnk defenders at base x=6; need to defend both y-vectors',
     'Stall → both raiders kill harvs → LOSS. Single-axis intercept → off-axis harv dies → LOSS.')
-add(P,'hard',C,M,SZ,'wide',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=14) or SOUTH (y=26): fact + proc + 2× harv + 3× heavy tank',
-    '2× enemy heavy tank @(90,14)/(90,26) — both raiders always place + 3× enemy harv + enemy proc + anti-DRAW fact',
+    '2× enemy heavy tank @(90,14)/(90,26) — both raiders always place + 3× enemy harv + enemy proc + anti-DRAW fact @(92,20)',
     POST,'',
     "Commander, this is a contested-economy drill with seed-rotated base latitude. Your Construction Yard (fact), Ore Refinery (proc), two harvesters (harv, unarmed ore trucks) and three heavy-tank (3tnk) defenders all stage at either the NORTH (y=14) or SOUTH (y=26) latitude — the seed picks. A shared ore patch sits at x=22 on your base's latitude. Two enemy heavy tanks are approaching from the east targeting your harvesters. Within about 50 turns, drive the defenders forward to intercept both raiders while the harvesters auto-mine. Win requires economy value 2200, at least two kills, and both harvesters still alive.",
     'economy_value ≥$2200 AND 2 harvs alive AND ≥2 kills, within 4500 ticks.',
@@ -287,14 +287,14 @@ add(P,'hard',C,M,SZ,'wide',T,
     'Stall → proc snowballs → LOSS. Charge in disorder → e3 cluster kills column → LOSS. Wrong-target (main) → LOSS.')
 
 # ── 7. econ-expansion-timing ──────────────────────────────────────────
-# rush-hour-arena 128x40; decision footprint x=8..22 (~14 cells).
-# large-trivial.
-P='econ-expansion-timing'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 48x40 (econ-expansion-timing-48x40). Decision
+# footprint x=8..22 (~14 cells) on a 48-wide arena. Tag fit.
+P='econ-expansion-timing'; C='reasoning'; M='econ-expansion-timing-48x40'; SZ='48x40'
 T='observe, build, place_building, harvest, move_units, stop'
 POST='passive (st0 anti-DRAW e1 far east) — no enemy interaction'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(8-16,18-22): fact + proc + powr + weap + 1× harv on near patches',
-    '1× anti-DRAW rifle infantry @(120,36) HoldFire',
+    '1× anti-DRAW rifle infantry @(42,4) HoldFire',
     POST,'',
     "Commander, this is an expansion-timing drill. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr) and War Factory (weap), with one harvester (harv, unarmed ore truck) on two near ore patches feeding about $95 per turn, and $1100 starting cash. Within about 30 turns, finish with economy value at least $5200 while keeping the Construction Yard and at least one refinery standing. A second harvester ($1400 from the war factory) sharply lifts income; a second refinery ($2000) without harvs to feed it just burns budget.",
     'economy_value ≥$5200 AND fact standing AND ≥1 proc, within 2700 ticks.',
@@ -303,9 +303,9 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     1100,
     '1 harv on 2 near patches @ ~95 cr/turn; weap available to build 2nd harv ($1400)',
     'Stall → income too slow → economy bar unmet → LOSS. 2nd proc without 2nd harv → empty refinery, cash gone → LOSS.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Allied base @(8-16,18-22): fact + proc + powr + weap + 1× harv on near patches',
-    '1× anti-DRAW rifle infantry @(120,36) HoldFire',
+    '1× anti-DRAW rifle infantry @(42,4) HoldFire',
     POST,'',
     "Commander, this is a tighter expansion-timing drill. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr) and War Factory (weap), with one harvester (harv, unarmed ore truck) on two near ore patches feeding about $95 per turn, and $1100 starting cash. Within about 40 turns, finish with economy value at least $7300 while keeping the Construction Yard and refinery standing. A timely second harvester nearly doubles income; over-expansion (extra refinery) burns budget without throughput.",
     'economy_value ≥$7300 AND fact standing AND ≥1 proc, within 3600 ticks.',
@@ -314,9 +314,9 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     1100,
     '1 harv @ ~95 cr/turn; weap can build 2nd or 3rd harv',
     'Stall → bar unmet → LOSS. Over-expand (2nd proc) → cash drain, no income gain → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=10) or SOUTH (y=28): fact + proc + powr + weap + 1× harv',
-    '1× anti-DRAW rifle infantry @(120,36) HoldFire',
+    '1× anti-DRAW rifle infantry @(42,4) HoldFire',
     POST,'',
     "Commander, this is the tightest expansion-timing drill with seed-rotated base latitude. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr) and War Factory (weap), with one harvester (harv, unarmed ore truck) on the matching latitude's patches feeding about $95 per turn, and $1100 starting cash. Within about 50 turns, finish with economy value at least $10200 while keeping the Construction Yard and refinery standing. Multiple harvesters compound income; over-building refineries without harvs to feed them stalls progress.",
     'economy_value ≥$10200 AND fact standing AND ≥1 proc, within 4500 ticks.',
@@ -520,13 +520,14 @@ add(P,'hard',C,M,SZ,'wide',T,
     'Stall → LOSS. Wrong placement (home or off-latitude) → no income gain → LOSS.')
 
 # ── 13. econ-overflow-to-silos ────────────────────────────────────────
-# rush-hour-arena 128x40; small footprint x=8..14 (~6 cells). large-trivial.
-P='econ-overflow-to-silos'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 64x40 (econ-overflow-to-silos-64x40). Small base
+# footprint x=8..14 with anti-DRAW fact far east @(60,4). Tag fit.
+P='econ-overflow-to-silos'; C='reasoning'; M='econ-overflow-to-silos-64x40'; SZ='64x40'
 T='observe, build, place_building, harvest, move_units, stop'
 POST='passive (anti-DRAW enemy fact only)'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(8-14,18-20): fact + proc + powr + 1× harv on near patch',
-    'Anti-DRAW enemy fact @(120,20)',
+    'Anti-DRAW enemy fact @(60,4)',
     POST,'',
     "Commander, this is an overflow-to-silos drill. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), and one harvester (harv, unarmed ore truck) on a near patch, with $1000 cash. Without silos (storage), the refinery has limited buffer and overflowing ore is lost. Within about 20 turns, build extra silos ($150 each) or spend cash so the economy value (cash + buffer) reaches at least $6000.",
     'economy_value ≥$6000 AND fact AND proc, within 1800 ticks.',
@@ -535,9 +536,9 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     1000,
     '1 harv on near patch; refinery has small ore buffer; silos cost $150 each',
     'Stall → buffer fills, ore lost → bar unmet → LOSS. No silos but harv keeps mining → wasted cycles.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Allied base @(8-14,14-22): fact + proc + powr + 7× harv on 7 stacked mines',
-    'Anti-DRAW enemy fact @(120,20)',
+    'Anti-DRAW enemy fact @(60,4)',
     POST,'',
     "Commander, this is a heavy-overflow silo drill. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), and SEVEN harvesters (harv, unarmed ore trucks) on stacked patches all dumping into one refinery, with $500 cash. The refinery buffer overflows fast with seven harvs hauling — without silos to capture excess ore, most of the income is dropped. Within about 21 turns, build silos and reach economy value of at least $19500.",
     'economy_value ≥$19500 AND fact AND proc, within 1803 ticks.',
@@ -546,11 +547,11 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     500,
     '7 harvs flooding 1 proc; overflow loss without silos; silos $150 each',
     'Stall → catastrophic overflow loss → bar unmet → LOSS. Cash spent on power/other → no storage → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
-    'Allied base seed-rotated WEST (x=8) or EAST (x=80): fact + proc + powr + 7× harv on 7 stacked mines',
-    'Anti-DRAW enemy fact @(120,20)',
+add(P,'hard',C,M,SZ,'fit',T,
+    'Allied base seed-rotated WEST (x=8) or EAST (x=40): fact + proc + powr + 7× harv on 7 stacked mines',
+    'Anti-DRAW enemy fact @(60,4)',
     POST,'',
-    "Commander, this is a heavy-overflow silo drill with seed-rotated base position. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), and SEVEN harvesters (harv, unarmed ore trucks) flooding one refinery at either the WEST (x=8) or EAST (x=80) base — the seed picks. With $500 cash, build silos fast or the refinery's tiny buffer drops most income. Within about 21 turns, reach economy value of at least $19500.",
+    "Commander, this is a heavy-overflow silo drill with seed-rotated base position. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), and SEVEN harvesters (harv, unarmed ore trucks) flooding one refinery at either the WEST (x=8) or EAST (x=40) base — the seed picks. With $500 cash, build silos fast or the refinery's tiny buffer drops most income. Within about 21 turns, reach economy value of at least $19500.",
     'economy_value ≥$19500 AND fact AND proc, within 1803 ticks.',
     'fact or proc lost, or deadline (1804 ticks).',
     21, 1893,
@@ -598,13 +599,14 @@ add(P,'hard',C,M,SZ,'wide',T,
     'Stall → no income → LOSS. Unescorted → harv dies → LOSS.')
 
 # ── 15. econ-quantitative-vs-qualitative-spend ────────────────────────
-# rush-hour-arena 128x40; engagement x=10..72 → 62 cells. Wide.
-P='econ-quantitative-vs-qualitative-spend'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 56x40 (econ-quantitative-vs-qualitative-56x40).
+# Engagement x=10..52 fills the arena. Tag fit.
+P='econ-quantitative-vs-qualitative-spend'; C='reasoning'; M='econ-quantitative-vs-qualitative-56x40'; SZ='56x40'
 T='build, place_building, move_units, attack_unit, attack_move, stop'
 POST='hunter (st3 mixed e1/e3 rush + dog + pbox on hard)'
-add(P,'easy',C,M,SZ,'wide',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(8-16,20-26): fact + powr + tent + weap + fix + 2× rifle infantry HOLD-FIRE; $4500 cash',
-    '4× rifle infantry @(70,18-22) + 2× rocket infantry @(72,19/21) HUNTER (st3) + anti-DRAW enemy fact @(124,20)',
+    '4× rifle infantry @(40,18-22) + 2× rocket infantry @(42,19/21) HUNTER (st3) + anti-DRAW enemy fact @(52,20)',
     POST,'',
     "Commander, this is a quantitative-vs-qualitative spend drill. You hold a full Allied base — Construction Yard (fact), Power Plant (powr), Allied Barracks (tent), War Factory (weap), Service Depot (fix) — plus two starter rifle infantry on hold-fire, and $4500 cash. A mixed enemy wave of 4 riflemen plus 2 anti-tank rocket soldiers is rushing your base. The $4500 can buy a SWARM (many cheap units, e.g. 45× e1 @ $100) OR QUALITY (5× medium tank @ $850 = $4250). Within about 60 turns, kill at least 6 enemies while losing no more than 5 of your own, keeping the Construction Yard standing.",
     '≥6 kills AND ≤5 own losses AND fact standing, within 5400 ticks.',
@@ -613,9 +615,9 @@ add(P,'easy',C,M,SZ,'wide',T,
     4500,
     'No income engine; $4500 spend = up to 45× $100 e1 (swarm) or 5× $850 2tnk (quality)',
     'Pure swarm (45× e1) loses too many to e3 → loss cap busted → LOSS. Stall → fact razed → LOSS.')
-add(P,'medium',C,M,SZ,'wide',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Same Allied base + 2 starter rifle inf HOLD-FIRE; $4500',
-    '4× rifle infantry + 2× rocket infantry HUNTER + anti-DRAW fact',
+    '4× rifle infantry + 2× rocket infantry HUNTER + anti-DRAW fact @(52,20)',
     POST,'',
     "Commander, this is a quantitative-vs-qualitative spend drill with a tighter loss cap. You hold a full Allied base — Construction Yard, Power Plant, Allied Barracks, War Factory, Service Depot — plus two starter rifle infantry on hold-fire, and $4500 cash. A mixed enemy wave of 4 riflemen plus 2 anti-tank rocket soldiers is rushing your base. Within about 60 turns, kill at least 6 enemies while losing no more than 4 of your own, keeping the Construction Yard standing.",
     '≥6 kills AND ≤4 own losses AND fact standing, within 5400 ticks.',
@@ -624,9 +626,9 @@ add(P,'medium',C,M,SZ,'wide',T,
     4500,
     'Same $4500 budget; tighter ≤4 loss cap punishes pure swarm',
     'Swarm loses 5+ infantry to e3 → cap busted → LOSS. Stall → fact razed → LOSS.')
-add(P,'hard',C,M,SZ,'wide',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=10) or SOUTH (y=30): fact + powr + tent + weap + fix + 2 starter rifle infantry HOLD-FIRE; $4500',
-    'NORTH spawn: 5× e1 + 1× dog + 1× pbox @x=70-74 y=8-12. SOUTH spawn: 6× e3 @x=70-72 y=28-32. Both HUNTER + anti-DRAW fact',
+    'NORTH spawn: 5× e1 + 1× dog + 1× pbox @x=40-44 y=8-12. SOUTH spawn: 6× e3 @x=40-42 y=28-32. Both HUNTER + anti-DRAW fact @(52,20)',
     POST,'',
     "Commander, this is a quantitative-vs-qualitative spend drill with seed-rotated base latitude AND seed-rotated enemy composition. You hold a full Allied base on either NORTH (y=10) or SOUTH (y=30) — the seed picks — plus two starter rifle infantry on hold-fire, and $4500 cash. The enemy composition differs by spawn: NORTH faces a mixed wave with attack dogs and a pillbox; SOUTH faces a heavy anti-tank rocket soldier wall. Within about 60 turns, kill at least 6 enemies while losing no more than 4 of your own, keeping the Construction Yard standing. The right spend differs by what you face.",
     '≥6 kills AND ≤4 own losses AND fact standing, within 5400 ticks.',
@@ -637,13 +639,14 @@ add(P,'hard',C,M,SZ,'wide',T,
     'Memorised one-shape spend (e.g. all tanks) fails on e3-heavy spawn or vice-versa → LOSS. Swarm vs e3 → cap busted → LOSS.')
 
 # ── 16. econ-recover-from-zero-cash ───────────────────────────────────
-# rush-hour-arena 128x40; small footprint. large-trivial.
-P='econ-recover-from-zero-cash'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 48x40 (econ-recover-from-zero-cash-48x40). Small
+# footprint at base; anti-DRAW fact at far corner @(42,4). Tag fit.
+P='econ-recover-from-zero-cash'; C='reasoning'; M='econ-recover-from-zero-cash-48x40'; SZ='48x40'
 T='observe, build, place_building, harvest, move_units, stop'
 POST='passive (anti-DRAW enemy fact only)'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(8-14,18): fact + proc + 1× harv on near patch (no powr — must build); $0 cash',
-    'Anti-DRAW enemy fact @(120,20)',
+    'Anti-DRAW enemy fact @(42,4)',
     POST,'',
     "Commander, this is a zero-cash recovery drill. You hold a Construction Yard (fact), Ore Refinery (proc), and one harvester (harv, unarmed ore truck) on a near patch — but NO Power Plant and ZERO cash. Without power the refinery cannot process and the harv idles. Within about 70 turns, build at least one Power Plant ($300 — requires waiting for harvest income), keep the harv alive, and finish with economy value at least $1500.",
     'economy_value ≥$1500 AND fact AND ≥1 powr AND ≥1 harv, within 6300 ticks.',
@@ -652,9 +655,9 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     0,
     '1 harv idle initially (no power); must wait for first bale income to build powr; $300 powr is minimum spend',
     'Stall → no powr → no income → bar unmet → LOSS. Build wrong building → wastes scarce cash → LOSS.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Allied base: fact + proc + 1× harv; $0 cash',
-    'Anti-DRAW enemy fact',
+    'Anti-DRAW enemy fact @(42,4)',
     POST,'',
     "Commander, this is a zero-cash recovery drill with a tighter target. You hold a Construction Yard (fact), Ore Refinery (proc), and one harvester (harv, unarmed ore truck) on a near patch — ZERO cash. Within about 70 turns, recover to economy value at least $2000 AND TWO harvesters alive (build a second harv at $1400 once cash allows), keeping the Construction Yard.",
     'economy_value ≥$2000 AND ≥2 harvs AND fact, within 6300 ticks.',
@@ -663,9 +666,9 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     0,
     '1 harv → need to grow to 2 harvs (extra $1400 from earned income)',
     'Stall → only 1 harv → 2-harv clause unmet → LOSS. Spend cash elsewhere → no 2nd harv → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=14) or SOUTH (y=26): fact + proc + 1× harv on matching latitude; $0 cash',
-    'Anti-DRAW enemy fact',
+    'Anti-DRAW enemy fact @(42,4)',
     POST,'',
     "Commander, this is a zero-cash recovery drill with seed-rotated base latitude AND a heavy growth target. You hold a Construction Yard (fact), Ore Refinery (proc), and one harvester (harv, unarmed ore truck) on a near patch at NORTH (y=14) or SOUTH (y=26) — ZERO cash. Within about 70 turns, recover to economy value at least $3000 AND THREE harvesters alive (build two more at $1400 each), keeping the Construction Yard.",
     'economy_value ≥$3000 AND ≥3 harvs AND fact, within 6300 ticks.',
@@ -676,24 +679,26 @@ add(P,'hard',C,M,SZ,'large-trivial',T,
     'Stall → only 1 harv → LOSS. Spend on tanks/other → no extra harvs → LOSS. Memorised opening fails on wrong spawn.')
 
 # ── 17. econ-replace-dead-harvester ───────────────────────────────────
-# rush-hour-arena 128x40; tiny footprint x=8..18. large-trivial.
-P='econ-replace-dead-harvester'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 64x40 (econ-replace-dead-harvester-64x40). Tiny
+# base footprint x=8..18; in-base 4tnk raid + anti-DRAW fact at (60,34).
+# Tag fit. weap @(12,22) IS pre-placed in every tier → replacement queue.
+P='econ-replace-dead-harvester'; C='reasoning'; M='econ-replace-dead-harvester-64x40'; SZ='64x40'
 T='observe, build, place_building, harvest, move_units, stop'
 POST='hunter (Mammoth 4tnk in-base raider attacks harvs)'
-add(P,'easy',C,M,SZ,'large-trivial',T,
-    'Allied base @(8-15,18-23): fact + proc + tent + 3× harv + 2× heavy tank @(15,21/23) on Defend; $1100',
-    '1× Mammoth tank @(18,22) (in-base raider) + anti-DRAW enemy fact @(120,20)',
+add(P,'easy',C,M,SZ,'fit',T,
+    'Allied base @(8-15,18-23): fact + proc + tent + weap + 3× harv + 2× heavy tank @(15,21/23) on Defend; $1100',
+    '1× Mammoth tank @(18,22) (in-base raider) + anti-DRAW enemy fact @(60,34)',
     POST,'',
-    "Commander, this is a harvester-replacement drill. You hold a Construction Yard (fact), Ore Refinery (proc), Allied Barracks (tent), three harvesters (harv, unarmed ore trucks), and two heavy tanks (3tnk) on Defend orders, with $1100 cash. A Mammoth tank (4tnk — very heavy enemy raider) is already inside your base at (18,22) and will kill harvesters fast. Within about 60 turns, replace any dead harvs to maintain THREE harvs alive AND deliver economy value $1800, keeping the refinery. Building a replacement harv costs $1400 and requires the war factory.",
+    "Commander, this is a harvester-replacement drill. You hold a Construction Yard (fact), Ore Refinery (proc), Allied Barracks (tent), War Factory (weap), three harvesters (harv, unarmed ore trucks), and two heavy tanks (3tnk) on Defend orders, with $1100 cash. A Mammoth tank (4tnk — very heavy enemy raider) is already inside your base at (18,22) and will kill harvesters fast. Within about 60 turns, replace any dead harvs to maintain THREE harvs alive AND deliver economy value $1800, keeping the refinery. Building a replacement harv costs $1400 and requires the war factory.",
     'economy_value ≥$1800 AND ≥3 harvs AND proc, within 5400 ticks.',
     'No harv, no proc, or deadline (5401 ticks).',
     60, 5403,
     1100,
-    '3 starter harvs but Mammoth in-base kills them; replace via weap ($1400 each — but pack has no weap!) — actually NO weap given; defect candidate',
-    'Stall → Mammoth kills harvs → harv-count clause fails → LOSS. No replacement engine → defeating Mammoth is required first.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
-    'Same as easy: fact + proc + tent + 3× harv + 2× heavy tank Defend; $1100',
-    '1× Mammoth + anti-DRAW fact',
+    '3 starter harvs + Mammoth in-base; weap @(12,22) is pre-placed so harv replacements ($1400) are queueable',
+    'Stall → Mammoth kills harvs → harv-count clause fails → LOSS. No tank engagement → replacements out-paced by losses → LOSS.')
+add(P,'medium',C,M,SZ,'fit',T,
+    'Same as easy: fact + proc + tent + weap + 3× harv + 2× heavy tank Defend; $1100',
+    '1× Mammoth + anti-DRAW fact @(60,34)',
     POST,'',
     "Commander, this is a harvester-replacement drill with a higher cash bar. You hold a Construction Yard (fact), Ore Refinery (proc), Allied Barracks (tent), three harvesters (harv, unarmed ore trucks), and two heavy tanks (3tnk) on Defend orders, with $1100 cash. A Mammoth tank (4tnk) is already inside your base at (18,22) and will kill harvesters. Within about 60 turns, maintain THREE harvs alive AND deliver economy value $2500.",
     'economy_value ≥$2500 AND ≥3 harvs AND proc, within 5400 ticks.',
@@ -702,9 +707,9 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     1100,
     'Same setup; tighter $2500 bar',
     'Stall → harvs die → LOSS. Failure to neutralise Mammoth → cascading harv losses → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
-    'Allied base seed-rotated NORTH (y=14) or SOUTH (y=26): fact + proc + tent + 3× harv + 4× heavy tank; $3300',
-    '2× Mammoth in-base + 1× Mammoth mid-map @(60,20) + anti-DRAW fact',
+add(P,'hard',C,M,SZ,'fit',T,
+    'Allied base seed-rotated NORTH (y=14) or SOUTH (y=26): fact + proc + tent + weap + 3× harv + 4× heavy tank; $3300',
+    '2× Mammoth in-base + 1× Mammoth mid-map @(60,20) + anti-DRAW fact @(60,34)',
     POST,'',
     "Commander, this is a harvester-replacement drill with seed-rotated base latitude and a heavier threat. You hold a Construction Yard, Ore Refinery, Allied Barracks, three harvesters, and four heavy tanks (3tnk) on Defend orders at NORTH (y=14) or SOUTH (y=26), with $3300 cash. TWO Mammoth tanks (4tnk) are already in your base plus a third at mid-map (60,20). Within about 60 turns, deliver economy value $3500 with three harvs alive by tick 3600, keeping the refinery.",
     'economy_value ≥$3500 AND ≥3 harvs by tick 3600 AND proc, within 5400 ticks.',
@@ -715,13 +720,14 @@ add(P,'hard',C,M,SZ,'large-trivial',T,
     'Stall → Mammoths kill all harvs → LOSS. Failure to focus-fire Mammoths → cascading losses → LOSS.')
 
 # ── 18. econ-resource-trade-with-self ─────────────────────────────────
-# rush-hour-arena 128x40; tiny footprint. large-trivial.
-P='econ-resource-trade-with-self'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 48x40 (econ-resource-trade-with-self-48x40). Tiny
+# footprint x=8..16; anti-DRAW fact @(42,34). Tag fit.
+P='econ-resource-trade-with-self'; C='reasoning'; M='econ-resource-trade-with-self-48x40'; SZ='48x40'
 T='observe, build, place_building, harvest, move_units, sell, stop'
 POST='passive (anti-DRAW enemy fact only)'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(8-16,18-22): fact + proc + powr + 1× harv + weap (unused war factory); $500',
-    'Anti-DRAW enemy fact @(120,20)',
+    'Anti-DRAW enemy fact @(42,34)',
     POST,'',
     "Commander, this is a resource-trade-with-self drill. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), one harvester (harv), and a War Factory (weap), with $500 cash. The `sell` order returns ~50% of a building's cost back as cash. Within about 30 turns, finish with $5500 cash — you can sell the unused war factory ($1000 back from $2000 cost) for immediate liquidity to combine with harvest income.",
     'cash ≥$5500 AND fact AND proc, within 2700 ticks.',
@@ -730,9 +736,9 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     500,
     '1 harv ~95 cr/turn; weap sellable for $1000 instant cash',
     'Stall → income alone too slow → bar unmet → LOSS. Sell wrong building (e.g. proc) → no income → LOSS.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Same as easy + $500',
-    'Anti-DRAW fact',
+    'Anti-DRAW fact @(42,34)',
     POST,'',
     "Commander, this is a resource-trade-with-self drill with a higher cash bar. You hold a Construction Yard, Ore Refinery, Power Plant, one harvester, and a War Factory, with $500 cash. The `sell` order returns half a building's cost. Within about 40 turns, finish with $7500 cash by combining sells with harvest income.",
     'cash ≥$7500 AND fact AND proc, within 3600 ticks.',
@@ -741,9 +747,9 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     500,
     'Same; $7500 bar requires sell + sustained harvest',
     'Stall → bar unmet → LOSS. Sell proc/powr → wreck income → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=10) or SOUTH (y=28): fact + proc + powr + 1× harv + weap; $500',
-    'Anti-DRAW fact',
+    'Anti-DRAW fact @(42,34)',
     POST,'',
     "Commander, this is a resource-trade-with-self drill with seed-rotated base latitude. You hold a Construction Yard, Ore Refinery, Power Plant, one harvester, and a War Factory at NORTH (y=10) or SOUTH (y=28), with $500 cash. Within about 50 turns, finish with $9000 cash by combining sells with harvest income.",
     'cash ≥$9000 AND fact AND proc, within 4500 ticks.',
@@ -792,13 +798,14 @@ add(P,'hard',C,M,SZ,'wide',T,
     'Stall → no 2nd proc → LOSS. Build at home → location fails → LOSS.')
 
 # ── 20. econ-silo-vs-spend ────────────────────────────────────────────
-# rush-hour-arena 128x40; small footprint x=8..14 plus skirmish at x=40. wide.
-P='econ-silo-vs-spend'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 48x40 (econ-silo-vs-spend-48x40). Base x=8..14
+# plus skirmish at x=30, anti-DRAW fact @(42,20). Tag fit.
+P='econ-silo-vs-spend'; C='reasoning'; M='econ-silo-vs-spend-48x40'; SZ='48x40'
 T='observe, build, place_building, harvest, move_units, attack_unit, attack_move, stop'
-POST='passive (st0 e1 garrison at x=40 + anti-DRAW fact)'
-add(P,'easy',C,M,SZ,'wide',T,
+POST='passive (st0 e1 garrison at x=30 + anti-DRAW fact)'
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(8-14,18-20): fact + proc + powr + 1× harv on near patch; $1800',
-    '2× rifle infantry @(40,18-19) HoldFire + anti-DRAW enemy fact @(120,20)',
+    '2× rifle infantry @(30,18-19) HoldFire + anti-DRAW enemy fact @(42,20)',
     POST,'',
     "Commander, this is a silo-vs-spend drill. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), and one harvester (harv) on a near patch, with $1800 cash. Two enemy riflemen sit at (40, 18..19) on hold-fire — they only fire if shot at. Within about 20 turns, satisfy at least one of: (a) build a silo, (b) kill at least 1 enemy, (c) build 2 pillboxes — AND reach economy value $1500 while keeping fact and proc. The pack tests cash conversion choice: storage, military, or defense.",
     '(silo OR ≥1 kill OR 2 pbox) AND economy_value ≥$1500 AND fact AND proc, within 1800 ticks.',
@@ -807,9 +814,9 @@ add(P,'easy',C,M,SZ,'wide',T,
     1800,
     '1 harv near patch ~95 cr/turn; $1800 starting; 3 conversion options',
     'Stall → no conversion clause met → LOSS. Spend only on procs/powr → no qualifying clause → LOSS.')
-add(P,'medium',C,M,SZ,'wide',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Allied base: fact + proc + powr + 2× harv on 2 near patches; $1800',
-    '3× rifle infantry @(40,18-20) HoldFire + anti-DRAW fact',
+    '3× rifle infantry @(30,18-20) HoldFire + anti-DRAW fact @(42,20)',
     POST,'',
     "Commander, this is a tighter silo-vs-spend drill. You hold a Construction Yard, Ore Refinery, Power Plant, and TWO harvesters on two near patches, with $1800 cash. Three enemy riflemen sit at (40, 18..20) on hold-fire. Within about 14 turns, satisfy at least one of: build a silo, kill ≥2 enemies, or build 2 pillboxes — AND reach economy value $2200 while keeping fact and proc.",
     '(silo OR ≥2 kills OR 2 pbox) AND economy_value ≥$2200 AND fact AND proc, within 1260 ticks.',
@@ -818,9 +825,9 @@ add(P,'medium',C,M,SZ,'wide',T,
     1800,
     '2 harvs ~190 cr/turn; tighter clock; same 3 options',
     'Stall → no conversion clause met → LOSS.')
-add(P,'hard',C,M,SZ,'wide',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=14) or SOUTH (y=26): fact + proc + powr + 2× harv on matching latitude patches; $1800',
-    '3× rifle infantry @(40,19-21) HoldFire + anti-DRAW fact',
+    '3× rifle infantry @(30,19-21) HoldFire + anti-DRAW fact @(42,20)',
     POST,'',
     "Commander, this is a silo-vs-spend drill with seed-rotated base latitude. You hold a Construction Yard, Ore Refinery, Power Plant, and TWO harvesters on near patches at NORTH (y=14) or SOUTH (y=26), with $1800 cash. Three enemy riflemen sit at (40, 19..21) on hold-fire. Within about 14 turns, satisfy at least one of: build a silo, kill ≥2 enemies, or build 2 pillboxes — AND reach economy value $2200 while keeping fact and proc.",
     '(silo OR ≥2 kills OR 2 pbox) AND economy_value ≥$2200 AND fact AND proc, within 1260 ticks.',
@@ -831,14 +838,14 @@ add(P,'hard',C,M,SZ,'wide',T,
     'Stall → no clause met → LOSS. Wrong-spawn opening wastes time.')
 
 # ── 21. econ-startup-from-scratch ─────────────────────────────────────
-# rush-hour-arena 128x40; agent has mcv + lone mine at x=20..26.
-# large-trivial.
-P='econ-startup-from-scratch'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 48x40 (econ-startup-from-scratch-48x40). Agent
+# MCV @(20,20) + mine @(26,20); anti-DRAW fact @(42,34). Tag fit.
+P='econ-startup-from-scratch'; C='reasoning'; M='econ-startup-from-scratch-48x40'; SZ='48x40'
 T='observe, deploy, build, place_building, harvest, move_units, stop'
 POST='passive (anti-DRAW enemy fact only)'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     '1× MCV @(20,20) + 1× ore mine @(26,20); $1900 cash; NO base built',
-    'Anti-DRAW enemy fact @(120,20)',
+    'Anti-DRAW enemy fact @(42,34)',
     POST,'',
     "Commander, this is a startup-from-scratch drill. You hold ONE Mobile Construction Vehicle (mcv — a deployable vehicle that becomes a Construction Yard when deployed) at (20,20), with $1900 cash and an ore mine at (26,20). Deploy the MCV to spawn the fact, then build a Power Plant ($300) + Ore Refinery ($2000) + harvester ($1400) chain to get income flowing. Within about 50 turns, end with at least one refinery, at least one harvester, and economy value $800.",
     '≥1 proc AND ≥1 harv AND economy_value ≥$800, within 4500 ticks.',
@@ -847,9 +854,9 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     1900,
     '$1900 starting + need powr ($300) + proc ($2000) + harv ($1400) — must sequence carefully; build_total grows over time',
     'Stall (no deploy) → no production → bar unmet → LOSS. Wrong build order (proc before powr) → no power, can\'t produce → LOSS.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     '1× MCV + 1 mine; $1900',
-    'Anti-DRAW fact',
+    'Anti-DRAW fact @(42,34)',
     POST,'',
     "Commander, this is a startup-from-scratch drill with tighter clock. You hold ONE Mobile Construction Vehicle (mcv) at (20,20), with $1900 cash and an ore mine at (26,20). Deploy, build powr + proc + harv, get mining. Within about 40 turns, end with ≥1 proc, ≥1 harv, and economy value $1200.",
     '≥1 proc AND ≥1 harv AND economy_value ≥$1200, within 3600 ticks.',
@@ -858,9 +865,9 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     1900,
     'Same setup; tighter clock + higher economy bar',
     'Stall → bar unmet → LOSS. Wasted turns on wrong sequence → can\'t reach $1200 in time → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
+add(P,'hard',C,M,SZ,'fit',T,
     '1× MCV seed-rotated NORTH (y=14) or SOUTH (y=26) + matching latitude mine; $1900',
-    'Anti-DRAW fact',
+    'Anti-DRAW fact @(42,34)',
     POST,'',
     "Commander, this is a startup-from-scratch drill with seed-rotated start. You hold ONE Mobile Construction Vehicle (mcv) at either NORTH (y=14) or SOUTH (y=26) with a matching latitude ore mine, and $1900 cash. Deploy, build powr + proc + harv, get mining. Within about 45 turns, end with ≥1 proc, ≥1 harv, and economy value $1500.",
     '≥1 proc AND ≥1 harv AND economy_value ≥$1500, within 4000 ticks.',
@@ -871,13 +878,14 @@ add(P,'hard',C,M,SZ,'large-trivial',T,
     'Stall → LOSS. Wrong build order → LOSS. Memorised deploy cell on wrong latitude → LOSS.')
 
 # ── 22. econ-target-cash-amount-by-deadline ──────────────────────────
-# rush-hour-arena 128x40; small footprint. large-trivial.
-P='econ-target-cash-amount-by-deadline'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 48x40 (econ-target-cash-amount-by-deadline-48x40).
+# Small footprint x=8..16; anti-DRAW e1 @(42,34). Tag fit.
+P='econ-target-cash-amount-by-deadline'; C='reasoning'; M='econ-target-cash-amount-by-deadline-48x40'; SZ='48x40'
 T='observe, build, place_building, harvest, move_units, stop'
 POST='passive (anti-DRAW enemy fact only)'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(8-16,18-22): fact + proc + tent + powr + weap + 1× harv on near patches; $600',
-    'Anti-DRAW enemy fact @(120,36) HoldFire',
+    'Anti-DRAW enemy e1 @(42,34) HoldFire',
     POST,'',
     "Commander, this is a target-cash-by-deadline drill. You hold a Construction Yard (fact), Ore Refinery (proc), Allied Barracks (tent), Power Plant (powr), War Factory (weap), and one harvester (harv) on two near ore patches, with $600 cash. Within about 30 turns, reach $1500 cash with AT LEAST TWO harvesters alive (build a 2nd harv at $1400 from the war factory). Stalling will not reach the harv count; over-spending on other buildings will not reach the cash.",
     'cash ≥$1500 AND ≥2 harvs, within 2700 ticks.',
@@ -886,9 +894,9 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     600,
     '1 harv ~95 cr/turn; need to build 2nd harv ($1400) and still hit $1500 cash',
     'Stall → only 1 harv → 2-harv clause unmet → LOSS. Skip 2nd harv → bar unmet → LOSS.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Same: fact + proc + tent + powr + weap + 1× harv; $600',
-    'Anti-DRAW fact',
+    'Anti-DRAW e1 @(42,34)',
     POST,'',
     "Commander, this is a target-cash drill with a higher bar. You hold a full Allied production base — Construction Yard (fact), Ore Refinery (proc), Allied Barracks (tent), Power Plant (powr), War Factory (weap) — plus one harvester (harv), with $600 cash. Within about 51 turns, reach $5500 cash with at least two harvesters alive.",
     'cash ≥$5500 AND ≥2 harvs, within 4500 ticks.',
@@ -897,9 +905,9 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     600,
     'Need 2nd harv + sustained income; $5500 requires patient harvest cycle',
     'Stall → only 1 harv → LOSS. Skip 2nd harv → income too slow → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=10) or SOUTH (y=28): fact + proc + tent + powr + weap + 1× harv; $600',
-    'Anti-DRAW fact',
+    'Anti-DRAW e1 @(42,34)',
     POST,'',
     "Commander, this is a target-cash drill with seed-rotated base latitude. You hold a full Allied production base — Construction Yard, Ore Refinery, Allied Barracks, Power Plant, War Factory — plus one harvester at NORTH (y=10) or SOUTH (y=28), with $600 cash. Within about 46 turns, reach $6500 cash with at least two harvesters alive.",
     'cash ≥$6500 AND ≥2 harvs, within 4000 ticks.',
@@ -910,13 +918,14 @@ add(P,'hard',C,M,SZ,'large-trivial',T,
     'Stall → 1 harv only → LOSS. Wrong build sequence wastes ticks → bar unmet → LOSS.')
 
 # ── 23. econ-tech-vs-expand-decision ─────────────────────────────────
-# rush-hour-arena 128x40; small footprint. large-trivial.
-P='econ-tech-vs-expand-decision'; C='reasoning'; M='rush-hour-arena'; SZ='128x40'
+# Shrunk to procedural 48x40 (econ-tech-vs-expand-decision-48x40). Small
+# base footprint x=8..16; anti-DRAW e1 @(42,34). Tag fit.
+P='econ-tech-vs-expand-decision'; C='reasoning'; M='econ-tech-vs-expand-decision-48x40'; SZ='48x40'
 T='observe, build, place_building, harvest, move_units, stop'
 POST='passive (anti-DRAW enemy fact only)'
-add(P,'easy',C,M,SZ,'large-trivial',T,
+add(P,'easy',C,M,SZ,'fit',T,
     'Allied base @(8-16,18-22): fact + proc + powr + weap + 1× harv on near patches; $2000',
-    'Anti-DRAW enemy fact @(120,36) HoldFire',
+    'Anti-DRAW enemy e1 @(42,34) HoldFire',
     POST,'',
     "Commander, this is a tech-vs-expand decision drill. You hold a Construction Yard (fact), Ore Refinery (proc), Power Plant (powr), War Factory (weap), and one harvester (harv) on two near ore patches, with $2000 cash. The decision is to invest in TECH (more harvesters via war factory, or a Service Depot to enable higher tech) OR EXPAND (a 2nd refinery for parallel mining). Within about 30 turns, reach economy value at least $7000 while keeping the Construction Yard and refinery standing.",
     'economy_value ≥$7000 AND fact AND ≥1 proc, within 2700 ticks.',
@@ -925,9 +934,9 @@ add(P,'easy',C,M,SZ,'large-trivial',T,
     2000,
     '1 harv ~95 cr/turn; $2000 funds either 2nd harv ($1400) or 2nd proc ($2000); tech option (fix) is $1200',
     'Stall → income too slow → LOSS. 2nd proc without 2nd harv → empty → LOSS.')
-add(P,'medium',C,M,SZ,'large-trivial',T,
+add(P,'medium',C,M,SZ,'fit',T,
     'Same: fact + proc + powr + weap + 1× harv; $2000',
-    'Anti-DRAW fact',
+    'Anti-DRAW e1 @(42,34)',
     POST,'',
     "Commander, this is a tech-vs-expand decision drill with a higher bar. You hold a Construction Yard, Ore Refinery, Power Plant, War Factory, and one harvester on two near patches, with $2000 cash. Within about 40 turns, reach economy value at least $9000 while keeping fact and refinery.",
     'economy_value ≥$9000 AND fact AND ≥1 proc, within 3600 ticks.',
@@ -936,9 +945,9 @@ add(P,'medium',C,M,SZ,'large-trivial',T,
     2000,
     'Same setup; $9000 bar',
     'Stall → LOSS. Wrong investment → bar unmet → LOSS.')
-add(P,'hard',C,M,SZ,'large-trivial',T,
+add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=10) or SOUTH (y=28): fact + proc + powr + weap + 1× harv; $2000',
-    'Anti-DRAW fact',
+    'Anti-DRAW e1 @(42,34)',
     POST,'',
     "Commander, this is a tech-vs-expand decision drill with seed-rotated base latitude. You hold a Construction Yard, Ore Refinery, Power Plant, War Factory, and one harvester at NORTH (y=10) or SOUTH (y=28), with $2000 cash. Within about 50 turns, reach economy value at least $12000.",
     'economy_value ≥$12000 AND fact AND ≥1 proc, within 4500 ticks.',
