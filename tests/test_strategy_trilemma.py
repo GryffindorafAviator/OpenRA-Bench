@@ -243,14 +243,31 @@ def test_brute_army_without_tent_loses_to_tech_tree():
     """Without the barracks (tent), infantry production has no
     prerequisite — every `build('e1')` order is silently dropped by
     the engine and no units ever appear, so the ARMY arm cannot be
-    satisfied. The episode times out as a real LOSS."""
+    satisfied. The episode times out as a real LOSS.
+
+    Tent must be stripped from BOTH the pack's `base.actors` AND the
+    matching level `overrides.actors` (when the level declares one) —
+    a level override REPLACES base actors, so leaving tent in the
+    override leaks the barracks back in and the gate never fires.
+    """
     pack = load_pack(PACK)
-    # Strip tent from the base actors before compile.
     modified = pack.model_copy(deep=True)
-    modified.base["actors"] = [
-        a for a in modified.base["actors"]
-        if not (isinstance(a, dict) and a.get("type") == "tent")
-    ]
+
+    def _strip_tent(actors):
+        return [
+            a for a in actors
+            if not (isinstance(a, dict) and a.get("type") == "tent")
+        ]
+
+    # Strip tent from base actors.
+    modified.base["actors"] = _strip_tent(modified.base["actors"])
+    # AND from every level override that declares its own actors block
+    # (otherwise the override replaces base.actors and tent leaks back
+    # in — the prereq gate would never fire).
+    for level_def in (modified.levels or {}).values():
+        overrides = getattr(level_def, "overrides", None) or {}
+        if "actors" in overrides:
+            overrides["actors"] = _strip_tent(overrides["actors"])
     c = modified.compile("medium")
     res = run_level(c, brute_army_no_tent, seed=1)
     assert res.outcome == "loss", (
