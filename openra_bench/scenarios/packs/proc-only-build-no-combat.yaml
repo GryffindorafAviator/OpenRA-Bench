@@ -225,6 +225,16 @@ levels:
   #     not where it starts. See tests/test_hard_tier.py
   #     NOT_APPLICABLE.
   hard:
+    # Tier-progression audit fix (2026-05-24, F-NO-SEED-ROTATION |
+    # F-TRIVIAL-HARD): add two enemy spawn_point groups so the
+    # approaching hunt squad arrives from a seed-rotated bearing
+    # (NORTH-east vs SOUTH-east), and a `scheduled_events.spawn_actors`
+    # mid-episode harassment wave so a memorised opening can't dodge
+    # the encroach. The hard escalation vs medium is now:
+    #   - bar 6 → 7 buildings, cash 2400 → 2900 (unchanged)
+    #   - posture: passive HoldFire → hunt bot_type (active threat)
+    #   - +1 mid-episode wave (3 more e1 at tick 2700)
+    #   - 2 enemy spawn groups (seed-rotated approach axis)
     # Original (pre-verbosity-sweep) description preserved for
     # contributors. The trimmed version below removes scripted-policy
     # spoilers and cell-coord dumps; load-bearing intent kept.
@@ -239,9 +249,9 @@ levels:
     # defenders, but you may not order an attack.
     description: >
       Same builder ROE; the hostile rifle squad now approaches and chips
-      your structures. Add buildings to reach SEVEN total, ending in a war
-      factory. You may move your defenders but you may NOT order an
-      attack. Within about 60 turns.
+      your structures, with a second wave inbound. Add buildings to reach
+      SEVEN total, ending in a war factory. You may move your defenders
+      but you may NOT order an attack. Within about 60 turns.
     overrides:
       # `hunt` bot makes the enemy infantry close on the agent's mass.
       enemy: {faction: soviet, cash: 0, bot_type: hunt}
@@ -250,18 +260,31 @@ levels:
         - {type: tent, owner: agent, position: [14, 18]}
         - {type: powr, owner: agent, position: [10, 21]}
         - {type: proc, owner: agent, position: [16, 21]}
-        - {type: fact, owner: enemy, position: [120, 20]}
         # Passive spotter / shock-absorber (stance:0). Extends vision
         # east and tanks a few shots; will NOT auto-fire.
         - {type: e1, owner: agent, position: [20, 20], stance: 0}
-        # Three rifles on `hunt` — they will close on the agent base
-        # and shoot. Three is empirically enough to be a felt threat
-        # (visible damage on tent / proc) but not enough to raze the
-        # conyard `fact` inside 5400 ticks given building HP. The
-        # discipline play (don't attack; just keep building) wins.
-        - {type: e1, owner: enemy, position: [40, 18], stance: 2}
-        - {type: e1, owner: enemy, position: [40, 20], stance: 2}
-        - {type: e1, owner: enemy, position: [40, 22], stance: 2}
+        # ── spawn_point=0 — NORTH-east approach (y=14..18) ──
+        - {type: e1, owner: enemy, position: [40, 14], stance: 2, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [40, 16], stance: 2, spawn_point: 0}
+        - {type: e1, owner: enemy, position: [40, 18], stance: 2, spawn_point: 0}
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 0}
+        # ── spawn_point=1 — SOUTH-east approach (y=22..26) ──
+        - {type: e1, owner: enemy, position: [40, 22], stance: 2, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [40, 24], stance: 2, spawn_point: 1}
+        - {type: e1, owner: enemy, position: [40, 26], stance: 2, spawn_point: 1}
+        - {type: fact, owner: enemy, position: [120, 20], spawn_point: 1}
+      scheduled_events:
+        # Mid-episode harassment wave at tick 2700 (~ turn 30) — a
+        # second 3-rifle group from the opposite y-band, so the agent
+        # sees the threat envelope GROW mid-build. Still well under
+        # the conyard's HP burn rate; the discipline play (keep
+        # building, do not attack) wins.
+        - tick: 2700
+          spawn_actors:
+            actors:
+              - {type: e1, owner: enemy, position: [50, 20], stance: 2}
+              - {type: e1, owner: enemy, position: [50, 18], stance: 2}
+              - {type: e1, owner: enemy, position: [50, 22], stance: 2}
     starting_cash: 2900
     forbidden_tools: [attack_unit, attack_move]
     win_condition:
