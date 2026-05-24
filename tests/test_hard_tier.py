@@ -170,6 +170,11 @@ UPGRADED = [
     # syrd to be built adjacent to water; the dd + tank force
     # composition; hard tier seed-rotates NORTH/SOUTH coastal base.
     "f11-vertical-strike-naval",
+    # Family-11 FULL combined-arms (ground + air + naval): three
+    # production gates (weap + hpad + syrd) in a 5-clause `then:`
+    # chain; hard tier seed-rotates NORTH/SOUTH base across the
+    # tri-domain target spread (coastal + midfield + inland).
+    "f11-full-combined-arms",
     # Family-11 reactive-idiom pack: enemy SWITCHES arm mid-episode
     # via scheduled_events.spawn_actors; hard tier seed-rotates
     # NORTH/SOUTH base.
