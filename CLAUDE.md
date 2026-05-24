@@ -400,6 +400,20 @@ Before editing any scenario pack:
 - **`place_building` does NOT enforce build-adjacency** — orders
   work at arbitrary in-bounds coords. Forward-base / far-region
   building is solvable with a single `build + place_building`.
+- **`scout` is NOT a tool / `Command` verb** — it is a NOUN used in
+  pack briefings and pack names (`scout-and-report`,
+  `mid-tech-switch-on-scout`, …) to refer to a scout-role UNIT
+  (typically `jeep`) and the SCOUTING capability (move into the
+  fog to reveal hidden actors / buildings). The actual verb is
+  `move_units` (drive the jeep into the unexplored region); the
+  predicate that gates the WIN is `buildings_discovered_gte` /
+  `enemies_discovered_gte` (snapshot of the agent's fog-of-war
+  scan, populated by the engine's `is_visible_to` + the
+  adapter's `enemies_seen_ids`). No pack currently lists `scout`
+  in `tools:` (verified by a YAML scan), and there is no
+  `Command::Scout` variant in `openra-train/src/env.rs`. The F9
+  audit's "scout tool semantics unclear" caveat was a
+  false-positive on the NOUN; nothing to change.
 - **`fact` has cost 0** → not buildable via `StartProduction`
   (engine gates on `cost > 0`). Use `proc` as the "second base seed"
   in expand-arm objectives.
