@@ -272,7 +272,7 @@ SITE_DIR = Path(__file__).resolve().parent
 
 @app.get("/")
 def serve_index():
-    return FileResponse(SITE_DIR / "index.html")
+    return FileResponse(SITE_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
 
 app.mount("/public", StaticFiles(directory=str(SITE_DIR / "public")), name="public")
