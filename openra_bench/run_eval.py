@@ -427,6 +427,8 @@ def evaluate(
             "objective_progress": res.objective_progress,
             "reward_vector": res.reward_vector,
             "turns": res.turns,
+            "speed": sc.speed,
+            "win_turns": sc.win_turns,
             "notes": sc.notes,
             "passivity": hstats.get("passivity") if hstats else None,
             "handoff": hstats,
@@ -580,6 +582,8 @@ class _ScoreShim:
     action: float
     weakest_link: str
     dimensions: dict
+    speed: float
+    win_turns: int
 
 
 def _shim(r: dict):
@@ -594,6 +598,8 @@ def _shim(r: dict):
         action=r.get("action", 0.0),
         weakest_link=r.get("weakest_link", "n/a"),
         dimensions={"objective": r.get("objective_progress", 0.0)},
+        speed=r.get("speed", 0.0),
+        win_turns=r.get("win_turns", r.get("turns", 0)),
     )
 
 
