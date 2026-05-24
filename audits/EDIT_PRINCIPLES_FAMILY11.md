@@ -127,6 +127,22 @@ The waves must FIRE before the deadline (`tick < within_ticks`).
 A wave scheduled at tick 3000 against a `within_ticks: 2800`
 predicate is dead-code; flag as `inert-wave` in the audit.
 
+**Engine commit `493898e` removed the historical 10000-tick
+`max_ticks` cap** — `oramap.rs` now reads `termination.max_ticks`
+end-to-end (it used to be silently dropped, with the engine
+defaulting to `DEFAULT_MAX_TICKS=10000` regardless of the
+scenario's request). Long-horizon F11 hard tiers (multi-wave +
+multi-phase rebuild) can now use the original
+`audits/family11_full_game.csv` design budgets at
+`max_turns 140-180` — the POC's `f11-vertical-strike-ground-air`
+hard tier ships at `max_turns: 140`, the naval pack at 160, and
+`f11-full-combined-arms` at 180. Declare a matching
+`base.termination.max_ticks` (e.g. `13000` for `max_turns: 140`
+covering reachable `12603 + buffer`) and the engine honours it.
+Wave 3 ticks for hard can now sit anywhere up to ~`within_ticks
+− 5000` (the strike-runway floor); the legacy "~4500 ceiling"
+constraint is gone.
+
 ## §70. Combined-arms verbs
 
 F11 packs exercise the combined-arms verb set: ground (`weap` →
@@ -267,22 +283,26 @@ must be BUILT by the agent. Rationale:
 
 Cash budget per tier (the model must afford ≥1 of each required
 production building + ≥N units; the chain feasibility check is
-F6 §41 critical-path):
+F6 §41 critical-path). **Ranges below were recalibrated after the
+F11 POC and again after engine commit `493898e` unlocked
+`max_turns 140+` for hard** — a longer hard tier accrues more
+harv income, so starting_cash distributes ACROSS the budget
+rather than getting stuffed in up front.
 
-- **easy**: starting_cash $5500-6500 + econ income → fund weap
-  ($2000) + hpad ($1000) + ≥2 tanks ($1600) + ≥1 heli ($2000) =
-  **$6600**. Tight without econ income; deliberate (the econ axis
-  must work).
-- **medium**: starting_cash $7000-8000 + econ income → fund
-  weap + hpad + fix + ≥3 tanks + ≥1 heli = **$9000**. Income
-  required.
-- **hard**: starting_cash $8000-9500 + econ income → fund weap
-  + hpad + syrd + fix + ≥3 tanks + ≥1 heli + ≥1 dd = **$10000+**.
-  Income mandatory; cash-starved play LOSES.
+| Tier | starting_cash | typical max_turns | Notes |
+|---|---|---|---|
+| easy | **$5000-6500** | 80-110 | weap ($2000) + hpad ($1000) + ≥2 tanks ($1600) + ≥1 heli ($2000) ≈ $6600 chain. Tight without econ income; deliberate (the econ axis must work). |
+| medium | **$7000-9000** | 100-130 | + 1 wave attrition; income required. |
+| hard | **$12000-16000** | 110-180 | + tri-wave attrition + tech overhead + seed-rotation reserve. **Distributable across the budget**: a 110-turn POC needs the cash front-loaded ($15000); a 140-turn restored design draws ~$2500 more from sustained harv income so $12500 reaches the same chain. A 180-turn `f11-full-combined-arms` packs syrd+dd on top — still ≤ $16000 (income covers the longer tail). |
 
-Audit-check: every F11 pack's starting_cash + ~30-turn econ income
-floor must fit the cheapest winning chain. If not, flag as
-`cash-budget-too-tight` (F2 §12 violation).
+Audit-check: every F11 pack's starting_cash + per-turn harv income ×
+max_turns must fit the cheapest winning chain. If not, flag as
+`cash-budget-too-tight` (F2 §12 violation). When raising `max_turns`
+(now possible up to the original CSV designs of 140-180 for hard),
+PROPORTIONALLY REDUCE starting_cash to maintain cash-tension — a
+relaxed budget that also leaves the agent flush with cash collapses
+the no-cheat bar (wrong-strategy policies may stumble into a WIN
+just by having enough cash to overproduce).
 
 ## §74. Scripted attrition idiom (`f11-rebuild-after-attrition`)
 
@@ -621,18 +641,31 @@ rule applies to the AA's relationship with the heli approach corridor.
 ## §81. Cash budgets — recalibrated for heli=$2000 + pre-placed tech
 
 Surfaced by the F11 POC. The original §73 budgets assumed heli=$1200
-(corrected to $2000) AND no pre-placed tech-chain. The POC ended up at:
+(corrected to $2000) AND no pre-placed tech-chain. The POC's first
+hard build at `max_turns: 110` ended up at:
 
-| Tier | starting_cash | Why higher than original §73 |
+| Tier | starting_cash (POC, max_turns 110) | Why higher than original §73 |
 |---|---|---|
 | easy | **$5500** | heli $2000 (was $1200) + buy weap+hpad+2tnk+heli |
 | medium | **$8000** | + wave attrition (build more units than the kill quota) |
 | hard | **$15000** | + tri-wave attrition + tech-overhead + seed-rotation reserve |
 
-**Update §73 ranges** based on POC empirical:
+**Post-engine-fix update (2026-05-24)**: engine commit `493898e`
+removed the historical 10000-tick `max_ticks` cap. The hard tier was
+restored to the original `family11_full_game.csv` design at
+`max_turns: 140` / `within_ticks: 12500` /
+`base.termination.max_ticks: 13000`. The longer budget yields ~$2500
+more in harv income, so starting_cash was reduced from $15000 to
+**$12500** to preserve cash-tension while keeping the same chain
+affordable. The validation matrix (5 policies × 4 seeds) held: 16
+LOSS + 4 WIN, no policy flips outcome.
+
+**Update §73 ranges** based on POC empirical (POST engine fix):
 - easy: starting_cash $5000-6500 (was $4000-5000)
 - medium: $7000-9000 (was $5000-6000)
-- hard: $12000-16000 (was $6000-7500)
+- hard: $12000-16000 (was $6000-7500) — distributable across
+  `max_turns 110-180` (lower cash at longer horizons; the harv
+  income tail covers it).
 
 These higher floors reflect:
 - Vendor heli cost ($2000), correctly applied this time.
