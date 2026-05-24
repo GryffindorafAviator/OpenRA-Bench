@@ -118,23 +118,32 @@ Before editing any scenario pack:
 
 ## Engine facts you must internalise
 
-- **Vendor RA YAML is the SINGLE source of unit data.** The historical
-  hardcoded `GameRules::defaults()` table in
-  `OpenRA-Rust/openra-sim/src/gamerules.rs` was removed in PR #15
-  (replacing the earlier sync). All actor / weapon stats — HP, cost,
-  speed, footprint, weapons, prereqs — now come exclusively from
-  `OpenRA-Rust/vendor/OpenRA/mods/ra/rules/*.yaml`, parsed by
-  `from_ruleset()` and reached via:
-  - `GameRules::from_vendor()` — fresh parse, panics with a clear
-    message if the vendor directory is unreachable.
+- **Embedded RA YAML is the SINGLE source of unit data.** Originally
+  seeded from upstream OpenRA at SHA `0938a27` (bleed branch), the RA
+  rules / weapons YAML now lives in-repo at
+  `OpenRA-Rust/openra-data/src/embedded/{rules,weapons}/*.yaml` and is
+  parsed at runtime via `include_str!`. The runtime vendor-checkout
+  dependency was removed by the engine refactor that introduced this
+  section — history: an earlier `GameRules::defaults()` stub was
+  removed in PR #15 making the vendor checkout strict-required, then
+  the vendor-checkout dependency itself was removed when the YAML
+  files were embedded into the binary. See
+  `OpenRA-Rust/VENDOR_DATA.md` for the snapshot / bump procedure.
+  All actor / weapon stats — HP, cost, speed, footprint, weapons,
+  prereqs — flow through `GameRules::from_ruleset` exactly as before,
+  reached via:
+  - `GameRules::from_vendor()` — fresh parse of the embedded data
+    (no filesystem). Can't fail unless an explicit `OPENRA_VENDOR_DIR`
+    override is broken.
   - `GameRules::vendor_cached()` — `OnceLock`-cached clone, suitable
     for tests that spin up many worlds (parity sweeps, etc.).
   - `openra-train/src/env.rs::load_rules_strict()` — runtime entry
-    point for the bench wheel; panics on missing vendor.
+    point for the bench wheel. Reads the embedded data by default;
+    honours `OPENRA_VENDOR_DIR` as an opt-in override for power users
+    testing against an alternate snapshot.
   - `openra-sim/src/world.rs::build_world(map, ..., None, ...)` — the
-    `None` fallback now hits `vendor_cached()` instead of the deleted
-    `defaults()` stub, so every test that passes `None` for rules
-    transparently inherits vendor truth.
+    `None` fallback hits `vendor_cached()`, so every test that passes
+    `None` for rules transparently inherits the embedded RA truth.
   **Footguns this closes**: the stub used to drift from vendor — `fact`
   footprint was 3×2 but vendor is 3×4; pillbox/tanya weapons were
   hand-coded stubs (`AAStub`, `TanyaPistol`) rather than the real
