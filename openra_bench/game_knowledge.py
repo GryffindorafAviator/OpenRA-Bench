@@ -67,6 +67,12 @@ ACTOR_GLOSSARY: dict[str, str] = {
     "sam": "SAM site (anti-air defence)",
     "mslo": "missile silo (Soviet superweapon; launches a single "
     "high-damage nuke at a target cell after a charge cycle)",
+    "atek": "advanced tech centre (gates top-tier units / superweapons)",
+    "hpad": "helipad (builds and rearms helicopters)",
+    "afld": "airfield (builds and rearms fixed-wing aircraft; "
+    "Soviet equivalent of hpad's role for planes)",
+    "syrd": "Soviet shipyard (builds naval units)",
+    "spen": "Allied sub pen (builds naval units)",
 }
 
 GAME_MODEL = (

@@ -33,6 +33,17 @@ pytest.importorskip("openra_train", reason="Rust env wheel not installed")
 
 from openra_train import OpenRAEnv  # type: ignore[import]
 
+# Absolute path to the bundled rush-hour terrain — older templates
+# wrote `base_map: {base_map}` and relied on the engine's
+# HOME-dir fallback to `~/Projects/OpenRA-RL-Training/...`, which
+# does not exist on CI runners. Same fix as commit 00d01ad4.
+_BUNDLED_MAP = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "maps"
+    / "rush-hour-arena.oramap"
+)
+
 
 def _enemy_actor_types(obs: dict) -> list[str]:
     """Every visible enemy actor_type at the current observation. The
@@ -52,7 +63,7 @@ SCENARIO_TPL = textwrap.dedent(
     """\
     name: enemy-spawn-roundtrip
     description: per-owner spawn_point filter round-trip
-    base_map: rush-hour-arena.oramap
+    base_map: {base_map}
     agent:
       faction: allies
     enemy:
@@ -134,7 +145,7 @@ NO_ENEMY_SP_TPL = textwrap.dedent(
     """\
     name: enemy-no-spawn-point
     description: back-compat — no enemy declares spawn_point
-    base_map: rush-hour-arena.oramap
+    base_map: {base_map}
     agent:
       faction: allies
     enemy:
@@ -188,14 +199,14 @@ def _step_for_reveal(env: OpenRAEnv, obs: dict, frames: int = 5) -> dict:
 @pytest.fixture
 def scenario_yaml(tmp_path: Path) -> Path:
     p = tmp_path / "enemy-sp-roundtrip.yaml"
-    p.write_text(SCENARIO_TPL)
+    p.write_text(SCENARIO_TPL.format(base_map=str(_BUNDLED_MAP)))
     return p
 
 
 @pytest.fixture
 def no_enemy_sp_yaml(tmp_path: Path) -> Path:
     p = tmp_path / "enemy-no-sp.yaml"
-    p.write_text(NO_ENEMY_SP_TPL)
+    p.write_text(NO_ENEMY_SP_TPL.format(base_map=str(_BUNDLED_MAP)))
     return p
 
 
