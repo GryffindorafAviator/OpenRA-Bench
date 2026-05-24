@@ -80,7 +80,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .game-stat .label{font-size:11px;color:var(--muted);text-transform:uppercase}
 .game-stat .value{font-size:18px;font-weight:600}
 .game-stat .value.win{color:var(--green)}.game-stat .value.loss{color:var(--red)}
-.game-layout{display:grid;grid-template-columns:minmax(620px,2fr) minmax(320px,1fr);gap:16px;align-items:start}
+.game-layout{display:grid;grid-template-columns:minmax(620px,2fr) minmax(380px,1fr);gap:16px;align-items:start}
 .game-map-col{min-width:0}
 .game-side-col{min-width:0}
 .game-minimap{position:relative;background:#0a0c10;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px;cursor:crosshair}
@@ -102,13 +102,19 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .legend-mark.arrow{width:18px;height:3px;background:#ffe45c;border:none;position:relative}
 .legend-mark.arrow:after{content:"";position:absolute;right:-1px;top:-4px;border-left:7px solid #ffe45c;border-top:5px solid transparent;border-bottom:5px solid transparent}
 .game-coords{position:absolute;right:8px;top:8px;background:rgba(15,17,21,.78);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font:12px ui-monospace,monospace;color:var(--muted);pointer-events:none}
-.game-units{font-size:13px;max-height:180px;overflow-y:auto}
+.game-units{font-size:15px;max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:rgba(15,17,21,.35)}
 .game-units table{width:100%;border-collapse:collapse}
-.game-units th{text-align:left;padding:4px 8px;font-size:11px;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)}
-.game-units td{padding:4px 8px;border-bottom:1px solid var(--border)}
+.game-units th{text-align:left;padding:8px 12px;font-size:12px;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)}
+.game-units td{padding:9px 12px;border-bottom:1px solid var(--border);line-height:1.25}
 .game-units tr.selected{background:rgba(116,151,219,.15)}
 .game-units tr:hover{background:rgba(255,255,255,.05);cursor:pointer}
-.game-log{font-size:12px;color:var(--muted);max-height:120px;overflow-y:auto;margin-top:8px;font-family:monospace;padding:8px;background:var(--bg);border-radius:6px}
+.game-units .type-cell{font-weight:700}
+.game-units .enemy-tank .type-cell{color:#ffcd75}
+.game-units .enemy-infantry .type-cell{color:#ff7b7b}
+.game-units .priority-cell{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.02em}
+.game-units .enemy-actions{white-space:nowrap;width:1%}
+.game-units .enemy-actions button{padding:3px 7px;font-size:12px;margin-right:4px}
+.game-log{font-size:12px;color:var(--muted);max-height:90px;overflow-y:auto;margin-top:12px;font-family:monospace;padding:8px;background:var(--bg);border-radius:6px}
 .server-config{display:flex;gap:8px;align-items:center;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--border);font-size:13px}
 .server-config input{font-size:13px;padding:4px 8px;width:200px}
 .server-config .dot{width:8px;height:8px;border-radius:50%;background:var(--red)}
@@ -118,7 +124,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .btn-stop{background:var(--red);color:#fff}.btn-stop:hover{opacity:.9}
 .btn-endturn{background:var(--accent);color:#fff;font-weight:600;padding:8px 24px}.btn-endturn:hover{opacity:.9}
 .btn-endturn:disabled{opacity:.4;cursor:not-allowed}
-@media(max-width:900px){.game-layout{grid-template-columns:1fr}.game-minimap .placeholder{min-height:240px}}
+@media(max-width:1100px){.game-layout{grid-template-columns:1fr}.game-minimap .placeholder{min-height:240px}.game-units{max-height:320px}}
 </style>
 </head>
 <body>
@@ -207,7 +213,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
       <div class="game-status" id="game-stats"></div>
       <div class="game-layout">
         <div class="game-map-col">
-          <div class="game-help">Click a friendly marker to select that stack, then click ground to move or an enemy marker to attack. You can also click a visible enemy row on the right to queue an attack.</div>
+          <div class="game-help">Click friendly units to select, then click ground to move or a visible enemy to attack. Enemy Atk uses selected units; All selects all visible units and focuses that enemy.</div>
           <div class="game-minimap" id="game-minimap" onclick="gameMinimapClick(event)" onmousemove="gameMinimapMove(event)" onmouseleave="gameMinimapLeave()">
             <div class="placeholder" id="game-minimap-ph">Start a game to see the minimap</div>
             <img id="game-minimap-img" style="display:none" draggable="false">
@@ -419,7 +425,7 @@ function gameResetForMissionSwitch(){
     fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"}).catch(()=>{});
   }
   gameSession=null; gameState=null;
-  gameSelected.clear(); gameQueue=[];
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null;
   const body=document.getElementById("game-body");
   if(body)body.style.display="none";
   const start=document.getElementById("game-start-btn");
@@ -522,6 +528,7 @@ function esc(s){const d=document.createElement("div");d.textContent=s||"";return
 // ── Game engine integration ──
 let gameSession=null, gameServerUrl="", gameServerOk=false;
 let gameSelected=new Set(), gameQueue=[], gameState=null;
+let gameRepeatAction=null;
 
 async function checkServer(){
   const url=document.getElementById("server-url").value.replace(/\/$/,"");
@@ -561,7 +568,7 @@ async function gameStart(){
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
     gameState=await r.json();
     gameSession=gameState.session_id;
-    gameSelected.clear(); gameQueue=[];
+    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null;
     document.getElementById("game-body").style.display="";
     document.getElementById("game-start-btn").style.display="none";
     document.getElementById("game-stop-btn").style.display="";
@@ -581,7 +588,7 @@ async function gameStop(){
     await fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"});
   }catch(e){}
   gameSession=null; gameState=null;
-  gameSelected.clear(); gameQueue=[];
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null;
   document.getElementById("game-body").style.display="none";
   document.getElementById("game-start-btn").style.display="";
   document.getElementById("game-stop-btn").style.display="none";
@@ -592,7 +599,9 @@ async function gameStop(){
 async function gameEndTurn(){
   if(!gameSession||!gameState||gameState.done)return;
   document.getElementById("game-endturn-btn").disabled=true;
-  const actions=gameQueue.length?gameQueue:[{mode:"observe"}];
+  const actions=gameQueue.length
+    ? gameQueue
+    : (gameRepeatAction?[gameRepeatAction]:[{mode:"observe"}]);
   try{
     const r=await fetch(gameServerUrl+"/api/game/step",{
       method:"POST",headers:{"Content-Type":"application/json"},
@@ -600,6 +609,13 @@ async function gameEndTurn(){
     });
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
     gameState=await r.json();
+    if(gameQueue.length){
+      gameRepeatAction={...gameQueue[gameQueue.length-1]};
+    }
+    if(gameRepeatAction&&gameState&&gameState.enemies){
+      const tid=gameRepeatAction.target_id;
+      if(tid&&!gameState.enemies.some(e=>e.id===tid))gameRepeatAction=null;
+    }
     gameSelected.clear(); gameQueue=[];
     gameRender();
     if(gameState.done){
@@ -682,15 +698,15 @@ function gameMinimapClick(e){
   if(!p)return;
   const ownHere=gameNearestStack(gameState.units,p.cx,p.cy,2.6);
   const enemyHere=gameNearestStack(gameState.enemies,p.cx,p.cy,3.8);
-  if(ownHere.length>0){
+  if(gameSelected.size>0&&enemyHere.length>0){
+    gameQueueAttack(enemyHere[0]);
+  }else if(ownHere.length>0){
     const allSelected=ownHere.every(u=>gameSelected.has(u.id));
     ownHere.forEach(u=>{
       if(allSelected)gameSelected.delete(u.id);
       else gameSelected.add(u.id);
     });
     gameLog((allSelected?"Deselected ":"Selected ")+ownHere.length+" unit(s) at ("+ownHere[0].cell_x+","+ownHere[0].cell_y+").");
-  }else if(gameSelected.size>0&&enemyHere.length>0){
-    gameQueueAttack(enemyHere[0]);
   }else if(gameSelected.size>0){
     const n=gameSelected.size;
     gameQueueOrder({mode:"move",unit_ids:[...gameSelected],target_x:p.cx,target_y:p.cy});
@@ -716,8 +732,8 @@ function gameClearSelection(){
 }
 
 function gameClearQueue(){
-  gameQueue=[];
-  gameLog("Queued orders cancelled.");
+  gameQueue=[]; gameRepeatAction=null;
+  gameLog("Queued and repeating orders cancelled.");
   gameRender();
 }
 
@@ -733,23 +749,26 @@ function gameQueueOrder(order){
   gameQueue=next;
 }
 
-function gameQueueAttack(target){
-  if(!target||!gameSelected.size)return;
+function gameQueueAttack(target, all=false){
+  if(!target)return;
+  if(all){
+    (gameState.units||[]).forEach(u=>gameSelected.add(u.id));
+  }
+  if(!gameSelected.size){
+    gameLog("Select friendly units first, or use All Attack for this target.");
+    return;
+  }
   const n=gameSelected.size;
   gameQueueOrder({mode:"attack",unit_ids:[...gameSelected],target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
   gameSelected.clear();
-  gameLog("Queued ATTACK on "+target.id+" at ("+target.cell_x+","+target.cell_y+") with "+n+" unit(s). Selection cleared so another unit can receive a different order this turn.");
+  gameLog("Queued ATTACK on "+target.id+" at ("+target.cell_x+","+target.cell_y+") with "+n+" unit(s). It will repeat on End Turn until the target disappears or you queue another order.");
 }
 
-function gameAttackEnemy(enemyId){
+function gameAttackEnemy(enemyId, all=false){
   if(!gameState)return;
   const target=(gameState.enemies||[]).find(e=>e.id===enemyId);
   if(!target)return;
-  if(!gameSelected.size){
-    gameLog("Select friendly units first, then click the enemy row again.");
-    return;
-  }
-  gameQueueAttack(target);
+  gameQueueAttack(target, all);
   gameSelected.clear();
   gameRender();
 }
@@ -949,6 +968,39 @@ function gameDrawArrow(ctx,sx,sy,tx,ty,scale,color){
 function gameLegendEntry(cls,label){
   return `<span><i class="legend-mark ${cls}"></i> ${esc(label)}</span>`;
 }
+function gameHpText(hp){
+  const n=Number(hp);
+  if(!Number.isFinite(n))return "?";
+  return Math.max(0,Math.min(100,Math.round(n*100)))+"%";
+}
+function gameHpClass(hp){
+  const n=Number(hp);
+  if(!Number.isFinite(n))return "";
+  if(n<=0.2)return "color:var(--red);font-weight:700";
+  if(n<=0.5)return "color:#ffcd75;font-weight:600";
+  return "";
+}
+function gameEnemyPriority(e){
+  const t=gameTypeKey(e&&e.type);
+  if(t.includes("tnk")||t==="jeep")return 0;
+  if(t==="e3"||t==="tanya"||t==="e6"||t==="spy"||t==="thf")return 1;
+  if(e&&e.is_building)return 2;
+  return 3;
+}
+function gameEnemySortScore(e){
+  const t=gameTypeKey(e&&e.type);
+  if(e&&e.is_building)return 3;
+  if(t.includes("tnk")||t==="jeep")return 2;
+  if(t==="e3"||t==="tanya"||t==="e6"||t==="spy"||t==="thf")return 1;
+  return 0;
+}
+function gameEnemyPriorityLabel(e){
+  const p=gameEnemyPriority(e);
+  if(p===0)return "armor";
+  if(p===1)return "special";
+  if(p===2)return "building";
+  return "infantry";
+}
 function gameRenderLegend(){
   const el=document.getElementById("game-legend");
   if(!el||!gameState)return;
@@ -987,20 +1039,27 @@ function gameRenderUnits(){
     const sel=gameSelected.has(u.id);
     html+=`<tr class="${sel?'selected':''}" onclick="gameToggleUnit('${u.id}')">
       <td>${sel?"▶":""}</td><td>${u.id}</td><td>${u.type}</td>
-      <td>(${u.cell_x},${u.cell_y})</td><td>${u.hp}</td><td>${u.activity||"idle"}</td></tr>`;
+      <td>(${u.cell_x},${u.cell_y})</td><td style="${gameHpClass(u.hp)}">${gameHpText(u.hp)}</td><td>${u.activity||"idle"}</td></tr>`;
   }
   if((gameState.own_buildings||[]).length){
     html+='<tr><th colspan="6" style="color:var(--accent);padding-top:8px">Own Buildings</th></tr>';
     for(const b of gameState.own_buildings){
       html+=`<tr><td>■</td><td>${b.id}</td><td>${b.type}</td>
-        <td>(${b.cell_x},${b.cell_y})</td><td>${b.hp}</td><td>building</td></tr>`;
+        <td>(${b.cell_x},${b.cell_y})</td><td style="${gameHpClass(b.hp)}">${gameHpText(b.hp)}</td><td>building</td></tr>`;
     }
   }
-  if(gameState.enemies.length){
-    html+='<tr><th colspan="6" style="color:var(--red);padding-top:8px">Visible Enemies</th></tr>';
-    for(const e of gameState.enemies){
-      html+=`<tr style="color:var(--red)" onclick="gameAttackEnemy('${e.id}')"><td>◆</td><td>${e.id}</td><td>${e.type}</td>
-        <td>(${e.cell_x},${e.cell_y})</td><td>${e.hp}</td><td>click to attack</td></tr>`;
+  html+='<tr><th colspan="6" style="color:var(--red);padding-top:8px">Visible Enemies</th></tr>';
+  if(!gameState.enemies.length){
+    html+='<tr><td colspan="6" style="color:var(--muted);padding:10px 12px">No visible enemies yet.</td></tr>';
+  }else{
+    html+='<tr><th>Act</th><th>ID</th><th>Type</th><th>Pos</th><th>HP</th><th>Kind</th></tr>';
+    const enemies=[...(gameState.enemies||[])].sort((a,b)=>
+      Number(a.hp)-Number(b.hp) || gameEnemySortScore(a)-gameEnemySortScore(b)
+    );
+    for(const e of enemies){
+      const cls=gameEnemyPriority(e)===0?"enemy-tank":"enemy-infantry";
+      html+=`<tr class="${cls}" style="color:var(--red)"><td class="enemy-actions"><button class="btn-secondary btn-sm" onclick="gameAttackEnemy('${e.id}',false)">Atk</button><button class="btn-primary btn-sm" onclick="gameAttackEnemy('${e.id}',true)">All</button></td><td>${e.id}</td><td class="type-cell">${gameTypeLabel(e.type)}</td>
+        <td>(${e.cell_x},${e.cell_y})</td><td style="${gameHpClass(e.hp)}">${gameHpText(e.hp)}</td><td class="priority-cell">${gameEnemyPriorityLabel(e)}</td></tr>`;
     }
   }
   html+='</table>';
@@ -1008,6 +1067,10 @@ function gameRenderUnits(){
     html+='<div style="margin-top:8px;font-size:12px;color:var(--accent)">Queued: '+
       gameQueue.map(a=>a.mode+'('+((a.target_x!=null)?a.target_x+','+a.target_y:'')+')'
       ).join(', ')+'</div>';
+  }else if(gameRepeatAction){
+    html+='<div style="margin-top:8px;font-size:12px;color:var(--accent)">Repeating: '+
+      gameRepeatAction.mode+' '+(gameRepeatAction.target_id?('target '+gameRepeatAction.target_id):'')+
+      ' on End Turn</div>';
   }
   el.innerHTML=html;
 }
