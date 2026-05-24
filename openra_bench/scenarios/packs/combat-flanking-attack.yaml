@@ -187,10 +187,26 @@ levels:
         - {units_killed_gte: 3}
         - {own_units_gte: 3}
         - {within_ticks: 3000}
+    # Qwen-9B v3 deep triage (S.3) flagged easy:1 as DRAW: the model
+    # stalled (6/26 observe turns) and the engine produced done=True
+    # before the after_ticks:3001 fail clause could bite — leaving
+    # neither win nor fail latched → DRAW. The original fail clause
+    # only fires at the explicit tick deadline or on full force-wipe;
+    # a passivity inversion that lands no kills and keeps its army
+    # whole survives the auto-`done` race and draws. The added
+    # all_of clause closes that gap: at tick 1500 (well past first
+    # contact even under heavy interrupt event firing — the intended
+    # flank reaches the line by tick ~500 and lands 3 kills by tick
+    # ~900) any policy that has scored ZERO kills is LOSING, so the
+    # passivity / wrong-route / stall inversions become explicit
+    # losses regardless of how done=True is reached.
     fail_condition:
       any_of:
         - {after_ticks: 3001}
         - {not: {own_units_gte: 3}}
+        - all_of:
+            - {after_ticks: 1500}
+            - {not: {units_killed_gte: 1}}
     max_turns: 51
 
   # ── MEDIUM ──────────────────────────────────────────────────────────
