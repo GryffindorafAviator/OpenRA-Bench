@@ -209,12 +209,30 @@ class OpenAICompatibleProvider(ChatProvider):
             "Content-Type": "application/json",
             **cfg.extra_headers,
         }
+        # OpenAI's newer "reasoning" / GPT-5+ model families require
+        # `max_completion_tokens` instead of `max_tokens` and reject the
+        # legacy parameter outright. Sniff the model id for the known
+        # forward-dated families (gpt-5, gpt-5-mini, gpt-5-nano,
+        # gpt-5.x-... — every model with a `gpt-5` prefix today
+        # requires the new param). Same code path is used by openrouter
+        # but those models don't currently include the gpt-5 family
+        # under their own slug, so the prefix check is safe.
+        _model_l = (cfg.model or "").lower()
+        _needs_completion_tokens = (
+            _model_l.startswith("gpt-5")
+            or _model_l.startswith("o1")
+            or _model_l.startswith("o3")
+            or _model_l.startswith("o4")
+        )
         body: dict[str, Any] = {
             "model": cfg.model,
             "messages": self._wire_messages(messages),
             "temperature": cfg.temperature,
-            "max_tokens": cfg.max_tokens,
         }
+        if _needs_completion_tokens:
+            body["max_completion_tokens"] = cfg.max_tokens
+        else:
+            body["max_tokens"] = cfg.max_tokens
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
