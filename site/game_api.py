@@ -189,6 +189,15 @@ def _serialize_state(sess) -> dict:
         "power_provided": sig.power_provided,
         "power_drained": sig.power_drained,
         "production": list(rs.get("production", []) or []),
+        # Per-entry detail (item / progress / done) so the UI can tell
+        # "Ready (click Place)" apart from "Building (30%)". Without
+        # this the manual-play UI labelled every queued item as
+        # "ready", and Place silently no-op'd on a not-yet-done entry
+        # because the engine rejects place_building until `done=true`.
+        "production_detail": [
+            dict(p) for p in (rs.get("production_detail", []) or [])
+            if isinstance(p, dict)
+        ],
         "available_production": list(rs.get("available_production", []) or []),
         "tools": list(
             getattr(sess.compiled, "tools", None)

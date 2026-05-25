@@ -519,3 +519,187 @@ def test_sessions_clear_destroys_unreviewed_draft(api_client, tmp_path):
     assert not final_dirs, (
         f"/clear must not promote drafts; found {final_dirs}"
     )
+
+
+# ── Production "ready vs building" surface (build+place UX bug) ──────
+#
+# A zh user reported "Build + Place 之后 map 上什么都没有" — clicked
+# Build, end-turned until the UI said "ready", clicked Place, end-
+# turned, and the new structure never appeared. Root cause: the bench
+# adapter only carried the production item NAMES; the UI labelled
+# every queued item as "ready" even when the engine still had
+# `done: false`. Place clicks on a not-yet-done entry were silently
+# rejected by the engine (`PLACE BLOCKED: <item> not completed in
+# queue`) and the order was dropped.
+#
+# These tests pin the fix:
+#   1. /api/game/step responses carry `production_detail` with
+#      `{item, progress, done}` per queue entry.
+#   2. A `build('proc')` queued without a paired sell on
+#      build-sell-and-rebuild-elsewhere progresses but never reaches
+#      `done: true` (the agent runs out of cash mid-build) — the UI
+#      must therefore NEVER show this item as ready, only as a
+#      partial-progress pending entry.
+#   3. The canonical sell→build→place flow reaches `done: true`,
+#      Place succeeds, and the new proc actually appears in
+#      `own_buildings` at the requested cell.
+
+
+def test_production_detail_surfaces_progress_and_done(api_client):
+    """The /step response must carry per-entry production detail so
+    the manual-play UI can distinguish "building" from "ready to
+    place"."""
+    client, _game_api, _ = api_client
+    r = client.post(
+        "/api/game/start",
+        json={
+            "pack_id": "build-sell-and-rebuild-elsewhere",
+            "level": "easy",
+            "seed": 1,
+        },
+    )
+    assert r.status_code == 200
+    sid = r.json()["session_id"]
+
+    # build('proc') without selling — the engine accepts the order
+    # and starts draining cash, but the entry will never reach done.
+    r = client.post(
+        "/api/game/step",
+        json={
+            "session_id": sid,
+            "actions": [{"mode": "build", "building_type": "proc"}],
+        },
+    )
+    assert r.status_code == 200
+    state = r.json()
+    detail = state.get("production_detail")
+    assert isinstance(detail, list) and detail, (
+        "production_detail must surface the in-progress entry"
+    )
+    entry = detail[0]
+    assert entry["item"] == "proc"
+    assert entry["done"] is False, (
+        "queued-but-still-building entry must have done=False — the "
+        "UI ready/pending split hinges on this"
+    )
+    assert 0.0 < entry["progress"] < 1.0, (
+        f"in-progress entry must report 0<progress<1; got {entry}"
+    )
+
+
+def test_build_without_sell_never_reaches_done(api_client):
+    """Cash-starved build on build-sell-and-rebuild-elsewhere never
+    completes — `done` stays False all the way to cash=0 — so the UI
+    must NEVER label `proc` as ready on this trace. Pins the
+    invariant the user's bug report inverted (UI used to show
+    `proc` as ready immediately after Build)."""
+    client, _game_api, _ = api_client
+    r = client.post(
+        "/api/game/start",
+        json={
+            "pack_id": "build-sell-and-rebuild-elsewhere",
+            "level": "easy",
+            "seed": 1,
+        },
+    )
+    sid = r.json()["session_id"]
+    # Build without selling — the user's reported flow.
+    client.post(
+        "/api/game/step",
+        json={
+            "session_id": sid,
+            "actions": [{"mode": "build", "building_type": "proc"}],
+        },
+    )
+    saw_done = False
+    for _ in range(15):
+        r = client.post(
+            "/api/game/step",
+            json={"session_id": sid, "actions": []},
+        )
+        det = r.json().get("production_detail") or []
+        if any(p.get("done") for p in det):
+            saw_done = True
+            break
+    assert not saw_done, (
+        "build('proc') WITHOUT a paired sell must NOT complete — the "
+        "engine ran out of cash mid-build. If this fires the user's "
+        "'Place silently no-op' bug is back: the UI would label the "
+        "stuck entry as 'ready'."
+    )
+
+
+def test_sell_then_build_then_place_creates_new_building(api_client):
+    """The canonical capability flow: SELL the forward proc, BUILD a
+    new proc, wait for done=true, PLACE at the safe target cell. The
+    new proc must materialise in own_buildings at the requested
+    coords."""
+    client, _game_api, _ = api_client
+    r = client.post(
+        "/api/game/start",
+        json={
+            "pack_id": "build-sell-and-rebuild-elsewhere",
+            "level": "easy",
+            "seed": 1,
+        },
+    )
+    state = r.json()
+    sid = state["session_id"]
+    # Find the forward proc by type so we don't pin a specific id.
+    forward_proc = next(
+        b for b in state["own_buildings"]
+        if b["type"] == "proc" and b["cell_x"] > 20
+    )
+
+    # Sell forward proc.
+    r = client.post(
+        "/api/game/step",
+        json={
+            "session_id": sid,
+            "actions": [{"mode": "sell", "unit_ids": [forward_proc["id"]]}],
+        },
+    )
+    assert r.status_code == 200
+    # Build proc.
+    r = client.post(
+        "/api/game/step",
+        json={
+            "session_id": sid,
+            "actions": [{"mode": "build", "building_type": "proc"}],
+        },
+    )
+    assert r.status_code == 200
+    # Step until done.
+    done_seen = False
+    for _ in range(20):
+        r = client.post(
+            "/api/game/step",
+            json={"session_id": sid, "actions": []},
+        )
+        det = r.json().get("production_detail") or []
+        if any(p.get("item") == "proc" and p.get("done") for p in det):
+            done_seen = True
+            break
+    assert done_seen, "sell+build flow must reach done=True on proc"
+    # Place at the safe target cell.
+    r = client.post(
+        "/api/game/step",
+        json={
+            "session_id": sid,
+            "actions": [{
+                "mode": "place_building",
+                "building_type": "proc",
+                "target_x": 16,
+                "target_y": 8,
+            }],
+        },
+    )
+    state = r.json()
+    safe_procs = [
+        b for b in state["own_buildings"]
+        if b["type"] == "proc" and b["cell_x"] < 20
+    ]
+    assert safe_procs, (
+        "Place at (16,8) must materialise a new proc in own_buildings "
+        "near the safe NW corner — the build+place flow's win path"
+    )

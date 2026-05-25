@@ -150,6 +150,17 @@ class EpisodeSignals:
     # found a new base near a region).
     own_buildings: list[tuple[str, int, int]] = field(default_factory=list)
     production_items: list[str] = field(default_factory=list)
+    # Parallel to `production_items`: per-entry production detail surfaced
+    # by the engine (`item` / `progress` 0-1 / `done` bool). The bench
+    # historically threw `progress`/`done` away and exposed only the
+    # item-name list, which made the manual-play UI confuse "queued
+    # in-progress" with "completed and waiting to place" — Build then
+    # Place silently no-op'd because the engine rejects `place_building`
+    # on a not-yet-`done` queue entry. Surface the full record so the
+    # UI / agents can distinguish "Building 30%" from "Ready (click
+    # Place)". Engine raw entry shape (see env.rs::production_summary):
+    #     {"item": "proc", "progress": 0.0–1.0, "done": false|true}
+    production_detail: list[dict] = field(default_factory=list)
     # Per-episode scratch latch for stateful win predicates (e.g.
     # waypoint_sequence's ordered-visit progress, keyed by sequence id).
     # Reset for free: EpisodeSignals is reconstructed each episode.
@@ -304,6 +315,18 @@ class RustObsAdapter:
             for p in (self._raw.get("production", []) or [])
             if isinstance(p, dict)
         ]
+        # Carry the full per-entry record (item / progress / done) so
+        # downstream consumers can tell completed-and-waiting-to-place
+        # apart from still-building. See `production_detail` doc above.
+        s.production_detail = [
+            {
+                "item": str(p.get("item", "")).lower(),
+                "progress": float(p.get("progress", 0.0) or 0.0),
+                "done": bool(p.get("done", False)),
+            }
+            for p in (self._raw.get("production", []) or [])
+            if isinstance(p, dict)
+        ]
 
         s.game_tick = int(self._raw.get("game_tick", s.game_tick) or 0)
         s.done = bool(done)
@@ -408,6 +431,12 @@ class RustObsAdapter:
                 if isinstance(b, dict) and b.get("type")
             ],
             "production": list(self.signals.production_items),
+            # Detailed per-entry production status (item / progress 0-1 /
+            # done) — the UI uses `done` to distinguish "ready to place"
+            # from "still building" so a Place click on an unfinished
+            # structure surfaces a clear hint instead of silently
+            # no-op'ing (engine rejects the order under the hood).
+            "production_detail": [dict(p) for p in self.signals.production_detail],
             # S9 spatial tensor passthrough (flat row-major [y][x][c] +
             # (h,w,c) shape) so multimodal/spatial agents and transfer
             # studies can do grid/occupancy reasoning. Empty when the
