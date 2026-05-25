@@ -711,7 +711,24 @@ async function gameStop(){
 // retroactively clean for already-running servers), then resets
 // local frontend state. Saves the user from having to manually
 // restart `python -m site.game_api`.
+//
+// DATA-LOSS GUARD: when a session has finished and is sitting in
+// the review modal awaiting Save/Discard, the draft on the server
+// has NOT been promoted. /api/game/sessions/clear drops the
+// underlying InteractiveSession, which closes it, which causes
+// human_labeling.InteractiveSession.close() to call
+// Playback.discard() on the unreviewed draft (the abandoned-draft
+// cleanup path). The playback would silently vanish. Same risk if
+// a live game is mid-play and has accumulated turns the user might
+// want to commit. We confirm explicitly in those two cases.
 async function gameRefresh(){
+  if(gameState){
+    if(gameState.pending_review){
+      if(!confirm("A finished game is waiting for Save / Discard in the review panel. Refresh will DISCARD this playback. Continue?"))return;
+    }else if(gameSession && (gameState.turn||0)>0){
+      if(!confirm("A game is in progress. Refresh will end it and clear the session. The current run will NOT be saved. Continue?"))return;
+    }
+  }
   gameLog("Refreshing — clearing server sessions and resetting local state...");
   try{
     const r=await fetch(gameServerUrl+"/api/game/sessions/clear",{method:"POST"});

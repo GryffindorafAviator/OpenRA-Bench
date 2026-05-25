@@ -460,3 +460,62 @@ def test_double_start_does_not_leak_first_session(api_client):
     assert sids[0] not in game_api._sessions
     assert sids[-1] in game_api._sessions
     assert len(game_api._sessions) <= game_api.MAX_SESSIONS + 1
+
+
+def test_sessions_clear_destroys_unreviewed_draft(api_client, tmp_path):
+    """Pin the data-loss surface of /api/game/sessions/clear (the
+    backend half of the UI Refresh button).
+
+    Refresh is the human's "the UI feels stuck — recover without
+    server restart" escape hatch. Calling /clear drops every live
+    session via InteractiveSession.close(), which for a manual-review
+    session with an unreviewed draft falls into the abandoned-draft
+    cleanup path (human_labeling.py:1207) — Playback.discard() runs
+    and the draft directory is removed.
+
+    This test pins that behaviour so future refactors don't
+    accidentally LEAK the draft (occupying disk forever) OR PROMOTE
+    it (data the user wanted to discard sneaking into the dataset).
+    The frontend gameRefresh() guards against accidental loss via a
+    confirm() dialog; this test just nails down what /clear itself
+    does once the user has confirmed."""
+    client, game_api, root = api_client
+    compiled = _smallest_easy_pack()
+    assert compiled is not None
+    r = client.post(
+        "/api/game/start",
+        json={"pack_id": compiled.pack_id, "level": "easy", "seed": 1},
+    )
+    assert r.status_code == 200
+    sid = r.json()["session_id"]
+    # Take one step so the session has a non-empty draft on disk.
+    r = client.post(
+        "/api/game/step",
+        json={"session_id": sid, "actions": []},
+    )
+    assert r.status_code == 200
+    # The session is still mid-game (not done) — its draft folder
+    # exists under root/.draft/ but is not promoted. Sanity check.
+    sess = game_api._sessions[sid]
+    pb_dir = sess._playback.dir if sess._playback is not None else None
+    assert pb_dir is not None
+    assert pb_dir.exists(), "draft dir must exist after first step"
+
+    # Refresh — clear all sessions.
+    r = client.post("/api/game/sessions/clear")
+    assert r.status_code == 200
+    assert sid in r.json()["dropped"]
+    assert sid not in game_api._sessions
+
+    # The draft must be gone (Playback.discard() ran via close()'s
+    # abandoned-draft cleanup path). Nothing was promoted — the final
+    # save_path was never set.
+    assert not pb_dir.exists(), "unreviewed draft must be discarded"
+    # And no stray finalized cell directory landed at the real save
+    # location — we're not silently promoting drafts on /clear.
+    final_dirs = [
+        p for p in root.rglob("seed*") if p.is_dir() and ".draft" not in p.parts
+    ]
+    assert not final_dirs, (
+        f"/clear must not promote drafts; found {final_dirs}"
+    )
