@@ -396,6 +396,23 @@ def run_level(
                     interrupt=interrupt,
                     goal=turn_goal(compiled.win_condition, ctx),
                 )
+                # Flush the LLM transcript per-turn so an operator
+                # tailing messages.json sees the live conversation
+                # rather than waiting for episode end. Without this,
+                # a 200-turn 1v1 episode goes silent on disk for
+                # ≥30 min and a mid-episode crash loses the whole
+                # transcript. Cost: one ~100KB write per turn — fine
+                # on SSD, ~20MB total per episode in the worst case.
+                try:
+                    _intro = locals().get("_introspection_per_turn")
+                    if _intro is None:
+                        _intro = introspection_source(controller)
+                        _introspection_per_turn = _intro  # noqa: F841
+                    _hist = getattr(_intro, "history", None)
+                    if isinstance(_hist, list):
+                        playback.write_messages(_hist)
+                except Exception:  # noqa: BLE001 — playback never breaks a run
+                    pass
             if full_playback is not None:
                 # Mirror the same PNG (when the legacy playback rendered
                 # one). Otherwise render on-demand for the audit format.

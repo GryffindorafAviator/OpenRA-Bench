@@ -84,6 +84,7 @@ def run_1v1(
     seed: int = 0,
     max_turns: int = 200,
     progress: bool = True,
+    transcript_dir=None,
 ) -> OneVOneResult:
     """Run one full-macro 1v1 match and return the result.
 
@@ -147,6 +148,65 @@ def run_1v1(
         # bench harness from serializing the round-trips.
         executor = ThreadPoolExecutor(max_workers=2)
 
+        # Per-turn LLM transcript persistence (1v1). When the caller
+        # passes a transcript_dir, both sides' message histories are
+        # flushed to disk every turn — `tail -f` on these files shows
+        # the live LLM conversation rather than waiting 30-60 min for
+        # the episode to complete (and a mid-episode crash preserves
+        # the partial transcript instead of losing it).
+        import time as _time
+        _episode_t0 = _time.monotonic()
+        _td = None
+        if transcript_dir:
+            import json as _json
+            from pathlib import Path as _Path
+            _td = _Path(transcript_dir)
+            _td.mkdir(parents=True, exist_ok=True)
+
+            def _unwrap(ctrl):
+                obj = ctrl
+                for attr in ("_agent", "agent", "wrapped", "controller"):
+                    if hasattr(obj, attr):
+                        inner = getattr(obj, attr)
+                        if hasattr(inner, "history"):
+                            return inner
+                return obj if hasattr(obj, "history") else None
+
+            _agent_inner = _unwrap(agent)
+            _enemy_inner = _unwrap(enemy)
+
+            def _flush_transcripts(turn_n: int):
+                try:
+                    if _agent_inner is not None:
+                        (_td / "agent_history.json").write_text(
+                            _json.dumps(getattr(_agent_inner, "history", []),
+                                        default=str, indent=2)
+                        )
+                    if _enemy_inner is not None:
+                        (_td / "enemy_history.json").write_text(
+                            _json.dumps(getattr(_enemy_inner, "history", []),
+                                        default=str, indent=2)
+                        )
+                    # Real-time rate metrics — operator-traceable
+                    # turns/sec without parsing the engine log. The
+                    # episode-rate watcher reads progress.json.
+                    elapsed = _time.monotonic() - _episode_t0
+                    tps = (turn_n / elapsed) if elapsed > 0 else 0.0
+                    eta_s = ((max_turns - turn_n) / tps) if tps > 0 else 0.0
+                    (_td / "progress.json").write_text(_json.dumps({
+                        "turn": turn_n,
+                        "max_turns": max_turns,
+                        "seed": seed,
+                        "elapsed_s": round(elapsed, 1),
+                        "turns_per_second": round(tps, 3),
+                        "sec_per_turn": round(1.0 / tps, 2) if tps > 0 else None,
+                        "eta_s": round(eta_s, 1),
+                    }))
+                except Exception:  # noqa: BLE001 — transcript never breaks a run
+                    pass
+        else:
+            def _flush_transcripts(turn_n: int): return  # no-op
+
         try:
             for turns in range(1, max_turns + 1):
                 a_rs = agent_ad.render_state()
@@ -159,6 +219,7 @@ def run_1v1(
                 a_obs, e_obs, done, _info = raw.step_1v1(a_cmds, e_cmds)
                 agent_ad.observe(a_obs, done=done)
                 enemy_ad.observe(e_obs, done=done)
+                _flush_transcripts(turns)
 
                 agent_trace.append(
                     {
@@ -235,6 +296,30 @@ def run_1v1(
                     else:
                         winner, reason = "draw", f"deadline — fully tied (kills={ak}, buildings={ab}, economy={av})"
 
+        # Final-state transcript flush + episode completion stamp.
+        # The rate-history.jsonl file (one row per completed episode)
+        # is the source of truth for "episodes/min" — tail it to see
+        # the running rate.
+        if _td is not None:
+            _flush_transcripts(turns)
+            try:
+                import json as _json
+                ep_elapsed = _time.monotonic() - _episode_t0
+                rate_row = {
+                    "winner": winner,
+                    "reason": reason,
+                    "turns": turns,
+                    "seed": seed,
+                    "episode_seconds": round(ep_elapsed, 1),
+                    "turns_per_second": round(turns / ep_elapsed, 3) if ep_elapsed > 0 else 0.0,
+                    "completed_at": _time.time(),
+                }
+                # Cell-level history (one file per cell, append per seed/half)
+                (_td.parent / "rate-history.jsonl").open("a").write(
+                    _json.dumps(rate_row) + "\n"
+                )
+            except Exception:  # noqa: BLE001
+                pass
         return OneVOneResult(
             winner=winner,
             reason=reason,

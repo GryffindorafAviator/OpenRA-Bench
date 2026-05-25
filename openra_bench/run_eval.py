@@ -1209,6 +1209,7 @@ def evaluate_1v1(
     report_path: str | Path | None = None,
     run_id: str | None = None,
     model: str | None = None,
+    playback_root: str | Path | None = None,
 ) -> dict:
     """The 1v1 sibling of `evaluate()` — drives `run_1v1` over
     `pack:level:seed` cells and emits an episode-record-compatible
@@ -1296,9 +1297,25 @@ def evaluate_1v1(
                             agent_spec, compiled, "enemy",
                             provider_cfg=provider_cfg,
                         )
+                    # Per-turn transcript persistence: write both sides'
+                    # LLM message history to disk every turn so an
+                    # operator tailing the file sees the live
+                    # conversation rather than waiting 30-60 min for
+                    # the episode to finish. A mid-episode crash
+                    # also preserves the partial transcript.
+                    transcript_dir = None
+                    if playback_root:
+                        safe = re.sub(r"[^a-z0-9-]+", "-",
+                                      (model or "agent").lower()).strip("-")
+                        transcript_dir = (
+                            Path(playback_root) / f"{run_id}__{safe}"
+                            / f"{cell.replace(':', '_')}_{half}"
+                            / f"seed{seed}"
+                        )
                     res = run_1v1(
                         tmp, agent_ctrl, enemy_ctrl,
                         seed=seed, max_turns=compiled.max_turns,
+                        transcript_dir=transcript_dir,
                     )
                     # Map raw winner ("agent"|"enemy"|"draw") to the
                     # AGENT's POV, accounting for the side swap.
@@ -1830,6 +1847,7 @@ def main(argv: list[str]) -> int:
             side_swap=a.side_swap,
             report_path=a.out,
             model=agent_label,
+            playback_root=a.playback,
         )
         write_report(stats, a.out)
         o = stats["overall"]
