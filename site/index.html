@@ -968,13 +968,30 @@ function gameSetBuildHint(text){
   if(el)el.textContent=text||"";
 }
 
+// Known unit / structure types so we can refuse "Place" for units
+// (units spawn automatically from their production building once
+// Build completes — clicking Place for a unit was a no-op that
+// silently confused human players, see bug report on
+// build-production-throughput-multibuilding).
+const GAME_UNIT_TYPES=new Set([
+  "e1","e2","e3","e4","e6","e7","e9","spy","thf","mdic","engineer",
+  "harv","jeep","apc","1tnk","2tnk","3tnk","4tnk","arty","mnly","ftrk",
+  "ttnk","ftnk","mcv","msam","stnk","v2rl","tran","heli","hind","mig",
+  "yak","badr","u2","dd","ss","ca","pt","msub","lst","mgg",
+]);
+function gameItemIsUnit(item){
+  return GAME_UNIT_TYPES.has((item||"").toLowerCase());
+}
+
 function gameQueueBuild(){
   if(!gameState)return;
   const item=gameBuildItemValue();
   if(!item){gameSetBuildHint("Enter an item like powr or e3.");return;}
   gameQueueAction({mode:"build",building_type:item});
   gamePlaceItem="";
-  gameLog("Queued BUILD "+item+".");
+  const note=gameItemIsUnit(item)
+    ?" (unit — will spawn automatically; do NOT click Place)":"";
+  gameLog("Queued BUILD "+item+"."+note);
   gameRender();
 }
 
@@ -982,6 +999,15 @@ function gameArmPlaceBuilding(){
   if(!gameState)return;
   const item=gameBuildItemValue();
   if(!item){gameSetBuildHint("Enter a building item, then click Place.");return;}
+  if(gameItemIsUnit(item)){
+    // Refuse: units come out of the production queue on their own.
+    // The UI used to accept the place_building order and the engine
+    // silently dropped it, leaving the player wondering why their
+    // tank never appeared.
+    gameSetBuildHint(item+" is a UNIT — Place is for buildings only. Units spawn automatically once Build completes.");
+    gameLog("Ignored Place for "+item+": units don't need Place; they spawn from their production building.");
+    return;
+  }
   gamePlaceItem=item;
   gameLog("Place mode: click the map cell for "+item+".");
   gameRender();
