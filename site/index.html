@@ -283,6 +283,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
           <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
             <button class="btn-secondary btn-sm" onclick="gameSelectAll()">Select All</button>
             <button class="btn-secondary btn-sm" onclick="gameClearSelection()">Clear Selection</button>
+            <button class="btn-secondary btn-sm" id="game-deploy-btn" onclick="gameDeploySelected()" style="display:none">Deploy MCV</button>
             <label class="btn-secondary btn-sm" title="Checked: selected harvesters harvest visible ore. Unchecked: selected units move on ground click.">
               <input type="checkbox" id="game-harvest-check" onchange="gameSetHarvestMode(this.checked)"> Harvest
             </label>
@@ -1411,6 +1412,21 @@ function gameQueueBuildPlacement(item,x,y){
   gameLog("Queued PLACE "+item+" at ("+x+","+y+").");
 }
 
+function gameDeploySelected(){
+  if(!gameState||gameState.done)return;
+  const ids=(gameState.units||[])
+    .filter(u=>gameSelected.has(u.id)&&gameTypeKey(u.type)==="mcv")
+    .map(u=>u.id);
+  if(!ids.length){
+    gameLog("Select an MCV first, then click Deploy MCV.");
+    return;
+  }
+  gameQueueOrder({mode:"deploy",unit_ids:ids});
+  gameSelected.clear();
+  gameLog("Queued DEPLOY for "+ids.length+" MCV(s).");
+  gameRender();
+}
+
 function gameQueueAttack(target, all=false){
   if(!target)return;
   if(all){
@@ -1488,8 +1504,20 @@ function gameRender(){
     ph.textContent="No minimap available";
   }
   gameRenderBuildPanel();
+  gameRenderActionButtons();
   gameRenderLegend();
   gameRenderUnits();
+}
+
+function gameRenderActionButtons(){
+  const deployBtn=document.getElementById("game-deploy-btn");
+  if(!deployBtn||!gameState)return;
+  const tools=gameState.tools||[];
+  const selectedMcvs=(gameState.units||[])
+    .filter(u=>gameSelected.has(u.id)&&gameTypeKey(u.type)==="mcv");
+  const canDeploy=tools.includes("deploy")&&selectedMcvs.length>0&&!gameState.done;
+  deployBtn.style.display=canDeploy?"":"none";
+  deployBtn.textContent=selectedMcvs.length>1?"Deploy MCVs":"Deploy MCV";
 }
 
 function gameRenderBuildPanel(){
