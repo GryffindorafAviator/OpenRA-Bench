@@ -1,163 +1,174 @@
-# rob-partial-base-loss-continue — press on after a non-critical base loss
+# rob-partial-base-loss-continue — continue operating after partial base loss
 #
-# REASONING capability — graceful degradation / incident triage. A
-# mid-episode `scheduled_events` destroy event razes a NON-CRITICAL
-# slice of the agent's base (an outer pillbox + 1 of 2 harvesters);
-# the war-critical core (fact + proc + powr + weap + fix) is left
-# untouched. The intended policy TRIAGES the loss — recognises the
-# razed assets are not on the win path — and PRESSES ON with the core
-# objective (field the heavy-armour establishment, clear the eastern
-# garrison) instead of panic-rebuilding the lost non-essentials.
+# REASONING capability — graceful degradation under partial loss. The
+# agent starts with TWO bases: a FORWARD outpost (doomed: anything
+# agent-owned inside the forward region is razed by a series of
+# scheduled destroy pulses) and a HOME base further east on the map
+# (safe: the destroy region never reaches it). HOME is seeded with a
+# Construction Yard (fact) and Power Plant (powr) ONLY — it has no
+# Refinery (proc) and no War Factory (weap) at start; those exist
+# initially at FORWARD and are wiped out alongside everything else in
+# the forward region. To "continue operating" the agent must
+# RECONSTITUTE the production chain at HOME — a refinery and a war
+# factory inside the home region, both alive at the deadline.
+#
+# Two-base strategic-retreat template (task #81):
+#   START   — FORWARD (doomed) + HOME (safe), HOME unreachable by the
+#             destroy region.
+#   THREAT  — repeated scheduled `destroy_actors` pulses raze every
+#             agent actor inside the FORWARD region (including any
+#             REPLACEMENTS the agent tries to plant there).
+#   WIN     — state-based at deadline: a `proc` AND a `weap` inside
+#             the HOME region, plus a surviving `fact` somewhere.
+#             Preemptive redundancy (building at HOME before the first
+#             pulse) and reactive rebuild (building at HOME after the
+#             pulse) both satisfy the predicate.
+#   LOSS    — in-game and on the deadline. Stalling never builds proc
+#             or weap → both region clauses unsatisfied → timeout
+#             LOSS. Building at FORWARD → the next destroy pulse razes
+#             it → still no region coverage → timeout LOSS. Building
+#             at HOME → WIN.
+#   BRIEFING (§9.5) — situation only; no scripted-policy spoilers.
 #
 # Real-world anchor: graceful degradation under partial system loss;
-# incident triage (distinguish a critical outage from a cosmetic one);
-# PlanBench replanning that does NOT over-react to an exogenous but
-# non-blocking loss; military battle-damage assessment (don't divert
-# the main effort to repair a non-mission-essential asset).
+# strategic retreat from a doomed forward site to a safer rear site;
+# multi-region disaster-recovery failover (the primary region keeps
+# being knocked offline by an attacker; the operator must stand up
+# the workload at the secondary region instead of fighting the
+# attacker on the primary).
 #
 # DISCRIMINATION (the four-script no-cheat bar):
-#   • stall (only `observe`): the army never attacks → kill bar (K)
-#     unmet → after_ticks T+1 fires → timeout LOSS.
-#   • no-rebuild (attack_move the 2tnk column east but never build):
-#     the column clears the garrison so the kill bar passes, BUT the
-#     agent starts BELOW the establishment quota — the win requires
-#     `unit_type_count_gte:{2tnk,N}` with N one (easy/medium) or two
-#     (hard) ABOVE the starting column — and a policy that never
-#     builds a 2tnk replacement can never reach N → timeout LOSS.
-#   • rebuild-the-non-essentials (after the destroy event, panic-build
-#     `pbox` + `harv` to restore the razed outpost): the build orders
-#     and decision turns are spent on assets that are NOT in the win
-#     predicate; the 2tnk establishment is never brought to N, so the
-#     type-count clause busts → timeout LOSS. This is the triage
-#     failure the scenario is built to catch — restoring the cosmetic
-#     loss instead of fielding the war-critical establishment.
-#   • intended press-on (TRIAGE the loss: ignore the razed
-#     non-essentials; build the 2tnk establishment UP to N and
-#     attack_move the column east): the type-count + kill +
-#     fact-intact bars all pass inside T → WIN.
+#   • stall (only `observe`): no proc or weap is ever built. The
+#     FORWARD proc + weap are razed by the first destroy pulse, the
+#     HOME base never had them → both region clauses busted →
+#     after_ticks T+1 fires → timeout LOSS.
+#   • build-at-forward (rebuild proc + weap inside the forward
+#     region after the first pulse): the next destroy pulse razes
+#     the replacements; the agent burns its cash and decision turns
+#     on assets that don't survive → region clauses still busted →
+#     timeout LOSS. This is the canonical strategic-retreat failure
+#     the scenario is built to catch — fighting the attacker at the
+#     doomed site instead of retreating to safety.
+#   • build-at-home (queue proc + weap and place each inside the
+#     HOME region): the destroy region never reaches them, both
+#     region clauses latch the moment each building lands → WIN.
+#   • do-both (preemptive redundancy: build proc + weap at HOME
+#     BEFORE the first pulse, while the forward base is still alive):
+#     the HOME copies survive every pulse → same WIN. The predicate
+#     credits both the preemptive and the reactive path equally —
+#     a rational operator who notices the threat would pre-build at
+#     HOME; one who only reacts after the first pulse can still
+#     recover. Both LOSS modes above remain LOSSES.
 #
 # ENGINE NOTES (CLAUDE.md / SCENARIO_QUALITY.md):
-#  - Engine movement fixes (2026-05): `attack_unit` on out-of-sight
-#    targets paths normally and a moving unit both fires and takes
-#    fire en route. The earlier design relied on an opening light-tank
-#    strike to shave exactly one 2tnk off the column — bench-wide
-#    combat rebalancing made that casualty unreliable (the medium-tank
-#    column now out-trades light tanks without loss). The recalibrated
-#    discriminator is DETERMINISTIC and combat-RNG-free: the agent
-#    starts the column BELOW the establishment quota N, so fielding
-#    the N-th tank is a mandatory build verb — no casualty needed.
-#  - Combat unit `2tnk` (allied medium tank, cost 800). Allied tank
-#    tech-prereq is `weap` (war factory) + `fix` (service depot) — so
-#    BOTH are pre-placed in the core base; the destroy event leaves
-#    them untouched so the rebuild queue stays open all episode.
-#  - The lane-mouth pickets are 2× `1tnk` (light tank) at stance:2
-#    (Defend — fire on the in-range column but DON'T chase it east).
-#    They are kill fodder that pads the kill count above the 5-kill
-#    bar; they do NOT (and need not) destroy an agent tank — the
-#    establishment quota, not a combat casualty, is the load-bearing
-#    build trigger.
 #  - `scheduled_events: destroy_actors` removes every actor matching
-#    `filter: {owner, region:{x,y,radius}}` (oramap.rs::
-#    read_scheduled_events / env.rs::fire_scheduled_events, pinned by
-#    openra-data/tests/test_scheduled_events.rs). The filter has NO
-#    actor_type key — region isolation is what limits the blast to
-#    the outer pbox + the south harvester: the destroy circle is
-#    centred on the SOUTH outpost (11,30) r=4, ~12 cells from the
-#    core base row (y=16..18), so the fact/proc/powr/weap/fix and the
-#    surviving NORTH harvester are all outside the radius. The
-#    scheduled_events block keeps key order `tick, type, filter` —
-#    the Rust parser reads it positionally.
-#  - The destroy event fires at tick ~1200 — after the agent's first
-#    few decision turns (so the loss is observed mid-episode, the
-#    triage decision is live) but with ample budget left to press on.
-#  - `building_count_gte:{type: fact, n: 1}` re-counts LIVE building
-#    actors every tick — the destroy event never touches the fact, so
-#    this clause stays satisfied; it is in BOTH the win (fact intact)
-#    and the fail (`not building_count_gte:fact`) so a core-loss is a
-#    real immediate LOSS.
-#  - Enemy uses the `turtle` scripted bot: the eastern e1 garrison
-#    HOLDS at x=80 instead of surging west, so the kill bar is
-#    reachable by a single eastbound assault and the loss event stays
-#    isolated to the scripted destroy hook (not a roaming enemy).
-#  - The far enemy `fact` at (120,20) is the engine-auto-done guard
-#    (CLAUDE.md): without a persistent MustBeDestroyed enemy the
-#    engine ends the episode the instant the last garrison e1 falls,
-#    collapsing a clean run to DRAW before the win/fail evaluator.
-#  - Tick budget: max_turns 60 ⇒ ceiling 93 + 90·59 = 5403 ⇒
-#    within_ticks 5400 + after_ticks 5401 both reachable; a non-
-#    finisher LOSES (not draws); the win/fail windows don't overlap.
-#  - `not own_units_gte:1` mis-fires on turn 1 when the agent starts
-#    unit-less (CLAUDE.md footgun) — this pack starts with a 4-tank
-#    2tnk column + fact, so `own_units_gte:1` is safe.
-#  - mine actors (neutral) feed the harvesters; they are placed
-#    OUTSIDE the destroy circle so the surviving north harvester
-#    still has a patch — but income is incidental, the reserve cash
-#    is the budget that matters and harvesting is not on the win path.
+#    `filter: {owner, region:{x,y,radius}}` exactly once at its
+#    declared tick (oramap.rs::read_scheduled_events /
+#    env.rs::fire_scheduled_events, pinned by
+#    openra-data/tests/test_scheduled_events.rs). To make REBUILDS
+#    inside the same region also die, the pack declares a SERIES of
+#    destroy pulses at staggered ticks. Each pulse fires only once,
+#    so the timing axis is "between pulses the agent has a window
+#    that's shorter than the proc+weap build cost". Easy/medium use
+#    4 pulses; hard uses 5 (one extra late pulse to bite a late-game
+#    rebuild attempt). The first pulse fires at tick 600 — after the
+#    agent's first ~7 decision turns so the loss is observed
+#    mid-episode.
+#  - `proc` (cost 1400) and `weap` (cost 2000) both require `powr`
+#    as a tech prereq (gamerules.rs). HOME is pre-placed with both
+#    `fact` and `powr` so both items are buildable from tick 0; the
+#    agent does NOT need to build powr at home first.
+#  - `place_building` does NOT enforce build-adjacency (CLAUDE.md).
+#    A proc or weap queued at the (shared) Building queue can be
+#    placed at any in-bounds cell with one `place_building` order
+#    — including the far HOME region from the FORWARD fact, or
+#    vice-versa.
+#  - Map: 128×40 with playable bounds (2,2,124,36). FORWARD region
+#    centred at (20, 18), radius 10 — covers x∈[10,30], y∈[8,28].
+#    HOME region centred at (100, 18), radius 10 — covers
+#    x∈[90,110], y∈[8,28]. The two regions are ~80 cells apart so
+#    the destroy radius cannot accidentally clip the HOME base.
+#  - Persistent enemy `fact` far east at (120, 20) keeps the engine
+#    from auto-`done`'ing on all-enemies-eliminated (CLAUDE.md). The
+#    enemy `turtle` bot holds position — there is no roaming threat
+#    that could confound the destroy-pulse discrimination.
+#  - Tick budget: easy/medium max_turns 60 ⇒ ceiling 93 + 90·59 =
+#    5403 ⇒ within_ticks 5400 + after_ticks 5401 are reachable, a
+#    non-finisher LOSES (not draws), the win/fail windows don't
+#    overlap. Hard max_turns 60 ⇒ same ceiling; the harder pulse
+#    cadence makes the rebuild window tighter without changing the
+#    deadline.
+#  - The hard tier declares ≥2 agent `spawn_point` groups (NORTH-
+#    flank scout at (50,10) on spawn 0; SOUTH-flank scout at (50,30)
+#    on spawn 1). The FORWARD + HOME bases are SHARED across both
+#    groups at identical cells (per the CLAUDE.md per-owner spawn
+#    filter — any agent actor with a spawn_point forces every agent
+#    actor without one to be filtered out). `scheduled_events` do
+#    NOT honour spawn_point, so the destroy pulses fire on every
+#    seed and target the same FORWARD region in both groups.
 #
 # Validate (no model / no network):
 #   python3 -m pytest tests/test_rob_partial_base_loss_continue.py -q
 
 meta:
   id: rob-partial-base-loss-continue
-  title: 'Graceful Degradation — Press On After a Non-Critical Base Loss'
+  title: 'Graceful Degradation — Continue Operating From the Safe Rear Base'
   capability: reasoning
   real_world_meaning: >
-    Triage an exogenous partial loss. Mid-mission, a scripted strike
-    razes a NON-CRITICAL slice of the agent's base — an outer pillbox
-    and one of two harvesters — while the war-critical core
-    (construction yard, refinery, power, war factory, service depot)
-    is untouched. The intended policy performs battle-damage
-    assessment: it recognises the lost assets are NOT on the win path
-    and PRESSES ON with the core objective — field the heavy-armour
-    establishment UP to the required strength and clear the eastern
-    garrison defending the enemy construction yard — rather than
-    diverting its decision turns to panic-rebuilding the
-    non-essentials. Rebuilding the razed pillbox + harvester burns the
-    turns the agent needed to commission the war-critical tanks; the
-    establishment and kill bars then go unmet.
+    Continue operating after the partial loss of a doomed forward
+    site. The operator starts with two production sites: a FORWARD
+    outpost that is repeatedly hit by an exogenous strike (anything
+    placed there gets razed) and a HOME site further to the rear
+    that the strike never reaches. The HOME site is seeded with only
+    the construction yard and a power source — the agent must
+    RECONSTITUTE its production chain (refinery and war factory) at
+    HOME to continue operating. A rational operator either
+    pre-positions the redundant production at HOME before the first
+    pulse (preemptive redundancy) or RETREATS to HOME the moment the
+    first pulse lands (reactive rebuild). The brittle failure mode is
+    fighting the attacker on the doomed site — rebuilding refinery /
+    war factory inside the forward region, where the next pulse razes
+    them again.
   robotics_analogue: >
-    Graceful degradation under partial subsystem loss. A field robot
-    loses a non-mission-essential sensor or a spare battery pack
-    mid-task; a brittle controller halts the primary task to restore
-    the lost component, blowing the mission deadline, while a robust
-    one assesses that the loss does not block the objective and
-    continues. The discrimination is incident triage — distinguishing
-    a critical failure (which DOES require a stop-and-fix) from a
-    cosmetic / redundant one (which must be ignored so the main
-    effort stays on schedule).
+    Multi-region disaster-recovery failover. A workload's primary
+    region keeps being knocked offline by an attacker the operator
+    cannot evict. The standby region is safe but seeded only with
+    the bare control plane (the equivalent of the construction yard
+    and power) — the data plane (refinery / war factory) has to be
+    stood up there from scratch to continue operating. The intended
+    play is to stop fighting the attacker on the primary region and
+    bring the missing services online in the secondary, either
+    preemptively (continuous redundancy) or reactively (fail over
+    after the first outage). The brittle play is to keep relaunching
+    the data plane on the primary region after every outage.
   benchmark_anchor:
     - "graceful degradation"
-    - "incident triage"
-    - "critical-vs-noncritical assessment"
+    - "strategic retreat"
+    - "two-base failover"
+    - "multi-region disaster recovery"
     - "PlanBench replanning under exogenous loss"
-    - "military battle-damage assessment"
   author: "openra-bench"
 
-# rush-hour-arena: 128×40, playable bounds (2,2,124,36). Agent core
-# base at the WEST (x≈8..16, y≈16..18). The SOUTH outpost (outer pbox
-# + south harvester) sits at (11..12, 30) — the destroy circle is
-# centred there so the blast is isolated from the core. 2tnk column
-# stages at x=22; enemy garrison holds at x=80; far enemy fact at
-# (120,20) is the engine-auto-done guard.
+# rush-hour-arena: 128×40, playable bounds (2,2,124,36). FORWARD region
+# centred at (20,18) r=10 contains the doomed outpost; HOME region
+# centred at (100,18) r=10 contains the safe rear base. ~80 cells
+# between centres so the destroy radius can never clip HOME.
 base_map:
   generator: arena
   name: rob-partial-base-loss-continue-arena
   width: 128
   height: 40
-starting_cash: 2000  # per-level override below
+starting_cash: 5000
 
 base:
   agent:
     faction: allies
-    cash: 2000
+    cash: 5000
   enemy:
     faction: soviet
-    # `turtle` (Wave-2 scripted bot) — the eastern e1 garrison holds
-    # position and returns fire only, so the kill bar is satisfied by
-    # an eastbound assault rather than by absorbing a surge. The
-    # pre-placed `4tnk` strikers (stance:3) handle the opening
-    # casualty independently; the partial-base loss is the scripted
-    # `destroy_actors` hook, not a roaming enemy.
+    # `turtle` (Wave-2 scripted bot) — no roaming offence. The only
+    # threat is the scripted destroy pulses; the enemy `fact` marker
+    # far east is the engine auto-done guard.
     bot_type: turtle
   tools:
     - observe
@@ -173,316 +184,230 @@ base:
 
 levels:
   # ── EASY ────────────────────────────────────────────────────────
-  # The bare triage skill: at tick 1200 the destroy event razes the
-  # outer pbox + the south harvester; the core base is untouched. The
-  # 2tnk column starts at 4 and loses ~1 to the opening strike; the
-  # 2000 cr reserve covers TWO replacement tanks (800 each) if the
-  # agent presses on — or is fully wasted if it rebuilds pbox+harv.
+  # Bare retreat skill. FORWARD outpost (fact + proc + powr + weap +
+  # harv) is razed by a series of four destroy pulses at ticks
+  # 600 / 1800 / 3000 / 4200. HOME (fact + powr only) is safe. The
+  # agent must build a Refinery (proc, cost 1400) AND a War Factory
+  # (weap, cost 2000) and place each inside the HOME region —
+  # 5000 cr is exactly enough for both (1400 + 2000 = 3400; the
+  # remainder covers misclicks).
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # You command 4 medium tanks (2tnk) at a forward staging area (x=22,
-    # y=18..24) with a CORE base behind you — construction yard (fact),
-    # refinery (proc), power (powr), war factory (weap), service depot
-    # (fix). A SOUTH outpost holds an outer pillbox (pbox) and one of your
-    # two ore harvesters (harv). Two enemy light tanks (1tnk) picket the
-    # lane mouth (x=24). At tick ~1200 an enemy strike RAZES the SOUTH
-    # outpost — the outer pillbox and that harvester are destroyed; your
-    # core base is UNTOUCHED. An eastern garrison of 5 rifle infantry (e1)
-    # at x=80 defends the enemy construction yard. The razed pillbox and
-    # harvester are NOT on your win path: do NOT spend your turns
-    # rebuilding them. The intended play is to PRESS ON — field the heavy-
-    # armour establishment by building ONE more medium tank (your column
-    # of 4 is BELOW the required strength of 5), and attack_move the 2tnk
-    # column east to clear the garrison. Win when you have killed >=5
-    # enemy units AND you have >=5 medium tanks alive AND your
-    # construction yard is intact, before tick 5400. Stalling, and
-    # rebuilding the razed non-essentials instead of the tank, both LOSE.
     description: >
-      Four medium tanks staged at (22, 18..24) in front of a full core
-      base (yard, refinery, power, war factory, depot). A south outpost
-      holds an outer pillbox and one of two harvesters. Around tick 1200 a
-      strike RAZES the south outpost — pillbox and harvester gone, core
-      untouched. Don't rebuild the lost outpost. Build ONE more medium
-      tank, then attack-move east to clear five rifles guarding the enemy
-      yard. Five tanks alive, five kills, yard standing, within about 60
-      turns.
-    starting_cash: 2000
+      Two bases. FORWARD at (20,18): construction yard, refinery, power,
+      war factory, ore truck. HOME at (100,18): construction yard plus
+      power only. Around tick 600 and every 1200 ticks after that, a
+      hostile pulse razes everything you own inside the forward region
+      (radius 10 around (20,18)); the home region (radius 10 around
+      (100,18)) is never touched. Win by having a refinery inside the
+      home region AND a war factory inside the home region, with at
+      least one construction yard still standing, within about 60
+      turns. Building only at the forward base never survives the
+      pulses; stalling never builds anything.
+    starting_cash: 5000
     overrides:
       actors:
-        # Agent CORE base — fact + proc + powr + weap + fix at the
-        # west edge, y=16..18. Untouched by the destroy event.
-        - {type: fact, owner: agent, position: [8, 18]}
-        - {type: proc, owner: agent, position: [10, 18]}
-        - {type: powr, owner: agent, position: [12, 18]}
-        - {type: weap, owner: agent, position: [14, 18]}
-        - {type: fix,  owner: agent, position: [16, 18]}
-        # North harvester — SURVIVES (outside the destroy circle).
-        - {type: harv, owner: agent, position: [10, 16]}
-        # SOUTH outpost — outer pbox + south harvester. Both RAZED by
-        # the destroy event at tick 1200 (region {11,30,r4}).
-        - {type: pbox, owner: agent, position: [12, 30]}
-        - {type: harv, owner: agent, position: [10, 30]}
-        # Neutral ore mines. North mines feed the surviving north
-        # harvester (outside the destroy circle); the south mine sits
-        # INSIDE the destroy circle so the south harvester
-        # auto-harvests locally and is still on its patch when the
-        # tick-1200 strike fires (pre-placed harvesters auto-bind to
-        # the nearest proc and travel there to harvest, so a south
-        # harv with no local mine moves north and escapes the blast).
-        - {type: mine, owner: neutral, position: [14, 14]}
-        - {type: mine, owner: neutral, position: [14, 16]}
-        - {type: mine, owner: neutral, position: [11, 30]}
-        # 4 medium tanks (2tnk) at the forward staging line — ONE
-        # BELOW the establishment quota of 5; fielding the 5th is the
-        # mandatory build verb the press-on policy must execute.
-        - {type: '2tnk', owner: agent, position: [22, 18], stance: 2}
-        - {type: '2tnk', owner: agent, position: [22, 20], stance: 2}
-        - {type: '2tnk', owner: agent, position: [22, 22], stance: 2}
-        - {type: '2tnk', owner: agent, position: [22, 24], stance: 2}
-        # Lane-mouth pickets: 2× 1tnk at stance:2 (Defend — fire on
-        # the in-range column but do NOT chase it east). They are kill
-        # fodder padding the kill count above the 5-kill bar; they do
-        # not destroy an agent tank.
-        - {type: '1tnk', owner: enemy, position: [24, 19], stance: 2}
-        - {type: '1tnk', owner: enemy, position: [24, 23], stance: 2}
-        # Eastern garrison: 5 rifle infantry defending the enemy fact.
-        - {type: e1, owner: enemy, position: [80, 18], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 20], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 22], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 24], stance: 1}
-        - {type: e1, owner: enemy, position: [82, 20], stance: 1}
-        # Persistent enemy `fact` far east (engine auto-done guard).
+        # FORWARD outpost (doomed). Everything inside the (20,18) r=10
+        # circle is razed at every pulse.
+        - {type: fact, owner: agent, position: [16, 18]}
+        - {type: proc, owner: agent, position: [18, 16]}
+        - {type: powr, owner: agent, position: [20, 18]}
+        - {type: weap, owner: agent, position: [22, 16]}
+        - {type: harv, owner: agent, position: [18, 18]}
+        # HOME base (safe). fact + powr only — agent must BUILD the
+        # proc + weap and place them inside this region.
+        - {type: fact, owner: agent, position: [100, 18]}
+        - {type: powr, owner: agent, position: [102, 18]}
+        # Neutral ore mines near the forward outpost (feed the
+        # original harv until the first pulse razes it).
+        - {type: mine, owner: neutral, position: [18, 14]}
+        - {type: mine, owner: neutral, position: [22, 14]}
+        # Persistent enemy `fact` far east — engine auto-done guard.
         - {type: fact, owner: enemy, position: [120, 20]}
-      # Wave-9 scheduled destroy event: at tick 1200 raze every agent
-      # actor inside the SOUTH-outpost circle — the outer pbox at
-      # (12,30) and the south harvester at (10,30). The core base row
-      # (y=16..18) and the north harvester (10,16) are ~12+ cells
-      # away, outside r=4, so they survive.
+      # Series of destroy pulses razing every agent actor inside the
+      # FORWARD region. Each pulse fires once at its declared tick,
+      # so any replacement built before the next pulse also dies.
       scheduled_events:
-        - tick: 1200
+        - tick: 600
           type: destroy_actors
           filter:
             owner: agent
-            region: {x: 11, y: 26, radius: 6}
+            region: {x: 20, y: 18, radius: 10}
+        - tick: 1800
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 20, y: 18, radius: 10}
+        - tick: 3000
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 20, y: 18, radius: 10}
+        - tick: 4200
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 20, y: 18, radius: 10}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: '2tnk', n: 5}}
-        - {units_killed_gte: 5}
-        - {building_count_gte: {type: fact, n: 1}}
-        - {within_ticks: 5400}
+        - building_in_region:
+            {x: 100, y: 18, radius: 10, type: proc, count: 1}
+        - building_in_region:
+            {x: 100, y: 18, radius: 10, type: weap, count: 1}
+        - has_building: fact
+        - within_ticks: 5400
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
-        - {not: {own_units_gte: 1}}
-        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - after_ticks: 5401
+        - not: {has_building: fact}
     max_turns: 60
 
   # ── MEDIUM ──────────────────────────────────────────────────────
-  # +1 controlled variable: a HARDER non-critical loss to triage —
-  # the destroy event razes the south harvester AND a SECOND outer
-  # pbox (a fuller-looking outpost), so the panic-rebuild temptation
-  # is larger. The establishment quota stays at 5 (one build) so the
-  # difficulty axis is purely the size of the decoy loss.
+  # +1 controlled variable: a TIGHTER pulse cadence (600 / 1500 /
+  # 2400 / 3300 / 4200) so a late-arriving rebuilder at HOME has
+  # less safety margin. The five pulses also tighten the cost of
+  # any forward-rebuild attempt — every 900 ticks the replacements
+  # die again. The cash budget and HOME seed are identical to easy
+  # so the difficulty axis is purely pulse cadence.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Tougher version: THREE enemy light tanks (1tnk) picket the lane
-    # mouth (x=24, y=19..23). Your SOUTH outpost now holds TWO outer
-    # pillboxes and one harvester; at tick ~1200 an enemy strike RAZES the
-    # entire outpost — both pillboxes and that harvester — while your CORE
-    # base (fact + proc + powr + weap + fix) and your north harvester are
-    # UNTOUCHED. The eastern garrison is 6 rifle infantry at x=80. The
-    # razed outpost is NOT on your win path. Press on: field the heavy-
-    # armour establishment by building ONE more medium tank (your column
-    # of 4 is BELOW the required strength of 5) and attack_move the 2tnk
-    # column east. Win when you have killed >=5 enemy units AND you have
-    # >=5 medium tanks alive AND your construction yard is intact, before
-    # tick 5400. Stalling, and rebuilding the razed outpost instead of the
-    # tank, both LOSE.
     description: >
-      Same press-on setup, but TWO outer pillboxes plus one harvester are
-      razed at the south outpost around tick 1200 (core base untouched).
-      Three enemy light tanks now picket the lane mouth and the eastern
-      garrison grows to six rifles. Build one more medium tank, attack
-      east. Five tanks alive, five kills, yard standing, within about 60
-      turns.
-    starting_cash: 2000
+      Same two bases as easy: forward at (20,18) with the full chain;
+      home at (100,18) with only the construction yard and a power
+      plant. The pulse cadence is tighter — destroy pulses fire around
+      ticks 600, 1500, 2400, 3300, and 4200, razing everything inside
+      the forward region each time. Win by having a refinery and a war
+      factory inside the home region (radius 10 around (100,18)) with
+      a construction yard still standing, within about 60 turns.
+    starting_cash: 5000
     overrides:
       actors:
-        - {type: fact, owner: agent, position: [8, 18]}
-        - {type: proc, owner: agent, position: [10, 18]}
-        - {type: powr, owner: agent, position: [12, 18]}
-        - {type: weap, owner: agent, position: [14, 18]}
-        - {type: fix,  owner: agent, position: [16, 18]}
-        - {type: harv, owner: agent, position: [10, 16]}
-        # SOUTH outpost — 2 outer pbox + 1 harv; all RAZED at tick 1200.
-        - {type: pbox, owner: agent, position: [10, 30]}
-        - {type: pbox, owner: agent, position: [12, 30]}
-        - {type: harv, owner: agent, position: [11, 28]}
-        - {type: mine, owner: neutral, position: [14, 14]}
-        - {type: mine, owner: neutral, position: [14, 16]}
-        # South mine inside the destroy circle so the south harv
-        # auto-harvests locally and is in radius when the strike
-        # fires (see easy-tier comment for the auto-bind footgun).
-        - {type: mine, owner: neutral, position: [11, 30]}
-        # 4 medium tanks — ONE below the establishment quota of 5.
-        - {type: '2tnk', owner: agent, position: [22, 18], stance: 2}
-        - {type: '2tnk', owner: agent, position: [22, 20], stance: 2}
-        - {type: '2tnk', owner: agent, position: [22, 22], stance: 2}
-        - {type: '2tnk', owner: agent, position: [22, 24], stance: 2}
-        # 3 lane-mouth pickets (1tnk, stance:2 Defend): kill fodder
-        # padding the kill count; they hold their post and never chase
-        # the column east.
-        - {type: '1tnk', owner: enemy, position: [24, 19], stance: 2}
-        - {type: '1tnk', owner: enemy, position: [24, 21], stance: 2}
-        - {type: '1tnk', owner: enemy, position: [24, 23], stance: 2}
-        # Garrison: 6 e1 at x=80..82.
-        - {type: e1, owner: enemy, position: [80, 18], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 20], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 22], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 24], stance: 1}
-        - {type: e1, owner: enemy, position: [82, 20], stance: 1}
-        - {type: e1, owner: enemy, position: [82, 22], stance: 1}
+        - {type: fact, owner: agent, position: [16, 18]}
+        - {type: proc, owner: agent, position: [18, 16]}
+        - {type: powr, owner: agent, position: [20, 18]}
+        - {type: weap, owner: agent, position: [22, 16]}
+        - {type: harv, owner: agent, position: [18, 18]}
+        - {type: fact, owner: agent, position: [100, 18]}
+        - {type: powr, owner: agent, position: [102, 18]}
+        - {type: mine, owner: neutral, position: [18, 14]}
+        - {type: mine, owner: neutral, position: [22, 14]}
         - {type: fact, owner: enemy, position: [120, 20]}
       scheduled_events:
-        - tick: 1200
+        - tick: 600
           type: destroy_actors
-          filter:
-            owner: agent
-            region: {x: 11, y: 26, radius: 6}
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 1500
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 2400
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 3300
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 4200
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: '2tnk', n: 5}}
-        - {units_killed_gte: 5}
-        - {building_count_gte: {type: fact, n: 1}}
-        - {within_ticks: 5400}
+        - building_in_region:
+            {x: 100, y: 18, radius: 10, type: proc, count: 1}
+        - building_in_region:
+            {x: 100, y: 18, radius: 10, type: weap, count: 1}
+        - has_building: fact
+        - within_ticks: 5400
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
-        - {not: {own_units_gte: 1}}
-        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - after_ticks: 5401
+        - not: {has_building: fact}
     max_turns: 60
 
   # ── HARD ────────────────────────────────────────────────────────
   # +2 controlled variables vs medium:
   #   1. TWO seed-driven AGENT spawn_point groups (a NORTH-flank
-  #      scout at (18,12) on spawn 0; a SOUTH-flank scout at (18,32)
-  #      on spawn 1). The core base + 2tnk column + south outpost are
-  #      SHARED across both groups at identical cells so the strike
-  #      and destroy geometry is symmetric, but a memorised opening
-  #      cannot generalise — the scout's flank flips per seed.
-  #      (CLAUDE.md: enemy actors are NOT spawn-filtered; ANY agent
-  #      actor with a spawn_point forces every agent actor WITHOUT
-  #      one to be filtered out — so EVERY agent actor declares
-  #      spawn_point and the shared base is duplicated across BOTH
-  #      groups. scheduled_events do NOT honour spawn_point — the
-  #      single destroy event fires on both seeds and razes the
-  #      south outpost, which is at identical cells in both groups.)
-  #   2. A higher establishment quota (6 ⇒ TWO mandatory builds) with
-  #      a 3000 cr reserve to cover them. Rebuilding the larger razed
-  #      outpost (2 pbox + harv) instead burns the decision turns the
-  #      agent needed to commission BOTH tanks — the triage failure is
-  #      sharper at the higher quota.
+  #      scout at (50,10) on spawn 0; a SOUTH-flank scout at (50,30)
+  #      on spawn 1). The FORWARD + HOME bases are SHARED across
+  #      both groups at identical cells so the destroy geometry is
+  #      symmetric, but a memorised opening cannot generalise — the
+  #      scout's flank flips per seed. (CLAUDE.md: enemy actors are
+  #      NOT spawn-filtered; ANY agent actor with a spawn_point
+  #      forces every agent actor WITHOUT one to be filtered out —
+  #      so EVERY agent actor declares spawn_point and the shared
+  #      bases are duplicated across BOTH groups. scheduled_events
+  #      do NOT honour spawn_point — the single set of destroy
+  #      pulses fires on both seeds.)
+  #   2. A SIXTH pulse at tick 5100 — biting any late-game rebuild
+  #      attempt at FORWARD that would otherwise sneak past pulse 5
+  #      and satisfy the bar by the deadline. The HOME path is
+  #      untouched.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Hard tier: TWO seed-driven base orientations (a NORTH-flank scout at
-    # (18,12) on spawn 0; a SOUTH-flank scout at (18,32) on spawn 1) keep
-    # the strike and destroy geometry symmetric but defeat a memorised
-    # opening. Three enemy light tanks (1tnk) picket the lane mouth; the
-    # SOUTH outpost (2 outer pillboxes + 1 harvester) is RAZED at tick
-    # ~1200 while the core base (fact + proc + powr + weap + fix) and the
-    # north harvester survive. The eastern garrison is 6 rifle infantry at
-    # x=80. The razed outpost is NOT on your win path. Press on: field the
-    # heavy-armour establishment by building TWO more medium tanks (your
-    # column of 4 is BELOW the required strength of 6) using the 3000 cr
-    # reserve, and attack_move the 2tnk column east. Win when you have
-    # killed >=5 enemy units AND you have >=6 medium tanks alive AND your
-    # construction yard is intact, before tick 5400. Stalling, and
-    # rebuilding the razed outpost instead of the tanks, both LOSE.
     description: >
-      Same partial-loss task on a seed-chosen NORTH (y=12) or SOUTH (y=32)
-      flank scout. South outpost razed around tick 1200; core survives.
-      $3000 reserve covers TWO more medium tanks (column starts at four,
-      needs six). Build both, attack east, six tanks alive, five kills,
-      yard standing, within about 60 turns.
-    starting_cash: 3000
+      Same task on a seed-chosen north (y=10) or south (y=30) flank
+      scout. Forward base at (20,18): full chain. Home base at
+      (100,18): construction yard plus power only. Six destroy pulses
+      fire on the forward region across the episode (around ticks
+      600, 1500, 2400, 3300, 4200, and 5100). Win by having a
+      refinery and a war factory inside the home region (radius 10
+      around (100,18)) with a construction yard still standing,
+      within about 60 turns.
+    starting_cash: 5000
     overrides:
       actors:
-        # SPAWN 0 — NORTH-flank scout at (18,12). Core base, 2tnk
-        # column, and south outpost duplicated across both groups
-        # (per CLAUDE.md: ANY agent actor with a spawn_point forces
-        # agent actors WITHOUT one to be filtered out).
-        - {type: fact, owner: agent, position: [8, 18], spawn_point: 0}
-        - {type: proc, owner: agent, position: [10, 18], spawn_point: 0}
-        - {type: powr, owner: agent, position: [12, 18], spawn_point: 0}
-        - {type: weap, owner: agent, position: [14, 18], spawn_point: 0}
-        - {type: fix,  owner: agent, position: [16, 18], spawn_point: 0}
-        - {type: harv, owner: agent, position: [10, 16], spawn_point: 0}
-        - {type: pbox, owner: agent, position: [10, 30], spawn_point: 0}
-        - {type: pbox, owner: agent, position: [12, 30], spawn_point: 0}
-        - {type: harv, owner: agent, position: [11, 28], spawn_point: 0}
-        - {type: mine, owner: neutral, position: [14, 14], spawn_point: 0}
-        - {type: mine, owner: neutral, position: [14, 16], spawn_point: 0}
-        - {type: mine, owner: neutral, position: [11, 30], spawn_point: 0}
-        - {type: '2tnk', owner: agent, position: [22, 18], stance: 2, spawn_point: 0}
-        - {type: '2tnk', owner: agent, position: [22, 20], stance: 2, spawn_point: 0}
-        - {type: '2tnk', owner: agent, position: [22, 22], stance: 2, spawn_point: 0}
-        - {type: '2tnk', owner: agent, position: [22, 24], stance: 2, spawn_point: 0}
-        - {type: e1, owner: agent, position: [18, 12], stance: 0, spawn_point: 0}
-        # SPAWN 1 — SOUTH-flank scout at (18,32). Symmetric.
-        - {type: fact, owner: agent, position: [8, 18], spawn_point: 1}
-        - {type: proc, owner: agent, position: [10, 18], spawn_point: 1}
-        - {type: powr, owner: agent, position: [12, 18], spawn_point: 1}
-        - {type: weap, owner: agent, position: [14, 18], spawn_point: 1}
-        - {type: fix,  owner: agent, position: [16, 18], spawn_point: 1}
-        - {type: harv, owner: agent, position: [10, 16], spawn_point: 1}
-        - {type: pbox, owner: agent, position: [10, 30], spawn_point: 1}
-        - {type: pbox, owner: agent, position: [12, 30], spawn_point: 1}
-        - {type: harv, owner: agent, position: [11, 28], spawn_point: 1}
-        - {type: mine, owner: neutral, position: [14, 14], spawn_point: 1}
-        - {type: mine, owner: neutral, position: [14, 16], spawn_point: 1}
-        - {type: mine, owner: neutral, position: [11, 30], spawn_point: 1}
-        - {type: '2tnk', owner: agent, position: [22, 18], stance: 2, spawn_point: 1}
-        - {type: '2tnk', owner: agent, position: [22, 20], stance: 2, spawn_point: 1}
-        - {type: '2tnk', owner: agent, position: [22, 22], stance: 2, spawn_point: 1}
-        - {type: '2tnk', owner: agent, position: [22, 24], stance: 2, spawn_point: 1}
-        - {type: e1, owner: agent, position: [18, 32], stance: 0, spawn_point: 1}
-        # 3 lane-mouth pickets (1tnk, stance:2; kill fodder. Enemy
-        # actors place on every seed — enemy actors do NOT honour
-        # spawn_point).
-        - {type: '1tnk', owner: enemy, position: [24, 19], stance: 2}
-        - {type: '1tnk', owner: enemy, position: [24, 21], stance: 2}
-        - {type: '1tnk', owner: enemy, position: [24, 23], stance: 2}
-        - {type: e1, owner: enemy, position: [80, 18], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 20], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 22], stance: 1}
-        - {type: e1, owner: enemy, position: [80, 24], stance: 1}
-        - {type: e1, owner: enemy, position: [82, 20], stance: 1}
-        - {type: e1, owner: enemy, position: [82, 22], stance: 1}
+        # SPAWN 0 — NORTH-flank scout at (50,10). FORWARD + HOME
+        # bases duplicated across both groups (per CLAUDE.md: ANY
+        # agent actor with a spawn_point forces agent actors WITHOUT
+        # one to be filtered out).
+        - {type: fact, owner: agent, position: [16, 18], spawn_point: 0}
+        - {type: proc, owner: agent, position: [18, 16], spawn_point: 0}
+        - {type: powr, owner: agent, position: [20, 18], spawn_point: 0}
+        - {type: weap, owner: agent, position: [22, 16], spawn_point: 0}
+        - {type: harv, owner: agent, position: [18, 18], spawn_point: 0}
+        - {type: fact, owner: agent, position: [100, 18], spawn_point: 0}
+        - {type: powr, owner: agent, position: [102, 18], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [18, 14], spawn_point: 0}
+        - {type: mine, owner: neutral, position: [22, 14], spawn_point: 0}
+        - {type: e1, owner: agent, position: [50, 10], stance: 0, spawn_point: 0}
+        # SPAWN 1 — SOUTH-flank scout at (50,30). Symmetric.
+        - {type: fact, owner: agent, position: [16, 18], spawn_point: 1}
+        - {type: proc, owner: agent, position: [18, 16], spawn_point: 1}
+        - {type: powr, owner: agent, position: [20, 18], spawn_point: 1}
+        - {type: weap, owner: agent, position: [22, 16], spawn_point: 1}
+        - {type: harv, owner: agent, position: [18, 18], spawn_point: 1}
+        - {type: fact, owner: agent, position: [100, 18], spawn_point: 1}
+        - {type: powr, owner: agent, position: [102, 18], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [18, 14], spawn_point: 1}
+        - {type: mine, owner: neutral, position: [22, 14], spawn_point: 1}
+        - {type: e1, owner: agent, position: [50, 30], stance: 0, spawn_point: 1}
+        # Enemy actors place on every seed (enemy actors do NOT
+        # honour spawn_point).
         - {type: fact, owner: enemy, position: [120, 20]}
       scheduled_events:
-        - tick: 1200
+        - tick: 600
           type: destroy_actors
-          filter:
-            owner: agent
-            region: {x: 11, y: 26, radius: 6}
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 1500
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 2400
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 3300
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 4200
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
+        - tick: 5100
+          type: destroy_actors
+          filter: {owner: agent, region: {x: 20, y: 18, radius: 10}}
     win_condition:
       all_of:
-        - {unit_type_count_gte: {type: '2tnk', n: 6}}
-        - {units_killed_gte: 5}
-        - {building_count_gte: {type: fact, n: 1}}
-        - {within_ticks: 5400}
+        - building_in_region:
+            {x: 100, y: 18, radius: 10, type: proc, count: 1}
+        - building_in_region:
+            {x: 100, y: 18, radius: 10, type: weap, count: 1}
+        - has_building: fact
+        - within_ticks: 5400
     fail_condition:
       any_of:
-        - {after_ticks: 5401}
-        - {not: {own_units_gte: 1}}
-        - {not: {building_count_gte: {type: fact, n: 1}}}
+        - after_ticks: 5401
+        - not: {has_building: fact}
     max_turns: 60
