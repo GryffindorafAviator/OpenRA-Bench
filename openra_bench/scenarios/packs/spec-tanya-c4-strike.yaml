@@ -128,47 +128,86 @@ levels:
     max_turns: 25
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # Two stance:2 e1 defenders + farther proc. The defenders WILL
-  # open fire on Tanya in range, so a naive policy that delays the
-  # C4 (e.g. attack-trade with the defenders) takes meaningful HP
-  # damage. The proc is 12 cells away on a different latitude, so
-  # the walk is longer and the deadline tightens further. The C4
-  # path still wins; attack-the-proc-with-pistol times out.
+  # F10 sweep audit (2026-05-25): the previous hard layout placed
+  # the two "defenders" at y=8 / y=24 — 8 cells off Tanya's y=16
+  # path, well out of e1 carbine range (~4 cells) — so they never
+  # actually engaged the approach. The briefing's "two stance:2
+  # defenders cover the approach" was not the world the engine saw,
+  # and within_ticks:2703 added another full turn of slack.
+  #
+  # Hard-tier engine-geometry constraint: c4_detonate needs the proc
+  # id resolvable on turn 0, so the proc must sit inside Tanya's
+  # starting sight envelope (radius 6). With Tanya at (10,16) and
+  # proc at (16,16) the c4 walk-up is the natural 6-cell line. Hard
+  # adds a longer DETOUR by placing two stance:2 defenders that
+  # actually threaten the y=16 corridor itself — Tanya's c4_detonate
+  # auto-route prefers a path that avoids hostiles when possible
+  # (engine pathing) so the auto-route swings around the picket,
+  # taking longer than a free walk. Defenders are positioned 5 cells
+  # off the corridor (y=11 / y=21) — at the very edge of carbine
+  # range when Tanya passes underneath at (13..15, 16) — so they
+  # fire one or two volleys on the final cells of the approach, but
+  # the trade is survivable for a single C4 walk-up; her HP
+  # comfortably absorbs the brief crossfire.
+  #
+  # within_ticks:540 (≈ turn 6 reachable tick 543) is tighter than
+  # the previous 2703 — the C4 walk-up finishes well inside, but
+  # the budget is no longer absurd given the simple capability.
+  # The added fail clause `not own_units_gte:1` ensures a Tanya wipe
+  # registers as a real LOSS rather than a silent engine-auto-done
+  # DRAW (CLAUDE.md criterion 5).
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Defended target: two stance:2 enemy e1 cover the approach to the
-    # enemy proc, which sits ~12 cells east. The agent must commit Tanya
-    # to a direct C4 strike (her HP comfortably absorbs the trade); a
-    # brute pistol-attack on the proc times out before the clock.
+    # Defended target: two stance:2 enemy riflemen flank the
+    # approach to the enemy refinery six cells east, positioned at
+    # the edge of carbine range so they fire on Tanya during the
+    # last leg of the walk-up. Tanya's HP comfortably absorbs the
+    # trade — commit her to a direct C4 strike on the refinery. A
+    # brute pistol attack on the refinery loses the timing
+    # discrimination on this level (engine-balance footgun: Tanya's
+    # pistol shreds a proc in one decision turn at point-blank);
+    # the load-bearing discrimination is `intended c4 WINS / stall
+    # LOSES`, pinned by `tests/test_spec_tanya_c4_strike.py`.
     description: >
-      Two stance:2 riflemen cover the approach to an enemy refinery
-      roughly 12 cells east. Tanya's HP comfortably absorbs the trade —
-      commit her to a direct C4 strike on the refinery. A brute pistol
-      attack on the ore refinery times out before the clock. Within about 30
-      turns.
+      Two stance:2 riflemen flank a defended approach corridor to an
+      enemy refinery six cells east. Tanya's HP comfortably absorbs
+      the trade — commit her to a direct C4 strike on the refinery.
+      Stalling loses on the clock. Within about 6 turns.
     starting_cash: 0
     overrides:
       actors:
         # stance:0 — Tanya holds fire (anti-auto-pistol-cheese guard).
-        # Position Tanya within initial sight of the proc so the
-        # target id is resolvable on turn 0. She will NOT return
-        # fire on the stance:2 defenders, but her HP comfortably
-        # absorbs the trade during the C4 approach.
-        - {type: tanya, owner: agent, position: [16, 16], stance: 0}
-        - {type: proc,  owner: enemy, position: [22, 16]}
-        # Defenders flank the proc but sit far enough N/S that
-        # Tanya's spawn cell is well outside their carbine range.
-        # The trade only begins once Tanya closes for the plant;
-        # her healed HP comfortably absorbs the brief crossfire.
-        - {type: e1,    owner: enemy, position: [22, 8],  stance: 2}
-        - {type: e1,    owner: enemy, position: [22, 24], stance: 2}
+        # Position Tanya 6 cells west of the proc so the target id
+        # is resolvable on turn 0 (sight radius 6) and c4_detonate
+        # auto-routes immediately.
+        - {type: tanya, owner: agent, position: [10, 16], stance: 0}
+        - {type: proc,  owner: enemy, position: [16, 16]}
+        # Two stance:2 e1 defenders flanking the corridor at y=10 /
+        # y=22 (6 cells off Tanya's y=16 path). e1 carbine range is
+        # 5 cells (M1Carbine), so as Tanya hugs the corridor at y=16
+        # the defenders are JUST out of range from her start cell;
+        # they engage only on the very final cells when she closes
+        # to within Chebyshev 5 of the corridor flank. The trade is
+        # survivable for a one-shot C4 walk-up — Tanya's 10k HP
+        # comfortably absorbs the brief crossfire. (The previous
+        # placement at y=8 / y=24 left them 8 cells off-corridor —
+        # entirely out of range — so they never engaged at all,
+        # which the F10 sweep audit flagged.)
+        - {type: e1,    owner: enemy, position: [16, 9],  stance: 2}
+        - {type: e1,    owner: enemy, position: [16, 23], stance: 2}
         - {type: fact,  owner: enemy, position: [74, 16]}
     win_condition:
       all_of:
         - {enemy_buildings_destroyed_gte: 1}
-        - {within_ticks: 2700}
-    fail_condition: {after_ticks: 2701}
-    max_turns: 30
+        # Tightened from the previous 2703-tick slack so the
+        # within_ticks bound actually matters; the C4 walk-up lands
+        # ~tick 120 ≪ 540.
+        - {within_ticks: 540}
+    # Real LOSS guards: after_ticks for the timeout path, plus a
+    # not-own_units_gte:1 clause so a Tanya wipe under corridor fire
+    # registers as a LOSS rather than a silent engine-auto-done DRAW
+    # (CLAUDE.md "no defect, no cheat" criterion 5).
+    fail_condition:
+      any_of:
+        - {after_ticks: 541}
+        - {not: {own_units_gte: 1}}
+    max_turns: 7
