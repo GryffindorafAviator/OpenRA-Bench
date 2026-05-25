@@ -242,6 +242,14 @@ class CompiledLevel(BaseModel):
     # `fog_mode`-derived value so both paths produce the same engine
     # effect (`reveal_map: true` in `_scenario_to_tmp_yaml`).
     pack_reveal_map: bool = False
+    # Per-scenario production-tick multiplier (default None ⇒ engine
+    # default 1.0 ⇒ unchanged behaviour). Lifted from the pack's
+    # `base.build_speed_multiplier` at compile time; the
+    # `_scenario_to_tmp_yaml` emitter passes it through to the engine
+    # YAML as a top-level key. The single contributor of this field is
+    # `adversarial-1v1-macro` (4.0× ⇒ snappier 1v1 episodes); every
+    # other pack stays on 1.0 by leaving this None.
+    build_speed_multiplier: float | None = None
 
     @property
     def reveal_map(self) -> bool:
@@ -359,6 +367,15 @@ class ScenarioPack(BaseModel):
         water_rect = merged.get("water_rect")
         if water_rect is None:
             water_rect = self.water_rect
+        # Lift `build_speed_multiplier` (default None ⇒ engine 1.0).
+        # The merged `base` may carry it directly, or the
+        # ScenarioDefinition validator will surface it via the
+        # `scenario` object. Read both for robustness.
+        build_speed_multiplier = (
+            merged.get("build_speed_multiplier")
+            if "build_speed_multiplier" in merged
+            else getattr(scenario, "build_speed_multiplier", None)
+        )
         return CompiledLevel(
             pack_id=self.meta.id,
             level=level,
@@ -378,6 +395,7 @@ class ScenarioPack(BaseModel):
             water_cells=water_cells,
             water_rect=list(water_rect) if water_rect is not None else None,
             pack_reveal_map=self.reveal_map,
+            build_speed_multiplier=build_speed_multiplier,
         )
 
     def config_names(self) -> list[str]:
