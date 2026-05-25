@@ -422,6 +422,15 @@ def _safe(x: Any, n: int = 4) -> str:
     return str(x)
 
 
+def _pct(x: Any) -> str:
+    """Format a [0,1] fraction as a percentage string with one decimal.
+    Used for win-rate / composite display in the summary tables so
+    readers don't mis-parse `0.5357` as "near zero" instead of 53.6%."""
+    if x is None:
+        return "-"
+    return f"{float(x) * 100:.1f}%"
+
+
 def summarise_run(stats: dict, *, slug: str, type_: str) -> dict:
     overall = stats.get("overall") or {}
     summary = stats.get("summary") or {}
@@ -551,8 +560,8 @@ def render_summary_md(summary: dict) -> str:
       f"(evaluated: {n_eval}, provider errors: {errors})")
     L(f"- wins / losses / draws: "
       f"{summary['wins']} / {summary['losses']} / {summary['draws']}")
-    L(f"- win rate (over evaluated cells): {_safe(summary.get('win_rate'))}")
-    L(f"- mean composite: {_safe(summary.get('composite_mean'))}")
+    L(f"- win rate (over evaluated cells): {_pct(summary.get('win_rate'))}")
+    L(f"- mean composite: {_pct(summary.get('composite_mean'))}")
     L("")
     L("> `composite` is the headline scalar in [0,1] combining outcome, "
       "deadline-speed bonus, and the perception/reasoning/action "
@@ -571,7 +580,7 @@ def render_summary_md(summary: dict) -> str:
     L("| --- | ---:| ---:| ---:| ---:|")
     for r in summary["per_family"]:
         L(f"| {r['family']} | {r['n']} | {r.get('errors', 0)} | "
-          f"{_safe(r['win_rate'])} | {_safe(r['composite_mean'])} |")
+          f"{_pct(r['win_rate'])} | {_pct(r['composite_mean'])} |")
     if summary["best_cells"]:
         L("")
         L("## top 5 cells")
@@ -708,7 +717,13 @@ def open_paper_pr(prod_dir: Path, slug: str, type_: str, *,
             timeout=120,
         )
         if cp.returncode != 0:
-            # PR may already exist — view it instead.
+            # PR may already exist — view it instead, AND update the body
+            # to match the freshly-regenerated summary. Without the body
+            # refresh the PR-overview page keeps showing a stale snapshot
+            # captured at first-create time (the v1.1 launch hit this when
+            # an early `pr` invocation set the body while the eval was
+            # still warming up, with all-zero stats — subsequent file
+            # pushes updated the file but not the description).
             view = subprocess.run(
                 ["gh", "pr", "view", branch, "--json", "url",
                  "-q", ".url"],
@@ -719,6 +734,15 @@ def open_paper_pr(prod_dir: Path, slug: str, type_: str, *,
                 print(f"[pr] gh pr create failed: "
                       f"{cp.stderr.strip()[:300]}", file=sys.stderr)
                 return None
+            # Refresh the body to the current summary.
+            edit = subprocess.run(
+                ["gh", "pr", "edit", url, "--body", body],
+                cwd=str(repo), check=False, capture_output=True, text=True,
+                timeout=120,
+            )
+            if edit.returncode != 0:
+                print(f"[pr] body refresh failed: "
+                      f"{edit.stderr.strip()[:200]}", file=sys.stderr)
         else:
             url = (cp.stdout or "").strip().splitlines()[-1] if cp.stdout else None
 
