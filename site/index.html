@@ -1464,7 +1464,12 @@ function gameRenderUnits(){
   if((gameState.own_buildings||[]).length){
     html+='<tr><th colspan="6" style="color:var(--accent);padding-top:8px">Own Buildings</th></tr>';
     if(gameSelectedBuildings.size>0){
-      html+='<tr><td colspan="6" style="padding:6px 12px"><button class="btn-sm" style="background:var(--orange);color:#fff;margin-right:6px" onclick="gamePowerDownSelected()">Power Down</button><button class="btn-secondary btn-sm" onclick="gameSelectedBuildings.clear();gameRender()">Deselect</button></td></tr>';
+      html+='<tr><td colspan="6" style="padding:6px 12px">'+
+        '<button class="btn-sm" style="background:var(--accent);color:#fff;margin-right:6px" onclick="gameRepairSelected()" title="Queue a repair order for every selected building">Repair</button>'+
+        '<button class="btn-sm" style="background:var(--orange);color:#fff;margin-right:6px" onclick="gamePowerDownSelected()">Power Down</button>'+
+        '<button class="btn-sm" style="background:var(--red);color:#fff;margin-right:6px" onclick="gameSellSelected()" title="Refund a portion of the building cost — building is destroyed">Sell</button>'+
+        '<button class="btn-secondary btn-sm" onclick="gameSelectedBuildings.clear();gameRender()">Deselect</button>'+
+        '</td></tr>';
     }
     for(const b of gameState.own_buildings){
       const isPD=gamePoweredDown.has(b.id);
@@ -1518,6 +1523,34 @@ function gamePowerDownSelected(){
     else gamePoweredDown.add(bid);
     gameQueueOrder({mode:"power_down",unit_ids:[bid]});
     gameLog((gamePoweredDown.has(bid)?"POWER DOWN":"POWER ON")+" building "+bid+".");
+  }
+  gameSelectedBuildings.clear();
+  gameRender();
+}
+
+// Repair: order the engine to repair each selected building. The
+// engine drains cash over time until the building is at full HP or
+// the player runs out of credits. The action is canonical (in the
+// `repair` tool list in openra_bench/human_labeling.py); the UI just
+// hadn't exposed it. Surfaces it as a sibling of Power Down / Sell.
+function gameRepairSelected(){
+  if(!gameState||gameState.done||!gameSelectedBuildings.size)return;
+  for(const bid of gameSelectedBuildings){
+    gameQueueOrder({mode:"repair",unit_ids:[bid]});
+    gameLog("REPAIR queued for building "+bid+".");
+  }
+  gameSelectedBuildings.clear();
+  gameRender();
+}
+
+// Sell: refund a portion of the building cost; the building is
+// destroyed. Confirms before queuing because it is destructive.
+function gameSellSelected(){
+  if(!gameState||gameState.done||!gameSelectedBuildings.size)return;
+  if(!confirm("Sell "+gameSelectedBuildings.size+" selected building(s)? They will be destroyed; cash is partially refunded."))return;
+  for(const bid of gameSelectedBuildings){
+    gameQueueOrder({mode:"sell",unit_ids:[bid]});
+    gameLog("SELL queued for building "+bid+".");
   }
   gameSelectedBuildings.clear();
   gameRender();
