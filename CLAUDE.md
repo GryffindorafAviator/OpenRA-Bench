@@ -737,6 +737,73 @@ tests and for the fairness probe.
 * `run_1v1` is deterministic given identical inputs (pinned by
   `tests/test_one_v_one_macro.py`).
 
+## Production eval workflow (multi-hour sweeps)
+
+A v1.0 Qwen 9B sweep had 205/653 journal↔disk mismatches — entries
+the journal said were `done` but where the on-disk `score.json` was
+missing or carried a different `outcome`. The default `--resume` is
+trusting (skips any cell whose journal row says it's done) and that
+trust does NOT hold for long sweeps. For any production run across
+multiple models / modes, use the v11 hardening flags:
+
+* **`--strict-resume`** — on resume, every journaled cell is
+  cross-checked against its on-disk `score.json`. Rows where the
+  score.json is missing / corrupt / carries a different `outcome`
+  are DROPPED from the resume set (the cell re-runs). Recommended
+  for any multi-hour sweep. The dropped rows are logged to stderr
+  so the operator can see what was re-run and why.
+
+* **`--ignore-run-id`** — a journal carries a `_meta` header with
+  the `run_id` of the process that wrote it. Re-opening a journal
+  with a DIFFERENT current run_id aborts unless this flag is
+  passed. The flag is the explicit "I am merging two sweep runs
+  into one journal" knob; without it, parallel sweeps pointed at
+  the same journal silently produced a frankenstein run.
+
+* **`--adaptive-concurrency`** — monitors the rolling per-cell
+  error rate over a 20-cell window; halves concurrency when error
+  rate exceeds 10%, restores when a clean 50-cell stretch (<2%
+  errors) is observed. Every change is logged to stderr with the
+  trigger. The right knob for provider rate-limit storms — the
+  sweep slows down instead of aborting.
+
+The `RunJournal` also dedupes `_key`s in-memory inside the append
+lock (raises `DuplicateJournalKey` on a same-process re-append),
+so the v1.0 `adversarial-duel:easy`-appearing-twice footgun cannot
+happen any more.
+
+### Status command
+
+```
+python3 -m openra_bench.run_eval status --out data/runs/v1.1-qwen-9b/
+```
+
+Prints the run dir, the journal's `_meta` header (run_id, model,
+code SHA), per-outcome counts (win / loss / draw / error), the
+journaled mean composite, the last cell completed, and a count of
+on-disk `score.json` files for cross-reference. Tolerates partial
+/ empty / corrupt journals (Ctrl-C-shaped torn tails are common
+during long sweeps).
+
+### Recommended invocation
+
+For a real multi-hour multi-model sweep:
+
+```
+python3 -m openra_bench.run_eval \\
+  --provider openrouter --model <model> \\
+  --playback data/runs/<run-name>/ \\
+  --concurrency 8 --adaptive-concurrency \\
+  --strict-resume \\
+  --max-spend 50.0 \\
+  --out data/runs/<run-name>/stats.json
+```
+
+A killed process re-launched with the same `--playback` + `--model`
+resumes losslessly (strict gate re-verifies every entry); the same
+re-launch with a DIFFERENT process gets a `JournalRunIdMismatch`
+unless `--ignore-run-id` is passed.
+
 ## Working on `main` (PRs vs direct push)
 
 - The default branch is `main`.

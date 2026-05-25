@@ -18,9 +18,10 @@ import argparse
 import json
 import re
 import statistics
+import subprocess
 import sys
 import time
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -241,6 +242,195 @@ def _handoff_wrap(agent, cell: str, seed: int, k: int, bank):
     return HandoffController(stall_policy, agent, 0), ""
 
 
+def _git_sha() -> str:
+    """Best-effort short git SHA for the journal header `code_version`
+    field. Returns '' when git is unavailable or this isn't a checkout
+    — the header still serializes, the field is just empty."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _score_path_candidates(playback_root, run_id, safe_model,
+                           cell: str, split: str, seed: int) -> list[Path]:
+    """Candidate on-disk `score.json` locations for a journaled cell.
+
+    The Playback writer (see `playback.py`) builds dirs under
+    `<playback_root>/<run_id>__<safe_model>/<sanitized-cell:split>__seed<N>/`.
+    We don't replicate the sanitizer's exact rules here — instead we
+    glob for any `score.json` whose parent dir starts with a
+    prefix matching the cell+split+seed signature, which is what the
+    production sweeps use. Returns ALL matches so the caller can pick
+    the first that exists."""
+    if not playback_root:
+        return []
+    root = Path(playback_root) / f"{run_id}__{safe_model}"
+    if not root.exists():
+        return []
+    # Tolerate any sanitizer that swapped ":" / "/" / "|" for "_".
+    # Cell+split+seed are deterministic; just glob.
+    safe_cell = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{cell}:{split}")
+    pattern = f"{safe_cell}*seed{seed}*/score.json"
+    return sorted(root.glob(pattern))
+
+
+def _strict_resume_gate(journal, prior: list[dict],
+                        playback_root, run_id: str,
+                        safe_model: str, *, progress=None):
+    """Verify each journaled cell against its on-disk `score.json`.
+
+    Returns (done_keys, kept_prior, stale_keys). For every prior row:
+      * `score.json` missing → DROP (re-run); log a `_journal_stale`
+        note via progress if a callback is provided.
+      * outcomes disagree → DROP (re-run); log mismatch.
+      * both present and agree → KEEP (normal resume).
+
+    `done_keys` is the set of keys we still consider DONE under the
+    strict gate; the run loop uses it to filter `tasks`.
+    """
+    kept: list[dict] = []
+    stale: list[str] = []
+    done: set[str] = set()
+    for r in prior:
+        key = r.get("_key")
+        if not key:
+            continue
+        cell = r.get("cell", "")
+        split = r.get("split", "public")
+        seed = r.get("seed", 0)
+        outcome = r.get("outcome")
+        # Errors never count as done (mirror the loose-resume path),
+        # so the existing done_keys() filter handles them. Strict
+        # gate only further checks WIN/LOSS/DRAW cells.
+        if outcome == "error":
+            continue
+        cands = _score_path_candidates(
+            playback_root, run_id, safe_model, cell, split, seed,
+        )
+        sc_path = next((c for c in cands if c.exists()), None)
+        if sc_path is None:
+            stale.append(f"{key}: missing score.json")
+            continue
+        try:
+            sc = json.loads(sc_path.read_text())
+        except Exception:  # noqa: BLE001 — corrupt → re-run
+            stale.append(f"{key}: corrupt score.json")
+            continue
+        if sc.get("outcome") != outcome:
+            stale.append(
+                f"{key}: journal outcome={outcome!r} disagrees with "
+                f"score.json outcome={sc.get('outcome')!r}"
+            )
+            continue
+        kept.append(r)
+        done.add(key)
+    if stale:
+        sys.stderr.write(
+            f"[strict-resume] dropping {len(stale)} journaled "
+            f"entries (mismatch with on-disk score.json):\n"
+        )
+        for m in stale[:25]:
+            sys.stderr.write(f"  • {m}\n")
+        if len(stale) > 25:
+            sys.stderr.write(f"  • ... and {len(stale) - 25} more\n")
+        sys.stderr.flush()
+    return done, kept, stale
+
+
+def _run_adaptive_pool(tasks: list, run_fn: Callable, record_fn: Callable,
+                       initial_concurrency: int) -> None:
+    """Threadpool runner with rolling-window error-rate adaptation.
+
+    Policy (per the production-eval spec):
+      * Start at `initial_concurrency`.
+      * If error rate > 10% over last 20 cells → halve concurrency
+        (floor 1). One-shot — won't halve again until the window
+        re-fills.
+      * If error rate < 2% over 50 cells → restore to the original
+        starting concurrency (or step up by 25% if already there).
+
+    Implemented as a refilling worker pool: the pool runs at the
+    current `cap`, and a controller thread adjusts cap between
+    completions. Concurrency changes are logged to stderr with the
+    trigger so a long run's log lets you reconstruct the adaptation
+    timeline.
+    """
+    from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
+
+    if not tasks:
+        return
+    n = len(tasks)
+    cap = max(1, initial_concurrency)
+    original = cap
+    window20: deque = deque(maxlen=20)
+    window50: deque = deque(maxlen=50)
+    pending: list = []
+    next_idx = 0
+    halved_at_window_fill: int = -1  # last completed-count where we halved
+
+    def _log(msg: str) -> None:
+        sys.stderr.write(f"[adaptive-concurrency] {msg}\n")
+        sys.stderr.flush()
+
+    with ThreadPoolExecutor(max_workers=max(initial_concurrency, 1)) as ex:
+        # Prime the pool up to the current cap.
+        while next_idx < n and len(pending) < cap:
+            pending.append(ex.submit(run_fn, tasks[next_idx]))
+            next_idx += 1
+
+        completed = 0
+        while pending:
+            done, _not_done = wait(pending, return_when=FIRST_COMPLETED)
+            for fu in done:
+                pending.remove(fu)
+                rec = fu.result()
+                completed += 1
+                err = 1 if rec.get("outcome") == "error" else 0
+                window20.append(err)
+                window50.append(err)
+                record_fn(rec)
+
+                # Adapt: halve on hot error streak (one-shot per fill).
+                if (
+                    len(window20) == 20
+                    and sum(window20) / 20.0 > 0.10
+                    and cap > 1
+                    and completed > halved_at_window_fill
+                ):
+                    new_cap = max(1, cap // 2)
+                    _log(
+                        f"error rate {sum(window20)}/20 > 10% — "
+                        f"halving concurrency {cap} → {new_cap}"
+                    )
+                    cap = new_cap
+                    halved_at_window_fill = completed
+
+                # Adapt: restore on clean 50-cell stretch.
+                if (
+                    len(window50) == 50
+                    and sum(window50) / 50.0 < 0.02
+                    and cap < original
+                ):
+                    new_cap = min(original, max(cap + 1, int(cap * 1.25)))
+                    _log(
+                        f"error rate {sum(window50)}/50 < 2% — "
+                        f"restoring concurrency {cap} → {new_cap}"
+                    )
+                    cap = new_cap
+
+            # Refill the pool up to the current cap.
+            while next_idx < n and len(pending) < cap:
+                pending.append(ex.submit(run_fn, tasks[next_idx]))
+                next_idx += 1
+
+
 def evaluate(
     packs: list[Path],
     levels: list[str],
@@ -265,6 +455,9 @@ def evaluate(
     handoff_bank: str | Path | None = None,
     repeats: int = 1,
     full_playback_root: str | Path | None = None,
+    strict_resume: bool = False,
+    ignore_run_id: bool = False,
+    adaptive_concurrency: bool = False,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -568,14 +761,36 @@ def evaluate(
     jp = journal_path
     if jp is None and playback_root is not None:
         jp = Path(playback_root) / f"_journal__{_safe_model}.jsonl"
-    journal = RunJournal(jp) if jp is not None else None
+    journal = (
+        RunJournal(
+            jp,
+            run_id=run_id,
+            model=model,
+            code_version=_git_sha(),
+            ignore_run_id=ignore_run_id,
+        )
+        if jp is not None
+        else None
+    )
     prior: list[dict] = []
     if journal is not None and resume:
         done = journal.done_keys()
         prior = journal.records()
+
         def _cell_fog(cl):
             """Cell `pack:level:fog` ⇒ fog; otherwise default vision."""
             return getattr(cl, 'fog_mode', None) or 'vision'
+
+        if strict_resume:
+            # Strict gate: a key counts as DONE only if (a) the journal
+            # has it AND (b) the on-disk score.json exists AND (c) the
+            # outcome agrees. Otherwise re-run the cell. This is the
+            # production-eval guard that catches the v1.0 sweep's 205
+            # journal↔disk mismatches.
+            done, prior, _stale_keys = _strict_resume_gate(
+                journal, prior, playback_root, run_id, _safe_model,
+                progress=progress,
+            )
         tasks = [
             t for t in tasks
             if episode_key(t[0].meta.id, t[0].level, t[2], t[3], _cell_fog(t[0])) not in done
@@ -658,14 +873,18 @@ def evaluate(
                 }
 
         if concurrency > 1 and len(tasks) > 1:
-            from concurrent.futures import ThreadPoolExecutor
+            if adaptive_concurrency:
+                _run_adaptive_pool(
+                    tasks, _safe_run, _record, concurrency,
+                )
+            else:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            with ThreadPoolExecutor(max_workers=concurrency) as ex:
-                futs = {ex.submit(_safe_run, t): t for t in tasks}
-                from concurrent.futures import as_completed
+                with ThreadPoolExecutor(max_workers=concurrency) as ex:
+                    futs = {ex.submit(_safe_run, t): t for t in tasks}
 
-                for fu in as_completed(futs):
-                    _record(fu.result())
+                    for fu in as_completed(futs):
+                        _record(fu.result())
         else:
             for t in tasks:
                 _record(_safe_run(t))
@@ -1159,6 +1378,151 @@ def evaluate_1v1(
     return out
 
 
+def _status_summary(out_dir: str | Path) -> dict:
+    """Read a sweep's playback dir (journal + score.json files) and
+    return a status snapshot. Tolerates partial/empty/corrupt journals
+    (the production sweeps Ctrl-C frequently; the closer the snapshot
+    is to crashes the more torn-line-shaped the journal looks).
+
+    The returned dict is what `run_eval status` prints; tests assert
+    on its structure rather than the print-format directly.
+    """
+    out = {
+        "run_dir": str(out_dir),
+        "journals": [],
+        "header": None,
+        "total_journaled": 0,
+        "outcomes": {"win": 0, "loss": 0, "draw": 0, "error": 0},
+        "compose_mean": 0.0,
+        "last_cell": None,
+        "errors": [],
+        "scores_on_disk": 0,
+        "scores_missing": [],
+    }
+    d = Path(out_dir)
+    if not d.exists():
+        out["error"] = f"run dir does not exist: {d}"
+        return out
+
+    # Find every per-model journal (the deterministic path pattern).
+    journals = sorted(d.glob("_journal__*.jsonl"))
+    out["journals"] = [str(j) for j in journals]
+    rows: list[dict] = []
+    header: dict | None = None
+    for j in journals:
+        try:
+            for line in j.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:  # noqa: BLE001 — torn tail tolerated
+                    continue
+                if rec.get("_meta"):
+                    if header is None:
+                        header = rec
+                    continue
+                rows.append(rec)
+        except OSError as e:  # noqa: PERF203
+            out["errors"].append(f"{j.name}: {e}")
+
+    out["header"] = header
+    out["total_journaled"] = len(rows)
+    comps: list[float] = []
+    for r in rows:
+        oc = r.get("outcome", "")
+        if oc in out["outcomes"]:
+            out["outcomes"][oc] += 1
+        if isinstance(r.get("composite"), (int, float)):
+            comps.append(float(r["composite"]))
+    if comps:
+        out["compose_mean"] = round(sum(comps) / len(comps), 4)
+
+    # Most recently appended row (journal is append-only, last row in
+    # the last journal is the chronologically newest entry).
+    if rows:
+        last = rows[-1]
+        out["last_cell"] = {
+            "cell": last.get("cell"),
+            "outcome": last.get("outcome"),
+            "turns": last.get("turns"),
+            "seed": last.get("seed"),
+            "composite": last.get("composite"),
+        }
+
+    # Cross-check score.json presence (only when journal points at the
+    # canonical playback layout — i.e. <run_dir>/<run_id>__<model>/...).
+    if header and header.get("run_id"):
+        run_id = header.get("run_id")
+        # Heuristic: a score.json should exist under a child dir whose
+        # name begins with `<run_id>__`.
+        per_model = sorted(d.glob(f"{run_id}__*"))
+        scored = 0
+        for pm in per_model:
+            scored += len(list(pm.rglob("score.json")))
+        out["scores_on_disk"] = scored
+    return out
+
+
+def _format_status(snap: dict) -> str:
+    lines: list[str] = []
+    lines.append(f"Run dir:     {snap['run_dir']}")
+    h = snap.get("header") or {}
+    if h:
+        lines.append(
+            f"Started:     run_id={h.get('run_id')} "
+            f"model={h.get('model')} code={h.get('code_version') or '-'}"
+        )
+    else:
+        lines.append("Started:     (no _meta header — legacy journal)")
+    tot = snap["total_journaled"]
+    oc = snap["outcomes"]
+    won = oc["win"]
+    lost = oc["loss"]
+    drew = oc["draw"]
+    err = oc["error"]
+    pct = lambda x, n: f"{round(100 * x / n)}%" if n else "0%"  # noqa: E731
+    lines.append(
+        f"Cells:       {tot} journaled "
+        f"({snap['scores_on_disk']} score.json on disk)"
+    )
+    lines.append(
+        f"Outcomes:    win={won} ({pct(won, tot)}) | "
+        f"loss={lost} ({pct(lost, tot)}) | draw={drew} ({pct(drew, tot)}) | "
+        f"error={err}"
+    )
+    lines.append(f"Avg compose: {snap['compose_mean']}")
+    last = snap.get("last_cell")
+    if last:
+        lines.append(
+            f"Last cell:   {last['cell']} "
+            f"({last['outcome']}, turn {last['turns']}, "
+            f"composite {last['composite']})"
+        )
+    if snap.get("errors"):
+        lines.append(f"Errors:      {len(snap['errors'])}")
+        for e in snap["errors"][:5]:
+            lines.append(f"  • {e}")
+    return "\n".join(lines)
+
+
+def _status_main(argv: list[str]) -> int:
+    """Entry for `python -m openra_bench.run_eval status --out <dir>`."""
+    ap = argparse.ArgumentParser(
+        prog="openra_bench.run_eval status",
+        description="Print progress for an in-flight or completed sweep "
+                    "by reading the journal(s) + score.json files on disk.",
+    )
+    ap.add_argument("--out", required=True,
+                    help="playback root dir (the one passed as "
+                    "--playback to the sweep)")
+    a = ap.parse_args(argv)
+    snap = _status_summary(a.out)
+    print(_format_status(snap))
+    return 0
+
+
 def _load_dotenv(path: str | Path = ".env") -> None:
     """Minimal, dependency-free .env loader: populate os.environ from
     `KEY=VALUE` lines (skips comments/blanks; never overrides an
@@ -1183,6 +1547,12 @@ def _load_dotenv(path: str | Path = ".env") -> None:
 
 def main(argv: list[str]) -> int:
     _load_dotenv()
+    # Status subcommand: `python -m openra_bench.run_eval status --out <dir>`.
+    # Intentionally a sibling entry point rather than a full
+    # argparse-subparsers split — keeps every existing `run_eval ...`
+    # invocation working unchanged (back-compat).
+    if len(argv) >= 2 and argv[1] == "status":
+        return _status_main(argv[2:])
     ap = argparse.ArgumentParser(description="Run a model over OpenRA-Bench scenario packs")
     ap.add_argument("--packs", help="pack file or dir (default: bundled packs/)")
     ap.add_argument(
@@ -1248,6 +1618,23 @@ def main(argv: list[str]) -> int:
                     help="checkpoint journal path (default: under "
                     "<playback>/_journal__<model>.jsonl, deterministic per "
                     "(out_dir, model) so re-launches resume losslessly)")
+    ap.add_argument("--strict-resume", action="store_true",
+                    help="on resume, verify each journaled cell against "
+                    "its on-disk score.json — re-run cells that are "
+                    "missing, corrupt, or where the outcome disagrees. "
+                    "Recommended for any multi-hour production sweep "
+                    "(the v1.0 Qwen 9B sweep had 205/653 journal↔disk "
+                    "mismatches without this).")
+    ap.add_argument("--ignore-run-id", action="store_true",
+                    help="acknowledge a journal whose _meta header "
+                    "run_id differs from the current process — i.e. "
+                    "explicitly merge two sweep runs into one journal. "
+                    "Without this flag a mismatched header aborts.")
+    ap.add_argument("--adaptive-concurrency", action="store_true",
+                    help="monitor the rolling per-cell error rate and "
+                    "halve concurrency when >10% errors over 20 cells, "
+                    "restore when <2% over 50 cells. Smooths through "
+                    "provider rate-limit storms without aborting.")
     ap.add_argument("--max-spend", type=float, default=0.0,
                     help="hard USD cap; the run finalizes when hit")
     ap.add_argument("--qps", type=float, default=0.0,
@@ -1423,6 +1810,9 @@ def main(argv: list[str]) -> int:
         handoff_bank=a.handoff_bank,
         repeats=a.repeats,
         full_playback_root=a.full_playback,
+        strict_resume=a.strict_resume,
+        ignore_run_id=a.ignore_run_id,
+        adaptive_concurrency=a.adaptive_concurrency,
         progress=lambda d, n, rec, c: print(
             f"[{d}/{n}] {rec['cell']}:{rec['split']}#{rec['seed']} "
             f"{rec['outcome']} comp={rec['composite']} "
