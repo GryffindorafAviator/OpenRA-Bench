@@ -86,6 +86,15 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .game-minimap{position:relative;background:#0a0c10;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px;cursor:crosshair}
 .game-minimap img,.game-minimap canvas{display:block;width:100%;height:auto;image-rendering:pixelated;user-select:none;-webkit-user-drag:none}
 .game-minimap .placeholder{display:flex;align-items:center;justify-content:center;min-height:320px;color:var(--muted);font-size:14px}
+/* N/E/S/W compass labels over the map edges — saves the human from
+   mentally re-deriving "up=N, down=S, left=W, right=E" every time
+   the briefing references a direction. Pointer-events:none so they
+   never intercept clicks. */
+.game-compass{position:absolute;color:#ffe27a;font-weight:700;font-size:14px;text-shadow:0 0 4px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,.9);pointer-events:none;user-select:none;font-family:ui-monospace,Menlo,monospace;letter-spacing:0.5px}
+.game-compass.n{top:4px;left:50%;transform:translateX(-50%)}
+.game-compass.s{bottom:4px;left:50%;transform:translateX(-50%)}
+.game-compass.w{left:6px;top:50%;transform:translateY(-50%)}
+.game-compass.e{right:6px;top:50%;transform:translateY(-50%)}
 .game-help{font-size:12px;color:var(--muted);margin:-4px 0 10px}
 .game-legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:8px 0 12px}
 .game-legend span{display:inline-flex;align-items:center;gap:4px}
@@ -244,6 +253,12 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
             <div class="placeholder" id="game-minimap-ph">Start a game to see the minimap</div>
             <img id="game-minimap-img" style="display:none" draggable="false">
             <div class="game-coords" id="game-coords" style="display:none"></div>
+            <!-- Compass labels — N at top, S at bottom, W at left, E at right.
+                 Bench convention: x grows east, y grows south. -->
+            <div class="game-compass n">N</div>
+            <div class="game-compass s">S</div>
+            <div class="game-compass w">W</div>
+            <div class="game-compass e">E</div>
           </div>
           <div class="game-legend" id="game-legend">
             <span><i class="legend-mark"></i> unit</span>
@@ -1142,7 +1157,32 @@ function gameCanBuild(){
 }
 
 function gameProductionItems(){
+  // Items in the queue (any state). Kept for back-compat; prefer
+  // gameProductionReadyItems() for "can be placed right now" checks.
   return [...new Set([...(gameState&&gameState.production||[])].map(String).filter(Boolean))];
+}
+
+// Items that the engine reports as `done: true` — i.e. structures
+// that have FINISHED production and are waiting for a place_building
+// order. Distinct from gameProductionItems() (which includes
+// still-building entries). Before this distinction the UI labelled
+// every queued item as "ready", and Place clicks silently no-op'd
+// on a not-yet-done entry — the user's reported "build+place 之后
+// map 上什么都没有" bug.
+function gameProductionReadyItems(){
+  const det=(gameState&&gameState.production_detail)||[];
+  return [...new Set(det.filter(p=>p&&p.done).map(p=>String(p.item||"")).filter(Boolean))];
+}
+
+// In-progress (not yet done) entries — surfaced as
+// "Building proc (47%)" so the user sees forward progress while
+// waiting for the structure to finish and become placeable.
+function gameProductionPendingDescriptions(){
+  const det=(gameState&&gameState.production_detail)||[];
+  return det.filter(p=>p&&!p.done).map(p=>{
+    const pct=Math.round(Math.max(0,Math.min(1,Number(p.progress)||0))*100);
+    return String(p.item||"?")+" ("+pct+"%)";
+  });
 }
 
 function gameBuildItemValue(){
@@ -1192,6 +1232,27 @@ function gameArmPlaceBuilding(){
     // tank never appeared.
     gameSetBuildHint(item+" is a UNIT — Place is for buildings only. Units spawn automatically once Build completes.");
     gameLog("Ignored Place for "+item+": units don't need Place; they spawn from their production building.");
+    return;
+  }
+  // Refuse Place when nothing of this type is COMPLETED in the queue.
+  // The engine rejects place_building on a not-yet-`done` entry
+  // (`PLACE BLOCKED: <item> not completed in queue`) and the order
+  // was silently dropped — the user's reported "Build then Place,
+  // nothing appears" bug. Surface the failure mode up front so the
+  // user knows to wait for the structure to finish (or build it at
+  // all if they skipped Build / can't afford it).
+  const ready=gameProductionReadyItems();
+  if(!ready.includes(item)){
+    const det=(gameState&&gameState.production_detail)||[];
+    const pending=det.find(p=>p&&!p.done&&String(p.item||"").toLowerCase()===item);
+    if(pending){
+      const pct=Math.round(Math.max(0,Math.min(1,Number(pending.progress)||0))*100);
+      gameSetBuildHint(item+" is still BUILDING ("+pct+"%). Wait for it to reach 100% (End Turn a few times), then click Place.");
+      gameLog("Ignored Place for "+item+": still building ("+pct+"%). Engine accepts place_building only when the structure is COMPLETE.");
+    }else{
+      gameSetBuildHint("No completed "+item+" waiting. Click Build first; structures must finish (100%) before they can be placed.");
+      gameLog("Ignored Place for "+item+": nothing of that type is ready. Queue with Build first; if cash is short, sell something or wait for income.");
+    }
     return;
   }
   gamePlaceItem=item;
@@ -1274,10 +1335,24 @@ function gameRenderBuildPanel(){
   if(btn)btn.classList.toggle("place-active",!!gamePlaceItem);
   if(!visible)gamePlaceItem="";
   if(visible){
-    const ready=gameProductionItems();
-    gameSetBuildHint(gamePlaceItem
-      ? ("Click map to place "+gamePlaceItem+".")
-      : (ready.length?("Ready: "+ready.join(", ")):"Build queues production; units finish automatically."));
+    const ready=gameProductionReadyItems();
+    const pending=gameProductionPendingDescriptions();
+    let hint;
+    if(gamePlaceItem){
+      hint="Click map to place "+gamePlaceItem+".";
+    }else if(ready.length){
+      hint="Ready (click Place): "+ready.join(", ");
+      if(pending.length)hint+=" — Building: "+pending.join(", ");
+    }else if(pending.length){
+      // Critical hint for the build-then-place user flow: pending
+      // entries are NOT placeable yet. Surface progress so the user
+      // knows to End Turn a few more times rather than clicking
+      // Place and getting a silent no-op.
+      hint="Building (wait for 100%, then Place): "+pending.join(", ");
+    }else{
+      hint="Build queues production; units finish automatically.";
+    }
+    gameSetBuildHint(hint);
   }
 }
 
@@ -1597,10 +1672,14 @@ function gameRenderUnits(){
       ' on End Turn</div>';
   }
   if(gameCanBuild()){
-    const ready=gameProductionItems();
+    const ready=gameProductionReadyItems();
+    const pending=gameProductionPendingDescriptions();
     html+='<div class="game-production"><b>Production ready:</b> '+
-      (ready.length?ready.map(esc).join(", "):"none")+
-      '<br><span>Ready structures can be placed with Place. Units appear automatically when production completes.</span></div>';
+      (ready.length?ready.map(esc).join(", "):"none");
+    if(pending.length){
+      html+='<br><b>Building:</b> '+pending.map(esc).join(", ");
+    }
+    html+='<br><span>Structures must reach 100% before Place will accept them; units spawn automatically once production completes.</span></div>';
   }
   el.innerHTML=html;
 }
