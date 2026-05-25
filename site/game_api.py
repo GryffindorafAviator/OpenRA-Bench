@@ -178,6 +178,12 @@ def _serialize_state(sess) -> dict:
         "own_buildings": own_buildings,
         "minimap_b64": minimap_b64,
         "minimap_ascii": minimap_ascii,
+        # 3-state shroud cells for clients that want to overlay their
+        # own fog (the PNG already bakes in the dim/bright distinction;
+        # exposing the raw cell lists lets the frontend draw e.g. a
+        # canvas overlay independent of the PNG resolution).
+        "visible_cells": rs.get("visible_cells", []),
+        "fogged_cells": rs.get("fogged_cells", []),
         "explored_percent": round(sig.explored_percent, 2),
         "units_killed": sig.units_killed,
         "units_lost": sig.units_lost,

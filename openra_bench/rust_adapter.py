@@ -38,6 +38,63 @@ def _cells(obj: Any) -> list[tuple[int, int]]:
     return out
 
 
+# ── Shroud 3-state approximation ──────────────────────────────────────
+# The Rust engine maintains the proper RA 3-state shroud per player
+# (`world.rs::shroud`: 0=unexplored, 1=fogged, 2=visible) but neither
+# the lean PyO3 observation nor the spatial tensor surfaces the
+# fogged-vs-visible distinction — both `explored_cells` and spatial
+# channel 1 collapse fogged+visible into a single "ever seen" mask. The
+# bench therefore approximates `visible_cells` bench-side: union of
+# cells within each currently-alive agent unit / building's sight
+# radius, the same shape the engine itself uses to compute shroud
+# reveal. Sight ranges are the RA vendor defaults (cross-checked via
+# `env.unit_codex` — see CLAUDE.md "vendor RA YAML is the single
+# source"). An actor type not listed here falls back to
+# `_DEFAULT_SIGHT`; this only affects edge cases (custom or
+# undocumented actor types) — for the bench's standard cast the
+# approximation is exact.
+_SIGHT_BY_TYPE: dict[str, int] = {
+    # Infantry (sight 4)
+    "e1": 4, "e2": 4, "e3": 4, "e4": 4, "e6": 4, "e7": 4,
+    "medi": 4, "mech": 4, "spy": 4, "thf": 4, "dog": 4,
+    "engineer": 4, "tanya": 6,
+    # Vehicles
+    "harv": 4, "mcv": 4,
+    "1tnk": 5, "2tnk": 6, "3tnk": 6, "4tnk": 5,
+    "jeep": 7, "apc": 6, "arty": 5, "v2rl": 5, "ftrk": 5,
+    "mnly": 4, "mgg": 5,
+    # Aircraft (longer sight)
+    "heli": 8, "hind": 8, "yak": 8, "mig": 8, "tran": 7, "u2": 10,
+    # Ships
+    "dd": 7, "ca": 8, "ss": 7, "msub": 7, "pt": 7, "lst": 5,
+    # Buildings
+    "fact": 5, "proc": 5, "powr": 4, "apwr": 4,
+    "barr": 5, "tent": 5, "weap": 5, "afld": 5, "hpad": 5,
+    "spen": 5, "syrd": 5, "silo": 4, "dome": 10,
+    # Defenses (the turret IS the sight)
+    "pbox": 5, "hbox": 5, "gun": 7, "ftur": 5,
+    "sam": 8, "agun": 7, "tsla": 7, "atek": 6, "stek": 6,
+}
+_DEFAULT_SIGHT = 5
+
+
+def _within_radius(cx: int, cy: int, r: int, w: int, h: int) -> list[tuple[int, int]]:
+    """Cells within Chebyshev radius `r` of (cx, cy), clipped to the
+    [0, w) × [0, h) grid. Matches the shape the engine uses to reveal
+    shroud (square footprint, matching `world.rs` reveal logic)."""
+    out: list[tuple[int, int]] = []
+    if r <= 0:
+        return [(cx, cy)] if 0 <= cx < w and 0 <= cy < h else []
+    x0 = max(0, cx - r)
+    x1 = min(w, cx + r + 1)
+    y0 = max(0, cy - r)
+    y1 = min(h, cy + r + 1)
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            out.append((x, y))
+    return out
+
+
 def _units_to_render_list(
     positions: dict[str, Any],
     hp: dict[str, Any] | None,
@@ -220,6 +277,18 @@ class RustObsAdapter:
         self.type_by_id = type_by_id or {}
         self.signals = EpisodeSignals()
         self._explored: set[tuple[int, int]] = set()
+        # Current-turn shroud-2 (visible) approximation. Recomputed every
+        # `observe()` call from the agent's live-actor footprints — see
+        # _SIGHT_BY_TYPE and `_compute_visible_cells`. NOT carried across
+        # turns: by definition a cell is "visible" only while at least
+        # one of your actors can see it RIGHT NOW.
+        self._visible: set[tuple[int, int]] = set()
+        # Previous-turn explored snapshot — gives an exact lower bound on
+        # the visible set (cells newly added to explored THIS turn MUST
+        # be currently visible, since the engine only adds to explored
+        # via a live reveal). Merged into `_visible` as a safety net for
+        # actor types missing from `_SIGHT_BY_TYPE`.
+        self._prev_explored: set[tuple[int, int]] = set()
         self._prev_own_ids: set[str] = set()
         self._raw: dict[str, Any] = {}
         self._first_own_count: int | None = None
@@ -248,7 +317,12 @@ class RustObsAdapter:
         prev_expl = s.explored_percent
         s.explored_percent = float(self._raw.get("explored_percent", prev_expl) or 0.0)
         s.explored_delta = max(0.0, s.explored_percent - prev_expl)
+        # Snapshot previous explored set BEFORE updating, so the "newly
+        # revealed this turn" delta can seed the visible approximation.
+        self._prev_explored = set(self._explored)
         self._explored.update(_cells(self._raw.get("explored_cells")))
+        # Recompute the 3-state visible set from this turn's actor list.
+        self._visible = self._compute_visible_cells()
 
         before_e = len(s.enemies_seen_ids)
         for e in self._raw.get("enemy_positions", []) or []:
@@ -358,16 +432,82 @@ class RustObsAdapter:
                     ys.append(int(p.get("cell_y", 0)))
         return max(xs) + margin, max(ys) + margin
 
+    def _compute_visible_cells(self) -> set[tuple[int, int]]:
+        """Approximate the engine's 3-state visible set bench-side.
+
+        The PyO3 boundary exposes only `explored_cells` (cumulative
+        union of fogged+visible) — the visible-only state is dropped.
+        We reconstruct it as the union of cells within each live agent
+        actor's sight radius (unit OR building), clipped to the
+        playable rectangle. Cells newly added to `explored` THIS turn
+        are merged in as a safety net (the engine only reveals via a
+        live actor, so a fresh-this-turn explored cell IS visible —
+        this catches actor types missing from `_SIGHT_BY_TYPE`).
+
+        This is the load-bearing fix for the
+        "explored area stays bright after the unit moves away" bug:
+        the minimap renderer can now distinguish "currently visible"
+        from "explored but fogged" and dim the latter accordingly.
+        """
+        w, h = self.grid_dims()
+        visible: set[tuple[int, int]] = set()
+        # Agent units.
+        for uid, p in (self._raw.get("unit_positions", {}) or {}).items():
+            if not isinstance(p, dict):
+                continue
+            cx, cy = int(p.get("cell_x", 0)), int(p.get("cell_y", 0))
+            t = str(
+                p.get("actor_type")
+                or self.type_by_id.get(str(uid), "")
+                or ""
+            ).lower()
+            r = _SIGHT_BY_TYPE.get(t, _DEFAULT_SIGHT)
+            visible.update(_within_radius(cx, cy, r, w, h))
+        # Agent buildings (buildings reveal shroud the same way).
+        for b in self._raw.get("own_buildings", []) or []:
+            if not isinstance(b, dict):
+                continue
+            cx, cy = int(b.get("cell_x", 0)), int(b.get("cell_y", 0))
+            t = str(b.get("type", "")).lower()
+            r = _SIGHT_BY_TYPE.get(t, _DEFAULT_SIGHT)
+            visible.update(_within_radius(cx, cy, r, w, h))
+        # Safety net: anything newly explored THIS turn is visible by
+        # construction (engine only reveals via a live actor's sight).
+        new_explored = set(_cells(self._raw.get("explored_cells"))) - self._prev_explored
+        visible.update(new_explored)
+        # `visible` must always be a subset of `explored` — drop any
+        # out-of-bounds artefacts that survived clipping.
+        return visible & self._explored
+
     def ascii_minimap(self) -> str:
-        """Synthesize the ASCII grid the renderer parses for the explored
-        mask: '#' = unexplored, '.' = explored. Faithful to
-        minimap_renderer._parse_ascii_minimap (anything != '#' = explored).
+        """Synthesize the ASCII grid the renderer parses.
+
+        3-state encoding (RA shroud):
+          '#' = unexplored (full shroud, never seen)
+          '.' = fogged    (explored once, NOT currently visible)
+          '+' = visible   (currently within an agent actor's sight)
+
+        Faithful to `minimap_renderer._parse_ascii_minimap` for the
+        2-state callers (anything != '#' counts as explored). The
+        bench's own renderer (`minimap.py`) reads '+' / '.' separately
+        to dim the fogged region so the human can SEE that they've
+        lost vision of an area — without this the map stayed bright
+        behind retreating units (the bug this docstring blocks).
         """
         w, h = self.grid_dims()
         explored = set(self._explored) | set(_cells(self._raw.get("explored_cells")))
+        visible = self._visible
         rows = []
         for y in range(h):
-            rows.append("".join("." if (x, y) in explored else "#" for x in range(w)))
+            row_chars = []
+            for x in range(w):
+                if (x, y) in visible:
+                    row_chars.append("+")
+                elif (x, y) in explored:
+                    row_chars.append(".")
+                else:
+                    row_chars.append("#")
+            rows.append("".join(row_chars))
         return "\n".join(rows)
 
     def render_state(self) -> dict[str, Any]:
@@ -449,6 +589,21 @@ class RustObsAdapter:
                 self._raw.get("spatial", []) or [],
                 self._raw.get("spatial_shape", (0, 0, 0)) or (0, 0, 0),
                 self._explored,
+            ),
+            # 3-state shroud (RA semantics):
+            #   `explored_cells`  — cumulative union of fogged + visible
+            #                       (kept for back-compat with legacy
+            #                       consumers that don't care about the
+            #                       fogged/visible split).
+            #   `visible_cells`   — currently within an agent actor's
+            #                       sight (this turn only).
+            #   `fogged_cells`    — explored MINUS visible (revealed once
+            #                       but no live vision — the dim tint).
+            # Lists of [x, y] pairs for JSON-friendliness.
+            "explored_cells": sorted([x, y] for (x, y) in self._explored),
+            "visible_cells": sorted([x, y] for (x, y) in self._visible),
+            "fogged_cells": sorted(
+                [x, y] for (x, y) in (self._explored - self._visible)
             ),
             # Raw obs + playable bounds so the vendored training
             # minimap_v2.render (consumes unit_positions/enemy_positions/
