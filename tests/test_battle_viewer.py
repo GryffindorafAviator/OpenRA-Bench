@@ -43,7 +43,12 @@ def _make(root, run_id, model, scenario, seed, n_turns, outcome):
                               "target": n_turns, "ratio": t / n_turns,
                               "satisfied": t == n_turns}],
                   "reward_vector": {"military": t / n_turns},
-                  "objective_progress": t / n_turns, "won": t == n_turns},
+                  # `objective_blocking_ratio` is the new key
+                  # (worst-leaf ratio); `objective_progress` is the
+                  # deprecated alias kept one release for back-compat.
+                  "objective_blocking_ratio": t / n_turns,
+                  "objective_progress": t / n_turns,
+                  "won": t == n_turns},
         )
     pb.write_messages([
         {"role": "system", "content": "s"},
@@ -89,10 +94,21 @@ def test_episode_view_steps_and_clamps(tmp_path):
     assert v0["n_turns"] == 3 and v0["turn"] == 1
     assert v0["briefing"] == "briefing turn 1"
     assert v0["reasoning"] == "think 1"
-    assert v0["goal"]["objective_progress"] == 1 / 3
+    # Per-leaf table is the public surface; the scalar
+    # `objective_progress` is no longer in the view dict (it
+    # averaged unrelated clauses and produced misleading near-win
+    # readings — see goal_tracker). The per-leaf detail is
+    # `leaves_final`, with explicit current/target/satisfied.
+    assert "objective_progress" not in v0
+    assert v0["leaves_final"]
+    lf = v0["leaves_final"][0]
+    assert lf["name"] == "units_killed_gte"
+    assert lf["current"] == 1 and lf["target"] == 3
+    assert lf["satisfied"] is False
     # clamp past the end → last turn, not an error
     vend = episode_view(d, 99)
     assert vend["turn_idx"] == 2 and vend["turn"] == 3
     assert vend["won"] is True
+    assert vend["leaves_final"][0]["satisfied"] is True
     # clamp below 0
     assert episode_view(d, -5)["turn_idx"] == 0

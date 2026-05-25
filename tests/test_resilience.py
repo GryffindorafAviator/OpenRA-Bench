@@ -159,13 +159,23 @@ def test_evaluate_journal_resume_is_lossless(tmp_path):
     jp = tmp_path / "j.jsonl"
     a = evaluate([PACK], ["easy"], [1, 2], journal_path=jp)
     assert a["overall"]["n"] == 2 and a["resumed"] == 0
-    n_lines = len(jp.read_text().splitlines())
-    assert n_lines == 2
+    # Two data rows; a `_meta` header line may also be present (v11
+    # production-eval hardening). Count by filtering data rows.
+    rows = [
+        ln for ln in jp.read_text().splitlines()
+        if ln.strip() and not json.loads(ln).get("_meta")
+    ]
+    assert len(rows) == 2
 
     # resume: both episodes already journaled → 0 new, same aggregate
-    b = evaluate([PACK], ["easy"], [1, 2], journal_path=jp, resume=True)
+    b = evaluate([PACK], ["easy"], [1, 2], journal_path=jp, resume=True,
+                 ignore_run_id=True)
     assert b["resumed"] == 2 and b["overall"]["n"] == 2
-    assert len(jp.read_text().splitlines()) == 2  # nothing re-appended
+    rows2 = [
+        ln for ln in jp.read_text().splitlines()
+        if ln.strip() and not json.loads(ln).get("_meta")
+    ]
+    assert len(rows2) == 2  # nothing re-appended
     assert "cost" in b and "truncated" in b
 
 
@@ -218,4 +228,9 @@ def test_evaluate_continues_past_a_failing_episode(tmp_path):
     assert all(e["outcome"] == "error" for e in eps)   # recorded, not raised
     assert "overall" in out                            # report still produced
     # journal captured them so --resume won't re-run the errored ones
-    assert len((tmp_path / "j.jsonl").read_text().splitlines()) == 2
+    # (count data rows only; v11 hardening prepends a `_meta` header)
+    rows = [
+        ln for ln in (tmp_path / "j.jsonl").read_text().splitlines()
+        if ln.strip() and not json.loads(ln).get("_meta")
+    ]
+    assert len(rows) == 2

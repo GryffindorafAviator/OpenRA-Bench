@@ -891,8 +891,13 @@ class InteractiveSession:
 
             from .minimap import render_tactical_minimap
 
+            # Pass `base_map` so the renderer paints the water/wall
+            # underlay (visible from t=0, regardless of fog) — saved
+            # human frames match the Play-tab image the labeler
+            # clicked on.
             img = render_tactical_minimap(
                 rs, scale=5, grid=True, legend=True,
+                base_map=self.compiled.scenario.base_map or "",
             )
             if img is not None:
                 buf = io.BytesIO()
@@ -991,9 +996,17 @@ class InteractiveSession:
             "actions_issued": self._issued,
             "actions_warned": 0,
             "agent_stats": {"turns": self.turn},
+            # Deprecated alias + new blocking-ratio scalar + the
+            # per-leaf snapshot. See goal_tracker for the rationale.
             "objective_progress": final_goal.get(
-                "objective_progress", 0.0
+                "objective_blocking_ratio",
+                final_goal.get("objective_progress", 0.0),
             ),
+            "objective_blocking_ratio": final_goal.get(
+                "objective_blocking_ratio",
+                final_goal.get("objective_progress", 0.0),
+            ),
+            "leaves_final": list(final_goal.get("leaves") or []),
             "reward_vector": final_goal.get("reward_vector", {}),
             "signals": {
                 "economy_value": sig.cash + sig.resources,

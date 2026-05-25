@@ -175,7 +175,12 @@ def load_capability_leaderboard() -> pd.DataFrame:
         rows = []
     cols = [
         "rank", "model", "episodes", "win_rate", "composite",
-        "objective", "adversarial_rating", "perception", "reasoning",
+        # `objective` mean-over-runs column dropped: it averaged the
+        # per-episode blocking-ratio across an entire run, producing
+        # a number with no useful interpretation. Headline metrics
+        # are now win_rate + composite; per-episode `leaves_final`
+        # is the only honest detail surface (see leaderboard.py).
+        "adversarial_rating", "perception", "reasoning",
         "action", "weakest_link", "reward_vector",
         "held_out_composite", "generalization_gap",
     ]
@@ -231,21 +236,25 @@ def _bv_turn_md(v: dict, heading: str) -> str:
         + (f" · ⚡ {v['interrupt']}" if v.get("interrupt") else ""),
     ]
     if g:
+        # Per-leaf table: explicit current/target + satisfied mark.
+        # The legacy scalar "objective: 79%" averaged unrelated leaves
+        # (e.g. a 0.57 kills leaf + 0.0 deadline-violated leaf → 0.28
+        # "near win" when both clauses had failed) — it is dropped
+        # in favour of this row-by-row display.
         parts = []
         for leaf in g.get("leaves", []):
-            mark = (
-                "✅" if leaf.get("satisfied")
-                else f"{float(leaf.get('ratio', 0.0)):.0%}"
-            )
-            parts.append(
-                f"{leaf['name']} {leaf.get('current')}/"
-                f"{leaf.get('target')} {mark}"
-            )
+            mark = "✅" if leaf.get("satisfied") else "❌"
+            cur = leaf.get("current")
+            tgt = leaf.get("target")
+            name = leaf.get("name", "?")
+            if name in ("within_ticks", "after_ticks") and cur is not None:
+                parts.append(f"{name} tick {cur}/{tgt} {mark}")
+            else:
+                parts.append(f"{name} {cur}/{tgt} {mark}")
         bars = " · ".join(parts)
         rv = g.get("reward_vector", {})
         lines += [
-            f"**objective: {g.get('objective_progress',0):.0%}**"
-            + ("  ✅ WON" if g.get("won") else ""),
+            "**objective leaves:**" + ("  ✅ WON" if g.get("won") else ""),
             (f"_{bars}_" if bars else ""),
             "reward vector: "
             + " ".join(f"`{k}={float(x):.2f}`" for k, x in rv.items()),

@@ -27,6 +27,8 @@ agent-vs-bot, or a `HumanController` on either side.
 
 from __future__ import annotations
 
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -58,8 +60,18 @@ def _alive(render_state: dict) -> bool:
     return bool(units) or bool(buildings)
 
 
+def _kills(render_state: dict) -> int:
+    """Cumulative enemy units killed — the primary military-progress metric."""
+    return int(render_state.get("units_killed", 0) or 0)
+
+
+def _own_buildings(render_state: dict) -> int:
+    """Count of own buildings still standing — the secondary military metric."""
+    return len(render_state.get("own_buildings") or [])
+
+
 def _economy_value(render_state: dict) -> int:
-    """Cash + stored resources — the deadline tie-break metric."""
+    """Cash + stored resources — the final-fallback economic metric."""
     return int(render_state.get("cash", 0) or 0) + int(
         render_state.get("resources", 0) or 0
     )
@@ -71,6 +83,8 @@ def run_1v1(
     enemy_controller: Any,
     seed: int = 0,
     max_turns: int = 200,
+    progress: bool = True,
+    transcript_dir=None,
 ) -> OneVOneResult:
     """Run one full-macro 1v1 match and return the result.
 
@@ -123,32 +137,127 @@ def run_1v1(
         winner = "draw"
         reason = "turn cap reached"
 
-        for turns in range(1, max_turns + 1):
-            a_rs = agent_ad.render_state()
-            e_rs = enemy_ad.render_state()
+        # Two controllers decide concurrently: both observe the same
+        # tick-N state (captured BEFORE either `.act()` runs), then
+        # their independent `.act()` calls go in parallel so the
+        # per-turn wall-clock is max(agent_latency, enemy_latency)
+        # rather than the sum — load-bearing when both controllers
+        # are LLMs with multi-second round-trips. The engine's
+        # `step_1v1` already applies both sides' orders in the same
+        # frame so neither side moves "first"; this just stops the
+        # bench harness from serializing the round-trips.
+        executor = ThreadPoolExecutor(max_workers=2)
 
-            a_cmds = agent.act(a_rs, Command) or [Command.observe()]
-            e_cmds = enemy.act(e_rs, Command) or [Command.observe()]
-            a_obs, e_obs, done, _info = raw.step_1v1(a_cmds, e_cmds)
-            agent_ad.observe(a_obs, done=done)
-            enemy_ad.observe(e_obs, done=done)
+        # Per-turn LLM transcript persistence (1v1). When the caller
+        # passes a transcript_dir, both sides' message histories are
+        # flushed to disk every turn — `tail -f` on these files shows
+        # the live LLM conversation rather than waiting 30-60 min for
+        # the episode to complete (and a mid-episode crash preserves
+        # the partial transcript instead of losing it).
+        import time as _time
+        _episode_t0 = _time.monotonic()
+        _td = None
+        if transcript_dir:
+            import json as _json
+            from pathlib import Path as _Path
+            _td = _Path(transcript_dir)
+            _td.mkdir(parents=True, exist_ok=True)
 
-            agent_trace.append(
-                {
-                    "turn": turns,
-                    "tick": agent_ad.signals.game_tick,
-                    "n_cmds": len(a_cmds),
-                }
-            )
-            enemy_trace.append(
-                {
-                    "turn": turns,
-                    "tick": enemy_ad.signals.game_tick,
-                    "n_cmds": len(e_cmds),
-                }
-            )
-            if done:
-                break
+            def _unwrap(ctrl):
+                obj = ctrl
+                for attr in ("_agent", "agent", "wrapped", "controller"):
+                    if hasattr(obj, attr):
+                        inner = getattr(obj, attr)
+                        if hasattr(inner, "history"):
+                            return inner
+                return obj if hasattr(obj, "history") else None
+
+            _agent_inner = _unwrap(agent)
+            _enemy_inner = _unwrap(enemy)
+
+            def _flush_transcripts(turn_n: int):
+                try:
+                    if _agent_inner is not None:
+                        (_td / "agent_history.json").write_text(
+                            _json.dumps(getattr(_agent_inner, "history", []),
+                                        default=str, indent=2)
+                        )
+                    if _enemy_inner is not None:
+                        (_td / "enemy_history.json").write_text(
+                            _json.dumps(getattr(_enemy_inner, "history", []),
+                                        default=str, indent=2)
+                        )
+                    # Real-time rate metrics — operator-traceable
+                    # turns/sec without parsing the engine log. The
+                    # episode-rate watcher reads progress.json.
+                    elapsed = _time.monotonic() - _episode_t0
+                    tps = (turn_n / elapsed) if elapsed > 0 else 0.0
+                    eta_s = ((max_turns - turn_n) / tps) if tps > 0 else 0.0
+                    (_td / "progress.json").write_text(_json.dumps({
+                        "turn": turn_n,
+                        "max_turns": max_turns,
+                        "seed": seed,
+                        "elapsed_s": round(elapsed, 1),
+                        "turns_per_second": round(tps, 3),
+                        "sec_per_turn": round(1.0 / tps, 2) if tps > 0 else None,
+                        "eta_s": round(eta_s, 1),
+                    }))
+                except Exception:  # noqa: BLE001 — transcript never breaks a run
+                    pass
+        else:
+            def _flush_transcripts(turn_n: int): return  # no-op
+
+        try:
+            for turns in range(1, max_turns + 1):
+                a_rs = agent_ad.render_state()
+                e_rs = enemy_ad.render_state()
+
+                a_fut = executor.submit(agent.act, a_rs, Command)
+                e_fut = executor.submit(enemy.act, e_rs, Command)
+                a_cmds = a_fut.result() or [Command.observe()]
+                e_cmds = e_fut.result() or [Command.observe()]
+                a_obs, e_obs, done, _info = raw.step_1v1(a_cmds, e_cmds)
+                agent_ad.observe(a_obs, done=done)
+                enemy_ad.observe(e_obs, done=done)
+                _flush_transcripts(turns)
+
+                agent_trace.append(
+                    {
+                        "turn": turns,
+                        "tick": agent_ad.signals.game_tick,
+                        "n_cmds": len(a_cmds),
+                    }
+                )
+                enemy_trace.append(
+                    {
+                        "turn": turns,
+                        "tick": enemy_ad.signals.game_tick,
+                        "n_cmds": len(e_cmds),
+                    }
+                )
+                if progress:
+                    a_rs_now = agent_ad.render_state()
+                    e_rs_now = enemy_ad.render_state()
+                    a_units = len(a_rs_now.get("units_summary") or [])
+                    e_units = len(e_rs_now.get("units_summary") or [])
+                    a_blds = _own_buildings(a_rs_now)
+                    e_blds = _own_buildings(e_rs_now)
+                    a_kills = _kills(a_rs_now)
+                    e_kills = _kills(e_rs_now)
+                    a_cash = _economy_value(a_rs_now)
+                    e_cash = _economy_value(e_rs_now)
+                    print(
+                        f"[1v1 t{turns:>3} tick{agent_ad.signals.game_tick:>5}] "
+                        f"agent: units={a_units} bld={a_blds} kills={a_kills} $={a_cash} | "
+                        f"enemy: units={e_units} bld={e_blds} kills={e_kills} $={e_cash} "
+                        f"(a_cmds={len(a_cmds)} e_cmds={len(e_cmds)})",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                if done:
+                    break
+        finally:
+            executor.shutdown(wait=False)
 
         # Decide the winner from the final boards.
         a_rs = agent_ad.render_state()
@@ -162,15 +271,55 @@ def run_1v1(
         elif not agent_alive and not enemy_alive:
             winner, reason = "draw", "mutual elimination"
         else:
-            # Both standing — deadline / turn cap. Tie-break on economy.
-            av, ev = _economy_value(a_rs), _economy_value(e_rs)
-            if av > ev:
-                winner, reason = "agent", "deadline — agent ahead on economy"
-            elif ev > av:
-                winner, reason = "enemy", "deadline — enemy ahead on economy"
+            # Both standing — deadline / turn cap. Layered tie-break:
+            # 1) kills (who took down more of the opponent's force),
+            # 2) own buildings remaining (military capital),
+            # 3) economy (cash + resources) as the final tiebreak.
+            # Each layer is consulted only if the previous is tied.
+            ak, ek = _kills(a_rs), _kills(e_rs)
+            if ak > ek:
+                winner, reason = "agent", f"deadline — agent ahead on kills ({ak} vs {ek})"
+            elif ek > ak:
+                winner, reason = "enemy", f"deadline — enemy ahead on kills ({ek} vs {ak})"
             else:
-                winner, reason = "draw", "deadline — even"
+                ab, eb = _own_buildings(a_rs), _own_buildings(e_rs)
+                if ab > eb:
+                    winner, reason = "agent", f"deadline — kills tied at {ak}; agent ahead on buildings ({ab} vs {eb})"
+                elif eb > ab:
+                    winner, reason = "enemy", f"deadline — kills tied at {ak}; enemy ahead on buildings ({eb} vs {ab})"
+                else:
+                    av, ev = _economy_value(a_rs), _economy_value(e_rs)
+                    if av > ev:
+                        winner, reason = "agent", f"deadline — kills+buildings tied; agent ahead on economy ({av} vs {ev})"
+                    elif ev > av:
+                        winner, reason = "enemy", f"deadline — kills+buildings tied; enemy ahead on economy ({ev} vs {av})"
+                    else:
+                        winner, reason = "draw", f"deadline — fully tied (kills={ak}, buildings={ab}, economy={av})"
 
+        # Final-state transcript flush + episode completion stamp.
+        # The rate-history.jsonl file (one row per completed episode)
+        # is the source of truth for "episodes/min" — tail it to see
+        # the running rate.
+        if _td is not None:
+            _flush_transcripts(turns)
+            try:
+                import json as _json
+                ep_elapsed = _time.monotonic() - _episode_t0
+                rate_row = {
+                    "winner": winner,
+                    "reason": reason,
+                    "turns": turns,
+                    "seed": seed,
+                    "episode_seconds": round(ep_elapsed, 1),
+                    "turns_per_second": round(turns / ep_elapsed, 3) if ep_elapsed > 0 else 0.0,
+                    "completed_at": _time.time(),
+                }
+                # Cell-level history (one file per cell, append per seed/half)
+                (_td.parent / "rate-history.jsonl").open("a").write(
+                    _json.dumps(rate_row) + "\n"
+                )
+            except Exception:  # noqa: BLE001
+                pass
         return OneVOneResult(
             winner=winner,
             reason=reason,

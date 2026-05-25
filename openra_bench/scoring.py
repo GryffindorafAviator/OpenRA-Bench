@@ -129,11 +129,20 @@ def _dimension_values(compiled: CompiledLevel, res: EpisodeResult) -> dict:
         if res.actions_issued == 0
         else _clamp(1.0 - res.actions_warned / res.actions_issued)
     )
-    # objective: continuous partial credit toward the scenario win
-    # condition (goal_tracker.objective_progress). A near-miss loss
-    # (cash 1900/2000) now scores above a no-effort loss instead of
-    # both collapsing to the binary `outcome`.
-    objective = _clamp(getattr(res, "objective_progress", 0.0))
+    # objective: partial credit toward the scenario win condition,
+    # using the goal_tracker's blocking-constraint scalar (worst
+    # leaf's ratio — the true bottleneck for an `all_of` win). A
+    # near-miss loss (cash 1900/2000 ⇒ 0.95) now scores above a
+    # no-effort loss instead of both collapsing to the binary
+    # `outcome`. Falls back to the deprecated `objective_progress`
+    # for v1.0 journal rows that predate `objective_blocking_ratio`.
+    objective = _clamp(
+        getattr(
+            res,
+            "objective_blocking_ratio",
+            getattr(res, "objective_progress", 0.0),
+        )
+    )
     return {
         "outcome": outcome,
         "objective": objective,

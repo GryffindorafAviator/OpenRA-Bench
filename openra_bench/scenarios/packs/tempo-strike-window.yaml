@@ -78,14 +78,31 @@ base:
   tools: [move_units, attack_unit, stop_units]
   planning: true
   termination: {max_ticks: 12000}
+  # Agent units start on stance:0 HoldFire so they never auto-engage
+  # — the lull is enforceable by simply waiting and not issuing attack
+  # orders. Explicit `attack_unit` after the lull overrides the stance
+  # (CLAUDE.md: "Explicit agent orders always override stance"). With
+  # the previous stance:3 default the units auto-hunted east the
+  # moment the episode began, racking up premature-engagement kills
+  # before turn 1 and making the lull structurally unreachable for
+  # any policy that didn't include a stance flip — but `set_stance`
+  # is NOT in `tools:` here, so the only honest fix is the actor-
+  # side default.
+  #
+  # Enemy units start on stance:2 Defend (fire in-range, never pursue)
+  # so they don't drive across the map and force return-fire kills
+  # during the lull. The previous stance:3 enemy AttackAnything hunt
+  # made even a stance:1 agent rack up return-fire kills before tick
+  # 1500. With stance:2 enemies, the agent's lull is genuinely a
+  # quiet hold-station window.
   actors:
-    - {type: 2tnk, owner: agent, position: [6, 18], stance: 3, count: 3}
-    - {type: 1tnk, owner: agent, position: [6, 22], stance: 3, count: 3}
-    - {type: jeep, owner: agent, position: [6, 14], stance: 3, count: 2}
+    - {type: 2tnk, owner: agent, position: [6, 18], stance: 0, count: 3}
+    - {type: 1tnk, owner: agent, position: [6, 22], stance: 0, count: 3}
+    - {type: jeep, owner: agent, position: [6, 14], stance: 0, count: 2}
     # Enemy cluster positioned so the dominant strike is one
     # coordinated push after the lull.
-    - {type: e1, owner: enemy, position: [40, 20], stance: 3, count: 4}
-    - {type: e3, owner: enemy, position: [42, 20], stance: 3, count: 2}
+    - {type: e1, owner: enemy, position: [40, 20], stance: 2, count: 4}
+    - {type: e3, owner: enemy, position: [42, 20], stance: 2, count: 2}
 
 levels:
   # Tick budgets aligned to 93 + 90·(max_turns - 1) so the timeout
@@ -115,10 +132,13 @@ levels:
         - after_ticks: 4201
         - not: {own_units_gte: 1}
         - not: {units_lost_lte: 3}
-        # premature engagement: more than 1 kill before tick 2000
-        # is taken as "did not wait for the lull"
+        # premature engagement: 3+ kills before tick 2000 is taken as
+        # "did not wait for the lull". Raised from 2 to 3 (F9 sweep
+        # audit fix, 2026-05-25): a single incidental Return-Fire
+        # kill should not sink the run; the threshold now requires a
+        # deliberate strike to fire the premature-engagement clause.
         - all_of:
-            - units_killed_gte: 2
+            - units_killed_gte: 3
             - within_ticks: 1999
     max_turns: 48   # ceiling 93 + 90·47 = 4323 > 4201 ✓
 
@@ -145,8 +165,10 @@ levels:
         - after_ticks: 3601
         - not: {own_units_gte: 1}
         - not: {units_lost_lte: 2}
+        # premature: 3+ kills before tick 1800 (F9 audit fix —
+        # tolerate incidental Return-Fire, require deliberate strike).
         - all_of:
-            - units_killed_gte: 1
+            - units_killed_gte: 3
             - within_ticks: 1799
     max_turns: 52
 
@@ -183,7 +205,9 @@ levels:
         - after_ticks: 3001
         - not: {own_units_gte: 1}
         - not: {units_lost_lte: 1}
+        # premature: 3+ kills before tick 1500 (F9 audit fix —
+        # tolerate incidental Return-Fire, require deliberate strike).
         - all_of:
-            - units_killed_gte: 1
+            - units_killed_gte: 3
             - within_ticks: 1499
     max_turns: 56

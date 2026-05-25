@@ -6,14 +6,25 @@ intent, not just the final verdict:
 
 * ``leaf_progress`` — walks the scenario's declarative win-condition
   tree and, for every leaf predicate, reports current vs. target and a
-  0..1 ratio. Scenario-specific, directly tied to *this* objective.
+  0..1 ratio. Scenario-specific, directly tied to *this* objective —
+  and the SOURCE OF TRUTH for "how close was the agent" reporting.
 * ``reward_vector`` — a fixed, normalized, monotone-cumulative vector
   (economy / military / territory / scouting / objective) that is
   scenario-agnostic and therefore comparable across runs and on the
   leaderboard. Mirrors the training rollout's per-turn reward_vector.
 
 ``turn_goal`` bundles both side by side plus a scalar
-``objective_progress`` and the boolean ``won``.
+``objective_blocking_ratio`` (the worst leaf's ratio — the bottleneck
+constraint, since `all_of` requires every leaf) and the boolean
+``won``. The old ``objective_progress`` scalar was `mean(leaves.ratio)`,
+which averaged unrelated leaves and produced false near-win readings
+(e.g. `units_killed_gte:7 (4/7=0.57)` + `within_ticks:4000 (tick
+4203 = 0.0 satisfied=False)` averaged to 0.79 — "near win" — when
+both clauses had FAILED). The new `min` scalar reports the blocking
+constraint honestly. `objective_progress` is preserved as a
+deprecated alias holding the same `min` value, so older journal
+readers don't crash; drop in a future release. `leaves` itself is
+the per-leaf table — always prefer it for display.
 """
 
 from __future__ import annotations
@@ -120,8 +131,14 @@ def reward_vector(signals: Any) -> dict[str, float]:
 def turn_goal(win_condition: Any, ctx: WinContext) -> dict:
     leaves = leaf_progress(win_condition, ctx)
     won = bool(evaluate(win_condition, ctx))
+    # The blocking-constraint scalar: the WORST leaf's ratio, because
+    # an `all_of` win requires every leaf to satisfy. Reporting the
+    # MEAN here averages unrelated clauses (e.g. a 0.57 kills leaf +
+    # a 0.0 deadline-violated leaf would average to 0.28 even though
+    # the run is over — the deadline never coming back), which hides
+    # the real blocker. `min` keeps the answer honest.
     obj = 1.0 if won else (
-        round(sum(r["ratio"] for r in leaves) / len(leaves), 4)
+        round(min(r["ratio"] for r in leaves), 4)
         if leaves else 0.0
     )
     rv = reward_vector(ctx.signals)
@@ -129,6 +146,11 @@ def turn_goal(win_condition: Any, ctx: WinContext) -> dict:
     return {
         "leaves": leaves,
         "reward_vector": rv,
+        "objective_blocking_ratio": obj,
+        # Back-compat alias holding the same scalar under the deprecated
+        # name so v1.0 journal readers don't crash. Drop in a future
+        # release once all readers consume `objective_blocking_ratio`
+        # / `leaves` directly.
         "objective_progress": obj,
         "won": won,
     }

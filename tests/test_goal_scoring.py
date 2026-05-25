@@ -32,9 +32,18 @@ def _compiled():
 def _loss(progress: float) -> EpisodeResult:
     sig = EpisodeSignals(units_killed=0, units_lost=0, explored_percent=5.0,
                          game_tick=8000, outcome=0.0)
+    # Pin BOTH the deprecated `objective_progress` and the new
+    # `objective_blocking_ratio` to the same value: scoring reads
+    # the new key first and falls back to the deprecated one.
     return EpisodeResult(scenario="t", seed=0, turns=10, signals=sig,
                          outcome="loss", actions_issued=10, actions_warned=0,
                          objective_progress=progress,
+                         objective_blocking_ratio=progress,
+                         leaves_final=[
+                             {"name": "units_killed_gte", "target": 5,
+                              "current": int(5 * progress),
+                              "ratio": progress, "satisfied": progress >= 1.0},
+                         ],
                          reward_vector={"economy": 0.0, "military": 0.0,
                                         "territory": 0.05, "scouting": 0.0,
                                         "objective": progress})
@@ -69,9 +78,11 @@ def test_agg_and_ingest_carry_objective_and_reward_vector(tmp_path):
     stats = {
         "episodes": [
             {"capability": "perception", "composite": 0.3,
-             "outcome": "loss", "objective_progress": 0.8},
+             "outcome": "loss", "objective_progress": 0.8,
+             "objective_blocking_ratio": 0.8},
             {"capability": "perception", "composite": 0.1,
-             "outcome": "loss", "objective_progress": 0.2},
+             "outcome": "loss", "objective_progress": 0.2,
+             "objective_blocking_ratio": 0.2},
         ],
         "overall": {"n": 2, "win_rate": 0.0, "composite_mean": 0.2,
                     "objective_mean": 0.5},
@@ -79,10 +90,17 @@ def test_agg_and_ingest_carry_objective_and_reward_vector(tmp_path):
         "summary": {"perception-frontier-reading:easy": {}},
     }
     rec = ingest_run(stats, "m1", store=tmp_path / "lb.jsonl")
-    assert rec["objective"] == 0.5
+    # `objective` mean-over-runs scalar was dropped — averaging the
+    # per-episode blocking ratio across a run produces a number with
+    # no useful interpretation. Headline metrics: win_rate + composite.
+    assert "objective" not in rec
     assert rec["reward_vector"] == {"economy": 0.1, "objective": 0.5}
     cap = _capability_breakdown(stats["episodes"])
-    assert cap["perception"]["objective"] == round((0.8 + 0.2) / 2, 4)
+    # Per-capability `objective` mean was dropped for the same reason:
+    # the per-leaf detail lives on each episode's `leaves_final`.
+    assert "objective" not in cap["perception"]
+    assert cap["perception"]["win_rate"] == 0.0
+    assert cap["perception"]["composite"] == round((0.3 + 0.1) / 2, 4)
 
 
 def _win(tick: int, turns: int = 12) -> EpisodeResult:
@@ -91,6 +109,8 @@ def _win(tick: int, turns: int = 12) -> EpisodeResult:
     return EpisodeResult(scenario="t", seed=0, turns=turns, signals=sig,
                          outcome="win", actions_issued=turns, actions_warned=0,
                          objective_progress=1.0,
+                         objective_blocking_ratio=1.0,
+                         leaves_final=[],
                          reward_vector={"objective": 1.0})
 
 

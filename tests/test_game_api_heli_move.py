@@ -89,9 +89,16 @@ def test_heli_move_via_step_endpoint_actually_moves(game_api_app):
     start_xy = (heli["cell_x"], heli["cell_y"])
     assert start_xy == (30, 19), start_xy
 
-    # Move the heli 30 cells east (over the pbox wall at x=50). One
-    # turn should advance ~10 cells (heli speed × ~90 ticks/turn on
-    # the non-interrupt manual-play path).
+    # Move the heli 14 cells due north (to y=5 on the same x=30 lane).
+    # One turn should advance ~10 cells (heli speed × ~90 ticks/turn on
+    # the non-interrupt manual-play path). Note we deliberately keep the
+    # target on the WEST side of the map: an `agun` (anti-aircraft tower)
+    # added at (45,20) in the F1-audit cheat-WIN fix (commit 35ddc81e)
+    # would shred a heli flying east across the centre-line, masking the
+    # move-flow probe as a "didn't move" failure (the unit disappears
+    # from `units` because it died en route). The north lane keeps the
+    # heli well outside the agun's effective range so this test only
+    # exercises the move PATH, not the survivability of a brute lane.
     r2 = client.post(
         "/api/game/step",
         json={
@@ -99,8 +106,8 @@ def test_heli_move_via_step_endpoint_actually_moves(game_api_app):
             "actions": [{
                 "mode": "move",
                 "unit_ids": [heli["id"]],
-                "target_x": 60,
-                "target_y": 10,
+                "target_x": 30,
+                "target_y": 5,
             }],
         },
     )
