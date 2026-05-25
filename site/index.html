@@ -229,6 +229,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
         <label style="font-size:13px">Seed:</label>
         <input type="number" id="game-seed" value="1" min="1" max="99" style="width:50px;padding:4px;font-size:13px">
         <button class="btn-play btn-sm" id="game-start-btn" onclick="gameStart()" disabled>Start</button>
+        <button class="btn-stop btn-sm" id="game-restart-btn" onclick="gameRestart()" style="display:none" title="Discard the current run and start this scenario fresh">Restart</button>
         <button class="btn-stop btn-sm" id="game-stop-btn" onclick="gameStop()" style="display:none">Stop</button>
       </div>
     </div>
@@ -292,11 +293,22 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
         <tbody></tbody>
       </table>
     </div>
-    <div class="review-actions">
+    <div class="review-actions" id="review-actions-decide">
       <button class="btn-secondary" id="review-discard-btn"
         onclick="reviewDiscard()">Discard (don't save)</button>
       <button class="btn-play" id="review-save-btn"
         onclick="reviewCommit()">Save to dataset</button>
+    </div>
+    <div class="review-actions" id="review-actions-followup" style="display:none">
+      <button class="btn-secondary" id="review-replay-btn"
+        onclick="reviewReplay()"
+        title="Play this same scenario again">Replay this scenario</button>
+      <button class="btn-play" id="review-next-btn"
+        onclick="reviewNextMission()"
+        title="Move to the next assigned mission">Next mission →</button>
+      <button class="btn-secondary" id="review-close-btn"
+        onclick="closeReviewModal()"
+        title="Stay on this scenario; close this dialog without choosing">Close</button>
     </div>
     <div class="review-status" id="review-status"></div>
   </div>
@@ -640,6 +652,7 @@ async function gameStart(){
     document.getElementById("game-body").style.display="";
     document.getElementById("game-start-btn").style.display="none";
     document.getElementById("game-stop-btn").style.display="";
+    document.getElementById("game-restart-btn").style.display="";
     document.getElementById("game-endturn-btn").disabled=false;
     document.getElementById("game-panel").classList.remove("inactive");
     document.getElementById("game-header").classList.remove("inactive");
@@ -660,8 +673,40 @@ async function gameStop(){
   document.getElementById("game-body").style.display="none";
   document.getElementById("game-start-btn").style.display="";
   document.getElementById("game-stop-btn").style.display="none";
+  document.getElementById("game-restart-btn").style.display="none";
   document.getElementById("game-start-btn").disabled=!gameServerOk;
   gameLog("Game stopped.");
+}
+
+// Restart: discard the current run (server-side draft is removed via
+// the same /discard endpoint so we don't leave an orphan), then
+// immediately start the same scenario again. The "stay on this
+// scenario" path complements Discard (which returns to the scenario
+// card) — Restart skips the click and re-launches.
+async function gameRestart(){
+  if(!gameSession)return;
+  if(!confirm("Restart this scenario? The current run will be discarded (not saved)."))return;
+  const sid=gameSession;
+  try{
+    // discard the current draft (mirrors reviewDiscard) — keeps no
+    // empty folders behind (Playback.discard() cleans the per-session
+    // run dir up to but not including the shared playback root).
+    await fetch(gameServerUrl+"/api/game/discard/"+sid,{method:"POST"});
+  }catch(e){
+    // discard failure is non-fatal — we still want the user to be
+    // able to restart. Fall back to stop if discard is unreachable.
+    try{await fetch(gameServerUrl+"/api/game/stop/"+sid,{method:"POST"});}catch(_){}
+  }
+  gameSession=null; gameState=null;
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
+  document.getElementById("game-body").style.display="none";
+  document.getElementById("game-stop-btn").style.display="none";
+  document.getElementById("game-restart-btn").style.display="none";
+  document.getElementById("game-start-btn").style.display="";
+  document.getElementById("game-start-btn").disabled=!gameServerOk;
+  gameLog("Restarting scenario.");
+  // Re-launch immediately so the user doesn't have to click Start.
+  await gameStart();
 }
 
 async function gameEndTurn(){
@@ -725,6 +770,12 @@ async function openReviewModal(){
   if(!modal||!tbody||!sum)return;
   modal.style.display="flex";
   saveBtn.disabled=false; dropBtn.disabled=false;
+  // Reset the two-stage action bar: show Save/Discard first; the
+  // follow-up Replay/Next bar is hidden until the user picks one.
+  const decide=document.getElementById("review-actions-decide");
+  const follow=document.getElementById("review-actions-followup");
+  if(decide)decide.style.display="";
+  if(follow)follow.style.display="none";
   status.textContent="Loading preview..."; status.className="review-status";
   tbody.innerHTML="";
   sum.innerHTML=`<b>Outcome:</b> ${gameState.outcome.toUpperCase()} &nbsp;`+
@@ -768,6 +819,17 @@ function closeReviewModal(){
   if(modal)modal.style.display="none";
 }
 
+// Show the post-decide button set (Replay / Next mission / Close)
+// after the user has chosen to Save or Discard. Hides the
+// initial Save / Discard buttons; the modal stays open so the
+// human can decide their next move explicitly — no auto-jump.
+function showFollowupActions(){
+  const decide=document.getElementById("review-actions-decide");
+  const follow=document.getElementById("review-actions-followup");
+  if(decide)decide.style.display="none";
+  if(follow)follow.style.display="";
+}
+
 async function reviewCommit(){
   if(!gameSession)return;
   const saveBtn=document.getElementById("review-save-btn");
@@ -779,17 +841,17 @@ async function reviewCommit(){
     const r=await fetch(gameServerUrl+"/api/game/commit/"+gameSession,{method:"POST"});
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
     const data=await r.json();
-    status.textContent="Saved to "+(data.save_path||"(unknown)");
+    status.textContent="Saved to "+(data.save_path||"(unknown)")+
+      ". You can Replay this scenario or move to the next.";
     status.className="review-status ok";
     gameLog("Playback saved: "+(data.save_path||""));
-    const completedId=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
     setMissionStatus("complete",{render:false});
     gameLog("Mission marked complete locally.");
     renderMission();
-    if(completedId)advanceHumanEvalQueueAfterCompletion(completedId);
     // The commit endpoint also closed the session server-side.
     gameSession=null;
-    setTimeout(closeReviewModal,800);
+    // No auto-advance — user explicitly clicks Replay / Next.
+    showFollowupActions();
   }catch(e){
     status.textContent="Save failed: "+e.message;
     status.className="review-status err";
@@ -808,17 +870,58 @@ async function reviewDiscard(){
   try{
     const r=await fetch(gameServerUrl+"/api/game/discard/"+gameSession,{method:"POST"});
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
-    gameLog("Episode discarded — not saved to dataset. Click Play to retry this mission.");
+    status.textContent="Discarded — not saved to dataset. "+
+      "Click Replay to play this scenario again, or Next to move on.";
+    status.className="review-status ok";
+    gameLog("Episode discarded — not saved.");
     gameSession=null; gameState=null;
-    closeReviewModal();
-    // Stay on the current mission so the human can retry (Play
-    // button is wired to the same scenario). Jumping back to the
-    // picker after Discard surprised users who wanted another go.
+    // Refresh the mission card so the human sees the unchanged
+    // progress state. Stay on this scenario; show follow-up buttons.
     if(typeof renderMission==="function")renderMission();
+    showFollowupActions();
   }catch(e){
     status.textContent="Discard failed: "+e.message;
     status.className="review-status err";
     saveBtn.disabled=false; dropBtn.disabled=false;
+  }
+}
+
+// Replay: re-launch the same scenario (at the same level/seed) from
+// the review-modal follow-up state. The previous episode is already
+// committed or discarded by this point, so no extra cleanup needed.
+async function reviewReplay(){
+  closeReviewModal();
+  // gameStart reads level + seed from the current UI controls, which
+  // are still set to the mission the human just played.
+  await gameStart();
+}
+
+// Next mission: advance to the next assigned mission in the human-
+// eval queue (or the next scenario in the unfiltered list if no
+// queue is active).
+function reviewNextMission(){
+  const cur=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
+  closeReviewModal();
+  if(!cur)return;
+  // Try the assigned annotator queue first.
+  const pos=humanEvalQueue.indexOf(cur);
+  if(pos>=0){
+    for(let step=1;step<=humanEvalQueue.length;step++){
+      const id=humanEvalQueue[(pos+step)%humanEvalQueue.length];
+      if(progress[id]!=="complete"&&progress[id]!=="annotated"){
+        const idx=scenarios.findIndex(s=>s.scenarioId===id);
+        if(idx>=0){openMission(idx);return;}
+      }
+    }
+    gameLog("Human eval queue complete — no more pending missions.");
+    return;
+  }
+  // No queue: just walk forward in the filtered list.
+  const flatIdx=filtered.indexOf(currentIdx);
+  if(flatIdx>=0&&flatIdx+1<filtered.length){
+    openMission(filtered[flatIdx+1]);
+  }else{
+    gameLog("Reached the end of the mission list.");
   }
 }
 
