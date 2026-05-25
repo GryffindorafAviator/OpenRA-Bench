@@ -141,6 +141,14 @@ class Playback:
             ),
             "units": render_state.get("units_summary", []),
             "enemies": render_state.get("enemy_summary", []),
+            # Buildings: separate from mobile units because the engine
+            # tracks them in their own slot. Without these, the viewer
+            # silently drops half the picture (the model's base can't
+            # be inspected turn-by-turn). Both sides — own + observed
+            # enemy buildings — go here so the audit can diff per-turn
+            # building destruction independently of unit kills.
+            "own_buildings": render_state.get("own_buildings", []),
+            "enemy_buildings": render_state.get("enemy_buildings", []),
             # Per-turn goal tracker: win-condition leaf progress AND the
             # normalized cumulative reward vector, side by side.
             "goal": goal or {},
