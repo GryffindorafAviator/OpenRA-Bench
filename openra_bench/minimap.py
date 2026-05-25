@@ -179,11 +179,22 @@ _BG_CLEAR_UNKNOWN  = _BG_UNKNOWN      # alias — same defaults as 'no terrain'
 _BG_CLEAR_FOGGED   = _BG_FOGGED
 _BG_CLEAR_VISIBLE  = _BG_VISIBLE
 _OWN = (60, 200, 90)            # your units
-_OWN_BLD = (60, 130, 230)       # your buildings
+_OWN_BLD = (60, 200, 90)        # your buildings — SAME hue as units
+                                # (per-type SHAPE distinguishes role,
+                                # hue distinguishes side).
 _ENEMY = (225, 60, 55)          # enemy units
-_ENEMY_BLD = (240, 160, 40)     # enemy buildings
+_ENEMY_BLD = (225, 60, 55)      # enemy buildings — SAME hue as units
 _OBJECTIVE = (255, 218, 70)     # objective / target region
 _ORE = (185, 150, 70)           # visible ore/resource cells
+
+# Per-side hue family for buildings — kept identical to the unit hue so
+# "self vs enemy" reads from COLOUR alone and "role" reads from SHAPE
+# alone. The previous renderer used blue=own-bld / orange=enemy-bld; the
+# image-primary upgrade collapses both onto green=own / red=enemy so a
+# model can read side and type independently (the task brief's key
+# requirement).
+_OWN_ACCENT = (190, 250, 210)   # lighter green — overlay marks on own
+_ENEMY_ACCENT = (255, 200, 180) # lighter red — overlay marks on enemy
 
 
 def _bg_for(ch: str, has_visible_mark: bool) -> tuple[int, int, int] | None:
@@ -338,17 +349,87 @@ _TYPE_SHAPE = {
     "e1": "circle", "e2": "circle", "e3": "circle", "e4": "circle",
     "e6": "circle", "e7": "circle", "medi": "circle", "mech": "circle",
     "spy": "circle", "thf": "circle", "dog": "circle", "engineer": "circle",
+    "tanya": "circle",
     "1tnk": "square", "2tnk": "diamond", "3tnk": "hexagon",
     "4tnk": "triangle", "harv": "tridown",
     "jeep": "pentagon", "apc": "pentagon", "mcv": "pentagon",
     "arty": "star", "v2rl": "star", "ftrk": "star",
+    # naval / aircraft
+    "dd": "diamond", "lst": "square",
+    "heli": "triangle",
 }
+
+
+# ── Per-building-type icons (image-primary readability) ────────────────
+# Each building type maps to (SHAPE, ACCENT) where ACCENT is an extra
+# glyph drawn ON TOP of the fill — a central dot, antenna line,
+# crosshair, etc. — that disambiguates buildings that share a base
+# shape. The model glances at the silhouette + accent and reads the
+# role (production / power / tech / defence / wall / fact) without
+# needing the text legend. Side (own / enemy) is encoded by COLOUR
+# only — green / red — so shape and hue carry orthogonal information.
+#
+# Shapes referenced here MUST be supported in `_shape_points` /
+# `_draw_building_icon`; accents are handled by `_draw_accent`.
+_BUILDING_ICON: dict[str, tuple[str, str | None]] = {
+    # base / loss-critical
+    "fact":  ("pentagon", "halo"),     # large pentagon w/ inner halo
+    # economy
+    "proc":  ("trapezoid", None),      # refinery trapezoid
+    "silo":  ("bar", None),            # narrow upright bar
+    "mine":  ("tridown", None),        # not normally agent-owned
+    # power
+    "powr":  ("diamond", "dot"),       # diamond w/ central dot
+    "apwr":  ("diamond", "dot2"),      # diamond w/ double dot (advanced)
+    # production
+    "weap":  ("hexagon", None),
+    "tent":  ("triangle", None),
+    "barr":  ("triangle", None),
+    "hpad":  ("square", "x"),          # airpad — square w/ X
+    "afld":  ("square", "x"),
+    "syrd":  ("square", "wave"),       # naval — square w/ wave
+    "spen":  ("square", "wave"),
+    # support / tech / radar
+    "dome":  ("circle", "ring"),       # radar dome — circle w/ ring
+    "radar": ("circle", "antenna"),    # radar w/ antenna
+    "fix":   ("square", "cross"),      # service depot — square w/ +
+    "atek":  ("hex_tall", None),       # tech — tall hex
+    "stek":  ("hex_tall", None),
+    "kenn":  ("circle", "dot"),        # dog kennel — small marker
+    # superweapons (unique silhouettes — large stars)
+    "mslo":  ("star", None),
+    "pdox":  ("star", None),
+    "iron":  ("star", None),
+    # defences (all share crosshair-square; cheap pillbox slightly
+    # smaller via `r` shrink in _draw_building_icon)
+    "pbox":  ("def_square", "crosshair"),
+    "hbox":  ("def_square", "crosshair"),
+    "gun":   ("def_square", "crosshair"),
+    "agun":  ("def_square", "crosshair"),
+    "sam":   ("def_square", "crosshair"),
+    "ftur":  ("def_square", "crosshair"),
+    "tsla":  ("def_square", "crosshair"),
+    # walls — thin tile (drawn small/centred so a wall row reads as
+    # a continuous strip rather than fat blocks)
+    "brik":  ("wall_tile", None),
+    "sbag":  ("wall_tile", None),
+    "cycl":  ("wall_tile", None),
+    "fenc":  ("wall_tile", None),
+    "wall":  ("wall_tile", None),
+}
+
+
+def _building_icon(actor_type: str) -> tuple[str, str | None]:
+    """(shape, accent) for a building type, with fallback."""
+    t = (actor_type or "").strip().lower()
+    return _BUILDING_ICON.get(t, ("building", None))
 
 
 def _unit_shape(actor_type: str, is_building: bool) -> str:
     """Shape key for a unit/building — distinct per unit TYPE."""
     if is_building:
-        return "building"
+        shape, _accent = _building_icon(actor_type)
+        return shape
     t = (actor_type or "").strip().lower()
     if t in _TYPE_SHAPE:
         return _TYPE_SHAPE[t]
@@ -358,6 +439,16 @@ def _unit_shape(actor_type: str, is_building: bool) -> str:
     if cat == "harvester":
         return "tridown"
     return "square"
+
+
+# The set of building-only shapes — used by `render_png_b64` (legacy
+# fallback) to draw with the building hue / radius. The richer
+# `render_tactical_minimap` carries an explicit is_building flag per
+# occupant so it never relies on this set.
+_BUILDING_ONLY_SHAPES = frozenset({
+    "building", "pentagon", "trapezoid", "bar", "hex_tall",
+    "def_square", "wall_tile",
+})
 
 
 def _shape_points(shape, x0, y0, x1, y1):
@@ -374,6 +465,30 @@ def _shape_points(shape, x0, y0, x1, y1):
         return [(mx, y0), (x1, y1), (x0, y1)]
     if shape == "tridown":
         return [(x0, y0), (x1, y0), (mx, y1)]
+    if shape == "trapezoid":
+        # Refinery silhouette — wide base, narrow top.
+        top_inset = (x1 - x0) * 0.22
+        return [(x0 + top_inset, y0), (x1 - top_inset, y0),
+                (x1, y1), (x0, y1)]
+    if shape == "bar":
+        # Narrow upright bar (silo).
+        bw = (x1 - x0) * 0.32
+        return [(mx - bw, y0), (mx + bw, y0),
+                (mx + bw, y1), (mx - bw, y1)]
+    if shape == "hex_tall":
+        # Tall hexagon — tech-building silhouette.
+        s = (y1 - y0) * 0.22
+        return [(mx, y0), (x1, y0 + s), (x1, y1 - s),
+                (mx, y1), (x0, y1 - s), (x0, y0 + s)]
+    if shape == "def_square":
+        # Defence square — full box (crosshair accent layered on).
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    if shape == "wall_tile":
+        # Thin centred tile — a wall row reads as a continuous strip.
+        ix = (x1 - x0) * 0.22
+        iy = (y1 - y0) * 0.22
+        return [(x0 + ix, y0 + iy), (x1 - ix, y0 + iy),
+                (x1 - ix, y1 - iy), (x0 + ix, y1 - iy)]
     if shape in ("hexagon", "pentagon", "star"):
         n = {"hexagon": 6, "pentagon": 5, "star": 5}[shape]
         pts = []
@@ -400,16 +515,143 @@ def _draw_shape(draw, x0, y0, x1, y1, shape, color):
     elif shape == "building":
         draw.rectangle([x0, y0, x1, y1], fill=color,
                        outline=outline, width=2)
+    elif shape == "def_square":
+        # Defence base — square with a thicker outline so the crosshair
+        # accent reads on top of the fill.
+        draw.rectangle([x0, y0, x1, y1], fill=color,
+                       outline=outline, width=2)
     else:
         draw.polygon(_shape_points(shape, x0, y0, x1, y1),
                      fill=color, outline=outline)
 
 
-def _draw_unit_shape(draw, cx, cy, cp, shape, color):
+def _draw_accent(draw, x0, y0, x1, y1, accent, side: str = "own"):
+    """Overlay a per-building accent glyph (dot / cross / x / ring /
+    antenna / wave / crosshair / halo) on the filled shape, so two
+    buildings sharing a base silhouette (e.g. hpad vs syrd — both
+    squares) read as distinct at a glance."""
+    if not accent:
+        return
+    mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+    rx, ry = max(1.0, (x1 - x0) / 2), max(1.0, (y1 - y0) / 2)
+    col = (240, 240, 248) if side == "own" else (250, 230, 220)
+    dark = (15, 15, 18)
+    if accent == "dot":
+        r = min(rx, ry) * 0.28
+        draw.ellipse([mx - r, my - r, mx + r, my + r], fill=col,
+                     outline=dark)
+    elif accent == "dot2":
+        # double-dot — distinguish apwr from powr
+        r = min(rx, ry) * 0.22
+        dx = rx * 0.36
+        for cx in (mx - dx, mx + dx):
+            draw.ellipse([cx - r, my - r, cx + r, my + r], fill=col,
+                         outline=dark)
+    elif accent == "ring":
+        r1 = min(rx, ry) * 0.5
+        r2 = min(rx, ry) * 0.22
+        w = max(2, int(min(rx, ry) * 0.18))
+        draw.ellipse([mx - r1, my - r1, mx + r1, my + r1], outline=col,
+                     width=w)
+        draw.ellipse([mx - r2, my - r2, mx + r2, my + r2], fill=col)
+    elif accent == "antenna":
+        # vertical line through centre, taller than the cell, plus a
+        # bulb at the top — the "radar tower" silhouette
+        w = max(2, int(min(rx, ry) * 0.18))
+        draw.line([(mx, my - ry * 1.05), (mx, my + ry * 0.2)],
+                  fill=col, width=w)
+        r = min(rx, ry) * 0.18
+        draw.ellipse([mx - r, my - ry * 1.05 - r,
+                      mx + r, my - ry * 1.05 + r], fill=col)
+    elif accent == "x":
+        w = max(2, int(min(rx, ry) * 0.22))
+        p = min(rx, ry) * 0.55
+        draw.line([(mx - p, my - p), (mx + p, my + p)], fill=col,
+                  width=w)
+        draw.line([(mx + p, my - p), (mx - p, my + p)], fill=col,
+                  width=w)
+    elif accent == "cross":
+        w = max(2, int(min(rx, ry) * 0.22))
+        p = min(rx, ry) * 0.55
+        draw.line([(mx - p, my), (mx + p, my)], fill=col, width=w)
+        draw.line([(mx, my - p), (mx, my + p)], fill=col, width=w)
+    elif accent == "wave":
+        # sine-like dashes — "water / naval" hint
+        w = max(2, int(min(rx, ry) * 0.18))
+        p = rx * 0.6
+        draw.line([(mx - p, my - ry * 0.18), (mx - p * 0.2, my - ry * 0.18)],
+                  fill=col, width=w)
+        draw.line([(mx + p * 0.2, my + ry * 0.18),
+                   (mx + p, my + ry * 0.18)], fill=col, width=w)
+    elif accent == "crosshair":
+        w = max(2, int(min(rx, ry) * 0.22))
+        p = min(rx, ry) * 0.55
+        # central dot
+        r = min(rx, ry) * 0.18
+        draw.ellipse([mx - r, my - r, mx + r, my + r], fill=col,
+                     outline=dark)
+        # arms — stop at the dot
+        draw.line([(mx - p, my), (mx - r, my)], fill=col, width=w)
+        draw.line([(mx + r, my), (mx + p, my)], fill=col, width=w)
+        draw.line([(mx, my - p), (mx, my - r)], fill=col, width=w)
+        draw.line([(mx, my + r), (mx, my + p)], fill=col, width=w)
+    elif accent == "halo":
+        # inner halo ring — the loss-critical fact glyph
+        r = min(rx, ry) * 0.42
+        w = max(2, int(min(rx, ry) * 0.18))
+        draw.ellipse([mx - r, my - r, mx + r, my + r], outline=col,
+                     width=w)
+
+
+def _draw_unit_shape(draw, cx, cy, cp, shape, color, accent: str | None = None,
+                     side: str = "own"):
     """Draw `shape` filling ~70% of the cp-px cell at grid (cx, cy)."""
     m = cp * 0.16
-    _draw_shape(draw, cx * cp + m, cy * cp + m,
-                (cx + 1) * cp - m, (cy + 1) * cp - m, shape, color)
+    x0, y0 = cx * cp + m, cy * cp + m
+    x1, y1 = (cx + 1) * cp - m, (cy + 1) * cp - m
+    _draw_shape(draw, x0, y0, x1, y1, shape, color)
+    if accent:
+        _draw_accent(draw, x0, y0, x1, y1, accent, side)
+
+
+# ── HP bar overlay ─────────────────────────────────────────────────────
+# A small horizontal bar drawn ABOVE the icon, length and colour both
+# encoding health. The bench surfaces HP as a 0..1 fraction on each
+# unit / building entry (`render_state` schema: `hp` for units,
+# `hp_pct` for the raw engine payload). Skip drawing at full HP so the
+# minimap stays clean — only damaged actors flag for attention.
+
+def _hp_color(frac: float) -> tuple[int, int, int]:
+    if frac >= 0.75:
+        return (90, 220, 110)        # green
+    if frac >= 0.50:
+        return (240, 230, 90)        # yellow
+    if frac >= 0.25:
+        return (245, 165, 70)        # orange
+    return (235, 70, 70)             # red
+
+
+def _draw_hp_bar(draw, cx: int, cy: int, cp: int, frac: float) -> None:
+    """Draw a short HP bar above cell (cx, cy). `frac` ∈ [0,1]. The bar
+    is omitted at full HP (≥ 0.99) so undamaged actors don't add
+    visual noise."""
+    try:
+        f = max(0.0, min(1.0, float(frac)))
+    except (TypeError, ValueError):
+        return
+    if f >= 0.99:
+        return  # full HP — skip
+    bar_w = int(cp * 0.86)
+    bar_h = max(3, int(cp * 0.20))
+    x0 = cx * cp + (cp - bar_w) // 2
+    # Sit the bar just above the icon (icon margin = cp*0.16).
+    y0 = cy * cp + max(1, int(cp * 0.02))
+    # Bg track (so 0-fill is still visible)
+    draw.rectangle([x0 - 1, y0 - 1, x0 + bar_w + 1, y0 + bar_h + 1],
+                   fill=(20, 20, 24), outline=(255, 255, 255))
+    fill_w = max(2, int(bar_w * f))
+    draw.rectangle([x0, y0, x0 + fill_w, y0 + bar_h],
+                   fill=_hp_color(f))
 
 
 def _draw_objective_region(draw, region, cp, w, h, index):
@@ -533,7 +775,9 @@ def render_tactical_minimap(
     if w == 0 or w * h > 200_000:
         return None
     cp = max(1, CELL * scale)
-    legend_h = cp * 2 if legend else 0
+    # Legend height grows to 3 cells (chip strip + HP/ore/objective row +
+    # one row of help text). Without legend the image is just the map.
+    legend_h = cp * 3 if legend else 0
     img = Image.new("RGB", (w * cp, h * cp + legend_h), _BG_UNKNOWN)
     draw = ImageDraw.Draw(img)
 
@@ -592,12 +836,15 @@ def render_tactical_minimap(
             _draw_resource_cell(draw, cell, cp, w, h)
 
     # Collect every actor by cell so stacked units can be counted.
-    by_cell: dict = {}
-    # Distinct (type, shape) of OWN units seen — drives the legend.
-    own_types: dict = {}
-
-    def _is_bld(shape):
-        return shape == "building"
+    # Each occupant is a dict so we can carry shape + accent + side +
+    # is_building + hp without growing a fragile tuple position.
+    by_cell: dict[tuple[int, int], list[dict]] = {}
+    # Distinct (type, shape, accent, is_building) of OWN actors seen —
+    # drives the legend strip. Order preserved by insertion.
+    own_types: dict[str, tuple[str, str | None, bool]] = {}
+    # Same for enemy actors that the agent has spotted — so the legend
+    # shows a RED swatch next to a representative enemy type.
+    enemy_types: dict[str, tuple[str, str | None, bool]] = {}
 
     def _collect(items, side, force_building):
         for it in items or []:
@@ -610,11 +857,30 @@ def render_tactical_minimap(
             is_b = force_building or bool(it.get("is_building"))
             atype = (it.get("actor_type") or it.get("type") or "?")
             shape = _unit_shape(atype, is_b)
-            by_cell.setdefault((cx, cy), []).append(
-                (side, shape, it.get("id"))
-            )
-            if side == "own" and atype != "?":
-                own_types.setdefault(str(atype).lower(), shape)
+            accent = None
+            if is_b:
+                _shape2, accent = _building_icon(atype)
+            # HP — units carry `hp` (0..1), buildings the same. Some
+            # legacy callers omit the field; treat absent as full HP so
+            # the bar is suppressed.
+            hp_raw = it.get("hp")
+            try:
+                hp = float(hp_raw) if hp_raw is not None else 1.0
+            except (TypeError, ValueError):
+                hp = 1.0
+            by_cell.setdefault((cx, cy), []).append({
+                "side": side,
+                "shape": shape,
+                "accent": accent,
+                "is_building": is_b,
+                "id": it.get("id"),
+                "hp": hp,
+                "type": str(atype).lower() if atype != "?" else "?",
+            })
+            bucket = own_types if side == "own" else enemy_types
+            if atype != "?":
+                bucket.setdefault(str(atype).lower(),
+                                  (shape, accent, is_b))
 
     _collect(render_state.get("units_summary"), "own", False)
     _collect(render_state.get("own_buildings"), "own", True)
@@ -625,18 +891,27 @@ def render_tactical_minimap(
         "enemy", True,
     )
 
-    def _color(side, shape):
+    def _color(side, is_b):
         if side == "own":
-            return _OWN_BLD if _is_bld(shape) else _OWN
-        return _ENEMY_BLD if _is_bld(shape) else _ENEMY
+            return _OWN_BLD if is_b else _OWN
+        return _ENEMY_BLD if is_b else _ENEMY
 
     badge_font = _minimap_font(max(9, int(cp * 0.62)))
     for (cx, cy), occ in by_cell.items():
-        # Dominant occupant decides the shape; prefer a building.
-        side, shape, _aid = next(
-            (o for o in occ if _is_bld(o[1])), occ[0]
+        # Dominant occupant decides the shape; prefer a building (the
+        # static structure beats a transient unit passing through).
+        bld = next((o for o in occ if o["is_building"]), None)
+        dom = bld if bld else occ[0]
+        _draw_unit_shape(
+            draw, cx, cy, cp, dom["shape"],
+            _color(dom["side"], dom["is_building"]),
+            accent=dom["accent"], side=dom["side"],
         )
-        _draw_unit_shape(draw, cx, cy, cp, shape, _color(side, shape))
+        # HP bar — uses the MIN hp across stacked actors so the model
+        # sees "something at this cell is hurt"; a damaged garrison /
+        # patched building both flag the right cell.
+        min_hp = min((o["hp"] for o in occ), default=1.0)
+        _draw_hp_bar(draw, cx, cy, cp, min_hp)
         # The count badge and per-unit labels are mutually exclusive —
         # `unit_labels` (image-primary) names each occupant individually,
         # which already disambiguates a stack.
@@ -714,12 +989,13 @@ def render_tactical_minimap(
         seen: set = set()
         actors = []  # (cx, cy, label, side)
         for (cx, cy), occ in by_cell.items():
-            for side, _shape, aid in occ:
+            for o in occ:
+                aid = o["id"]
                 key = str(aid)
                 if aid is None or key in seen or key not in unit_labels:
                     continue
                 seen.add(key)
-                actors.append((cx, cy, unit_labels[key], side))
+                actors.append((cx, cy, unit_labels[key], o["side"]))
         placed: list = []  # occupied label rects (x0, y0, x1, y1)
 
         def _free(x0, y0, x1, y1):
@@ -759,41 +1035,123 @@ def render_tactical_minimap(
                 stroke_width=3, stroke_fill=(0, 0, 0),
             )
 
-    # Legend strip — the unit TYPES actually present, each with its
-    # own shape, so the player can read 1tnk vs 2tnk vs e3 etc.
+    # ── Legend strip — VISUAL chip key ─────────────────────────────────
+    # The legend is the image-only model's only ground-truth mapping
+    # from glyph to type, so every chip is drawn with the SAME shape +
+    # accent + colour the map uses for that type. Two rows:
+    #   row 1: own building chips + own unit chips (in that order so
+    #          the bigger silhouettes anchor the left edge).
+    #   row 2: enemy chips + HP indicator swatch + ore swatch +
+    #          objective ring swatch + help text.
+    # When the strip runs out of width the surplus types are dropped
+    # silently (the image stays legible — the model just sees fewer
+    # legend entries; the actors are still on the map).
     if legend:
         ly = h * cp
         draw.rectangle([0, ly, w * cp, ly + legend_h], fill=(24, 24, 30))
-        lfont = _minimap_font(max(11, int(cp * 0.7)))
+        lfont = _minimap_font(max(11, int(cp * 0.62)))
         sample = cp
         m = sample * 0.16
-        x = int(cp * 0.4)
-        row_y = ly + int(cp * 0.16)
-        shown = sorted(own_types.items())[:8] or [("unit", "square")]
-        for tname, shape in shown:
-            col = _OWN_BLD if _is_bld(shape) else _OWN
-            _draw_shape(draw, x + m, row_y + m,
-                        x + sample - m, row_y + sample - m, shape, col)
-            tx = x + sample + int(cp * 0.18)
-            draw.text((tx, row_y + sample * 0.2), tname,
-                      fill=(235, 235, 245), font=lfont)
+
+        def _chip(x: int, row_y: int, label: str,
+                  draw_swatch_fn) -> int:
+            """Draw a swatch + label, return new x cursor."""
+            draw_swatch_fn(x + m, row_y + m,
+                           x + sample - m, row_y + sample - m)
+            tx = x + sample + int(cp * 0.14)
             try:
-                tw = draw.textlength(tname, font=lfont)
+                draw.text((tx, row_y + sample * 0.22), label,
+                          fill=(235, 235, 245), font=lfont)
+                tw = draw.textlength(label, font=lfont)
             except Exception:  # noqa: BLE001
-                tw = len(tname) * cp * 0.5
-            x = int(tx + tw + cp * 0.7)
+                tw = len(label) * cp * 0.45
+            return int(tx + tw + cp * 0.55)
+
+        # Split entries into building / unit chips so the row composes
+        # in a predictable order — buildings first (bigger silhouettes
+        # anchor the eye), then units.
+        own_b = [(t, s, a) for t, (s, a, isb) in own_types.items() if isb]
+        own_u = [(t, s, a) for t, (s, a, isb) in own_types.items() if not isb]
+        enemy_any = [(t, s, a, isb) for t, (s, a, isb) in enemy_types.items()]
+        own_b.sort()
+        own_u.sort()
+        enemy_any.sort()
+
+        # Row 1 — own actors.
+        x = int(cp * 0.4)
+        row1_y = ly + int(cp * 0.06)
+        max_x = w * cp - int(cp * 0.4)
+        for tname, shape, accent in own_b + own_u:
+            if x > max_x - sample * 4:
+                break
+            def _sw(x0, y0, x1, y1, _s=shape, _a=accent):
+                _draw_shape(draw, x0, y0, x1, y1, _s, _OWN)
+                if _a:
+                    _draw_accent(draw, x0, y0, x1, y1, _a, "own")
+            x = _chip(x, row1_y, tname, _sw)
+
+        # Row 2 — enemy actors, then the universal swatches.
+        x = int(cp * 0.4)
+        row2_y = ly + int(cp * 1.10)
+        for tname, shape, accent, isb in enemy_any:
+            if x > max_x - sample * 4:
+                break
+            def _sw(x0, y0, x1, y1, _s=shape, _a=accent, _isb=isb):
+                col = _ENEMY_BLD if _isb else _ENEMY
+                _draw_shape(draw, x0, y0, x1, y1, _s, col)
+                if _a:
+                    _draw_accent(draw, x0, y0, x1, y1, _a, "enemy")
+            x = _chip(x, row2_y, f"enemy {tname}", _sw)
+
+        # HP indicator — a 50% bar above a generic icon swatch.
+        def _hp_swatch(x0, y0, x1, y1):
+            # background icon stays grey so the bar reads
+            draw.rectangle([x0, y0 + (y1 - y0) * 0.4, x1, y1],
+                           fill=(110, 110, 120),
+                           outline=(15, 15, 18))
+            bw = (x1 - x0) * 0.78
+            bh = max(2, int((y1 - y0) * 0.18))
+            bx0 = x0 + ((x1 - x0) - bw) / 2
+            by0 = y0 + (y1 - y0) * 0.08
+            draw.rectangle([bx0, by0, bx0 + bw, by0 + bh],
+                           fill=(28, 28, 32),
+                           outline=(10, 10, 12))
+            draw.rectangle([bx0, by0, bx0 + bw * 0.5, by0 + bh],
+                           fill=_hp_color(0.5))
+        if x < max_x - sample * 3:
+            x = _chip(x, row2_y, "HP bar (damaged)", _hp_swatch)
+
+        # Ore swatch — brown filled square.
+        def _ore_swatch(x0, y0, x1, y1):
+            pad = (x1 - x0) * 0.12
+            draw.rectangle([x0 + pad, y0 + pad, x1 - pad, y1 - pad],
+                           fill=_ORE, outline=(15, 15, 18))
+        if x < max_x - sample * 2.5:
+            x = _chip(x, row2_y, "ore", _ore_swatch)
+
+        # Objective ring — yellow circle outline.
+        def _obj_swatch(x0, y0, x1, y1):
+            w_ = max(2, int((x1 - x0) * 0.18))
+            draw.ellipse([x0, y0, x1, y1], outline=_OBJECTIVE, width=w_)
+        if x < max_x - sample * 2.5:
+            x = _chip(x, row2_y, "objective", _obj_swatch)
+
+        # Trailing help text (third row).
         help_txt = (
-            "green = you   red/orange = enemy   yellow ring = objective   "
-            "brown = ore   label = unit id (pass it to your tools)   "
-            "scout the dark area to reveal more"
+            "shape = type, hue = side (green=you, red=enemy)   "
+            "HP bar shows damaged actors only   "
+            "labels = unit ids (pass to tools)"
             if unit_labels else
-            "green = you   red/orange = enemy   yellow ring = objective   "
-            "brown = ore   number = units stacked   white box = selected   "
-            "arrow = order"
+            "shape = type, hue = side (green=you, red=enemy)   "
+            "HP bar shows damaged actors only   "
+            "number = stack, white box = selected, arrow = order"
         )
-        draw.text(
-            (int(cp * 0.4), ly + int(cp * 1.05)), help_txt,
-            fill=(200, 202, 212), font=lfont,
-        )
+        try:
+            draw.text(
+                (int(cp * 0.4), ly + int(cp * 2.18)), help_txt,
+                fill=(200, 202, 212), font=lfont,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     return img
