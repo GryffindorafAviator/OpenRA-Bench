@@ -306,6 +306,22 @@ def test_hedge_loses_medium():
     )
 
 
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_hedge_clears_hard_at_original_bar_every_seed(seed):
+    """Document the preserved 19000 hard bar after the spawn fix.
+
+    Once the advertised starter harv no longer overlaps the power plant,
+    the cheap-decoy hedge reaches 19350 EV on every hard seed. This is
+    intentionally accepted because the scenario objective stays at the
+    original 19000 target."""
+    _, res = _run("hard", _make_hedge, seed=seed)
+    assert res.outcome == "win", (
+        f"hard seed{seed}: hedge should clear preserved 19000 bar; got "
+        f"{res.outcome} ev={_ev(res)}"
+    )
+    assert _ev(res) == 19350
+
+
 # ---------------------------------------------------------------- floor LOSES
 
 
