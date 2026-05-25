@@ -379,3 +379,141 @@ def test_end_to_end_rust_env_visible_shrinks_when_units_move_away():
                 f"be fogged, not visible"
             )
             assert c not in vis1
+
+
+def test_engine_visible_cells_used_verbatim_when_present():
+    """When the PyO3 obs carries `visible_cells` (engine PR "expose
+    typed-shroud visible_cells via PyO3"), the adapter must use it
+    verbatim — no Chebyshev approximation, no merging of newly-
+    explored cells. This is the load-bearing path on engine HEADs
+    that include the new field: trust engine truth.
+
+    Synthesizes an obs where the engine-supplied `visible_cells` is
+    deliberately INCONSISTENT with the Chebyshev approximation (a
+    proper subset of what the fallback would compute) — the adapter
+    must report exactly what the engine said.
+    """
+    # 1tnk at (10, 10), engine says ONLY two cells are visible:
+    # the unit's own cell and one adjacent neighbor. The Chebyshev
+    # fallback would compute the full sight=5 disc (~121 cells).
+    pos = {"1001": {"cell_x": 10, "cell_y": 10, "actor_type": "1tnk"}}
+    sight = _SIGHT_BY_TYPE["1tnk"]
+    explored = [
+        (x, y)
+        for x in range(10 - sight, 10 + sight + 1)
+        for y in range(10 - sight, 10 + sight + 1)
+    ]
+    engine_visible = [(10, 10), (11, 10)]
+    obs = _make_obs(pos, explored, visible_cells=[list(c) for c in engine_visible])
+    ad = RustObsAdapter()
+    ad.observe(obs)
+    rs = ad.render_state()
+    vis = _xy(rs["visible_cells"])
+
+    # Engine truth path: exactly what the engine reported (clipped
+    # to explored, which is a superset here).
+    assert vis == set(engine_visible), (
+        f"engine visible_cells must be used verbatim; "
+        f"got {vis}, expected {set(engine_visible)}"
+    )
+    # The Chebyshev fallback disc cell (12, 10) is NOT in vis —
+    # proves the adapter did NOT fall back.
+    assert (12, 10) not in vis, (
+        "Chebyshev fallback must NOT run when engine visible_cells is present"
+    )
+
+
+def test_chebyshev_fallback_runs_when_engine_visible_cells_absent():
+    """Back-compat: an obs WITHOUT a `visible_cells` key (older
+    engine HEAD or a synthetic test obs) must trigger the
+    Chebyshev fallback — visible reconstructed from each agent
+    actor's sight disc. Without this fallback the older engine
+    would silently report an empty visible set and the minimap
+    would draw the whole map as fogged.
+    """
+    sight = _SIGHT_BY_TYPE["1tnk"]
+    pos = {"1001": {"cell_x": 10, "cell_y": 10, "actor_type": "1tnk"}}
+    explored = [
+        (x, y)
+        for x in range(10 - sight, 10 + sight + 1)
+        for y in range(10 - sight, 10 + sight + 1)
+    ]
+    # Note: `_make_obs` does NOT inject `visible_cells` unless
+    # passed explicitly. Pin that pre-condition first.
+    obs = _make_obs(pos, explored)
+    assert "visible_cells" not in obs, (
+        "fixture must NOT carry visible_cells — that's the case we test"
+    )
+
+    ad = RustObsAdapter()
+    ad.observe(obs)
+    rs = ad.render_state()
+    vis = _xy(rs["visible_cells"])
+
+    # Chebyshev disc — every cell within sight=5 of (10,10) is
+    # visible. (12, 10) is inside the disc → fallback ran.
+    assert (10, 10) in vis
+    assert (12, 10) in vis, (
+        "Chebyshev fallback must compute the sight disc when "
+        "engine visible_cells is absent"
+    )
+    # Boundary: corner of the disc.
+    assert (10 + sight, 10) in vis
+    # Outside the disc:
+    assert (10 + sight + 1, 10) not in vis
+
+
+def test_engine_visible_cells_present_on_live_env():
+    """Pin that the engine PR is actually live: a real env.reset()
+    must emit a `visible_cells` key in the obs dict. If this test
+    fails, the engine wheel has been rebuilt against an older HEAD
+    that lacks the PyO3 binding and the adapter is silently using
+    the Chebyshev fallback on production runs. Skip gracefully if
+    the live-engine harness isn't installed."""
+    try:
+        from openra_train import OpenRAEnv
+
+        from openra_bench.eval_core import _scenario_to_tmp_yaml
+        from openra_bench.scenarios import load_pack
+        from openra_bench.scenarios.loader import PACKS_DIR, compile_level
+    except Exception:
+        pytest.skip("Live engine harness unavailable")
+
+    pack = load_pack(PACKS_DIR / "action-multiunit-coordination.yaml")
+    compiled = compile_level(pack, "easy")
+    tmp = _scenario_to_tmp_yaml(compiled)
+    env = OpenRAEnv(scenario_path=tmp, seed=1)
+    obs = env.reset()
+
+    assert "visible_cells" in obs, (
+        "engine PR not live — `visible_cells` missing from obs. "
+        "Rebuild the wheel: `cd OpenRA-Rust && maturin develop --release` "
+        "on the `expose-typed-visible-cells` branch."
+    )
+    # Engine subset invariant: visible ⊆ explored.
+    vis = _xy(obs["visible_cells"])
+    expl = _xy(obs["explored_cells"])
+    assert vis.issubset(expl), (
+        "engine invariant violated: visible_cells must be a subset "
+        f"of explored_cells (visible − explored = {vis - expl})"
+    )
+    # And the adapter must agree byte-for-byte with the engine on
+    # the standard cast (no approximation gap).
+    type_by_id = {
+        uid: (p.get("actor_type") or "?").lower()
+        for uid, p in obs["unit_positions"].items()
+        if isinstance(p, dict)
+    }
+    ad = RustObsAdapter(type_by_id=type_by_id)
+    ad.observe(obs)
+    rs = ad.render_state()
+    adapter_vis = _xy(rs["visible_cells"])
+    # The adapter intersects with its `_explored` (cumulative) set;
+    # on the first observe call `_explored == explored_cells`, so
+    # the adapter's result must equal the engine's set verbatim.
+    assert adapter_vis == vis, (
+        "adapter must report engine-truth visible_cells verbatim "
+        f"(adapter={len(adapter_vis)} engine={len(vis)} "
+        f"diff(adapter−engine)={list(adapter_vis - vis)[:5]} "
+        f"diff(engine−adapter)={list(vis - adapter_vis)[:5]})"
+    )
