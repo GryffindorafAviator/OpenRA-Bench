@@ -411,6 +411,23 @@ def run_level(
                     _hist = getattr(_intro, "history", None)
                     if isinstance(_hist, list):
                         playback.write_messages(_hist)
+                    # Live rate metrics — same shape as 1v1's progress.json
+                    import time as _time, json as _json
+                    _ep_t0 = locals().get("_ep_t0_per_turn")
+                    if _ep_t0 is None:
+                        _ep_t0 = _time.monotonic()
+                        _ep_t0_per_turn = _ep_t0  # noqa: F841
+                    _elapsed = _time.monotonic() - _ep_t0
+                    _tps = (turns / _elapsed) if _elapsed > 0 else 0.0
+                    _eta = ((compiled.max_turns - turns) / _tps) if _tps > 0 else 0.0
+                    (playback.dir / "progress.json").write_text(_json.dumps({
+                        "turn": turns,
+                        "max_turns": compiled.max_turns,
+                        "elapsed_s": round(_elapsed, 1),
+                        "turns_per_second": round(_tps, 3),
+                        "sec_per_turn": round(1.0 / _tps, 2) if _tps > 0 else None,
+                        "eta_s": round(_eta, 1),
+                    }))
                 except Exception:  # noqa: BLE001 — playback never breaks a run
                     pass
             if full_playback is not None:
