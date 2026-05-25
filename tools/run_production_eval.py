@@ -72,7 +72,7 @@ from typing import Any, Iterable
 # in the run-dir tree; the model_id is what we forward to `--model`.
 MODELS: tuple[tuple[str, str, str], ...] = (
     ("qwen3.5-9b",            "together",   "Qwen/Qwen3.5-9B"),
-    ("gemma-4-31b-it",        "together",   "together_sso/google/gemma-4-31B-it-f5dbf8ad"),
+    ("gemma-4-31b-it",        "openrouter", "google/gemma-4-31b-it:nitro"),
     ("qwen3.6-35b-a3b",       "together",   "together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad"),
     ("gpt-5.4-mini",          "openai",     "gpt-5.4-mini-2026-03-17"),
     ("gpt-5.4",               "openai",     "gpt-5.4-2026-03-05"),
