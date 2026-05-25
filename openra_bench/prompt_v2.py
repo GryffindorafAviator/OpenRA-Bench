@@ -860,6 +860,30 @@ def minimap_b64(
             for e in render_state.get("enemy_summary", []) or []
             if e.get("id") is not None
         }
+    # Inject the model's OWN buildings into the minimap so the agent's
+    # base is actually visible (the vendor renderer reads only
+    # `obs["unit_positions"]` for own actors, so a model with 7
+    # buildings and 3 units showed only 3 dots — its base was missing
+    # from the visual snapshot, while still being present in the
+    # briefing text under `Buildings: ...`). Mutate a SHALLOW COPY of
+    # the obs to add building coords + their types, so `_MM.render`
+    # draws them alongside units without touching the vendor file or
+    # disturbing the caller's render_state.
+    obs = dict(obs)
+    unit_positions = dict(obs.get("unit_positions") or {})
+    for b in (render_state.get("own_buildings") or []):
+        if not isinstance(b, dict):
+            continue
+        bid = b.get("id")
+        bx = b.get("cell_x")
+        by = b.get("cell_y")
+        btype = b.get("type")
+        if bid is None or bx is None or by is None:
+            continue
+        unit_positions[str(bid)] = (int(bx), int(by))
+        if btype and not constant_colors:
+            own_types[str(bid)] = str(btype)
+    obs["unit_positions"] = unit_positions
     try:
         png = _MM.render(
             obs=obs,

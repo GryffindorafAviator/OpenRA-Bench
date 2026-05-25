@@ -1,8 +1,17 @@
 # ADVERSARIAL-1V1-MACRO — the canonical LLM-vs-LLM full-macro 1v1 pack.
 #
-# Single canonical 128×96 bridges-naval map. NOT a difficulty ladder —
+# Single canonical 64×48 bridges-naval map. NOT a difficulty ladder —
 # this pack is a shared arena where two real-time decision agents
 # compete head-to-head. One map, one good macro problem.
+#
+# Map shrunk from 128×96 → 64×48 (2026-05-25) to halve per-episode
+# wall-clock (~80-120 min → ~20-30 min at 200 turns) while preserving
+# the mirrored full-macro contract: identical roster on both sides,
+# fog-of-war exploration, naval-optional bridges arena, contested
+# centre patch on the central bridge. Every coord (map, channel,
+# bridges, ore patches, water bands, actor positions) was scaled by
+# 1/2 about the map centre (now (32, 24)). Two spawn_point variants
+# (V0: NW↔SE, V1: NE↔SW) preserved verbatim with halved coords.
 #
 # Per-bench schema (`openra_bench/scenarios/schema.py`) `levels:` must
 # carry all three of {easy, medium, hard}; we therefore declare all
@@ -34,7 +43,7 @@
 #    stances (omitted ⇒ engine default `stance:2` Defend).
 #
 # 3. Three ore patches per side, mirrored about the map centre
-#    (64, 48):
+#    (32, 24):
 #       • near-base safe patch (small, immediate)
 #       • mid-distance expansion patch (medium, requires a 2nd proc
 #         or a long harvester commute)
@@ -54,32 +63,25 @@
 #
 # 6. `max_turns: 200` — reachable max tick ≈ 93 + 90·199 = 17 993,
 #    well clear of the comfortable macro horizon (economy → tech →
-#    army → engagement). Larger budget than a typical micro pack
-#    because the 128×96 diagonal (~160 cells) takes real time to
-#    cross.
+#    army → engagement). Budget unchanged from the 128×96 layout;
+#    the smaller map shortens wall-clock by shortening engagement
+#    travel, not by truncating the decision horizon.
 #
 # 7. `capability: adversarial` so `pairwise.py` / `adversarial.py`
 #    ladder rating treats this pack as a head-to-head rung.
 #
-# Hard-tier curation (2026-05-25 update): the pack now carries TWO
-# fully-symmetric spawn_point variants for ablation diversity, so
-# seeds 1-4 vary OPENING GEOMETRY (not just engine RNG):
-#   • spawn_point 0 — agent NW corner (12, 10) ↔ enemy SE (116, 86)
-#     [original mirrored layout, distance ≈128.8 cells]
-#   • spawn_point 1 — agent NE corner (116, 10) ↔ enemy SW (12, 86)
-#     [horizontal-flip of V0, distance ≈128.8 cells]
+# Hard-tier curation: the pack carries TWO fully-symmetric
+# spawn_point variants for ablation diversity, so seeds 1-4 vary
+# OPENING GEOMETRY (not just engine RNG):
+#   • spawn_point 0 — agent NW corner (6, 5) ↔ enemy SE (58, 43)
+#     [original mirrored layout]
+#   • spawn_point 1 — agent NE corner (58, 5) ↔ enemy SW (6, 43)
+#     [horizontal-flip of V0]
 # Both variants preserve the mirrored-symmetric contract: agent stays
-# in the NORTH lobe (y<48) and enemy in the SOUTH lobe (y>48) at the
+# in the NORTH lobe (y<24) and enemy in the SOUTH lobe (y>24) at the
 # SAME variant — neither side crosses the water at t=0 — and the
 # enemy fact is the exact rotational mirror of the agent fact about
-# the map centre (64, 48). The per-variant separation is well above
-# the 120-cell minimum (≈129) and within ±10 of the original 128.8.
-#
-# A V2/V3 (NW-down/NE-down) shrunk-vertical variant was considered
-# but reduces the diagonal to ~110-115 cells, which falls below the
-# 120 minimum that keeps both bases outside each other's starting
-# sight on the canonical 128×96 arena. Two well-tuned variants beat
-# four under-tuned ones.
+# the map centre (32, 24).
 #
 # Ore patches stay GLOBAL (top-level `ore_patches:` do not honour
 # spawn_point per CLAUDE.md), so the patch list has 9 entries: 4
@@ -106,7 +108,7 @@ meta:
     Barracks, one Ore Truck, two starter combat units, one
     Shipyard on a small shore water band) and the same $2000 in
     the bank. A safe ore patch sits next to each base; a mid-
-    distance expansion patch sits ~25 cells out; a rich contested
+    distance expansion patch sits ~13 cells out; a rich contested
     patch sits in the middle of the map, straddling the river that
     splits the arena. The decision is the full RTS macro stack —
     when to expand for income, when to tech, when to attack, when
@@ -137,19 +139,20 @@ meta:
 base_map:
   generator: bridges-arena
   name: adversarial-1v1-macro-arena
-  width: 128
-  height: 96
+  width: 64
+  height: 48
   cordon: 2
   axis: horizontal
-  channel_y: 48
+  channel_y: 24
   channel_width: 2
   # Three evenly-spaced 3-cell bridges across the channel. The
-  # playable interior runs x in [2, 126); quartiles ≈ 33, 64, 95.
+  # playable interior runs x in [2, 62); bridges placed symmetric
+  # about x=32 (centre) at quartile-like offsets.
   bridges:
-    - {pos: 33, width: 3}
-    - {pos: 64, width: 3}
-    - {pos: 95, width: 3}
-  title: 'Adversarial 1v1 Macro Bridges Arena 128x96'
+    - {pos: 16, width: 3}
+    - {pos: 32, width: 3}
+    - {pos: 48, width: 3}
+  title: 'Adversarial 1v1 Macro Bridges Arena 64x48'
 
 starting_cash: 2000
 
@@ -169,32 +172,32 @@ ore_patches:
   # ── North-WEST quadrant — spawn_point 0 agent / spawn_point 1 enemy ──
   # Safe near-base patch — visible from the home shroud at game
   # start, supports the opening econ.
-  - {x: 16, y: 14, amount: 6000, radius: 2}
-  # Mid-distance expansion patch — ~25 cells from the base,
+  - {x: 8, y: 7, amount: 6000, radius: 2}
+  # Mid-distance expansion patch — ~13 cells from the base,
   # requires either a 2nd proc near the patch or a long harvester
   # commute. Sits in the north lobe, well above the channel.
-  - {x: 36, y: 28, amount: 9000, radius: 3}
+  - {x: 18, y: 14, amount: 9000, radius: 3}
   # ── South-EAST quadrant — spawn_point 0 enemy / spawn_point 1 agent ──
-  # (mirror of NW about (64, 48))
-  - {x: 112, y: 82, amount: 6000, radius: 2}
-  - {x: 92, y: 68, amount: 9000, radius: 3}
+  # (mirror of NW about (32, 24))
+  - {x: 56, y: 41, amount: 6000, radius: 2}
+  - {x: 46, y: 34, amount: 9000, radius: 3}
   # ── North-EAST quadrant — spawn_point 1 agent / spawn_point 0 enemy ──
   # (V1 ablation: horizontal flip of the NW quadrant)
-  - {x: 112, y: 14, amount: 6000, radius: 2}
-  - {x: 92, y: 28, amount: 9000, radius: 3}
+  - {x: 56, y: 7, amount: 6000, radius: 2}
+  - {x: 46, y: 14, amount: 9000, radius: 3}
   # ── South-WEST quadrant — spawn_point 1 enemy / spawn_point 0 agent ──
-  # (mirror of NE about (64, 48))
-  - {x: 16, y: 82, amount: 6000, radius: 2}
-  - {x: 36, y: 68, amount: 9000, radius: 3}
+  # (mirror of NE about (32, 24))
+  - {x: 8, y: 41, amount: 6000, radius: 2}
+  - {x: 18, y: 34, amount: 9000, radius: 3}
   # ── Contested centre ─────────────────────────────────────────
-  # Sits ON the central bridge (x=64) at the water line (y=48).
-  # The disc (r=4) covers cells y in [44, 52]; the engine clips
+  # Sits ON the central bridge (x=32) at the water line (y=24).
+  # The disc (r=4) covers cells y in [20, 28]; the engine clips
   # ore to passable land, so water cells in the channel are
   # skipped and the disc seeds equal land on both sides of the
-  # river. The middle bridge gap (x=64..66) is also passable
+  # river. The middle bridge gap (x=32..34) is also passable
   # land, so the patch straddles the crossing — controlling it
   # means controlling the central river crossing.
-  - {x: 64, y: 48, amount: 14000, radius: 4}
+  - {x: 32, y: 24, amount: 14000, radius: 4}
 
 # Naval shore-water L-bands — one per side, mirrored about the
 # channel midline. Each band is a 3-cell-wide vertical strip
@@ -203,126 +206,78 @@ ore_patches:
 # the central channel) so the channel itself remains the central
 # land-engagement axis.
 water_cells:
-  # ── Agent (north lobe) shore band — west wall, x in 2..4,
-  #    y in 14..22. The agent's `syrd` (4, 12) sits just above
+  # ── Agent (north-west lobe) shore band — west wall, x in 1..3,
+  #    y in 7..11. The agent's `syrd` (2, 6) sits just above
   #    the band; ships launch southward into the band. ────
-  - [2, 14]
-  - [3, 14]
-  - [4, 14]
-  - [2, 15]
-  - [3, 15]
-  - [4, 15]
-  - [2, 16]
-  - [3, 16]
-  - [4, 16]
-  - [2, 17]
-  - [3, 17]
-  - [4, 17]
-  - [2, 18]
-  - [3, 18]
-  - [4, 18]
-  - [2, 19]
-  - [3, 19]
-  - [4, 19]
-  - [2, 20]
-  - [3, 20]
-  - [4, 20]
-  - [2, 21]
-  - [3, 21]
-  - [4, 21]
-  - [2, 22]
-  - [3, 22]
-  - [4, 22]
-  # ── Enemy (south lobe) shore band — east wall, mirrored. ────
-  # Mirror of (x, y) about (64, 48) is (128-x, 96-y).
-  # So x in 124..126, y in 74..82.
-  - [124, 74]
-  - [125, 74]
-  - [126, 74]
-  - [124, 75]
-  - [125, 75]
-  - [126, 75]
-  - [124, 76]
-  - [125, 76]
-  - [126, 76]
-  - [124, 77]
-  - [125, 77]
-  - [126, 77]
-  - [124, 78]
-  - [125, 78]
-  - [126, 78]
-  - [124, 79]
-  - [125, 79]
-  - [126, 79]
-  - [124, 80]
-  - [125, 80]
-  - [126, 80]
-  - [124, 81]
-  - [125, 81]
-  - [126, 81]
-  - [124, 82]
-  - [125, 82]
-  - [126, 82]
+  - [1, 7]
+  - [2, 7]
+  - [3, 7]
+  - [1, 8]
+  - [2, 8]
+  - [3, 8]
+  - [1, 9]
+  - [2, 9]
+  - [3, 9]
+  - [1, 10]
+  - [2, 10]
+  - [3, 10]
+  - [1, 11]
+  - [2, 11]
+  - [3, 11]
+  # ── Enemy (south-east lobe) shore band — east wall, mirrored. ────
+  # Mirror of (x, y) about (32, 24) is (64-x, 48-y).
+  # So x in 61..63, y in 37..41.
+  - [61, 37]
+  - [62, 37]
+  - [63, 37]
+  - [61, 38]
+  - [62, 38]
+  - [63, 38]
+  - [61, 39]
+  - [62, 39]
+  - [63, 39]
+  - [61, 40]
+  - [62, 40]
+  - [63, 40]
+  - [61, 41]
+  - [62, 41]
+  - [63, 41]
   # ── spawn_point 1 agent (NE lobe) shore band — east wall, x in
-  #    124..126, y in 14..22. The agent's V1 `syrd` (124, 12) sits
+  #    61..63, y in 7..11. The agent's V1 `syrd` (62, 6) sits
   #    just above the band; ships launch southward. ────
-  - [124, 14]
-  - [125, 14]
-  - [126, 14]
-  - [124, 15]
-  - [125, 15]
-  - [126, 15]
-  - [124, 16]
-  - [125, 16]
-  - [126, 16]
-  - [124, 17]
-  - [125, 17]
-  - [126, 17]
-  - [124, 18]
-  - [125, 18]
-  - [126, 18]
-  - [124, 19]
-  - [125, 19]
-  - [126, 19]
-  - [124, 20]
-  - [125, 20]
-  - [126, 20]
-  - [124, 21]
-  - [125, 21]
-  - [126, 21]
-  - [124, 22]
-  - [125, 22]
-  - [126, 22]
+  - [61, 7]
+  - [62, 7]
+  - [63, 7]
+  - [61, 8]
+  - [62, 8]
+  - [63, 8]
+  - [61, 9]
+  - [62, 9]
+  - [63, 9]
+  - [61, 10]
+  - [62, 10]
+  - [63, 10]
+  - [61, 11]
+  - [62, 11]
+  - [63, 11]
   # ── spawn_point 1 enemy (SW lobe) shore band — west wall,
-  #    mirror of the NE band about (64, 48): x in 2..4,
-  #    y in 74..82. ────
-  - [2, 74]
-  - [3, 74]
-  - [4, 74]
-  - [2, 75]
-  - [3, 75]
-  - [4, 75]
-  - [2, 76]
-  - [3, 76]
-  - [4, 76]
-  - [2, 77]
-  - [3, 77]
-  - [4, 77]
-  - [2, 78]
-  - [3, 78]
-  - [4, 78]
-  - [2, 79]
-  - [3, 79]
-  - [4, 79]
-  - [2, 80]
-  - [3, 80]
-  - [4, 80]
-  - [2, 81]
-  - [3, 81]
-  - [4, 81]
-  - [2, 82]
-  - [3, 82]
-  - [4, 82]
+  #    mirror of the NE band about (32, 24): x in 1..3,
+  #    y in 37..41. ────
+  - [1, 37]
+  - [2, 37]
+  - [3, 37]
+  - [1, 38]
+  - [2, 38]
+  - [3, 38]
+  - [1, 39]
+  - [2, 39]
+  - [3, 39]
+  - [1, 40]
+  - [2, 40]
+  - [3, 40]
+  - [1, 41]
+  - [2, 41]
+  - [3, 41]
 
 base:
   # Per-player cash plumbing (CLAUDE.md: per-player starting cash is
@@ -376,64 +331,60 @@ base:
   # ── Canonical actor layout — TWO spawn_point variants ─────────
   # spawn_point 0 (the historical mirrored layout): agent NW, enemy
   # SE. spawn_point 1 (ablation variant): agent NE, enemy SW. Both
-  # variants are horizontal flips of each other about x=64 and keep
+  # variants are horizontal flips of each other about x=32 and keep
   # the enemy as the exact rotational mirror of the agent about
-  # (64, 48). The engine round-robins the spawn group by seed (env
+  # (32, 24). The engine round-robins the spawn group by seed (env
   # `new_with_spawn_point`), so seeds 1-4 cycle through both variants
   # — distinct opening geometry on each seed, not just RNG.
   actors:
     # ── spawn_point 0: Agent (NW corner) ──
-    - {type: fact, owner: agent, position: [12, 10], spawn_point: 0}
-    - {type: powr, owner: agent, position: [16, 10], spawn_point: 0}
-    - {type: proc, owner: agent, position: [12, 14], spawn_point: 0}
-    - {type: tent, owner: agent, position: [16, 14], spawn_point: 0}
-    - {type: weap, owner: agent, position: [12, 18], spawn_point: 0}
+    - {type: fact, owner: agent, position: [6, 5],  spawn_point: 0}
+    - {type: powr, owner: agent, position: [8, 5],  spawn_point: 0}
+    - {type: proc, owner: agent, position: [6, 7],  spawn_point: 0}
+    - {type: tent, owner: agent, position: [8, 7],  spawn_point: 0}
+    - {type: weap, owner: agent, position: [6, 9],  spawn_point: 0}
     # Helipad (Allied air) — pre-placed so a model can BUILD heli/tran
     # without first building hpad themselves. Air axis is now active in
     # 1v1 (was land+navy only). Prereq for heli/tran: hpad (present).
-    - {type: hpad, owner: agent, position: [8, 14],   spawn_point: 0}
-    # Harv NORTH of tent (y=12, mirroring enemy harv's -y-of-tent
-    # arrangement). Per the kills+harv investigation (a9b52e1e), an
-    # agent harv placed +y of its tent has the tent's bib row (y+2)
-    # blocking the y-nearest ore cells, doubling the harvest cycle
-    # versus enemy harv which sits -y of its tent and is bib-clear.
-    - {type: harv, owner: agent, position: [16, 12], spawn_point: 0}
-    - {type: syrd, owner: agent, position: [4, 12],  spawn_point: 0}
-    - {type: 1tnk, owner: agent, position: [20, 12], spawn_point: 0}
-    - {type: e1,   owner: agent, position: [20, 14], spawn_point: 0}
-    # ── spawn_point 0: Enemy (SE corner) — mirror about (64, 48) ──
-    - {type: fact, owner: enemy, position: [116, 86], spawn_point: 0}
-    - {type: powr, owner: enemy, position: [112, 86], spawn_point: 0}
-    - {type: proc, owner: enemy, position: [116, 82], spawn_point: 0}
-    - {type: tent, owner: enemy, position: [112, 82], spawn_point: 0}
-    - {type: weap, owner: enemy, position: [116, 78], spawn_point: 0}
-    - {type: hpad, owner: enemy, position: [120, 82], spawn_point: 0}
-    - {type: harv, owner: enemy, position: [112, 78], spawn_point: 0}
-    - {type: syrd, owner: enemy, position: [124, 84], spawn_point: 0}
-    - {type: 1tnk, owner: enemy, position: [108, 84], spawn_point: 0}
-    - {type: e1,   owner: enemy, position: [108, 82], spawn_point: 0}
+    - {type: hpad, owner: agent, position: [4, 7],  spawn_point: 0}
+    # Harv NORTH of tent (mirroring enemy harv's -y-of-tent arrangement).
+    - {type: harv, owner: agent, position: [8, 6],  spawn_point: 0}
+    - {type: syrd, owner: agent, position: [2, 6],  spawn_point: 0}
+    - {type: 1tnk, owner: agent, position: [10, 6], spawn_point: 0}
+    - {type: e1,   owner: agent, position: [10, 7], spawn_point: 0}
+    # ── spawn_point 0: Enemy (SE corner) — mirror about (32, 24) ──
+    - {type: fact, owner: enemy, position: [58, 43], spawn_point: 0}
+    - {type: powr, owner: enemy, position: [56, 43], spawn_point: 0}
+    - {type: proc, owner: enemy, position: [58, 41], spawn_point: 0}
+    - {type: tent, owner: enemy, position: [56, 41], spawn_point: 0}
+    - {type: weap, owner: enemy, position: [58, 39], spawn_point: 0}
+    - {type: hpad, owner: enemy, position: [60, 41], spawn_point: 0}
+    - {type: harv, owner: enemy, position: [56, 39], spawn_point: 0}
+    - {type: syrd, owner: enemy, position: [62, 42], spawn_point: 0}
+    - {type: 1tnk, owner: enemy, position: [54, 42], spawn_point: 0}
+    - {type: e1,   owner: enemy, position: [54, 41], spawn_point: 0}
     # ── spawn_point 1: Agent (NE corner) — horizontal flip of V0 ──
-    - {type: fact, owner: agent, position: [116, 10], spawn_point: 1}
-    - {type: powr, owner: agent, position: [112, 10], spawn_point: 1}
-    - {type: proc, owner: agent, position: [116, 14], spawn_point: 1}
-    - {type: tent, owner: agent, position: [112, 14], spawn_point: 1}
-    - {type: weap, owner: agent, position: [116, 18], spawn_point: 1}
-    - {type: hpad, owner: agent, position: [120, 14], spawn_point: 1}
-    - {type: harv, owner: agent, position: [112, 12], spawn_point: 1}
-    - {type: syrd, owner: agent, position: [124, 12], spawn_point: 1}
-    - {type: 1tnk, owner: agent, position: [108, 12], spawn_point: 1}
-    - {type: e1,   owner: agent, position: [108, 14], spawn_point: 1}
-    # ── spawn_point 1: Enemy (SW corner) — mirror about (64, 48) ──
-    - {type: fact, owner: enemy, position: [12, 86],  spawn_point: 1}
-    - {type: powr, owner: enemy, position: [16, 86],  spawn_point: 1}
-    - {type: proc, owner: enemy, position: [12, 82],  spawn_point: 1}
-    - {type: tent, owner: enemy, position: [16, 82],  spawn_point: 1}
-    - {type: weap, owner: enemy, position: [12, 78],  spawn_point: 1}
-    - {type: hpad, owner: enemy, position: [8, 82],   spawn_point: 1}
-    - {type: harv, owner: enemy, position: [16, 78],  spawn_point: 1}
-    - {type: syrd, owner: enemy, position: [4, 84],   spawn_point: 1}
-    - {type: 1tnk, owner: enemy, position: [20, 84],  spawn_point: 1}
-    - {type: e1,   owner: enemy, position: [20, 82],  spawn_point: 1}
+    - {type: fact, owner: agent, position: [58, 5], spawn_point: 1}
+    - {type: powr, owner: agent, position: [56, 5], spawn_point: 1}
+    - {type: proc, owner: agent, position: [58, 7], spawn_point: 1}
+    - {type: tent, owner: agent, position: [56, 7], spawn_point: 1}
+    - {type: weap, owner: agent, position: [58, 9], spawn_point: 1}
+    - {type: hpad, owner: agent, position: [60, 7], spawn_point: 1}
+    - {type: harv, owner: agent, position: [56, 6], spawn_point: 1}
+    - {type: syrd, owner: agent, position: [62, 6], spawn_point: 1}
+    - {type: 1tnk, owner: agent, position: [54, 6], spawn_point: 1}
+    - {type: e1,   owner: agent, position: [54, 7], spawn_point: 1}
+    # ── spawn_point 1: Enemy (SW corner) — mirror about (32, 24) ──
+    - {type: fact, owner: enemy, position: [6, 43],  spawn_point: 1}
+    - {type: powr, owner: enemy, position: [8, 43],  spawn_point: 1}
+    - {type: proc, owner: enemy, position: [6, 41],  spawn_point: 1}
+    - {type: tent, owner: enemy, position: [8, 41],  spawn_point: 1}
+    - {type: weap, owner: enemy, position: [6, 39],  spawn_point: 1}
+    - {type: hpad, owner: enemy, position: [4, 41],  spawn_point: 1}
+    - {type: harv, owner: enemy, position: [8, 39],  spawn_point: 1}
+    - {type: syrd, owner: enemy, position: [2, 42],  spawn_point: 1}
+    - {type: 1tnk, owner: enemy, position: [10, 42], spawn_point: 1}
+    - {type: e1,   owner: enemy, position: [10, 41], spawn_point: 1}
 
 # All three required level keys point at the SAME compiled scenario.
 # The pack is effectively single-map; the `configs:` block below
@@ -442,7 +393,7 @@ base:
 levels:
   easy: &canonical
     description: >
-      Commander, this is a 1v1 macro match on a 128x96 bridges
+      Commander, this is a 1v1 macro match on a 64x48 bridges
       arena. A horizontal water channel splits the NORTH lobe
       (your side) from the SOUTH lobe (your opponent's side);
       three bridges cross the channel. You hold a Construction
@@ -453,7 +404,7 @@ levels:
       rifleman) in the NORTH-WEST corner. A second commander —
       your opponent — holds an identical base mirrored in the
       SOUTH-EAST corner. A safe ore patch sits next to your base;
-      a mid-distance expansion patch sits about 25 cells out; a
+      a mid-distance expansion patch sits about 13 cells out; a
       rich contested patch sits at the middle of the map astride
       the central bridge. You cannot see the contested patch or
       the opponent's base from your starting position. Build
