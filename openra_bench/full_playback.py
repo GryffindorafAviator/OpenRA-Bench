@@ -69,8 +69,23 @@ def _safe(s: str) -> str:
     return "".join(out)
 
 
-def cell_stem(pack_id: str, level: str, seed: int, fog_mode: str) -> str:
-    return f"{_safe(pack_id)}__{_safe(level)}__seed{int(seed)}__{_safe(fog_mode)}"
+def cell_stem(
+    pack_id: str,
+    level: str,
+    seed: int,
+    fog_mode: str,
+    repeat: int = 0,
+) -> str:
+    """Per-cell on-disk stem.
+
+    `_rep<R>` is appended ONLY when `repeat > 0` so pre-existing audit
+    JSONLs (no rep suffix) stay matchable by the viewer / paper
+    collector. Pass^N stability reps each get a distinct stem so
+    transcripts no longer overwrite each other (PR fix)."""
+    base = f"{_safe(pack_id)}__{_safe(level)}__seed{int(seed)}__{_safe(fog_mode)}"
+    if int(repeat) > 0:
+        return f"{base}__rep{int(repeat)}"
+    return base
 
 
 class FullPlayback:
@@ -95,10 +110,12 @@ class FullPlayback:
         level: str,
         seed: int,
         fog_mode: str,
+        repeat: int = 0,
     ):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
-        self.stem = cell_stem(pack_id, level, seed, fog_mode)
+        self.repeat = int(repeat)
+        self.stem = cell_stem(pack_id, level, seed, fog_mode, self.repeat)
         self.jsonl_path = self.root / f"{self.stem}.jsonl"
         self.png_dir = self.root / self.stem
         self.png_dir.mkdir(parents=True, exist_ok=True)

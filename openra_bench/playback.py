@@ -8,11 +8,16 @@ manifest with scenario meta + outcome + score. Written under a
 dedicated folder so people can inspect every run.
 
 Layout:
-  <root>/<pack:level>/seed<seed>/
+  <root>/<pack:level>/seed<seed>[_rep<R>]/
       manifest.json      scenario meta, outcome, scorecard, agent stats
       turns.jsonl        one JSON object per turn
       messages.json      full chat transcript (ModelAgent only)
       minimap_turnNN.png rendered minimap per turn (when available)
+
+The `_rep<R>` suffix is appended ONLY when `repeat > 0` so existing
+per-cell layouts (no rep suffix) stay readable by the viewer. Pass^N
+stability sweeps pass `repeat=R` for every replay so per-rep
+transcripts don't collide on disk.
 
 Entirely optional and additive: `run_level(..., playback=None)` is the
 default and changes nothing.
@@ -58,6 +63,7 @@ class Playback:
         cell: str,
         seed: int,
         draft: bool = False,
+        repeat: int = 0,
     ):
         safe_cell = "".join(
             ch if ch not in '<>:"/\\|?*' and ord(ch) >= 32 else "_"
@@ -68,12 +74,21 @@ class Playback:
         # walk up to (and remove) the run dir without straying past it
         # into the user's playback root.
         self._root_dir = Path(root)
-        self.final_dir = self._root_dir / safe_cell / f"seed{seed}"
+        self.seed = int(seed)
+        self.repeat = int(repeat)
+        # `_rep<R>` suffix is appended ONLY when repeat > 0 so existing
+        # bare-seed dirs (pre-bug-fix data and single-rep runs) stay at
+        # their canonical paths. Pass^N reps each get a distinct dir so
+        # rep transcripts no longer overwrite each other (PR fix).
+        seed_dirname = f"seed{seed}" if self.repeat == 0 else (
+            f"seed{seed}_rep{self.repeat}"
+        )
+        self.final_dir = self._root_dir / safe_cell / seed_dirname
         if draft:
             # Stage to a sibling .draft/<safe_cell>/seedN so the real
             # final path stays absent on disk until promote() runs.
             self.dir = (
-                self._root_dir / ".draft" / safe_cell / f"seed{seed}"
+                self._root_dir / ".draft" / safe_cell / seed_dirname
             )
         else:
             self.dir = self.final_dir

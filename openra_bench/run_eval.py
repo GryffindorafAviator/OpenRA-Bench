@@ -259,26 +259,39 @@ def _git_sha() -> str:
 
 
 def _score_path_candidates(playback_root, run_id, safe_model,
-                           cell: str, split: str, seed: int) -> list[Path]:
+                           cell: str, split: str, seed: int,
+                           repeat: int = 0) -> list[Path]:
     """Candidate on-disk `score.json` locations for a journaled cell.
 
     The Playback writer (see `playback.py`) builds dirs under
-    `<playback_root>/<run_id>__<safe_model>/<sanitized-cell:split>__seed<N>/`.
+    `<playback_root>/<run_id>__<safe_model>/<sanitized-cell:split>__seedN[_repR]/`.
     We don't replicate the sanitizer's exact rules here — instead we
-    glob for any `score.json` whose parent dir starts with a
-    prefix matching the cell+split+seed signature, which is what the
-    production sweeps use. Returns ALL matches so the caller can pick
-    the first that exists."""
+    glob for any `score.json` whose parent dir matches the
+    cell+split+seed[+rep] signature, which is what the production
+    sweeps use. Returns ALL matches so the caller can pick the first
+    that exists.
+
+    `repeat`: when 0 (the default), the legacy bare `seed<N>` dir is
+    matched FIRST (back-compat with pre-PR data) and falls back to
+    `seed<N>_rep0` for paranoia. When > 0, ONLY the `_rep<R>` dirs
+    are matched — the strict-resume gate must not conflate reps."""
     if not playback_root:
         return []
     root = Path(playback_root) / f"{run_id}__{safe_model}"
     if not root.exists():
         return []
     # Tolerate any sanitizer that swapped ":" / "/" / "|" for "_".
-    # Cell+split+seed are deterministic; just glob.
     safe_cell = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{cell}:{split}")
-    pattern = f"{safe_cell}*seed{seed}*/score.json"
-    return sorted(root.glob(pattern))
+    if int(repeat) > 0:
+        # rep>0 → MUST be the per-rep dir.
+        pattern = f"{safe_cell}*seed{seed}_rep{int(repeat)}*/score.json"
+        return sorted(root.glob(pattern))
+    # rep==0: prefer the legacy bare `seed<N>` layout (so back-compat
+    # data resumes), then fall back to a possible `seed<N>_rep0` dir
+    # if a writer ever emitted one. Glob both and order legacy first.
+    legacy = sorted(root.glob(f"{safe_cell}*seed{seed}/score.json"))
+    rep0 = sorted(root.glob(f"{safe_cell}*seed{seed}_rep0/score.json"))
+    return legacy + rep0
 
 
 def _strict_resume_gate(journal, prior: list[dict],
@@ -305,6 +318,7 @@ def _strict_resume_gate(journal, prior: list[dict],
         cell = r.get("cell", "")
         split = r.get("split", "public")
         seed = r.get("seed", 0)
+        repeat = int(r.get("repeat", 0) or 0)
         outcome = r.get("outcome")
         # Errors never count as done (mirror the loose-resume path),
         # so the existing done_keys() filter handles them. Strict
@@ -313,6 +327,7 @@ def _strict_resume_gate(journal, prior: list[dict],
             continue
         cands = _score_path_candidates(
             playback_root, run_id, safe_model, cell, split, seed,
+            repeat=repeat,
         )
         sc_path = next((c for c in cands if c.exists()), None)
         if sc_path is None:
@@ -620,24 +635,29 @@ def evaluate(
     def _run_one(task: tuple) -> dict:
         compiled, cell, split, seed, rep = task
         pb = None
-        # Only the first repeat writes a Playback — the records (the
-        # lightweight per-rep results) carry the pass^k data; saving N
-        # full per-turn dumps per cell would just bloat disk.
-        if playback_root is not None and rep == 0:
+        # Every rep writes its own Playback under a distinct
+        # seed<N>_rep<R> dir (rep > 0). Pre-PR runs used to gate this
+        # on `rep == 0` to "save disk", which silently OVERWROTE
+        # per-turn transcripts for reps 1..N-1 — the journal kept the
+        # outcomes but the messages.json / turns.jsonl / minimaps for
+        # every non-first rep were lost. We need per-rep transcripts
+        # for inter-rep behavioural-variance analysis on pass^N
+        # stability sweeps, so write them all.
+        if playback_root is not None:
             from .playback import Playback
 
             pb = Playback(
                 Path(playback_root) / f"{run_id}__{_safe_model}",
                 f"{cell}:{split}",
                 seed,
+                repeat=rep,
             )
             pb.run_id, pb.model = run_id, model
-        # Audit-format playback (FullPlayback): one JSONL per cell at the
-        # canonical `<pack>__<level>__seed<N>__<fog>.jsonl` path the
-        # paper-collection script consumes. Same first-repeat gating as
-        # the legacy Playback.
+        # Audit-format playback (FullPlayback): one JSONL per cell at
+        # `<pack>__<level>__seed<N>__<fog>[__rep<R>].jsonl` (rep>0
+        # appended only when needed for pass^N stability sweeps).
         fpb = None
-        if full_playback_root is not None and rep == 0:
+        if full_playback_root is not None:
             from .full_playback import FullPlayback
 
             # Derive (pack_id, level, fog_mode) from the cell. For
@@ -670,6 +690,7 @@ def evaluate(
                 level=_level,
                 seed=seed,
                 fog_mode=_fog,
+                repeat=rep,
             )
         ctrl = factory(compiled)
         if handoff_sweep and ":handoff-" in cell:
@@ -819,34 +840,49 @@ def evaluate(
                 return parts[1]  # pack:level OR pack:config_name
             return compiled.level
         # Pass^N resume: --repeats N generates N tasks per (cell, seed),
-        # all sharing the same episode_key (key doesn't carry rep). The
-        # naive `key not in done` filter would skip every task as soon
-        # as the journal had ONE record for that key, blocking pass^3
-        # from ever running rep=1/rep=2. Count journal records per key
-        # and keep `max(0, repeats - done_count)` tasks per key. The
-        # in-process journal-append dedupe is per-key-per-process so it
-        # would also fire on the second append of the same key in the
-        # same run — make this explicit so the journal allows repeats.
-        from collections import Counter
-        # Tally journal records by (base-key) — rep-suffixed and bare
-        # keys collapse to the same base so existing pass@1 data counts
-        # toward the pass^N quota.
+        # each carrying an explicit `rep` index (0, 1, ..., N-1). The
+        # task list contains every (cell, seed, rep) triple. The
+        # resume gate skips a task IFF its specific (cell, rep) slot is
+        # already in the journal; otherwise it keeps it.
+        #
+        # FOOTGUN HISTORY (commit 3ab9b417 → fixed here): The previous
+        # gate counted journal records per cell and kept the first
+        # `repeats - done_count` tasks regardless of which rep slot
+        # they targeted. For a pass@1-done cell with repeats=3, that
+        # logic kept the rep=0 task again, whose journal append then
+        # collided with the existing pass@1 record under the bare-key
+        # encoding (`pack|level|split|seed|fog`) and raised
+        # `DuplicateJournalKey` — silently for 280 episodes over a
+        # 50-minute window. The fix below uses per-slot set membership
+        # so the rep=0 task is skipped when rep=0 is already done.
         def _base_key(k: str) -> str:
             return k.split("|rep")[0] if "|rep" in k else k
-        done_count: Counter[str] = Counter()
+        def _rep_of(k: str) -> int:
+            if "|rep" not in k:
+                return 0
+            tail = k.rsplit("|rep", 1)[1]
+            try:
+                return int(tail)
+            except ValueError:
+                return 0
+        done_slots: set[tuple[str, int]] = set()
         for rec in prior:
-            base = _base_key(rec.get("_key") or "")
-            if base:
-                done_count[base] += 1
+            k = rec.get("_key") or ""
+            if not k:
+                continue
+            done_slots.add((_base_key(k), _rep_of(k)))
         kept: list = []
-        slots: Counter[str] = Counter()
+        in_run_slots: set[tuple[str, int]] = set()
         for t in tasks:
-            base_k = episode_key(t[0].meta.id, _suffix_of(t[1], t[0]),
-                                 t[2], t[3], _cell_fog(t[0]))
-            already = done_count[base_k] + slots[base_k]
-            if already < max(1, repeats):
-                kept.append(t)
-                slots[base_k] += 1
+            compiled = t[0]
+            base_k = episode_key(compiled.meta.id, _suffix_of(t[1], compiled),
+                                 t[2], t[3], _cell_fog(compiled))
+            rep = int(t[4]) if len(t) > 4 else 0
+            slot = (base_k, rep)
+            if slot in done_slots or slot in in_run_slots:
+                continue
+            kept.append(t)
+            in_run_slots.add(slot)
         tasks = kept
 
     def _persist(rec: dict) -> None:
@@ -1297,25 +1333,41 @@ def evaluate_1v1(
                             agent_spec, compiled, "enemy",
                             provider_cfg=provider_cfg,
                         )
-                    # Per-turn transcript persistence: write both sides'
-                    # LLM message history to disk every turn so an
-                    # operator tailing the file sees the live
-                    # conversation rather than waiting 30-60 min for
-                    # the episode to finish. A mid-episode crash
-                    # also preserves the partial transcript.
-                    transcript_dir = None
+                    # Per-turn full Playback persistence: both sides
+                    # write turns.jsonl + messages.json (when the
+                    # controller exposes `.history`) + per-turn
+                    # minimap PNGs + manifest.json + score.json into
+                    # sibling `agent_side/` and `enemy_side/` dirs
+                    # under this leaf. An operator tailing the file
+                    # sees the live LLM conversation rather than
+                    # waiting 30-60 min for the episode to finish;
+                    # a mid-episode crash preserves the partial run.
+                    # The bench's Playback UI uses the same on-disk
+                    # shape as the scenarios path, so 1v1 episodes
+                    # replay through the standard viewer.
+                    leaf_root = None
                     if playback_root:
                         safe = re.sub(r"[^a-z0-9-]+", "-",
                                       (model or "agent").lower()).strip("-")
-                        transcript_dir = (
+                        leaf_root = (
                             Path(playback_root) / f"{run_id}__{safe}"
                             / f"{cell.replace(':', '_')}_{half}"
-                            / f"seed{seed}"
                         )
                     res = run_1v1(
                         tmp, agent_ctrl, enemy_ctrl,
                         seed=seed, max_turns=compiled.max_turns,
-                        transcript_dir=transcript_dir,
+                        playback_root=leaf_root,
+                        cell=cell,
+                        half=half,
+                        run_id=run_id,
+                        agent_model=(
+                            opponent_label if half == "swapped" else model
+                        ),
+                        enemy_model=(
+                            model if half == "swapped" else opponent_label
+                        ),
+                        base_map=compiled.scenario.base_map,
+                        level=lv,
                     )
                     # Map raw winner ("agent"|"enemy"|"draw") to the
                     # AGENT's POV, accounting for the side swap.
