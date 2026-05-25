@@ -63,12 +63,17 @@ class Playback:
             ch if ch not in '<>:"/\\|?*' and ord(ch) >= 32 else "_"
             for ch in str(cell)
         )
-        self.final_dir = Path(root) / safe_cell / f"seed{seed}"
+        # Remember the per-session root (e.g.
+        # `<playback>/run-<ts>__<player>`) so cleanup after discard can
+        # walk up to (and remove) the run dir without straying past it
+        # into the user's playback root.
+        self._root_dir = Path(root)
+        self.final_dir = self._root_dir / safe_cell / f"seed{seed}"
         if draft:
             # Stage to a sibling .draft/<safe_cell>/seedN so the real
             # final path stays absent on disk until promote() runs.
             self.dir = (
-                Path(root) / ".draft" / safe_cell / f"seed{seed}"
+                self._root_dir / ".draft" / safe_cell / f"seed{seed}"
             )
         else:
             self.dir = self.final_dir
@@ -171,20 +176,25 @@ class Playback:
         return self.final_dir
 
     def _cleanup_empty_draft_parents(self) -> None:
-        """Walk up from `self.dir`'s parent removing empty dirs, BUT
-        stop at (and never delete) the `.draft/` boundary or higher.
-        Without this safeguard a sparsely-populated draft tree could
-        collapse all the way up to the playback root and erase the
-        caller's tmp_path."""
+        """Walk up from `self.dir`'s parent removing empty dirs. The
+        walk stops at (but is allowed to delete) the per-session root
+        `self._root_dir` (e.g. `<playback>/run-<ts>__<player>`); it
+        never strays above the session root into the shared playback
+        root. Without this safeguard a sparsely-populated draft tree
+        could either (a) leave an empty `run-…/` carcass behind after
+        Discard — the user-visible bug — or (b) collapse all the way
+        up and erase the caller's playback root."""
         try:
             parent = self.dir.parent
             while parent.exists() and not any(parent.iterdir()):
-                # Stop once we'd remove the `.draft` boundary itself —
-                # the playback root is not ours to delete.
-                if parent.name == ".draft":
-                    parent.rmdir()
-                    break
+                is_session_root = (
+                    self._root_dir is not None
+                    and parent.resolve() == self._root_dir.resolve()
+                )
                 parent.rmdir()
+                if is_session_root:
+                    # Don't ascend past the session root.
+                    break
                 parent = parent.parent
         except OSError:
             pass

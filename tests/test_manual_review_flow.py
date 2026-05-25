@@ -178,6 +178,21 @@ def test_discard_removes_draft_and_no_final_path(tmp_path):
         # No canonical save_path was ever published.
         assert sess.status()["save_path"] is None
         assert _final_seed_dir(tmp_path) is None
+        # Regression: the per-session run dir (parent of `.draft/`)
+        # must NOT be left behind as an empty carcass. The user-
+        # facing bug was that Discard removed the files but left an
+        # empty `run-<ts>__<player>/` folder visible to anyone
+        # browsing the playback root.
+        run_dirs = [
+            p for p in tmp_path.iterdir()
+            if p.is_dir() and p.name != ".draft"
+        ]
+        assert run_dirs == [], (
+            "Discard left empty run dir(s) behind: " + repr(run_dirs)
+        )
+        # And the shared playback root itself is preserved (caller's
+        # tmp_path must NOT be erased).
+        assert tmp_path.exists()
         # Idempotent — a second discard is a no-op.
         sess.discard_playback()
         assert sess.status()["save_path"] is None
