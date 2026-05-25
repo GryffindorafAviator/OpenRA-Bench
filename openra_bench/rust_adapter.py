@@ -38,21 +38,28 @@ def _cells(obj: Any) -> list[tuple[int, int]]:
     return out
 
 
-# ── Shroud 3-state approximation ──────────────────────────────────────
+# ── Shroud 3-state: engine-truth + Chebyshev fallback ────────────────
 # The Rust engine maintains the proper RA 3-state shroud per player
-# (`world.rs::shroud`: 0=unexplored, 1=fogged, 2=visible) but neither
-# the lean PyO3 observation nor the spatial tensor surfaces the
-# fogged-vs-visible distinction — both `explored_cells` and spatial
-# channel 1 collapse fogged+visible into a single "ever seen" mask. The
-# bench therefore approximates `visible_cells` bench-side: union of
-# cells within each currently-alive agent unit / building's sight
-# radius, the same shape the engine itself uses to compute shroud
-# reveal. Sight ranges are the RA vendor defaults (cross-checked via
-# `env.unit_codex` — see CLAUDE.md "vendor RA YAML is the single
-# source"). An actor type not listed here falls back to
-# `_DEFAULT_SIGHT`; this only affects edge cases (custom or
-# undocumented actor types) — for the bench's standard cast the
-# approximation is exact.
+# (`world.rs::shroud`: 0=unexplored, 1=fogged, 2=visible). Two PyO3
+# surfaces:
+#
+#   * `explored_cells` (cumulative union of fogged+visible) — always
+#     present.
+#   * `visible_cells`  (per-tick visible-only, from
+#     `typed_shroud[agent].visible`) — present on the engine HEAD with
+#     the "expose typed-shroud visible_cells via PyO3" PR; absent on
+#     older HEADs.
+#
+# `_compute_visible_cells` prefers the engine `visible_cells` when
+# present (exact truth, no approximation) and falls back to the
+# Chebyshev approximation below otherwise. The fallback unions cells
+# within each currently-alive agent unit/building's sight radius (the
+# same shape the engine itself uses for shroud reveal), seeded by the
+# per-turn explored-delta as a safety net for actor types missing
+# from `_SIGHT_BY_TYPE`. Sight ranges are the RA vendor defaults
+# (cross-checked via `env.unit_codex`). An actor type not listed
+# falls back to `_DEFAULT_SIGHT`; this only affects edge cases for
+# the fallback path.
 _SIGHT_BY_TYPE: dict[str, int] = {
     # Infantry (sight 4)
     "e1": 4, "e2": 4, "e3": 4, "e4": 4, "e6": 4, "e7": 4,
@@ -433,22 +440,35 @@ class RustObsAdapter:
         return max(xs) + margin, max(ys) + margin
 
     def _compute_visible_cells(self) -> set[tuple[int, int]]:
-        """Approximate the engine's 3-state visible set bench-side.
+        """Per-tick visible (shroud-state-2) cell set.
 
-        The PyO3 boundary exposes only `explored_cells` (cumulative
-        union of fogged+visible) — the visible-only state is dropped.
-        We reconstruct it as the union of cells within each live agent
-        actor's sight radius (unit OR building), clipped to the
-        playable rectangle. Cells newly added to `explored` THIS turn
-        are merged in as a safety net (the engine only reveals via a
-        live actor, so a fresh-this-turn explored cell IS visible —
-        this catches actor types missing from `_SIGHT_BY_TYPE`).
+        Two paths, in priority order:
 
-        This is the load-bearing fix for the
-        "explored area stays bright after the unit moves away" bug:
-        the minimap renderer can now distinguish "currently visible"
-        from "explored but fogged" and dim the latter accordingly.
+        1. ENGINE TRUTH — if the PyO3 obs carries `visible_cells`
+           (engine PR "expose typed-shroud visible_cells via PyO3"),
+           use it verbatim. This is the agent player's
+           `typed_shroud.visible` mask, scanned over the playable
+           rectangle by the engine — exact, no Chebyshev fudge.
+        2. CHEBYSHEV FALLBACK — older engine HEADs only ship
+           `explored_cells` (the cumulative fogged+visible union).
+           Reconstruct visible as the union of cells within each
+           live agent actor's sight radius (unit OR building),
+           clipped to the playable rectangle, with cells newly
+           added to `explored` THIS turn merged in as a safety net
+           for actor types missing from `_SIGHT_BY_TYPE`.
+
+        Either way the result is intersected with `_explored` so
+        `visible ⊆ explored` is a hard post-condition (clip any
+        out-of-bounds artefacts).
         """
+        # Engine-truth path: trust `visible_cells` if the engine
+        # surfaced it. An EMPTY list is still authoritative (e.g.
+        # the no-agent-actors case), so the presence-of-key check
+        # is on `"visible_cells" in self._raw`, not on truthiness.
+        if "visible_cells" in self._raw:
+            engine_vis = set(_cells(self._raw.get("visible_cells")))
+            return engine_vis & self._explored
+
         w, h = self.grid_dims()
         visible: set[tuple[int, int]] = set()
         # Agent units.
@@ -546,6 +566,15 @@ class RustObsAdapter:
             "bounds_y": 0,
             "game_tick": self.signals.game_tick,
             "explored_percent": self.signals.explored_percent,
+            # Cumulative units killed by THIS side, sourced from the engine
+            # `kills_per_player` counter (see openra-sim `credit_kill` /
+            # `update_kill_counter`). Surfaced into `render_state` so the
+            # 1v1 harness's military-progress tie-break (`one_v_one.py::
+            # _kills`) sees the real engine value rather than defaulting
+            # to 0. Without this, every 1v1 match where both bases
+            # survive the deadline collapses to the next tie-break layer
+            # (buildings → economy), masking real combat performance.
+            "units_killed": self.signals.units_killed,
             # Economy/base state so agents can plan construction.
             "cash": self.signals.cash,
             "resources": self.signals.resources,

@@ -610,9 +610,13 @@ class ModelAgent:
         unit_codex: str = "",
         level: str = "",
         fog_mode: str = "",
+        agent_faction: str = "",
+        enemy_faction: str = "",
     ):
         self.cfg = cfg
         self.objective = objective
+        self._agent_faction = (agent_faction or "").lower() or None
+        self._enemy_faction = (enemy_faction or "").lower() or None
         self.tools = _tool_schemas(allowed_tools)
         self.provider = provider or make_provider(cfg)
         self._level = level
@@ -631,6 +635,12 @@ class ModelAgent:
         # training bitmap minimap; persistent fog history across turns.
         self._terrain: bytes | None = None
         self._explored_history: set = set()
+        # Logical base_map id — passed through to render_tactical_minimap
+        # so the image-primary channel can paint the WATER/WALL terrain
+        # underlay (channels, bridges, walls visible from t=0; only
+        # CONTENTS gated by fog). Without this an image-primary model
+        # has to scout the river just to learn it's there.
+        self._base_map = base_map or ""
         if base_map:
             try:
                 from .minimap import terrain_png_for
@@ -688,6 +698,9 @@ class ModelAgent:
         self._labels = perception_labels(render_state, self._labels)
         self._label_to_id = {v: k for k, v in self._labels.items()}
         text = briefing_image_primary(render_state, self._labels)
+        faction = self._faction_line()
+        if faction:
+            text = f"{faction}\n{text}"
         b64 = None
         try:
             import base64
@@ -706,6 +719,7 @@ class ModelAgent:
             scale = max(2, min(6, 1560 // max(1, w * 6)))
             img = render_tactical_minimap(
                 render_state, scale=scale, unit_labels=self._labels,
+                base_map=self._base_map,
             )
             if img is not None:
                 buf = io.BytesIO()
@@ -726,6 +740,16 @@ class ModelAgent:
             }
         return {"role": "user", "content": text}
 
+    def _faction_line(self) -> str:
+        """One-line faction reminder for the per-turn briefing. Tells
+        the model which subset of the full RA codex IT can produce —
+        the codex itself stays uniform across packs."""
+        if not self._agent_faction:
+            return ""
+        ag = self._agent_faction
+        en = self._enemy_faction or "(unknown)"
+        return f"FACTION: You are {ag}. Your opponent is {en}."
+
     def _user_message(self, render_state: dict) -> dict:
         # Image-primary channel builds its own (position-redacted)
         # briefing + labelled minimap — dispatch before the text path.
@@ -740,6 +764,9 @@ class ModelAgent:
             text = _v2_brief(render_state)
         except Exception:  # noqa: BLE001 — never break a turn
             text = build_briefing(render_state, self.objective)
+        faction = self._faction_line()
+        if faction:
+            text = f"{faction}\n{text}"
         # Structured channel: NO image — append the text "Unexplored
         # regions" block instead (text-vs-vision A/B). Covers both
         # `structured` (fogged) and `structured-clear` (no fog — under

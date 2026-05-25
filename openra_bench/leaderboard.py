@@ -26,6 +26,13 @@ MIN_EPISODES = 5
 
 
 def _capability_breakdown(episodes: list[dict]) -> dict[str, dict]:
+    # Note: the per-capability `objective` MEAN was dropped — it
+    # averaged the already-misleading `objective_progress` scalar
+    # across runs, compounding the original mean-of-leaves defect
+    # (a 0.57 kills leaf + 0.0 deadline-violated leaf averages to
+    # 0.28; meaning the column number had no interpretation). The
+    # honest signal is win_rate + composite; per-leaf detail lives
+    # on each episode's `leaves_final`.
     out: dict[str, dict] = {}
     for cap in CAPABILITIES:
         eps = [e for e in episodes if e.get("capability") == cap]
@@ -36,9 +43,6 @@ def _capability_breakdown(episodes: list[dict]) -> dict[str, dict]:
             "n": n,
             "composite": round(sum(e["composite"] for e in eps) / n, 4),
             "win_rate": round(sum(e["outcome"] == "win" for e in eps) / n, 4),
-            "objective": round(
-                sum(e.get("objective_progress", 0.0) for e in eps) / n, 4
-            ),
         }
     return out
 
@@ -65,9 +69,14 @@ def ingest_run(
         "perception": overall.get("perception_mean", 0.0),
         "reasoning": overall.get("reasoning_mean", 0.0),
         "action": overall.get("action_mean", 0.0),
-        # Continuous goal achievement (partial credit) + the cumulative
-        # reward-vector signature, comparable across models/runs.
-        "objective": overall.get("objective_mean", 0.0),
+        # `objective` (mean blocking-ratio over the run) is REMOVED
+        # from the public leaderboard surface: averaging the per-
+        # episode scalar across runs is just as misleading as the
+        # original mean-of-leaves defect — the resulting number has
+        # no interpretation ("the average blocking-constraint across
+        # 50 episodes is 0.41" is not a thing). Headline metrics are
+        # win_rate and composite; per-episode `leaves_final` is the
+        # only honest detail surface.
         # Win speed (mean over wins): how decisively the model wins.
         "win_speed": overall.get("win_speed_mean", 0.0),
         "win_turns": overall.get("win_turns_mean", 0.0),

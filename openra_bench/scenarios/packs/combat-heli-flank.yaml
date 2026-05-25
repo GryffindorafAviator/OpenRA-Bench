@@ -1,12 +1,24 @@
-# combat-heli-flank — air-mobility cell: WIN by flying a `heli` over a
-# wall of buildings (pbox line) and killing the enemy e1 cluster
-# parked behind it; LOSE by trying to push ground units through the
-# wall (no detour exists wide enough inside the tick budget).
+# combat-heli-flank — air-mobility + lateral-flank cell: WIN by flying
+# the `heli` pair AROUND a centre-line AA emplacement and striking the
+# enemy e1 cluster from the north/south flank; LOSE by flying the
+# direct straight-east lane (an `agun` AA tower sits in the centre of
+# the airspace and shreds any heli crossing it on the y=20 axis) OR by
+# trying to push ground units through the pbox wall.
 #
-# MVP air-units pack. Demonstrates `ActorKind::Aircraft` straight-line
-# movement: heli ignores ground-impassable cells AND building
+# F1 cheat-WIN audit fix (2026-05-25): a brute `attack_move` straight
+# east used to WIN by flying over the pbox wall on y=20 — the "flank"
+# verb was cosmetic. An `agun` (anti-aircraft) added to the centre
+# airspace at (45,20) makes the direct lane LETHAL: a heli at y≈20
+# crossing x=45 takes the agun salvo and dies before reaching the
+# cluster. A real lateral flank (move north/south first, around the
+# AA, then east to the cluster, then strike) keeps the helis well
+# clear of the agun's effective range and clears the kill bar.
+#
+# MVP air-units pack. Demonstrates `ActorKind::Aircraft` lateral
+# manoeuvre: heli ignores ground-impassable cells AND building
 # footprints, so the direct (5..40) lane the wall blocks for tanks is
-# wide-open airspace for the heli.
+# wide-open airspace for the heli — but the AA tower on the airspace
+# axis forces the air arm to flank around the AA's engagement disc.
 #
 # Engine fixtures pinned by `OpenRA-Rust/openra-sim/tests/test_aircraft.rs`:
 #   * `heli_flies_over_impassable_terrain` — heli traverses a column
@@ -44,19 +56,19 @@
 
 meta:
   id: combat-heli-flank
-  title: 'Heli Flank — Air Mobility Over a Ground Wall'
+  title: 'Heli Flank — Air-Mobility Lateral Flank Around AA'
   capability: action
   real_world_meaning: >
     A two-helicopter strike must engage an enemy infantry cluster
     pinned behind a contiguous wall of pillboxes — a barrier that
-    denies any ground push inside the tick budget. The decision under
-    test is air-mobility recognition: only the helicopter
-    `move_units` / `attack_unit` flight path crosses the wall;
-    sending a ground unit at the same target stalls against the
-    impassable footprint and never reaches the cluster. Stall
-    (`observe` only) never engages; a ground brute push (no air
-    units exist in the agent force, so this degenerates to "no
-    valid plan") fails the kill bar.
+    denies any ground push inside the tick budget. An anti-aircraft
+    tower (agun) sits on the centre-line of the airspace; flying the
+    direct east lane crosses the AA disc and the heli pair is shot
+    down before reaching the cluster. The decision under test is
+    air-mobility + lateral-flank recognition: fly north (or south)
+    of the AA tower first, then east past it, then engage the
+    cluster from the flank. Stall never engages; a brute straight-
+    east attack_move dies to the AA.
   robotics_analogue: >
     Vertical envelopment / airmobile assault doctrine — the
     helicopter exists to bypass terrain that denies the ground
@@ -100,10 +112,13 @@ levels:
       (4,20) on the west side. A solid wall of pillboxes (stationary
       defensive turrets, impassable to ground units) runs vertically at
       x=50 from y=10..30 and cuts the map in half — no ground unit can
-      pass through it inside the deadline. Three enemy riflemen sit
-      behind the wall at (60, 19..21). Fly the helicopters over the wall
-      and gun all three down. Keep the Construction Yard intact, within
-      about 20 turns.
+      pass through it inside the deadline. An anti-aircraft gun
+      (agun) sits in the airspace at (45,20); any helicopter that
+      crosses the centre lane near y=20 will be shot down. Three
+      enemy riflemen sit behind the wall at (60, 19..21). Fly the
+      helicopters north or south of the AA tower first, then east
+      past it, then gun all three riflemen down. Keep the
+      Construction Yard intact, within about 20 turns.
     overrides:
       actors:
         # Agent base anchor — engine auto-done mitigation.
@@ -146,6 +161,16 @@ levels:
         - {type: e1, owner: enemy, position: [60, 19], stance: 0}
         - {type: e1, owner: enemy, position: [60, 20], stance: 0}
         - {type: e1, owner: enemy, position: [60, 21], stance: 0}
+        # Central anti-aircraft tower — sits on the airspace centre
+        # line. Engages any heli within its AA arc; the straight
+        # east lane from (30,20) → (60,20) crosses (45,20) and any
+        # heli on the y=20 axis is shot down before reaching the
+        # cluster. A lateral flank (move north past y≈10 or south
+        # past y≈30 first, then east, then engage) keeps the helis
+        # outside the agun's effective range. stance:2 Defend so it
+        # auto-fires on the closest in-range heli without leaving
+        # post.
+        - {type: agun, owner: enemy, position: [45, 20], stance: 2}
         # Far persistent enemy fact — engine auto-done mitigation
         # so the wall cluster doesn't take the whole side with it.
         - {type: fact, owner: enemy, position: [124, 20]}
@@ -158,6 +183,7 @@ levels:
       any_of:
         - {after_ticks: 1801}
         - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
     max_turns: 21
 
   # ── MEDIUM ──────────────────────────────────────────────────────────
@@ -171,9 +197,12 @@ levels:
       (4,20) on the west side. A solid wall of pillboxes (stationary
       defensive turrets, impassable to ground units) runs vertically at
       x=50 from y=10..30 and cuts the map in half — no ground unit can
-      pass through it inside the deadline. Five enemy riflemen are
-      clustered behind the wall at (60, 18..22). Fly the two helicopters
-      over the wall and clear the whole line. Keep the Construction
+      pass through it inside the deadline. An anti-aircraft gun
+      (agun) sits in the airspace at (45,20); any helicopter that
+      crosses the centre lane near y=20 will be shot down. Five
+      enemy riflemen are clustered behind the wall at (60, 18..22).
+      Fly the helicopters north or south of the AA tower first, then
+      east past it, then clear the whole line. Keep the Construction
       Yard standing, within about 24 turns.
     overrides:
       actors:
@@ -208,6 +237,8 @@ levels:
         - {type: e1, owner: enemy, position: [60, 20], stance: 0}
         - {type: e1, owner: enemy, position: [60, 21], stance: 0}
         - {type: e1, owner: enemy, position: [60, 22], stance: 0}
+        # Central anti-aircraft tower (see easy comment).
+        - {type: agun, owner: enemy, position: [45, 20], stance: 2}
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
@@ -218,6 +249,7 @@ levels:
       any_of:
         - {after_ticks: 2101}
         - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
     max_turns: 24
 
   # ── HARD ────────────────────────────────────────────────────────────
@@ -234,10 +266,15 @@ levels:
       your actual starting band from the observation — plus a
       Construction Yard at (4,20). A solid wall of pillboxes (stationary
       defensive turrets, impassable to ground units) runs vertically at
-      x=50 from y=10..30 and cuts the map in half. Five enemy riflemen
-      wait behind the wall at (60, 18..22). Fly the helicopters over
-      the wall from your starting band, gun all five down, and keep the
-      Construction Yard standing, within about 20 turns.
+      x=50 from y=10..30 and cuts the map in half. An anti-aircraft
+      gun (agun) sits in the airspace at (45,20); any helicopter that
+      crosses the centre lane near y=20 will be shot down. Five
+      enemy riflemen wait behind the wall at (60, 18..22). Fly the
+      helicopters east from your starting band while keeping clear of
+      the AA's centre disc (your band — north y≈11 or south y≈29 — is
+      already outside the AA's effective range; do not drift toward
+      y=20), gun all five riflemen down, and keep the Construction
+      Yard standing, within about 20 turns.
     overrides:
       actors:
         # Agent base anchor — duplicated under BOTH spawn_point
@@ -281,6 +318,9 @@ levels:
         - {type: e1, owner: enemy, position: [60, 20], stance: 0}
         - {type: e1, owner: enemy, position: [60, 21], stance: 0}
         - {type: e1, owner: enemy, position: [60, 22], stance: 0}
+        # Central anti-aircraft tower (see easy comment). Enemy
+        # actors don't honour spawn_point so this places every seed.
+        - {type: agun, owner: enemy, position: [45, 20], stance: 2}
         - {type: fact, owner: enemy, position: [124, 20]}
     win_condition:
       all_of:
@@ -291,4 +331,5 @@ levels:
       any_of:
         - {after_ticks: 1801}
         - {not: {has_building: fact}}
+        - {not: {own_units_gte: 1}}
     max_turns: 21

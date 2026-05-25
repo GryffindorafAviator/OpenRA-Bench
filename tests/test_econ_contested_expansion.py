@@ -285,10 +285,13 @@ def test_predicates_enforce_capability():
     in time; fail fires on timeout OR fact gone."""
     c = compile_level(load_pack(PACK), "easy")
 
-    # All clauses met → WIN
+    # All clauses met → WIN (easy bar raised to 6300 — see pack comments;
+    # OpenRA-Rust PR #20 made the auto-spawned harv reliably productive
+    # so the pre-fix 5800 bar no longer discriminates home-proc cheat
+    # from intended escort-then-place).
     assert evaluate(
         c.win_condition,
-        _ctx(building_types=("fact", "powr", "proc", "proc"), tick=2000, cash=5800),
+        _ctx(building_types=("fact", "powr", "proc", "proc"), tick=2000, cash=6300),
     )
     # Only 1 proc → not a win
     assert not evaluate(
@@ -298,7 +301,7 @@ def test_predicates_enforce_capability():
     # 2 procs but cash below bar → not a win
     assert not evaluate(
         c.win_condition,
-        _ctx(building_types=("fact", "powr", "proc", "proc"), tick=2000, cash=5799),
+        _ctx(building_types=("fact", "powr", "proc", "proc"), tick=2000, cash=6299),
     )
     # Timeout: bar unmet → fail
     assert evaluate(

@@ -230,16 +230,20 @@ levels:
         # rather than ending the episode in a draw.
         - {type: fact, owner: enemy, position: [80, 8]}
         - {type: fact, owner: enemy, position: [88, 4]}
+    # v1.0 sweep audit (F8 long-horizon): converted from strict `then:`
+    # to STATE-BASED `all_of:` — "at any point achieve power + intake +
+    # capital reserve + tech + K kills before deadline". Engine prereqs
+    # (powr→proc→weap) prevent skipping a building stage; the capital
+    # reserve gate genuinely depends on proc being built (no other
+    # income source). Removes the F8 "N-step plateau" Qwen 9B failure
+    # mode in which clauses crediting was blocked by latch ordering.
     win_condition:
       all_of:
-        - then:
-            id: stage-locked-easy
-            clauses:
-              - {has_building: powr}              # STAGE 1: power
-              - {has_building: proc}              # STAGE 2: intake
-              - {economy_value_gte: 3500}         # STAGE 3: capital
-              - {has_building: weap}              # STAGE 4: tech
-              - {units_killed_gte: 2}             # STAGE 5: action
+        - {has_building: powr}              # power
+        - {has_building: proc}              # intake
+        - {economy_value_gte: 3500}         # capital
+        - {has_building: weap}              # tech
+        - {units_killed_gte: 2}             # action
         - within_ticks: 6000
     fail_condition:
       any_of:
@@ -308,16 +312,15 @@ levels:
         # ANY enemy building is an instant LOSS (fail_condition).
         - {type: fact, owner: enemy, position: [80, 8]}
         - {type: fact, owner: enemy, position: [88, 4]}
+    # v1.0 sweep audit (F8 long-horizon): converted from `then:` to
+    # state-based `all_of:` — see EASY note above.
     win_condition:
       all_of:
-        - then:
-            id: stage-locked-medium
-            clauses:
-              - {has_building: powr}              # STAGE 1: power
-              - {has_building: proc}              # STAGE 2: intake
-              - {economy_value_gte: 3000}         # STAGE 3: capital
-              - {has_building: weap}              # STAGE 4: tech
-              - {units_killed_gte: 3}             # STAGE 5: action
+        - {has_building: powr}
+        - {has_building: proc}
+        - {economy_value_gte: 3000}
+        - {has_building: weap}
+        - {units_killed_gte: 3}
         - within_ticks: 6000
     fail_condition:
       any_of:
@@ -357,7 +360,7 @@ levels:
       SOUTH (y=26) by seed; the harvester's matched ore patch flips with
       it. Five hold-fire enemy soldiers wait mid-east as kill targets; two
       persistent enemy yards sit further east. Win bar: own a power plant,
-      own a refinery, reach economy value 3000, own a war factory, and
+      own a refinery, hold economy value 2700, own a war factory, and
       accumulate at least three UNIT kills (razing any enemy building
       forfeits), within about 67 turns.
     starting_cash: 2400
@@ -402,16 +405,23 @@ levels:
         # hunt-everything brute LOSES rather than drawing.
         - {type: fact, owner: enemy, position: [80, 8]}
         - {type: fact, owner: enemy, position: [88, 4]}
+    # v1.0 sweep audit (F8 long-horizon): converted from `then:` to
+    # state-based `all_of:` — see EASY note above. NOTE: on hard
+    # state-based `economy_value_gte` is evaluated LIVE at the win
+    # check (not latched as `then:` did), so M is tuned to the value
+    # the intended policy can HOLD at the deadline after the
+    # powr+proc+weap spend. M=2700 keeps the predicate strictly above
+    # starting_cash (2400) — so proc is still required to clear the
+    # gate — while making the AT-DEADLINE capital-reserve bar
+    # achievable on the off-axis NORTH spawn whose harvest throughput
+    # is slightly slower than EASY/MEDIUM's central layout.
     win_condition:
       all_of:
-        - then:
-            id: stage-locked-hard
-            clauses:
-              - {has_building: powr}              # STAGE 1: power
-              - {has_building: proc}              # STAGE 2: intake
-              - {economy_value_gte: 3000}         # STAGE 3: capital
-              - {has_building: weap}              # STAGE 4: tech
-              - {units_killed_gte: 3}             # STAGE 5: action
+        - {has_building: powr}
+        - {has_building: proc}
+        - {economy_value_gte: 2700}
+        - {has_building: weap}
+        - {units_killed_gte: 3}
         - within_ticks: 6000
     fail_condition:
       any_of:

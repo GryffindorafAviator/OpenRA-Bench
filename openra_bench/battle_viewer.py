@@ -61,6 +61,16 @@ def scan(root: str | Path) -> list[EpisodeRef]:
                 score = json.loads(sp.read_text())
             except Exception:  # noqa: BLE001
                 score = {}
+        # Read the new blocking-ratio scalar first; fall back to the
+        # deprecated `objective_progress` so a v1.0 playback dir
+        # (score.json + manifest.json predating the rename) still
+        # indexes. `leaves_final` is preferred for display, but the
+        # EpisodeRef carries the scalar for backwards-compatible
+        # filtering / sort downstream.
+        obj = score.get(
+            "objective_blocking_ratio",
+            score.get("objective_progress", m.get("objective_progress")),
+        )
         out.append(EpisodeRef(
             run_id=str(m.get("run_id") or "unknown"),
             model=str(m.get("model") or "agent"),
@@ -68,9 +78,7 @@ def scan(root: str | Path) -> list[EpisodeRef]:
             seed=int(m.get("seed") or 0),
             outcome=str(m.get("outcome") or "?"),
             composite=score.get("composite"),
-            objective=score.get(
-                "objective_progress", m.get("objective_progress")
-            ),
+            objective=obj,
             dir=str(d),
         ))
     out.sort(key=lambda e: (e.run_id, e.model, e.scenario, e.seed),
@@ -179,7 +187,13 @@ def episode_view(ep_dir: str | Path, turn_idx: int) -> dict:
         "commands": t.get("commands", []),
         "signals": t.get("signals", {}),
         "goal": g,
-        "objective_progress": g.get("objective_progress"),
+        # Source-of-truth per-leaf table. The legacy
+        # `objective_progress` scalar averaged unrelated leaves and
+        # produced false near-win readings — it is dropped from the
+        # public view dict. `goal` itself still carries it under the
+        # deprecated alias for any internal consumer that needs the
+        # scalar; new consumers should iterate `leaves_final`.
+        "leaves_final": g.get("leaves") or [],
         "won": g.get("won"),
         "manifest": ep["manifest"],
     }

@@ -126,5 +126,12 @@ def test_run_eval_playback_tree_with_score(tmp_path):
     # run/model identity is recorded for the viewer cascade.
     man = json.loads((sd / "manifest.json").read_text())
     assert man.get("run_id") and man.get("model")
+    # Deprecated `objective_progress` alias still present for one
+    # release of back-compat. The new sources of truth are
+    # `objective_blocking_ratio` (worst-leaf scalar) and the
+    # `leaves_final` per-leaf snapshot — both written to the manifest
+    # by eval_core.run_level().
     assert man["objective_progress"] is not None
+    assert man["objective_blocking_ratio"] is not None
+    assert isinstance(man.get("leaves_final"), list)
     assert isinstance(man.get("reward_vector"), dict)

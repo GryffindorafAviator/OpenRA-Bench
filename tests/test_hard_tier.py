@@ -1513,6 +1513,15 @@ UPGRADED = [
     "combat-heli-flank",  # hard: 2 agent spawn_point groups (north/south heli staging)
     "econ-harvester-defense-raid",  # hard: 2 agent spawn_point groups (north/south base)
     "econ-mine-and-grow",  # hard: 2 agent spawn_point groups (north/south base)
+    # The canonical LLM-vs-LLM 1v1 macro pack. 2026-05-25 update:
+    # carries TWO fully-symmetric spawn_point variants (V0: agent NW
+    # ↔ enemy SE; V1: agent NE ↔ enemy SW), both at the original
+    # ≈128.8-cell diagonal separation. The agent stays in the NORTH
+    # lobe and the enemy in the SOUTH lobe at the SAME variant — the
+    # symmetric-arena fairness contract is preserved (only the
+    # horizontal corner flips per seed). Ablation diversity without
+    # introducing per-seed bias.
+    "adversarial-1v1-macro",  # hard: 2 fully-symmetric spawn_point variants
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation

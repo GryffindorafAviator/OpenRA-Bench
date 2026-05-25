@@ -23,6 +23,18 @@
 # of the `then` latch — and the tick deadline bites as a real LOSS
 # (not a draw).
 #
+# Anti-cheat addendum (2026-05 Qwen-9B sweep): the original win only
+# required `has_building: powr` + `building_count_gte: {type: proc}`
+# under a `within_ticks` deadline. A trajectory of mostly-Observe with a
+# single Build('powr') + PlaceBuilding('proc') WON because has_building
+# flips as soon as the powr enters the production queue (the
+# own_building_types signal accumulates queued/produced types), so the
+# grid never had to actually come ONLINE. Added `power_provided_gte:
+# 100` per level — the gross-provided floor is satisfied ONLY when a
+# powr is actually placed (and not powered down/destroyed). A queued-
+# only powr contributes 0; a stall / observe-only policy LOSES on the
+# deadline.
+#
 # Engine facts used (verified against the installed openra_train wheel):
 #
 # 1. Build costs (gamerules.rs `actor!` macros):
@@ -146,9 +158,11 @@ levels:
     # building infantry/army, or attempting the Refinery before the
     # Power Plant all miss the clock and LOSE.
     description: >
-      Start with a Construction Yard and $1900. Build a Power Plant,
-      then an Ore Refinery, within about 40 turns. The Refinery
-      requires a Power Plant first.
+      Start with a Construction Yard and $1900. Build AND PLACE a Power
+      Plant, then build and place an Ore Refinery, within about 40
+      turns. The Refinery requires a Power Plant first. The grid must
+      actually be ONLINE — queuing the powr is not enough; it must be
+      PLACED so that gross provided power is ≥100.
     starting_cash: 1900
     overrides:
       actors:
@@ -162,10 +176,18 @@ levels:
             clauses:
               - {has_building: powr}
               - {building_count_gte: {type: proc, n: 1}}
-        - within_ticks: 3600
+        # Anti-cheat floor: a placed powr provides +100 gross power; a
+        # Build('powr') that is never followed by PlaceBuilding stays
+        # in the production queue and contributes 0 (the building never
+        # enters the world). This breaks the observed Qwen-9B trajectory
+        # (mostly-observe + a single Build powr + a single PlaceBuilding
+        # proc) where powr was queued but never placed, so the grid was
+        # never online yet has_building still flipped via the queue.
+        - power_provided_gte: 100
+        - within_ticks: 3602
     fail_condition:
       any_of:
-        - after_ticks: 3601
+        - after_ticks: 3603
         - not: {has_building: fact}
     max_turns: 40
 
@@ -190,9 +212,11 @@ levels:
     # the clock and LOSE.
     description: >
       Start with a Construction Yard, no power, and no economy. Build
-      a Power Plant, then an Ore Refinery, within about 32 turns on a
-      tighter cash budget ($1750). The Refinery requires a Power Plant
-      first.
+      AND PLACE a Power Plant, then build and place an Ore Refinery,
+      within about 32 turns on a tighter cash budget ($1750). The
+      Refinery requires a Power Plant first. The grid must actually be
+      ONLINE — gross provided power must be ≥100, so the powr must be
+      PLACED (a queued-only powr provides nothing).
     starting_cash: 1750
     overrides:
       actors:
@@ -205,10 +229,11 @@ levels:
             clauses:
               - {has_building: powr}
               - {building_count_gte: {type: proc, n: 1}}
-        - within_ticks: 2880
+        - power_provided_gte: 100
+        - within_ticks: 2882
     fail_condition:
       any_of:
-        - after_ticks: 2881
+        - after_ticks: 2883
         - not: {has_building: fact}
     max_turns: 32
 
@@ -238,8 +263,10 @@ levels:
     # rejected and the clock runs out as a LOSS.
     description: >
       Start with a Construction Yard, no power, and no economy. Build
-      a Power Plant, then an Ore Refinery, within about 32 turns on a
-      tight $1750 budget. The Refinery requires a Power Plant first.
+      AND PLACE a Power Plant, then build and place an Ore Refinery,
+      within about 32 turns on a tight $1750 budget. The Refinery
+      requires a Power Plant first. The grid must actually be ONLINE
+      — gross provided power must be ≥100, so the powr must be PLACED.
       Your Construction Yard sits in the north or south band depending
       on seed — read its position from the observation and place
       buildings adjacent to it.
@@ -265,9 +292,10 @@ levels:
             clauses:
               - {has_building: powr}
               - {building_count_gte: {type: proc, n: 1}}
-        - within_ticks: 2880
+        - power_provided_gte: 100
+        - within_ticks: 2882
     fail_condition:
       any_of:
-        - after_ticks: 2881
+        - after_ticks: 2883
         - not: {has_building: fact}
     max_turns: 32

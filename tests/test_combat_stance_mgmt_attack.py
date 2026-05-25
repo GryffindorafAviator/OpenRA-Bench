@@ -88,6 +88,25 @@ def test_allowlist_includes_set_stance():
     assert "observe" in tools
 
 
+def test_allowlist_excludes_offensive_verbs():
+    """F1 cheat-WIN audit fix (2026-05-25): `move_units`,
+    `attack_unit`, `attack_move` are NOT in the toolset. With them the
+    agent could brute attack_unit on each scattered enemy and clear
+    the kill bar without ever calling `set_stance` — making the verb-
+    under-test cosmetic. Restricting the toolset to {observe, stop,
+    set_stance} forces every winning play to escalate the stance.
+    """
+    pack = load_pack(PACK_PATH)
+    base = pack.base if isinstance(pack.base, dict) else pack.base.dict()
+    tools = set(base.get("tools") or [])
+    for forbidden in ("move_units", "attack_unit", "attack_move"):
+        assert forbidden not in tools, (
+            f"{forbidden!r} re-enabled — the brute attack_unit chain "
+            f"that the F1 audit caught will WIN again. Keep the "
+            f"toolset locked to stance-only verbs."
+        )
+
+
 def test_defenders_start_on_returnfire_at_the_west_edge():
     """The 4× 2tnk formation on every level must start on stance:1
     (ReturnFire). If they start on any other stance the scenario

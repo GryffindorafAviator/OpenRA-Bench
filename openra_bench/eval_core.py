@@ -126,10 +126,17 @@ class EpisodeResult:
     actions_warned: int = 0  # commands the engine rejected/warned on
     trace: list[dict] = field(default_factory=list)
     # Final goal-tracker snapshot (always computed, playback or not).
-    # objective_progress is continuous partial credit toward the
-    # scenario win condition; reward_vector is the normalized
-    # cumulative, scenario-agnostic vector (see goal_tracker).
-    objective_progress: float = 0.0
+    # `objective_blocking_ratio` is the worst-leaf ratio — i.e. the
+    # bottleneck constraint, since an `all_of` win needs every leaf
+    # satisfied (see goal_tracker for why min beats mean). `leaves_final`
+    # carries the per-predicate `{name, target, current, ratio,
+    # satisfied}` snapshot from the final turn — the SOURCE OF TRUTH
+    # for "how close to the win" reporting. `objective_progress` is
+    # kept as a deprecated alias of `objective_blocking_ratio` for
+    # one release so older readers don't crash.
+    objective_progress: float = 0.0  # deprecated alias of objective_blocking_ratio
+    objective_blocking_ratio: float = 0.0
+    leaves_final: list[dict] = field(default_factory=list)
     reward_vector: dict = field(default_factory=dict)
 
 
@@ -389,6 +396,40 @@ def run_level(
                     interrupt=interrupt,
                     goal=turn_goal(compiled.win_condition, ctx),
                 )
+                # Flush the LLM transcript per-turn so an operator
+                # tailing messages.json sees the live conversation
+                # rather than waiting for episode end. Without this,
+                # a 200-turn 1v1 episode goes silent on disk for
+                # ≥30 min and a mid-episode crash loses the whole
+                # transcript. Cost: one ~100KB write per turn — fine
+                # on SSD, ~20MB total per episode in the worst case.
+                try:
+                    _intro = locals().get("_introspection_per_turn")
+                    if _intro is None:
+                        _intro = introspection_source(controller)
+                        _introspection_per_turn = _intro  # noqa: F841
+                    _hist = getattr(_intro, "history", None)
+                    if isinstance(_hist, list):
+                        playback.write_messages(_hist)
+                    # Live rate metrics — same shape as 1v1's progress.json
+                    import time as _time, json as _json
+                    _ep_t0 = locals().get("_ep_t0_per_turn")
+                    if _ep_t0 is None:
+                        _ep_t0 = _time.monotonic()
+                        _ep_t0_per_turn = _ep_t0  # noqa: F841
+                    _elapsed = _time.monotonic() - _ep_t0
+                    _tps = (turns / _elapsed) if _elapsed > 0 else 0.0
+                    _eta = ((compiled.max_turns - turns) / _tps) if _tps > 0 else 0.0
+                    (playback.dir / "progress.json").write_text(_json.dumps({
+                        "turn": turns,
+                        "max_turns": compiled.max_turns,
+                        "elapsed_s": round(_elapsed, 1),
+                        "turns_per_second": round(_tps, 3),
+                        "sec_per_turn": round(1.0 / _tps, 2) if _tps > 0 else None,
+                        "eta_s": round(_eta, 1),
+                    }))
+                except Exception:  # noqa: BLE001 — playback never breaks a run
+                    pass
             if full_playback is not None:
                 # Mirror the same PNG (when the legacy playback rendered
                 # one). Otherwise render on-demand for the audit format.
@@ -490,6 +531,13 @@ def run_level(
                 [f"(episode end: {('loss' if conceded else outcome)})"],
                 adapter.signals, _fpng, interrupt=None, goal=final_goal,
             )
+        # `final_goal` always exposes the new `objective_blocking_ratio`
+        # key (and the deprecated `objective_progress` alias). Read the
+        # new key first; fall back for paranoia in case a hand-built
+        # dict is ever injected here.
+        _blk = final_goal.get(
+            "objective_blocking_ratio", final_goal.get("objective_progress", 0.0)
+        )
         result = EpisodeResult(
             scenario=f"{compiled.pack_id}:{compiled.level}",
             seed=seed,
@@ -499,7 +547,9 @@ def run_level(
             actions_issued=issued,
             actions_warned=warned,
             trace=trace,
-            objective_progress=final_goal["objective_progress"],
+            objective_progress=_blk,
+            objective_blocking_ratio=_blk,
+            leaves_final=list(final_goal.get("leaves") or []),
             reward_vector=final_goal["reward_vector"],
         )
         if playback is not None:
@@ -526,6 +576,8 @@ def run_level(
                     "actions_warned": warned,
                     "agent_stats": getattr(agent_obj, "stats", None),
                     "objective_progress": result.objective_progress,
+                    "objective_blocking_ratio": result.objective_blocking_ratio,
+                    "leaves_final": result.leaves_final,
                     "reward_vector": result.reward_vector,
                     "signals": {
                         "economy_value": adapter.signals.cash
@@ -558,6 +610,8 @@ def run_level(
                             introspection_source(controller), "stats", None
                         ),
                         "objective_progress": result.objective_progress,
+                        "objective_blocking_ratio": result.objective_blocking_ratio,
+                        "leaves_final": result.leaves_final,
                         "reward_vector": result.reward_vector,
                     },
                 )

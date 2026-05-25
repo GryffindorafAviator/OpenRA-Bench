@@ -125,8 +125,74 @@ def test_reward_vector_is_normalized_and_cumulative():
 def test_turn_goal_bundles_predicates_and_vector_side_by_side():
     g = turn_goal({"units_killed_gte": 5}, _ctx())
     assert "leaves" in g and "reward_vector" in g
-    assert "objective_progress" in g and 0.0 <= g["objective_progress"] <= 1.0
+    # `leaves_final` shape (per-leaf source of truth) is non-empty and
+    # carries the current/target/satisfied fields the renderer relies on.
+    assert g["leaves"]
+    leaf = g["leaves"][0]
+    assert leaf["name"] == "units_killed_gte"
+    assert leaf["target"] == 5
+    assert leaf["current"] == 3
+    assert leaf["satisfied"] is False
+    # The blocking-ratio scalar replaces the old mean-of-leaves
+    # `objective_progress`; both keys carry the same min-of-leaves
+    # value during the one-release deprecation window.
+    assert "objective_blocking_ratio" in g
+    assert 0.0 <= g["objective_blocking_ratio"] <= 1.0
+    assert g["objective_blocking_ratio"] == g["objective_progress"]
     assert g["won"] is False  # 3 < 5
+
+
+def test_turn_goal_blocking_ratio_is_min_not_mean():
+    """Anti-regression for the misleading-average defect.
+
+    `units_killed_gte:7` with 4 kills (ratio 0.57) + `within_ticks:4000`
+    at tick 4203 (a *violated* deadline — `satisfied=False`, ratio
+    softly clamped to ~0.95) used to produce `mean(0.57, 0.95) ≈ 0.76`
+    — reading "near win" when both clauses had FAILED. The fix:
+    `min(0.57, 0.95) = 0.57` — the worst leaf is the bottleneck
+    constraint of an `all_of`, and the scalar refuses to inflate
+    past it. Both leaves are also reported `satisfied=False`, which
+    is the load-bearing flag downstream consumers (`won` derivation,
+    leaf table renderer) check directly.
+    """
+
+    class _S:
+        explored_percent = 0.0
+        enemies_seen_ids: list = []
+        enemy_buildings_seen_ids: list = []
+        units_killed = 4
+        units_lost = 0
+        game_tick = 4203
+        cash = 0
+        resources = 0
+        power_provided = 0
+        power_drained = 0
+        own_building_types: set = set()
+        own_buildings: list = []
+
+    ctx = WinContext(signals=_S(), render_state={"units_summary": []})
+    wc = {"all_of": [{"units_killed_gte": 7}, {"within_ticks": 4000}]}
+    g = turn_goal(wc, ctx)
+    by = {leaf["name"]: leaf for leaf in g["leaves"]}
+    # The kills leaf is the bottleneck: ratio 4/7 ≈ 0.571.
+    assert by["units_killed_gte"]["ratio"] == pytest.approx(4 / 7, abs=1e-4)
+    assert by["units_killed_gte"]["satisfied"] is False
+    # within_ticks: deadline missed — satisfied=False — but the soft
+    # ratio is still > 0 (≈ 4000/4203). The point of the new scalar
+    # is that the MEAN of these (~0.76) would mislead; the MIN
+    # honestly reports the worst leaf.
+    assert by["within_ticks"]["satisfied"] is False
+    assert by["within_ticks"]["ratio"] > 0.9
+    # New scalar: the WORST leaf (min ≈ 0.57). NOT the mean (~0.76)
+    # which would have read "near win" even though both clauses
+    # failed (won is False).
+    assert g["objective_blocking_ratio"] == pytest.approx(4 / 7, abs=1e-4)
+    assert g["objective_progress"] == g["objective_blocking_ratio"]
+    # And the mean would have been MISLEADINGLY higher — pin the gap
+    # so a future regression to mean-of-leaves trips this test.
+    mean_of_leaves = sum(l["ratio"] for l in g["leaves"]) / len(g["leaves"])
+    assert mean_of_leaves > g["objective_blocking_ratio"] + 0.1
+    assert g["won"] is False
 
 
 # ---- 3. end-to-end persisted + loadable -----------------------------------
@@ -163,3 +229,33 @@ def test_playback_round_trip_has_reasoning_and_goal(tmp_path):
     # turns.jsonl is valid JSONL
     raw = (pb.dir / "turns.jsonl").read_text().strip().splitlines()
     assert json.loads(raw[0])["goal"]["reward_vector"]["territory"] >= 0.0
+
+
+# ---- 4. leaf table rendering (no percentage scalar) -----------------------
+
+
+def test_render_leaves_table_shows_current_over_target_not_percent():
+    """The viewer must render the per-leaf table verbatim — explicit
+    `current/target` plus a satisfied mark — and MUST NOT collapse it
+    to a misleading "objective: X%" scalar. Pinning the rendered
+    substrings keeps the user-visible defect (the 0.79 "near win"
+    that hid two failed clauses) from coming back.
+    """
+    from openra_bench.playback_view import render_leaves_table
+
+    leaves = [
+        {"name": "units_killed_gte", "target": 7, "current": 4,
+         "ratio": 4 / 7, "satisfied": False},
+        {"name": "within_ticks", "target": 4000, "current": 4203,
+         "ratio": 0.0, "satisfied": False},
+    ]
+    out = render_leaves_table(leaves)
+    # the load-bearing substrings every reviewer should see
+    assert "4/7" in out
+    assert "tick 4203/4000" in out
+    # MUST NOT contain a percentage scalar
+    assert "%" not in out
+    # both clauses failed → x marks present
+    assert "units_killed_gte: 4/7 x" in out
+    # an empty leaves list renders to the empty string (no goal yet)
+    assert render_leaves_table([]) == ""

@@ -20,10 +20,29 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import httpx
+
+
+def _log_retry(attempt: int, exc: Exception, delay: float) -> None:
+    """on_retry callback for resilience.retry_call — surfaces provider-
+    level transient failures (429/503/504/timeouts/malformed-JSON) into
+    stderr so the run_eval.log carries the real retry timeline. Without
+    this, retries are absorbed silently and the operator only sees the
+    eventual outcome — making it impossible to tell whether a slow
+    sweep is provider-throttled or just slow."""
+    msg = str(exc)
+    if len(msg) > 200:
+        msg = msg[:200] + "..."
+    print(
+        f"[retry] attempt={attempt} delay={delay:.1f}s "
+        f"reason={type(exc).__name__}: {msg}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 ProviderName = Literal["openai", "vllm", "openrouter", "bedrock", "together"]
 
@@ -209,12 +228,30 @@ class OpenAICompatibleProvider(ChatProvider):
             "Content-Type": "application/json",
             **cfg.extra_headers,
         }
+        # OpenAI's newer "reasoning" / GPT-5+ model families require
+        # `max_completion_tokens` instead of `max_tokens` and reject the
+        # legacy parameter outright. Sniff the model id for the known
+        # forward-dated families (gpt-5, gpt-5-mini, gpt-5-nano,
+        # gpt-5.x-... — every model with a `gpt-5` prefix today
+        # requires the new param). Same code path is used by openrouter
+        # but those models don't currently include the gpt-5 family
+        # under their own slug, so the prefix check is safe.
+        _model_l = (cfg.model or "").lower()
+        _needs_completion_tokens = (
+            _model_l.startswith("gpt-5")
+            or _model_l.startswith("o1")
+            or _model_l.startswith("o3")
+            or _model_l.startswith("o4")
+        )
         body: dict[str, Any] = {
             "model": cfg.model,
             "messages": self._wire_messages(messages),
             "temperature": cfg.temperature,
-            "max_tokens": cfg.max_tokens,
         }
+        if _needs_completion_tokens:
+            body["max_completion_tokens"] = cfg.max_tokens
+        else:
+            body["max_tokens"] = cfg.max_tokens
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
@@ -233,13 +270,37 @@ class OpenAICompatibleProvider(ChatProvider):
                 "stream_options", {"include_usage": True}
             )
             reply = retry_call(
-                lambda: self._stream_once(url, headers, body), self._policy
+                lambda: self._stream_once(url, headers, body),
+                self._policy,
+                on_retry=_log_retry,
             )
         else:
-            resp = retry_call(
-                lambda: self._post_once(url, headers, body), self._policy
+            def _call_and_parse():
+                resp = self._post_once(url, headers, body)
+                try:
+                    return self._reply_from_data(resp.json())
+                except json.JSONDecodeError as je:
+                    # Some providers (notably OpenRouter on large
+                    # tool-calling + vision prompts to glm-4.6v) ship
+                    # truncated response bodies on flaky links — the
+                    # HTTP status is 200 but the body parses as
+                    # incomplete JSON. Treat as transient so retry_call
+                    # gives it another go instead of recording an
+                    # outcome=error on a network glitch. After
+                    # max_retries the original JSONDecodeError surface
+                    # is preserved for diagnostics.
+                    body_snippet = resp.text[-300:] if resp.text else "(empty)"
+                    rt = RuntimeError(
+                        f"JSONDecodeError parsing provider response "
+                        f"({len(resp.text or '')} bytes): "
+                        f"{je}\ntail: {body_snippet}"
+                    )
+                    rt.transient = True  # type: ignore[attr-defined]
+                    rt.retry_after = None  # type: ignore[attr-defined]
+                    raise rt from je
+            reply = retry_call(
+                _call_and_parse, self._policy, on_retry=_log_retry
             )
-            reply = self._reply_from_data(resp.json())
         u = reply.usage or {}
         self._cost.add(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
         self._cost.check()  # raises BudgetExceeded → evaluate finalizes
@@ -777,6 +838,7 @@ class BedrockProvider(ChatProvider):
                 sys_blocks, br_messages, tool_config, inference_cfg,
             ),
             self._policy,
+            on_retry=_log_retry,
         )
         reply = self._reply_from_bedrock(resp)
         u = reply.usage or {}
