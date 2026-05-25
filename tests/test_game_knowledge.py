@@ -104,6 +104,7 @@ def test_all_predicate_keys_have_a_translation():
             "type": "jeep", "x": 1, "y": 2, "radius": 3, "n": 3,
         },
         "building_count_gte": {"type": "powr", "n": 2},
+        "building_hp_pct_gte": {"type": "proc", "pct": 0.8},
         "building_in_region": {"x": 1, "y": 2, "count": 1},
         "unit_type_count_eq": {"type": "e1", "n": 3},
         "unit_type_count_gte": {"type": "e3", "n": 2},

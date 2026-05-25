@@ -196,6 +196,19 @@ _PREDICATES: dict[str, Callable[[WinContext, Any], bool]] = {
         1 for (t, _, _) in c.signals.own_buildings if t == str(v["type"]).lower()
     )
     >= int(v.get("n", 1)),
+    # >= 1 agent building of a given type whose current HP fraction is
+    # at least `pct` (0..1). Reads from `render_state["own_buildings"]`
+    # which carries the engine's `hp_pct` per building (see
+    # rust_adapter.render_state). The load-bearing predicate for
+    # repair / triage packs: a pre-placed damaged building must be
+    # HEALED back up to win — a "let it stay damaged but alive" play
+    # (which `building_count_gte` would accept) is no longer enough.
+    # {type: proc, pct: 0.8}  ⇒ a proc must be at ≥80% HP.
+    "building_hp_pct_gte": lambda c, v: any(
+        str(b.get("type", "")).lower() == str(v["type"]).lower()
+        and float(b.get("hp", 0.0) or 0.0) >= float(v.get("pct", 1.0))
+        for b in (c.render_state.get("own_buildings", []) or [])
+    ),
     # >= count agent buildings (optionally typed) within radius of (x,y):
     # "defenses to the east", "found a base near the ridge".
     "building_in_region": lambda c, v: sum(

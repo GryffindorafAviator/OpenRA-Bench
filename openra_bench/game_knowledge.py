@@ -214,6 +214,10 @@ _PHRASES: dict[str, Any] = {
     "building_total_gte": lambda v: f"own ≥{v} buildings total",
     "building_count_gte": lambda v: f"own ≥{(v or {}).get('n', 1)} "
     f"'{(v or {}).get('type')}' building(s)",
+    "building_hp_pct_gte": lambda v: (
+        f"keep your '{(v or {}).get('type')}' building at "
+        f"≥{int(float((v or {}).get('pct', 1.0)) * 100)}% HP"
+    ),
     "building_in_region": lambda v: f"have {(v or {}).get('count', 1)} "
     f"building(s) near ({(v or {}).get('x')},{(v or {}).get('y')})",
     "unit_type_count_eq": lambda v: f"have EXACTLY {(v or {}).get('n')} "
@@ -417,6 +421,10 @@ _PHRASES_ZH: dict[str, Any] = {
     "building_count_gte": lambda v: (
         f"拥有至少 {(v or {}).get('n', 1)} 座"
         f"「{_actor_zh((v or {}).get('type', '?'))}」"
+    ),
+    "building_hp_pct_gte": lambda v: (
+        f"将「{_actor_zh((v or {}).get('type', '?'))}」"
+        f"修复到 ≥{int(float((v or {}).get('pct', 1.0)) * 100)}% 血量"
     ),
     "building_in_region": lambda v: (
         f"在 ({(v or {}).get('x')},{(v or {}).get('y')}) 附近"
