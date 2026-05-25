@@ -282,6 +282,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
           </div>
           <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
             <button class="btn-secondary btn-sm" onclick="gameSelectAll()">Select All</button>
+            <button class="btn-secondary btn-sm" onclick="gameSelectTanks()" title="Clear selection and select only visible tank units">Tanks</button>
             <button class="btn-secondary btn-sm" onclick="gameClearSelection()">Clear Selection</button>
             <label class="btn-secondary btn-sm" title="Checked: selected harvesters harvest visible ore. Unchecked: selected units move on ground click.">
               <input type="checkbox" id="game-harvest-check" onchange="gameSetHarvestMode(this.checked)"> Harvest
@@ -1253,6 +1254,17 @@ function gameSelectAll(){
   gameRender();
 }
 
+function gameSelectTanks(){
+  if(!gameState)return;
+  gameSelected.clear();
+  (gameState.units||[]).forEach(u=>{
+    const type=gameTypeKey(u.type);
+    if(type.includes("tnk")||type==="mcv")gameSelected.add(u.id);
+  });
+  gameLog("Selected "+gameSelected.size+" visible tank unit(s).");
+  gameRender();
+}
+
 function gameClearSelection(){
   gameSelected.clear();
   gameLog("Selection cleared.");
@@ -1432,6 +1444,32 @@ function gameAttackEnemy(enemyId, all=false){
   if(!target)return;
   gameQueueAttack(target, all);
   gameSelected.clear();
+  gameRender();
+}
+
+function gameSpecialTargetMode(){
+  const tools=(gameState&&gameState.tools)||[];
+  if(tools.includes("infiltrate"))return {mode:"infiltrate",label:"Inf",verb:"INFILTRATE"};
+  if(tools.includes("capture_actor"))return {mode:"capture_actor",label:"Cap",verb:"CAPTURE"};
+  if(tools.includes("c4_detonate"))return {mode:"c4_detonate",label:"C4",verb:"C4"};
+  return null;
+}
+
+function gameUseSpecialTarget(enemyId){
+  if(!gameState)return;
+  const spec=gameSpecialTargetMode();
+  if(!spec)return;
+  const target=(gameState.enemies||[]).find(e=>e.id===enemyId);
+  if(!target)return;
+  if(!gameSelected.size){
+    gameLog("Select the specialist unit(s) first, then click "+spec.label+" on the target.");
+    return;
+  }
+  const n=gameSelected.size;
+  gameQueueOrder({mode:spec.mode,unit_ids:[...gameSelected],target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
+  gameSelected.clear();
+  gameRepeatAction=null;
+  gameLog("Queued "+spec.verb+" on "+target.id+" with "+n+" unit(s).");
   gameRender();
 }
 
@@ -1773,6 +1811,7 @@ function gameActionLabel(a){
   if(a.mode==="harvest")return "harvest ("+a.target_x+","+a.target_y+")";
   if(a.mode==="build")return "build "+item;
   if(a.mode==="place_building")return "place "+item+"("+a.target_x+","+a.target_y+")";
+  if(["infiltrate","capture_actor","c4_detonate"].includes(a.mode))return a.mode+" target "+(a.target_id||"");
   return a.mode+'('+((a.target_x!=null)?a.target_x+','+a.target_y:'')+')';
 }
 function gameRenderLegend(){
@@ -1857,7 +1896,9 @@ function gameRenderUnits(){
     );
     for(const e of enemies){
       const cls=gameEnemyPriority(e)===0?"enemy-tank":"enemy-infantry";
-      html+=`<tr class="${cls}" style="color:var(--red)"><td class="enemy-actions"><button class="btn-secondary btn-sm" onclick="gameAttackEnemy('${e.id}',false)">Atk</button><button class="btn-primary btn-sm" onclick="gameAttackEnemy('${e.id}',true)">All</button></td><td>${e.id}</td><td class="type-cell">${gameTypeLabel(e.type)}</td>
+      const spec=gameSpecialTargetMode();
+      const specBtn=(spec&&e.is_building)?`<button class="btn-primary btn-sm" onclick="gameUseSpecialTarget('${e.id}')" title="Use ${spec.mode} with selected specialist unit(s)">${spec.label}</button>`:"";
+      html+=`<tr class="${cls}" style="color:var(--red)"><td class="enemy-actions"><button class="btn-secondary btn-sm" onclick="gameAttackEnemy('${e.id}',false)">Atk</button><button class="btn-primary btn-sm" onclick="gameAttackEnemy('${e.id}',true)">All</button>${specBtn}</td><td>${e.id}</td><td class="type-cell">${gameTypeLabel(e.type)}</td>
         <td>(${e.cell_x},${e.cell_y})</td><td style="${gameHpClass(e.hp)}">${gameHpText(e.hp)}</td><td class="priority-cell">${gameEnemyPriorityLabel(e)}</td></tr>`;
     }
   }

@@ -86,7 +86,7 @@ class StartRequest(BaseModel):
 
 
 class ActionItem(BaseModel):
-    mode: str  # "move" | "attack" | "harvest" | "observe" | "build" | "place_building" | "surrender" | "power_down"
+    mode: str  # "move" | "attack" | "harvest" | "observe" | "build" | "place_building" | "surrender" | "power_down" | special target verbs
     unit_ids: List[str] = []
     target_x: Optional[int] = None
     target_y: Optional[int] = None
