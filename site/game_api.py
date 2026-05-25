@@ -151,7 +151,18 @@ def _serialize_state(sess) -> dict:
     minimap_b64 = None
     try:
         from openra_bench.minimap import render_tactical_minimap
-        img = render_tactical_minimap(rs, scale=4, grid=True, legend=True)
+        # Pass `base_map` so the renderer paints the water/wall terrain
+        # underlay (channels, bridges, walls visible from t=0). Best-
+        # effort: `sess.compiled.scenario.base_map` is the canonical
+        # source, falling back to '' if the session lacks it.
+        _bm = ""
+        try:
+            _bm = sess.compiled.scenario.base_map or ""
+        except Exception:  # noqa: BLE001
+            _bm = ""
+        img = render_tactical_minimap(
+            rs, scale=4, grid=True, legend=True, base_map=_bm,
+        )
         if img is not None:
             buf = io.BytesIO()
             img.save(buf, format="PNG")

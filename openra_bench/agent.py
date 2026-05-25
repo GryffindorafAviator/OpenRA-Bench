@@ -635,6 +635,12 @@ class ModelAgent:
         # training bitmap minimap; persistent fog history across turns.
         self._terrain: bytes | None = None
         self._explored_history: set = set()
+        # Logical base_map id — passed through to render_tactical_minimap
+        # so the image-primary channel can paint the WATER/WALL terrain
+        # underlay (channels, bridges, walls visible from t=0; only
+        # CONTENTS gated by fog). Without this an image-primary model
+        # has to scout the river just to learn it's there.
+        self._base_map = base_map or ""
         if base_map:
             try:
                 from .minimap import terrain_png_for
@@ -713,6 +719,7 @@ class ModelAgent:
             scale = max(2, min(6, 1560 // max(1, w * 6)))
             img = render_tactical_minimap(
                 render_state, scale=scale, unit_labels=self._labels,
+                base_map=self._base_map,
             )
             if img is not None:
                 buf = io.BytesIO()

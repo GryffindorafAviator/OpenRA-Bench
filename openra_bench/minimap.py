@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import struct
 import zipfile
 from functools import lru_cache
 
@@ -36,6 +37,77 @@ def terrain_png_for(base_map: str) -> bytes | None:
     except Exception as e:  # noqa: BLE001
         logger.debug("terrain extract failed for %s: %s", base_map, e)
     return None
+
+
+# Terrain tile codes — match the `mapgen.py` constants. The .oramap
+# `map.bin` v2 layout is column-major u16 tile ids; we extract the full
+# w×h grid so the minimap can paint water/wall cells as a TERRAIN
+# UNDERLAY (visible from t=0, even in unexplored areas). Without this
+# underlay the model has to learn map topology by walking units into
+# the fog — the SHAPE of the map (water channels, bridges, walls)
+# should not require fog-of-war discovery; only the contents (units,
+# buildings, ore) should.
+_TERRAIN_CLEAR = 255      # passable grass — drawn as the default bg
+_TERRAIN_WATER = 1        # impassable water — drawn as blue underlay
+# A small allowlist of tile ids that show up in the bench's procedural
+# maps; anything outside this set is treated as clear. RA's real
+# tilesets carry hundreds of distinct tile ids — the bench's generated
+# maps only emit two — but we keep this defensive so a hand-authored
+# .oramap with extra ids degrades gracefully (renders as clear, not as
+# a misleading water cell).
+_WATER_TILE_IDS = frozenset({_TERRAIN_WATER})
+
+
+@lru_cache(maxsize=32)
+def terrain_grid_for(base_map: str) -> tuple[tuple[int, ...], ...] | None:
+    """Decode `map.bin` from the resolved `.oramap` into a `grid[y][x]`
+    of tile ids (read-only tuple-of-tuples so it's safely cached).
+
+    Returns None on any failure (missing map, unsupported `map.bin`
+    version, parse error). Callers must tolerate None — the renderer
+    falls back to the existing all-clear background.
+
+    `map.bin` v2 layout (matches `mapgen._map_bin`):
+        byte 0     : format version (2)
+        bytes 1-2  : width (u16 LE)
+        bytes 3-4  : height (u16 LE)
+        bytes 5-8  : tiles offset (u32 LE)  — typically 17
+        bytes 9-12 : height-layer offset (u32 LE, 0 if absent)
+        bytes 13-16: resources offset (u32 LE)
+        tiles      : column-major (x outer, y inner) — 3 bytes per cell:
+                     u16 tile id + u8 tile index
+    """
+    if not base_map:
+        return None
+    try:
+        from .scenarios.loader import resolve_map_path
+
+        p = resolve_map_path(base_map)
+        if not p:
+            return None
+        with zipfile.ZipFile(p, "r") as zf:
+            if "map.bin" not in zf.namelist():
+                return None
+            data = zf.read("map.bin")
+        if len(data) < 17 or data[0] != 2:
+            return None
+        w = struct.unpack_from("<H", data, 1)[0]
+        h = struct.unpack_from("<H", data, 3)[0]
+        tiles_off = struct.unpack_from("<I", data, 5)[0]
+        # Sanity: tiles block must fit
+        need = tiles_off + 3 * w * h
+        if w <= 0 or h <= 0 or w * h > 1_000_000 or need > len(data):
+            return None
+        # Build grid[y][x] from the column-major payload
+        rows = [[0] * w for _ in range(h)]
+        for x in range(w):
+            for y in range(h):
+                idx = tiles_off + 3 * (x * h + y)
+                rows[y][x] = struct.unpack_from("<H", data, idx)[0]
+        return tuple(tuple(r) for r in rows)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("terrain grid extract failed for %s: %s", base_map, e)
+        return None
 
 
 def render_b64(render_state: dict, terrain_png: bytes | None = None) -> str | None:
@@ -77,10 +149,35 @@ CELL = 6  # px per map cell (≈768×240 for a 128×40 map — legible)
 # markers vanish (the user-reported "the enemy disappeared" bug). For
 # legacy `.` callers that don't write `+` cells, `.` keeps the old
 # bright tint (back-compat: a 2-state grid renders identical to before).
-_BG_UNKNOWN = (18, 18, 22)      # '#'  unexplored
-_BG_FOGGED = (44, 46, 52)       # '.'  fogged-only (3-state callers)
-_BG_VISIBLE = (70, 74, 82)      # '+'  currently visible
+#
+# The 3-state delta was originally 44→70 (only 26 levels apart): too
+# subtle for image-primary LLM inference at minimap resolution. The
+# values below give a ≥2× brightness delta between fogged and visible
+# (≈60 vs ≈140) — the model can now tell "I see this cell NOW" from
+# "I explored this cell 10 turns ago" at a glance.
+_BG_UNKNOWN = (18, 18, 22)      # '#'  unexplored          — very dark
+_BG_FOGGED = (60, 62, 70)       # '.'  fogged-only         — mid-dark
+_BG_VISIBLE = (140, 144, 152)   # '+'  currently visible   — bright
 _BG_EXPLORED = _BG_VISIBLE      # legacy 2-state alias for '.'
+
+# Terrain underlay — painted BEFORE the shroud so map structure (water
+# channels, bridges, walls) is visible from t=0 even in unexplored
+# regions. The shroud then brightens (visible) / dims (fogged) /
+# obscures (unexplored) the terrain colour. Three terrain palettes,
+# each with three shroud-state brightnesses:
+#   * unexplored = dim ── the model sees "there is water HERE" but
+#     can't see enemy units / buildings in that water yet.
+#   * fogged     = mid
+#   * visible    = bright
+# The CLEAR palette intentionally reuses the existing _BG_UNKNOWN /
+# _BG_FOGGED / _BG_VISIBLE so a map with no water (every cell CLEAR)
+# renders byte-identical to the pre-terrain renderer (back-compat).
+_BG_WATER_UNKNOWN  = (18, 30, 50)     # very dark blue
+_BG_WATER_FOGGED   = (32, 60, 100)    # mid blue
+_BG_WATER_VISIBLE  = (60, 110, 180)   # bright blue
+_BG_CLEAR_UNKNOWN  = _BG_UNKNOWN      # alias — same defaults as 'no terrain'
+_BG_CLEAR_FOGGED   = _BG_FOGGED
+_BG_CLEAR_VISIBLE  = _BG_VISIBLE
 _OWN = (60, 200, 90)            # your units
 _OWN_BLD = (60, 130, 230)       # your buildings
 _ENEMY = (225, 60, 55)          # enemy units
@@ -105,6 +202,30 @@ def _bg_for(ch: str, has_visible_mark: bool) -> tuple[int, int, int] | None:
         return _BG_VISIBLE
     # ch == '.' or any other non-'#' char
     return _BG_FOGGED if has_visible_mark else _BG_EXPLORED
+
+
+def _terrain_bg(tile_id: int, ch: str, has_visible_mark: bool
+                ) -> tuple[int, int, int]:
+    """Resolve the (terrain × shroud) background for one cell.
+
+    Returns the unexplored tint when `ch == '#'` (so unexplored water
+    still reads as DIM BLUE — the model sees the map shape even in
+    fog), the fogged tint for explored-not-visible cells, the visible
+    tint for currently-in-sight cells. Per-terrain (clear vs water)
+    palettes — each with three shroud brightnesses — give a
+    perception channel that lifts map TOPOLOGY out of the fog while
+    keeping CONTENTS (enemies) hidden until scouted.
+    """
+    is_water = tile_id in _WATER_TILE_IDS
+    if ch == "#":
+        return _BG_WATER_UNKNOWN if is_water else _BG_CLEAR_UNKNOWN
+    if ch == "+":
+        return _BG_WATER_VISIBLE if is_water else _BG_CLEAR_VISIBLE
+    # ch == '.' or any other non-'#' char
+    if has_visible_mark:
+        return _BG_WATER_FOGGED if is_water else _BG_CLEAR_FOGGED
+    # 2-state legacy: '.' renders as bright (back-compat).
+    return _BG_WATER_VISIBLE if is_water else _BG_CLEAR_VISIBLE
 
 
 def _draw_cell(px, w: int, h: int, cx: int, cy: int, rgb, r: int = 1) -> None:
@@ -368,6 +489,8 @@ def render_tactical_minimap(
     selected=None,
     arrows=None,
     unit_labels=None,
+    base_map: str = "",
+    terrain_grid=None,
 ):
     """A legible tactical minimap as a PIL RGB image:
 
@@ -385,7 +508,18 @@ def render_tactical_minimap(
     the image-primary perception channel: every actor is tagged with
     its legible handle so the model can identify and command units
     from the picture alone (the text briefing carries no positions).
-    When set, the per-cell count badge is replaced by the labels."""
+    When set, the per-cell count badge is replaced by the labels.
+
+    `base_map` (logical id, e.g. `"adversarial-1v1-macro-arena"`) or
+    an explicit `terrain_grid` (list[list[int]] of tile ids, indexed
+    [y][x]) enables the TERRAIN UNDERLAY: water cells render as blue
+    even in unexplored regions, so the map's SHAPE (channels,
+    bridges, walls) is legible from t=0 — only the CONTENTS (units,
+    buildings, ore) remain gated by the fog. Without this, an
+    image-primary model has to walk a unit into the fog just to
+    learn that there's a river in the way. `base_map` is looked up
+    via `terrain_grid_for()` (cached); when both are provided the
+    explicit `terrain_grid` wins."""
     try:
         from PIL import Image, ImageDraw
     except Exception:  # noqa: BLE001
@@ -403,14 +537,48 @@ def render_tactical_minimap(
     img = Image.new("RGB", (w * cp, h * cp + legend_h), _BG_UNKNOWN)
     draw = ImageDraw.Draw(img)
 
-    # Shroud terrain — 3-state when the grid contains '+' marks
-    # (visible), 2-state legacy bright fill otherwise.
+    # Terrain underlay grid — explicit `terrain_grid` wins, else
+    # look up by `base_map`, else by `render_state["base_map"]`.
+    # None ⇒ no underlay (the legacy all-clear background).
+    if terrain_grid is None:
+        bm = base_map or str(render_state.get("base_map") or "")
+        if bm:
+            terrain_grid = terrain_grid_for(bm)
+
+    def _tile_at(x: int, y: int) -> int:
+        # Defensive: a hand-written `terrain_grid` may not exactly
+        # match the ASCII minimap dims (e.g. a `Bounds:` rectangle
+        # inside a larger `MapSize:`); clamp to the grid extent and
+        # treat OOB cells as clear so we never crash on edge pixels.
+        if terrain_grid is None:
+            return _TERRAIN_CLEAR
+        try:
+            row = terrain_grid[y]
+            return row[x]
+        except (IndexError, TypeError):
+            return _TERRAIN_CLEAR
+
+    # Shroud + terrain combined paint — 3-state shroud when the ASCII
+    # grid contains '+' marks (visible), 2-state legacy bright fill
+    # otherwise. Terrain underlay paints every cell (including '#'
+    # unexplored ones) so map SHAPE is visible from t=0; the shroud
+    # then dims/brightens that terrain to encode "do I have vision
+    # here right now".
     has_visible = any("+" in r for r in rows)
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
-            bg = _bg_for(ch, has_visible)
-            if bg is None:
-                continue
+            if terrain_grid is not None:
+                # Paint every cell — unexplored water/wall is visible
+                # as a DIM blue/gray, not solid black.
+                bg = _terrain_bg(_tile_at(x, y), ch, has_visible)
+            else:
+                # No terrain underlay: legacy path. Unexplored cells
+                # leave the default _BG_UNKNOWN background unset so
+                # we keep byte-identical output for back-compat with
+                # the existing tests + 2-state callers.
+                bg = _bg_for(ch, has_visible)
+                if bg is None:
+                    continue
             draw.rectangle(
                 [x * cp, y * cp, (x + 1) * cp - 1, (y + 1) * cp - 1],
                 fill=bg,

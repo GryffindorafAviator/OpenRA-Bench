@@ -891,8 +891,13 @@ class InteractiveSession:
 
             from .minimap import render_tactical_minimap
 
+            # Pass `base_map` so the renderer paints the water/wall
+            # underlay (visible from t=0, regardless of fog) — saved
+            # human frames match the Play-tab image the labeler
+            # clicked on.
             img = render_tactical_minimap(
                 rs, scale=5, grid=True, legend=True,
+                base_map=self.compiled.scenario.base_map or "",
             )
             if img is not None:
                 buf = io.BytesIO()
