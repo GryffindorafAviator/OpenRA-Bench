@@ -803,9 +803,25 @@ def evaluate(
                 journal, prior, playback_root, run_id, _safe_model,
                 progress=progress,
             )
+        # The resume-gate key must match the one `_persist` writes. For
+        # packs with a `configs:` block the cell name is `<pack>:<config
+        # name>` (e.g. `adversarial-1v1-macro:main`) — NOT `<pack>:<level
+        # name>`. Using compiled.level here would compute `|medium|`
+        # while _persist writes `|main|` from cell.split(":"), tripping
+        # the in-process dedupe on resume. Derive the suffix from the
+        # cell string the same way _persist does so both sides agree.
+        from .scenarios.schema import PERCEPTION_MODES as _PM
+        def _suffix_of(cell: str, compiled) -> str:
+            parts = cell.split(":")
+            if len(parts) >= 3 and parts[-1] in _PM:
+                return parts[1]  # pack:level:fog format
+            if len(parts) >= 2:
+                return parts[1]  # pack:level OR pack:config_name
+            return compiled.level
         tasks = [
             t for t in tasks
-            if episode_key(t[0].meta.id, t[0].level, t[2], t[3], _cell_fog(t[0])) not in done
+            if episode_key(t[0].meta.id, _suffix_of(t[1], t[0]),
+                           t[2], t[3], _cell_fog(t[0])) not in done
         ]
 
     def _persist(rec: dict) -> None:
