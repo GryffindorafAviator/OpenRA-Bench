@@ -566,6 +566,15 @@ class RustObsAdapter:
             "bounds_y": 0,
             "game_tick": self.signals.game_tick,
             "explored_percent": self.signals.explored_percent,
+            # Cumulative units killed by THIS side, sourced from the engine
+            # `kills_per_player` counter (see openra-sim `credit_kill` /
+            # `update_kill_counter`). Surfaced into `render_state` so the
+            # 1v1 harness's military-progress tie-break (`one_v_one.py::
+            # _kills`) sees the real engine value rather than defaulting
+            # to 0. Without this, every 1v1 match where both bases
+            # survive the deadline collapses to the next tie-break layer
+            # (buildings → economy), masking real combat performance.
+            "units_killed": self.signals.units_killed,
             # Economy/base state so agents can plan construction.
             "cash": self.signals.cash,
             "resources": self.signals.resources,

@@ -352,6 +352,89 @@ def test_fog_isolates_the_two_bases_at_t0():
         Path(tmp).unlink(missing_ok=True)
 
 
+def test_render_state_surfaces_units_killed_for_1v1_tiebreak():
+    """Regression: `RustObsAdapter.render_state()` MUST include the
+    `units_killed` key sourced from `signals.units_killed`. The 1v1
+    harness's military-progress tie-break (`one_v_one.py::_kills`)
+    reads `render_state["units_killed"]`; without this key the
+    fallback is `0`, so every match where both bases survive the
+    deadline collapses past the kills layer and is decided on
+    buildings / economy alone — masking real combat performance.
+
+    Engine `kills_per_player` is correctly incremented (verified by
+    `test_dedup_kill_credit_per_victim.rs` and friends); the missing
+    piece was the bench-side `render_state` shape — this test pins
+    it. Stall-vs-stall on adversarial-1v1-macro produces non-trivial
+    kill counts (units wander into engagement range around the map
+    centre on the default stance:2 engagement scan), so the test can
+    assert `units_killed >= 1` at the deadline-tier turn count.
+    """
+    from openra_bench.eval_core import _scenario_to_tmp_yaml
+    from openra_bench.rust_adapter import RustObsAdapter
+    from openra_rl_training.training.rust_env_pool import RustEnvPool
+
+    pack = load_pack(PACK_PATH)
+    c = compile_level(pack, "medium")
+    tmp = _scenario_to_tmp_yaml(c)
+
+    pool = RustEnvPool(size=1, scenario_path=tmp)
+    env = pool.acquire()
+    try:
+        a_ad = RustObsAdapter()
+        e_ad = RustObsAdapter()
+        a_ad.observe(env.reset(seed=1))
+        raw = env._env
+        e_ad.observe(raw.enemy_observation())
+        Command = env.Command
+
+        # Key MUST be present from t=0 (even if value is 0).
+        a_rs = a_ad.render_state()
+        e_rs = e_ad.render_state()
+        assert "units_killed" in a_rs, (
+            "render_state missing 'units_killed' — 1v1 tie-break "
+            "(_kills) will silently read 0 every match"
+        )
+        assert "units_killed" in e_rs
+        assert a_rs["units_killed"] == 0
+        assert e_rs["units_killed"] == 0
+
+        # Step deep enough for the engine's auto-engage scan to put
+        # units in range of each other around the map centre. At
+        # t=20 (tick 1803) the agent's e1 + the enemy's e1 have
+        # mutually killed and both 1tnks have wedged into the
+        # opponent's base far enough to destroy a `powr` — 2 kills
+        # per side.
+        for _ in range(20):
+            a_obs, e_obs, done, _info = raw.step_1v1(
+                [Command.observe()], [Command.observe()]
+            )
+            a_ad.observe(a_obs, done=done)
+            e_ad.observe(e_obs, done=done)
+
+        a_rs = a_ad.render_state()
+        e_rs = e_ad.render_state()
+        # Both sides have scored at least one kill (mutual e1 trade
+        # + first building destruction). The exact tally is engine
+        # state — what matters here is that `render_state` surfaces
+        # the live engine counter rather than defaulting to 0.
+        assert a_rs["units_killed"] >= 1, (
+            f"agent render_state units_killed={a_rs['units_killed']} "
+            f"— engine kills_per_player not reaching the bench adapter"
+        )
+        assert e_rs["units_killed"] >= 1, (
+            f"enemy render_state units_killed={e_rs['units_killed']} "
+            f"— engine kills_per_player not reaching the bench adapter"
+        )
+        # And the bench signals view must agree with the dict view —
+        # the dict is sourced FROM signals so any drift is a code bug.
+        assert a_rs["units_killed"] == a_ad.signals.units_killed
+        assert e_rs["units_killed"] == e_ad.signals.units_killed
+    finally:
+        pool.release(env)
+        pool.shutdown()
+        Path(tmp).unlink(missing_ok=True)
+
+
 def test_run_eval_1v1_cli_smoke(tmp_path):
     """`run_eval --mode 1v1 --provider scripted:stall --opponent
     scripted:stall --levels medium` runs end-to-end and emits a
