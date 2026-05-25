@@ -873,6 +873,11 @@ def evaluate(
             k = rec.get("_key") or ""
             if not k:
                 continue
+            # Errored cells aren't really "done" — a provider 500/timeout
+            # left no valid playback. Skip them so resume re-runs them.
+            # Mirrors `RunJournal.done_keys()` which excludes errors.
+            if rec.get("outcome") == "error":
+                continue
             done_slots.add((_base_key(k), _rep_of(k)))
         kept: list = []
         in_run_slots: set[tuple[str, int]] = set()
