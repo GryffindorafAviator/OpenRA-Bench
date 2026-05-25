@@ -59,6 +59,96 @@ def test_graceful_none_when_nothing_to_draw():
     assert render_png_b64({}) is None
 
 
+def test_vendor_renderer_draws_ore_and_distinct_buildings_and_harv(tmp_path):
+    """Regression: the vendor renderer (the one the LLM sees) must paint
+    ore patches (gold dots), own buildings as filled squares (distinct
+    from unit dots), and harvesters with the `tridown` shape so the
+    model can tell them apart from tanks. Pre-fix, none of these layers
+    surfaced on the image channel — the model was blind to ore and saw
+    its own base as a cluster of generic dots indistinguishable from
+    mobile units."""
+    from openra_bench._vendor import minimap_v2 as MM
+
+    # Synthesise a tiny terrain PNG (uniform mid-grey grass).
+    terrain = Image.new("RGB", (32, 24), (90, 110, 70))
+    buf = io.BytesIO()
+    terrain.save(buf, format="PNG")
+    terrain_png = buf.getvalue()
+
+    obs = {
+        "unit_positions": {
+            "100": {"cell_x": 4, "cell_y": 4},   # harv
+            "101": {"cell_x": 6, "cell_y": 4},   # 1tnk
+            "102": {"cell_x": 7, "cell_y": 4},   # e1
+        },
+        "enemy_positions": [],
+        "enemy_buildings_summary": [],
+        # NEW: own buildings as a SEPARATE layer
+        "own_buildings_summary": [
+            {"id": "200", "cell_x": 3, "cell_y": 3, "type": "fact"},
+            {"id": "201", "cell_x": 5, "cell_y": 3, "type": "proc"},
+        ],
+        # NEW: resource cells the agent can see
+        "resource_cells": [
+            {"cell_x": 8, "cell_y": 8, "amount": 1000},
+            {"cell_x": 9, "cell_y": 8, "amount": 1000},
+        ],
+    }
+
+    # All cells around the units + ore are explored so the fog gate
+    # doesn't hide the ore.
+    explored = {(x, y) for x in range(32) for y in range(24)}
+
+    png = MM.render(
+        obs=obs,
+        terrain_png_bytes=terrain_png,
+        map_width=32,
+        map_height=24,
+        bounds=(0, 0, 32, 24),
+        explored_history=explored,
+        own_unit_types={"100": "harv", "101": "1tnk", "102": "e1"},
+        enemy_unit_types={},
+    )
+    assert isinstance(png, (bytes, bytearray)) and png
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    px = im.load()
+
+    # Helper: world cell → pixel coord in cropped output.
+    # margin_x=36, margin_y=22, pixels_per_cell=8 (defaults).
+    def cpx(cx, cy):
+        return (36 + cx * 8 + 4, 22 + cy * 8 + 4)  # center of cell
+
+    # 1. Ore cell — should show the gold colour family (R high, G high,
+    #    B low). Sample inside the ore dot at (8, 8).
+    ore_rgb = px[cpx(8, 8)]
+    assert ore_rgb[0] > 180 and ore_rgb[1] > 150 and ore_rgb[2] < 120, (
+        f"ore cell (8,8) should be gold; got {ore_rgb}"
+    )
+
+    # 2. Own building (fact at (3,3)) — should be cyan family
+    #    (B high, G high, R low/mid). Sample inside the filled square.
+    fact_rgb = px[cpx(3, 3)]
+    assert fact_rgb[2] > 180 and fact_rgb[1] > 180 and fact_rgb[0] < 150, (
+        f"own fact at (3,3) should be cyan filled_square; got {fact_rgb}"
+    )
+
+    # 3. Own unit (1tnk at (6,4)) — cyan-family too but at a different
+    #    cell with a SQUARE shape. Sample inside the marker.
+    tank_rgb = px[cpx(6, 4)]
+    assert tank_rgb[2] > 150 and tank_rgb[1] > 180, (
+        f"own 1tnk at (6,4) should be cyan-family; got {tank_rgb}"
+    )
+
+    # 4. Empty grass cell — should be NEITHER gold NOR cyan. Sample at
+    #    (20, 20) where no actor / ore exists.
+    grass_rgb = px[cpx(20, 20)]
+    is_gold = grass_rgb[0] > 180 and grass_rgb[1] > 150 and grass_rgb[2] < 120
+    is_cyan = grass_rgb[2] > 180 and grass_rgb[1] > 180 and grass_rgb[0] < 150
+    assert not is_gold and not is_cyan, (
+        f"empty grass (20,20) should not be gold or cyan; got {grass_rgb}"
+    )
+
+
 def test_agent_attaches_image_when_vision_on():
     from openra_bench.agent import ModelAgent
     from openra_bench.providers import ProviderConfig
