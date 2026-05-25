@@ -86,7 +86,7 @@ class StartRequest(BaseModel):
 
 
 class ActionItem(BaseModel):
-    mode: str  # "move" | "attack" | "observe" | "build" | "place_building" | "surrender" | "power_down"
+    mode: str  # "move" | "attack" | "harvest" | "observe" | "build" | "place_building" | "surrender" | "power_down"
     unit_ids: List[str] = []
     target_x: Optional[int] = None
     target_y: Optional[int] = None
@@ -148,6 +148,41 @@ def _serialize_state(sess) -> dict:
                 "is_building": True,
             })
 
+    live_resource_cells = []
+    for p in rs.get("resource_cells", []) or []:
+        if not isinstance(p, dict):
+            continue
+        try:
+            live_resource_cells.append({
+                "cell_x": int(p.get("cell_x", 0)),
+                "cell_y": int(p.get("cell_y", 0)),
+                "type": "ore",
+            })
+        except (TypeError, ValueError):
+            continue
+    # Prefer the engine's live ore cells when the spatial tensor is
+    # available: those cells shrink/disappear as harvesters deplete them.
+    # Older observations may not expose spatial resource channels, so
+    # fall back to authored mine markers only in that case.
+    spatial_shape = rs.get("spatial_shape", (0, 0, 0)) or (0, 0, 0)
+    try:
+        has_resource_channel = int(spatial_shape[2]) > 5
+    except (TypeError, ValueError, IndexError):
+        has_resource_channel = False
+    harvest_points = live_resource_cells
+    if not has_resource_channel:
+        for p in rs.get("harvest_points", []) or []:
+            if not isinstance(p, dict):
+                continue
+            try:
+                harvest_points.append({
+                    "cell_x": int(p.get("cell_x", 0)),
+                    "cell_y": int(p.get("cell_y", 0)),
+                    "type": p.get("type", "mine"),
+                })
+            except (TypeError, ValueError):
+                continue
+
     minimap_b64 = None
     try:
         from openra_bench.minimap import render_tactical_minimap
@@ -176,6 +211,7 @@ def _serialize_state(sess) -> dict:
         "units": units,
         "enemies": enemies,
         "own_buildings": own_buildings,
+        "harvest_points": harvest_points,
         "minimap_b64": minimap_b64,
         "minimap_ascii": minimap_ascii,
         # 3-state shroud cells for clients that want to overlay their

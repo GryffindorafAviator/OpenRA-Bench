@@ -248,7 +248,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
       <div class="game-status" id="game-stats"></div>
       <div class="game-layout">
         <div class="game-map-col">
-          <div class="game-help">Click friendly units to select, then click ground to move or a visible enemy to attack. Enemy Atk uses selected units; All selects all visible units and focuses that enemy.</div>
+          <div class="game-help">Click friendly units to select, then click ground to move or a visible enemy to attack. Enemy Atk uses selected units; All selects all visible units and focuses that enemy. Check Harvest to send selected harvesters to a visible ore marker; uncheck it for normal move.</div>
           <div class="game-minimap" id="game-minimap" onclick="gameMinimapClick(event)" onmousemove="gameMinimapMove(event)" onmouseleave="gameMinimapLeave()">
             <div class="placeholder" id="game-minimap-ph">Start a game to see the minimap</div>
             <img id="game-minimap-img" style="display:none" draggable="false">
@@ -283,6 +283,9 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
           <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
             <button class="btn-secondary btn-sm" onclick="gameSelectAll()">Select All</button>
             <button class="btn-secondary btn-sm" onclick="gameClearSelection()">Clear Selection</button>
+            <label class="btn-secondary btn-sm" title="Checked: selected harvesters harvest visible ore. Unchecked: selected units move on ground click.">
+              <input type="checkbox" id="game-harvest-check" onchange="gameSetHarvestMode(this.checked)"> Harvest
+            </label>
             <button class="btn-secondary btn-sm" onclick="gameClearQueue()">Cancel Orders</button>
             <button class="btn-endturn" id="game-endturn-btn" onclick="gameEndTurn()" disabled>End Turn</button>
           </div>
@@ -531,7 +534,7 @@ function gameResetForMissionSwitch(){
     fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"}).catch(()=>{});
   }
   gameSession=null; gameState=null;
-  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePoweredDown.clear(); gameSelectedBuildings.clear();
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem=""; gameHarvestMode=false; gamePoweredDown.clear(); gameSelectedBuildings.clear();
   const body=document.getElementById("game-body");
   if(body)body.style.display="none";
   const start=document.getElementById("game-start-btn");
@@ -666,6 +669,7 @@ let gameSession=null, gameServerUrl="", gameServerOk=false;
 let gameSelected=new Set(), gameQueue=[], gameState=null;
 let gameRepeatAction=null;
 let gamePlaceItem="";
+let gameHarvestMode=false;
 let gamePoweredDown=new Set();
 let gameSelectedBuildings=new Set();
 
@@ -726,7 +730,7 @@ async function gameStart(){
     if(!r.ok){const e=await r.json();throw new Error(e.detail||r.statusText);}
     gameState=await r.json();
     gameSession=gameState.session_id;
-    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem=""; gamePoweredDown.clear(); gameSelectedBuildings.clear();
+    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem=""; gameHarvestMode=false; gamePoweredDown.clear(); gameSelectedBuildings.clear();
     document.getElementById("game-body").style.display="";
     document.getElementById("game-start-btn").style.display="none";
     document.getElementById("game-stop-btn").style.display="";
@@ -753,7 +757,7 @@ async function gameStop(){
     await fetch(gameServerUrl+"/api/game/stop/"+gameSession,{method:"POST"});
   }catch(e){}
   gameSession=null; gameState=null;
-  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem=""; gameHarvestMode=false;
   document.getElementById("game-body").style.display="none";
   document.getElementById("game-start-btn").style.display="";
   document.getElementById("game-stop-btn").style.display="none";
@@ -837,7 +841,7 @@ async function gameRestart(){
     try{await fetch(gameServerUrl+"/api/game/stop/"+sid,{method:"POST"});}catch(_){}
   }
   gameSession=null; gameState=null;
-  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem=""; gameHarvestMode=false;
   document.getElementById("game-body").style.display="none";
   document.getElementById("game-stop-btn").style.display="none";
   document.getElementById("game-restart-btn").style.display="none";
@@ -1133,6 +1137,16 @@ function gameNearestStack(items,cx,cy,radius){
   });
 }
 
+function gameNearestHarvestPoint(cx,cy,radius){
+  let best=null,bestD=Infinity;
+  for(const p of gameState&&gameState.harvest_points||[]){
+    const dx=Number(p.cell_x)-cx, dy=Number(p.cell_y)-cy;
+    const d=dx*dx+dy*dy;
+    if(d<=radius*radius&&d<bestD){best=p;bestD=d;}
+  }
+  return best;
+}
+
 function gameMinimapMove(e){
   const p=gameEventToCell(e);
   const el=document.getElementById("game-coords");
@@ -1183,6 +1197,26 @@ function gameMinimapClick(e){
   const enemyCloseHere=gameNearestStack(enemyClose,p.cx,p.cy,1.5);
   const enemyBigHere=gameNearestStack(enemyBig,p.cx,p.cy,2.5);
   const enemyHere=enemyCloseHere.length?enemyCloseHere:enemyBigHere;
+  const harvestHere=gameNearestHarvestPoint(p.cx,p.cy,3.2);
+  if(gameHarvestMode){
+    if(!gameSelected.size){
+      gameLog("Select harvester(s) first, then click a visible ore marker.");
+    }else if(!harvestHere){
+      gameLog("Harvest mode: click one of the visible ore markers.");
+    }else{
+      const ids=[...gameSelected];
+      const harvIds=ids.filter(id=>{
+        const u=(gameState.units||[]).find(x=>x.id===id);
+        return u&&gameTypeKey(u.type).startsWith("harv");
+      });
+      const useIds=harvIds.length?harvIds:ids;
+      gameQueueOrder({mode:"harvest",unit_ids:useIds,target_x:harvestHere.cell_x,target_y:harvestHere.cell_y});
+      gameSelected.clear(); gameHarvestMode=false;
+      gameLog("Queued HARVEST at ("+harvestHere.cell_x+","+harvestHere.cell_y+") with "+useIds.length+" harvester(s).");
+    }
+    gameRender();
+    return;
+  }
   if(gameSelected.size>0&&enemyHere.length>0){
     gameQueueAttack(enemyHere[0]);
   }else if(ownHere.length>0){
@@ -1226,7 +1260,7 @@ function gameClearSelection(){
 }
 
 function gameClearQueue(){
-  gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
+  gameQueue=[]; gameRepeatAction=null; gamePlaceItem=""; gameHarvestMode=false;
   gameLog("Queued and repeating orders cancelled.");
   gameRender();
 }
@@ -1236,7 +1270,12 @@ function gameQueueOrder(order){
   if(!ids.size)return;
   const next=[];
   for(const existing of gameQueue){
-    const remaining=(existing.unit_ids||[]).filter(id=>!ids.has(String(id)));
+    const existingIds=existing.unit_ids||[];
+    if(!existingIds.length){
+      next.push(existing);
+      continue;
+    }
+    const remaining=existingIds.filter(id=>!ids.has(String(id)));
     if(remaining.length)next.push({...existing,unit_ids:remaining});
   }
   next.push(order);
@@ -1288,6 +1327,16 @@ function gameBuildItemValue(){
 function gameSetBuildHint(text){
   const el=document.getElementById("game-build-hint");
   if(el)el.textContent=text||"";
+}
+
+function gameSetHarvestMode(on){
+  if(!gameState||gameState.done)return;
+  gamePlaceItem="";
+  gameHarvestMode=!!on;
+  gameLog(gameHarvestMode
+    ?"Harvest checked: selected harvesters will harvest when you click visible ore."
+    :"Harvest unchecked: selected units will move when you click ground.");
+  gameRender();
 }
 
 // Known unit / structure types so we can refuse "Place" for units
@@ -1446,10 +1495,12 @@ function gameRender(){
 function gameRenderBuildPanel(){
   const panel=document.getElementById("game-build-panel");
   const btn=document.getElementById("game-place-btn");
+  const harvestCheck=document.getElementById("game-harvest-check");
   if(!panel)return;
   const visible=gameCanBuild()&&!gameState.done;
   panel.classList.toggle("visible",visible);
   if(btn)btn.classList.toggle("place-active",!!gamePlaceItem);
+  if(harvestCheck)harvestCheck.checked=!!gameHarvestMode;
   if(!visible)gamePlaceItem="";
   if(visible){
     const ready=gameProductionReadyItems();
@@ -1520,6 +1571,7 @@ function gameRenderAsciiMinimap(ascii){
     ctx.setLineDash([]);
   }
 
+  gameDrawHarvestPoints(ctx,gameState.harvest_points||[],scale);
   gameDrawStacks(ctx,gameState.enemies||[],scale,"enemy");
   gameDrawStacks(ctx,gameState.own_buildings||[],scale,"own-building");
   gameDrawStacks(ctx,gameState.units||[],scale,"own");
@@ -1608,6 +1660,25 @@ function gameDrawMarker(ctx,x,y,r,shape){
     ctx.closePath();return;
   }
   ctx.beginPath();ctx.rect(x-r,y-r,r*2,r*2);
+}
+function gameDrawHarvestPoints(ctx,points,scale){
+  for(const p of points||[]){
+    const x=(Number(p.cell_x)+.5)*scale, y=(Number(p.cell_y)+.5)*scale;
+    if(!Number.isFinite(x)||!Number.isFinite(y))continue;
+    ctx.save();
+    ctx.fillStyle="#c99a39";
+    ctx.strokeStyle="rgba(0,0,0,.8)";
+    ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(x,y,6,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#fff3bd";
+    ctx.strokeStyle="rgba(0,0,0,.85)";
+    ctx.lineWidth=3;
+    ctx.font="bold 9px ui-monospace,monospace";
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.strokeText("ore",x,y-10);
+    ctx.fillText("ore",x,y-10);
+    ctx.restore();
+  }
 }
 function gameDrawStacks(ctx,items,scale,side){
   const groups=new Map();
@@ -1699,6 +1770,7 @@ function gameEnemyPriorityLabel(e){
 }
 function gameActionLabel(a){
   const item=a.building_type||a.unit_type||a.item||"";
+  if(a.mode==="harvest")return "harvest ("+a.target_x+","+a.target_y+")";
   if(a.mode==="build")return "build "+item;
   if(a.mode==="place_building")return "place "+item+"("+a.target_x+","+a.target_y+")";
   return a.mode+'('+((a.target_x!=null)?a.target_x+','+a.target_y:'')+')';
@@ -1726,7 +1798,8 @@ function gameRenderLegend(){
   if(hasEnemy)add("enemy","enemy unit","enemy");
   if(hasEnemyBuilding)add("enemy-building","enemy building","enemy-building");
   if((gameState.harvesters||0)>0&&!seen.has("own:harv"))add("tridown","harvester (harv)","harv");
-  if((gameState.resource_capacity||0)>0)add("ore","ore / stored resources","resources");
+  if((gameState.harvest_points||[]).length)add("ore","visible ore / harvest target","harvest-points");
+  else if((gameState.resource_capacity||0)>0)add("ore","ore / stored resources","resources");
   add("selected","selected");
   add("arrow","queued order");
   entries.push("<span><b>number</b> stacked units</span>");
