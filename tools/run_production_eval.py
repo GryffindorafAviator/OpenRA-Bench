@@ -563,6 +563,26 @@ def render_summary_md(summary: dict) -> str:
     L(f"- win rate (over evaluated cells): {_pct(summary.get('win_rate'))}")
     L(f"- mean composite: {_pct(summary.get('composite_mean'))}")
     L("")
+    cfg = summary.get("run_config") or {}
+    L("## run configuration")
+    L("")
+    L(f"- provider: `{cfg.get('provider', '?')}`")
+    L(f"- model id: `{cfg.get('model_id', summary.get('model','?'))}`")
+    L(f"- temperature: **{cfg.get('temperature', 0.7)}**")
+    L(f"- max_tokens: **{cfg.get('max_tokens', 1024)}** per completion")
+    L(f"- streaming: {cfg.get('stream', 'auto (per provider)')}")
+    L(f"- max_retries: {cfg.get('max_retries', 5)} per call "
+      f"(exponential backoff base={cfg.get('retry_base_s', 1.0)}s, "
+      f"cap={cfg.get('retry_cap_s', 30.0)}s)")
+    L(f"- timeout: {cfg.get('timeout_s', 120.0)}s per call")
+    L(f"- fog mode: `{cfg.get('fog_mode', 'vision')}` "
+      f"(image-primary minimap + text briefing)")
+    L(f"- max_history_turns: {cfg.get('max_history_turns', 16)} "
+      f"(sliding wire-history window)")
+    L(f"- concurrency: {cfg.get('concurrency', 20)} parallel cells "
+      f"(adaptive halving on >10% error rate over last 20 cells)")
+    L(f"- seeds: `{cfg.get('seeds', '1')}` × levels `{cfg.get('levels','easy,medium,hard')}`")
+    L("")
     L("> `composite` is the headline scalar in [0,1] combining outcome, "
       "deadline-speed bonus, and the perception/reasoning/action "
       "diagnostics for an episode. Defined in `openra_bench/scoring.py`. "
@@ -667,6 +687,33 @@ def open_paper_pr(prod_dir: Path, slug: str, type_: str, *,
         return None
 
     summary = summarise_run(stats, slug=slug, type_=type_)
+    # Plumb the run configuration so the PR description carries the
+    # exact sampling / provider settings each cell was evaluated under
+    # (paper reproducibility). Pulled from the campaign manifest +
+    # ProviderConfig defaults — overrides hot-loaded if a future
+    # version stores per-cell overrides.
+    from openra_bench.providers import ProviderConfig
+    _slug, provider, model_id = _model_by_slug(slug)
+    # Read the cell's manifest record (state, concurrency, seeds, etc.)
+    mf = load_manifest(prod_dir)
+    cell_state = (mf.get("cells") or {}).get(f"{slug}:{type_}") or {}
+    pcfg = ProviderConfig()
+    summary["run_config"] = {
+        "provider": provider,
+        "model_id": model_id,
+        "temperature": pcfg.temperature,
+        "max_tokens": pcfg.max_tokens,
+        "stream": cell_state.get("stream", "auto"),
+        "max_retries": pcfg.max_retries,
+        "retry_base_s": pcfg.retry_base_s,
+        "retry_cap_s": pcfg.retry_cap_s,
+        "timeout_s": pcfg.timeout_s,
+        "fog_mode": pcfg.fog_mode,
+        "max_history_turns": pcfg.max_history_turns,
+        "concurrency": cell_state.get("concurrency", 20),
+        "seeds": cell_state.get("seeds", "1"),
+        "levels": cell_state.get("levels", "easy,medium,hard"),
+    }
     md = render_summary_md(summary)
 
     if dry_run:
