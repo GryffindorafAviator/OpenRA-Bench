@@ -553,8 +553,11 @@ def render_summary_md(summary: dict) -> str:
       f"{summary['wins']} / {summary['losses']} / {summary['draws']}")
     L(f"- win rate (over evaluated cells): {_safe(summary.get('win_rate'))}")
     L(f"- mean composite: {_safe(summary.get('composite_mean'))}")
-    L(f"- leaves-final-blocking ratio: "
-      f"{_safe(summary['leaves_block_rate'])}")
+    L("")
+    L("> `composite` is the headline scalar in [0,1] combining outcome, "
+      "deadline-speed bonus, and the perception/reasoning/action "
+      "diagnostics for an episode. Defined in `openra_bench/scoring.py`. "
+      "Higher = better; wins are ≥ 0.5 by construction.")
     if errors:
         L("")
         L(f"> **Note**: {errors} cells errored on the provider side "
@@ -564,12 +567,11 @@ def render_summary_md(summary: dict) -> str:
     L("")
     L("## per family")
     L("")
-    L("| family | n | err | win rate | composite | blocked |")
-    L("| --- | ---:| ---:| ---:| ---:| ---:|")
+    L("| family | n | err | win rate | composite |")
+    L("| --- | ---:| ---:| ---:| ---:|")
     for r in summary["per_family"]:
         L(f"| {r['family']} | {r['n']} | {r.get('errors', 0)} | "
-          f"{_safe(r['win_rate'])} | {_safe(r['composite_mean'])} | "
-          f"{_safe(r['leaves_block_rate'])} |")
+          f"{_safe(r['win_rate'])} | {_safe(r['composite_mean'])} |")
     if summary["best_cells"]:
         L("")
         L("## top 5 cells")
