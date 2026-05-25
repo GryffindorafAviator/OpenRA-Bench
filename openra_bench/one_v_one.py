@@ -27,6 +27,8 @@ agent-vs-bot, or a `HumanController` on either side.
 
 from __future__ import annotations
 
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -81,6 +83,7 @@ def run_1v1(
     enemy_controller: Any,
     seed: int = 0,
     max_turns: int = 200,
+    progress: bool = True,
 ) -> OneVOneResult:
     """Run one full-macro 1v1 match and return the result.
 
@@ -133,32 +136,67 @@ def run_1v1(
         winner = "draw"
         reason = "turn cap reached"
 
-        for turns in range(1, max_turns + 1):
-            a_rs = agent_ad.render_state()
-            e_rs = enemy_ad.render_state()
+        # Two controllers decide concurrently: both observe the same
+        # tick-N state (captured BEFORE either `.act()` runs), then
+        # their independent `.act()` calls go in parallel so the
+        # per-turn wall-clock is max(agent_latency, enemy_latency)
+        # rather than the sum — load-bearing when both controllers
+        # are LLMs with multi-second round-trips. The engine's
+        # `step_1v1` already applies both sides' orders in the same
+        # frame so neither side moves "first"; this just stops the
+        # bench harness from serializing the round-trips.
+        executor = ThreadPoolExecutor(max_workers=2)
 
-            a_cmds = agent.act(a_rs, Command) or [Command.observe()]
-            e_cmds = enemy.act(e_rs, Command) or [Command.observe()]
-            a_obs, e_obs, done, _info = raw.step_1v1(a_cmds, e_cmds)
-            agent_ad.observe(a_obs, done=done)
-            enemy_ad.observe(e_obs, done=done)
+        try:
+            for turns in range(1, max_turns + 1):
+                a_rs = agent_ad.render_state()
+                e_rs = enemy_ad.render_state()
 
-            agent_trace.append(
-                {
-                    "turn": turns,
-                    "tick": agent_ad.signals.game_tick,
-                    "n_cmds": len(a_cmds),
-                }
-            )
-            enemy_trace.append(
-                {
-                    "turn": turns,
-                    "tick": enemy_ad.signals.game_tick,
-                    "n_cmds": len(e_cmds),
-                }
-            )
-            if done:
-                break
+                a_fut = executor.submit(agent.act, a_rs, Command)
+                e_fut = executor.submit(enemy.act, e_rs, Command)
+                a_cmds = a_fut.result() or [Command.observe()]
+                e_cmds = e_fut.result() or [Command.observe()]
+                a_obs, e_obs, done, _info = raw.step_1v1(a_cmds, e_cmds)
+                agent_ad.observe(a_obs, done=done)
+                enemy_ad.observe(e_obs, done=done)
+
+                agent_trace.append(
+                    {
+                        "turn": turns,
+                        "tick": agent_ad.signals.game_tick,
+                        "n_cmds": len(a_cmds),
+                    }
+                )
+                enemy_trace.append(
+                    {
+                        "turn": turns,
+                        "tick": enemy_ad.signals.game_tick,
+                        "n_cmds": len(e_cmds),
+                    }
+                )
+                if progress:
+                    a_rs_now = agent_ad.render_state()
+                    e_rs_now = enemy_ad.render_state()
+                    a_units = len(a_rs_now.get("units_summary") or [])
+                    e_units = len(e_rs_now.get("units_summary") or [])
+                    a_blds = _own_buildings(a_rs_now)
+                    e_blds = _own_buildings(e_rs_now)
+                    a_kills = _kills(a_rs_now)
+                    e_kills = _kills(e_rs_now)
+                    a_cash = _economy_value(a_rs_now)
+                    e_cash = _economy_value(e_rs_now)
+                    print(
+                        f"[1v1 t{turns:>3} tick{agent_ad.signals.game_tick:>5}] "
+                        f"agent: units={a_units} bld={a_blds} kills={a_kills} $={a_cash} | "
+                        f"enemy: units={e_units} bld={e_blds} kills={e_kills} $={e_cash} "
+                        f"(a_cmds={len(a_cmds)} e_cmds={len(e_cmds)})",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                if done:
+                    break
+        finally:
+            executor.shutdown(wait=False)
 
         # Decide the winner from the final boards.
         a_rs = agent_ad.render_state()
