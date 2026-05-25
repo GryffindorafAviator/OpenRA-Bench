@@ -818,11 +818,36 @@ def evaluate(
             if len(parts) >= 2:
                 return parts[1]  # pack:level OR pack:config_name
             return compiled.level
-        tasks = [
-            t for t in tasks
-            if episode_key(t[0].meta.id, _suffix_of(t[1], t[0]),
-                           t[2], t[3], _cell_fog(t[0])) not in done
-        ]
+        # Pass^N resume: --repeats N generates N tasks per (cell, seed),
+        # all sharing the same episode_key (key doesn't carry rep). The
+        # naive `key not in done` filter would skip every task as soon
+        # as the journal had ONE record for that key, blocking pass^3
+        # from ever running rep=1/rep=2. Count journal records per key
+        # and keep `max(0, repeats - done_count)` tasks per key. The
+        # in-process journal-append dedupe is per-key-per-process so it
+        # would also fire on the second append of the same key in the
+        # same run — make this explicit so the journal allows repeats.
+        from collections import Counter
+        # Tally journal records by (base-key) — rep-suffixed and bare
+        # keys collapse to the same base so existing pass@1 data counts
+        # toward the pass^N quota.
+        def _base_key(k: str) -> str:
+            return k.split("|rep")[0] if "|rep" in k else k
+        done_count: Counter[str] = Counter()
+        for rec in prior:
+            base = _base_key(rec.get("_key") or "")
+            if base:
+                done_count[base] += 1
+        kept: list = []
+        slots: Counter[str] = Counter()
+        for t in tasks:
+            base_k = episode_key(t[0].meta.id, _suffix_of(t[1], t[0]),
+                                 t[2], t[3], _cell_fog(t[0]))
+            already = done_count[base_k] + slots[base_k]
+            if already < max(1, repeats):
+                kept.append(t)
+                slots[base_k] += 1
+        tasks = kept
 
     def _persist(rec: dict) -> None:
         if journal is None:
@@ -840,7 +865,8 @@ def evaluate(
             pack, level = parts[0], parts[1]
             fog = rec.get("fog_mode") or "vision"
         journal.append(
-            episode_key(pack, level, rec["split"], rec["seed"], fog),
+            episode_key(pack, level, rec["split"], rec["seed"], fog,
+                        repeat=int(rec.get("repeat", 0) or 0)),
             slim,
         )
 

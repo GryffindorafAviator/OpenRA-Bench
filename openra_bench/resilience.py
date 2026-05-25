@@ -154,13 +154,22 @@ class CostMeter:
 
 
 def episode_key(pack: str, level: str, split: str, seed: int,
-                fog_mode: str = "vision") -> str:
-    """Stable key for the run journal — pack|level|split|seed|fog_mode.
+                fog_mode: str = "vision", repeat: int = 0) -> str:
+    """Stable key for the run journal —
+    pack|level|split|seed|fog_mode  (repeat appended when > 0).
 
     fog_mode is included so a (pack, level, split, seed) eval'd in
     `vision` and again in `structured` are treated as distinct cells;
-    resume on the same out_dir won't accidentally skip a new modality."""
-    return f"{pack}|{level}|{split}|{seed}|{fog_mode}"
+    resume on the same out_dir won't accidentally skip a new modality.
+
+    `repeat` is appended ONLY when > 0 so:
+      - back-compat: existing journals (no repeat suffix) match new
+        `repeat=0` keys exactly,
+      - pass^N stability sweeps: rep=1, rep=2 each carry a unique key
+        so the per-process dedupe doesn't trip and the resume-gate
+        counts each attempt distinctly."""
+    base = f"{pack}|{level}|{split}|{seed}|{fog_mode}"
+    return f"{base}|rep{repeat}" if repeat else base
 
 
 class DuplicateJournalKey(RuntimeError):
