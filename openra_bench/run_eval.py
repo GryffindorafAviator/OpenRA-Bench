@@ -713,6 +713,18 @@ def evaluate(
             "split": split,
             "seed": seed,
             "repeat": rep,
+            # Carry the COMPILED fog_mode through so the journal _key
+            # computed by `_persist` matches the one used by the
+            # resume-gate filter (`_cell_fog(compiled)`). Without this
+            # field the persist fallback writes `...|vision`, which
+            # mismatches the filter key `...|<config-fog>` on packs with
+            # a `configs:` block that pin non-vision fog (e.g.
+            # `adversarial-duel:easy` → `structured`). The mismatch
+            # tripped the in-process dedupe with `DuplicateJournalKey`
+            # on resume for those cells.
+            "fog_mode": (
+                getattr(compiled, "fog_mode", None) or "vision"
+            ),
             "outcome": sc.outcome,
             "composite": sc.composite,
             "perception": sc.perception,
