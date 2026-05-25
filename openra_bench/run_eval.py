@@ -127,13 +127,11 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
         return lambda _c: scripted_explore_agent
     from .agent import ModelAgent
 
-    from .game_knowledge import (actor_codes, objective_brief,
-                                 scenario_primer)
-    from .prompt_v2 import unit_codex as _codex
-    def _scn_codes(c):
-        from .game_knowledge import _condition_codes
-        return (actor_codes(c.scenario) | _condition_codes(c.win_condition)
-                | _condition_codes(c.fail_condition))
+    from .game_knowledge import (objective_brief, scenario_primer)
+    # The agent's system prompt now defaults to the FULL RA codex +
+    # tech tree (every model sees the same reference). The legacy
+    # scenario-scoped `unit_codex(codes)` filter is no longer wired
+    # in — kept callable for explicit override only.
 
     def factory(compiled: CompiledLevel):
         agent = ModelAgent(
@@ -148,9 +146,12 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
             ),
             system_extra=scenario_primer(compiled),
             base_map=compiled.scenario.base_map,
-            unit_codex=_codex(_scn_codes(compiled)),
             level=compiled.level,
             fog_mode=getattr(compiled, "fog_mode", "vision"),
+            agent_faction=getattr(
+                getattr(compiled.scenario, "agent", None), "faction", "") or "",
+            enemy_faction=getattr(
+                getattr(compiled.scenario, "enemy", None), "faction", "") or "",
         )
         return agent.agent_fn
 
@@ -317,13 +318,9 @@ def evaluate(
             provider_cfg, rate_limiter=limiter, cost_meter=meter
         )
 
-        from .game_knowledge import (actor_codes, objective_brief,
-                                     scenario_primer)
-        from .prompt_v2 import unit_codex as _codex
-        def _scn_codes(c):
-            from .game_knowledge import _condition_codes
-            return (actor_codes(c.scenario) | _condition_codes(c.win_condition)
-                    | _condition_codes(c.fail_condition))
+        from .game_knowledge import (objective_brief, scenario_primer)
+        # Full RA codex + tech tree is the default reference (see
+        # prompt_v2.system_prompt); no per-scenario filter is needed.
 
         def factory(compiled: CompiledLevel):
             return ModelAgent(
@@ -339,9 +336,12 @@ def evaluate(
                 provider=shared,
                 system_extra=scenario_primer(compiled),
                 base_map=compiled.scenario.base_map,
-                unit_codex=_codex(_scn_codes(compiled)),
                 level=compiled.level,
                 fog_mode=getattr(compiled, "fog_mode", "vision"),
+                agent_faction=getattr(
+                    getattr(compiled.scenario, "agent", None), "faction", "") or "",
+                enemy_faction=getattr(
+                    getattr(compiled.scenario, "enemy", None), "faction", "") or "",
             ).agent_fn
 
     # Run/model identity so a single playback root can hold many runs
@@ -899,16 +899,10 @@ def _build_1v1_controller(spec: str | None, compiled: CompiledLevel,
         # still runs (the CLI smoke / scripted-baseline flow).
         return scripted_explore_agent
     from .agent import ModelAgent
-    from .game_knowledge import (actor_codes, objective_brief,
-                                 scenario_primer)
-    from .prompt_v2 import unit_codex as _codex
-    from .game_knowledge import _condition_codes
-
-    codes = (
-        actor_codes(compiled.scenario)
-        | _condition_codes(compiled.win_condition)
-        | _condition_codes(compiled.fail_condition)
-    )
+    from .game_knowledge import (objective_brief, scenario_primer)
+    # Full RA codex + tech tree applied by default (every model sees
+    # the same reference); the legacy filtered `unit_codex(codes)`
+    # path is no longer wired in.
     return ModelAgent(
         provider_cfg,
         allowed_tools=compiled.scenario.tools,
@@ -921,9 +915,12 @@ def _build_1v1_controller(spec: str | None, compiled: CompiledLevel,
         ),
         system_extra=scenario_primer(compiled),
         base_map=compiled.scenario.base_map,
-        unit_codex=_codex(codes),
         level=compiled.level,
         fog_mode=getattr(compiled, "fog_mode", "vision"),
+        agent_faction=getattr(
+            getattr(compiled.scenario, "agent", None), "faction", "") or "",
+        enemy_faction=getattr(
+            getattr(compiled.scenario, "enemy", None), "faction", "") or "",
     ).agent_fn
 
 

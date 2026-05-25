@@ -3,10 +3,15 @@
 Loads the byte-vendored training artifacts (`_vendor/system_v2.txt`,
 `briefing_v2.py`, `minimap_v2.py`) and adapts the bench `render_state`
 into the exact `state` dict they expect, so a bench transcript is
-indistinguishable in format from a training rollout. Adds one bench
-extra the user asked for: a scenario-scoped unit codex (accurate RA
-ruleset numbers) appended to the system prompt — coherent with the
-combat-model section that references rng/DPS/sight.
+indistinguishable in format from a training rollout.
+
+The system prompt also carries the FULL RA codex + tech tree (built at
+import time from the vendored OpenRA YAML rules / weapons), so every
+LLM call sees the same uniform encyclopaedia — equivalent to a human
+reading the RA manual before play. Previously only the actors mentioned
+in a given pack were surfaced, which left a 1v1 macro pack with a
+`syrd` blind to what ships it could produce. (`unit_codex(codes)` is
+retained as a legacy filtered fallback.)
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from __future__ import annotations
 import base64
 import importlib.util as _iu
 import logging
+import re as _codex_re
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +79,10 @@ _CODEX: dict[str, str] = {
 
 
 def unit_codex(codes) -> str:
+    """Legacy scenario-scoped codex — kept for back-compat (callers
+    that still want a filtered view). The system prompt now defaults
+    to FULL_CODEX_TEXT + TECH_TREE_TEXT (every model sees the same
+    encyclopaedia)."""
     rows = [c for c in sorted(set(codes)) if c in _CODEX]
     if not rows:
         return ""
@@ -86,12 +96,528 @@ def unit_codex(codes) -> str:
     )
 
 
+# ─── Full RA codex built from vendor YAML ─────────────────────────────
+# Parses OpenRA-Rust/openra-data/src/embedded/rules/*.yaml and
+# weapons/*.yaml at import time. The result is two strings —
+# FULL_CODEX_TEXT (per-actor stats: cost / hp / range / DPS / sight /
+# movement / role) and TECH_TREE_TEXT (faction + prerequisites,
+# grouped by production source) — appended to the system prompt by
+# default so every LLM call sees the same uniform reference. Pure
+# function: read-only access to the vendored YAML files; if the
+# vendor checkout isn't reachable the builders return "" and the
+# system prompt falls back to the curated `_CODEX` legacy view.
+
+
+def _vendor_rules_dir() -> Path | None:
+    """Locate the in-repo vendored OpenRA rules directory.
+    Reuses the same path the engine compiles into the wheel."""
+    repo = Path(__file__).resolve().parents[2]  # …/OpenRA-Bench → parent
+    cand = repo / "OpenRA-Rust/openra-data/src/embedded"
+    if (cand / "rules").is_dir() and (cand / "weapons").is_dir():
+        return cand
+    return None
+
+
+def _parse_ra_yaml(text: str) -> dict:
+    """Tab-indented OpenRA YAML. A key with both inline value AND
+    children (e.g. `Warhead@1Dam: SpreadDamage` + sub-keys) stores
+    the value as `__type__` inside the child dict."""
+    lines: list[tuple[int, str]] = []
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        i = 0
+        while i < len(raw) and raw[i] == "\t":
+            i += 1
+        lines.append((i, raw[i:].rstrip()))
+    root: dict[str, Any] = {}
+    stack: list[tuple[int, dict]] = [(-1, root)]
+    n = len(lines)
+    for idx, (indent, line) in enumerate(lines):
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        parent = stack[-1][1]
+        has_children = idx + 1 < n and lines[idx + 1][0] > indent
+        if ":" in line:
+            key, _, val = line.partition(":")
+            key = key.strip()
+            val = val.strip()
+            if has_children:
+                child: dict[str, Any] = {}
+                if val:
+                    child["__type__"] = val
+                if key in parent and isinstance(parent[key], dict):
+                    child = {**child, **parent[key]}
+                parent[key] = child
+                stack.append((indent, child))
+            else:
+                parent[key] = val
+        else:
+            parent[line.strip()] = ""
+    return root
+
+
+def _deep_merge(into: dict, src: dict) -> dict:
+    out = dict(into)
+    for k, v in src.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def _resolve_inherits(actors: dict, name: str, seen: set | None = None) -> dict:
+    seen = set(seen or ())
+    if name in seen or name not in actors:
+        return {}
+    seen.add(name)
+    body = actors[name]
+    merged: dict = {}
+    for k in list(body.keys()):
+        if k == "Inherits" or k.startswith("Inherits@") or k.startswith("Inherits#"):
+            parent_name = body[k]
+            if isinstance(parent_name, str):
+                merged = _deep_merge(
+                    merged, _resolve_inherits(actors, parent_name, seen)
+                )
+    for k, v in body.items():
+        if k == "Inherits" or k.startswith("Inherits@") or k.startswith("Inherits#"):
+            continue
+        if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
+            merged[k] = _deep_merge(merged[k], v)
+        else:
+            merged[k] = v
+    return merged
+
+
+def _resolve_weapon(weapons: dict, name: str, seen: set | None = None) -> dict:
+    seen = set(seen or ())
+    if name in seen or name not in weapons:
+        return {}
+    seen.add(name)
+    body = weapons[name]
+    merged: dict = {}
+    for k in list(body.keys()):
+        if k == "Inherits" or k.startswith("Inherits"):
+            parent_name = body[k]
+            if isinstance(parent_name, str):
+                merged = _deep_merge(
+                    merged, _resolve_weapon(weapons, parent_name, seen)
+                )
+    for k, v in body.items():
+        if k == "Inherits" or k.startswith("Inherits"):
+            continue
+        if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
+            merged[k] = _deep_merge(merged[k], v)
+        else:
+            merged[k] = v
+    return merged
+
+
+def _parse_range_cells(rng: object) -> float:
+    if not rng:
+        return 0.0
+    m = _codex_re.match(r"(\d+)c(\d+)?", str(rng))
+    if m:
+        return int(m.group(1)) + int(m.group(2) or 0) / 1024.0
+    try:
+        return float(rng)  # type: ignore[arg-type]
+    except Exception:
+        return 0.0
+
+
+def _weapon_damage(weapon: dict) -> int:
+    total = 0
+    for k, v in weapon.items():
+        if k.startswith("Warhead") and isinstance(v, dict):
+            t = str(v.get("__type__", "")).strip()
+            if t.startswith("SpreadDamage") or "Damage" in v:
+                try:
+                    total += int(v.get("Damage", 0))
+                except Exception:
+                    pass
+    return total
+
+
+def _weapon_summary(weapons: dict, wname: str) -> dict | None:
+    w = _resolve_weapon(weapons, wname)
+    if not w:
+        return None
+    dmg = _weapon_damage(w)
+    try:
+        burst = int(w.get("Burst", 1))
+    except Exception:
+        burst = 1
+    try:
+        reload = int(w.get("ReloadDelay", 60))
+    except Exception:
+        reload = 60
+    rng = _parse_range_cells(w.get("Range", "0"))
+    # Engine HP / damage scale: vendor / 100. 25 ticks per game second.
+    dps = (dmg * burst * 25.0 / reload) / 100.0 if reload > 0 else 0.0
+    return {
+        "name": wname,
+        "dmg": dmg,
+        "burst": burst,
+        "reload": reload,
+        "range_cells": rng,
+        "dps": round(dps, 1),
+    }
+
+
+_LOCO_MAP = {
+    "foot": "foot", "wheeled": "wheeled", "tracked": "tracked",
+    "heavy": "tracked", "amphibious": "amphibious", "naval": "naval",
+    "ship": "naval", "submarine": "naval", "boat": "naval",
+}
+_SRC_MOVE = {
+    "aircraft.yaml": "aircraft", "ships.yaml": "naval",
+    "vehicles.yaml": "tracked", "infantry.yaml": "foot",
+    "structures.yaml": "building", "civilian.yaml": "foot",
+}
+
+# Engine aliases (gamerules.rs registers `tanya` as E7).
+_ALIASES = {"tanya": "E7"}
+
+
+def _actor_stats(actors: dict, weapons: dict, code_upper: str) -> dict:
+    body = _resolve_inherits(actors, code_upper)
+    src = actors.get(code_upper, {}).get("__source__", "")
+    out: dict[str, Any] = {"code": code_upper.lower(), "_src": src}
+    valued = body.get("Valued", {})
+    if isinstance(valued, dict) and "Cost" in valued:
+        try:
+            out["cost"] = int(valued["Cost"])
+        except Exception:
+            pass
+    health = body.get("Health", {})
+    if isinstance(health, dict) and "HP" in health:
+        try:
+            out["hp"] = int(int(health["HP"]) / 100)
+        except Exception:
+            pass
+    buildable = body.get("Buildable", {})
+    if isinstance(buildable, dict) and buildable:
+        out["prereqs"] = str(buildable.get("Prerequisites", "")).strip()
+        out["queue"] = str(buildable.get("Queue", "")).strip()
+        out["buildable"] = True
+    else:
+        out["buildable"] = False
+        out["prereqs"] = ""
+        out["queue"] = ""
+    rev = body.get("RevealsShroud", {})
+    if isinstance(rev, dict) and "Range" in rev:
+        out["sight_cells"] = _parse_range_cells(rev["Range"])
+    arms: list[dict] = []
+    seen_weapons: set[str] = set()
+    for k, v in body.items():
+        if k == "Armament" or k.startswith("Armament@") or k.startswith("Armament#"):
+            if isinstance(v, dict) and "Weapon" in v:
+                wname = v["Weapon"]
+                if "GARRISON" in k.upper() or str(v.get("Name", "")).lower() == "garrisoned":
+                    continue
+                if wname in seen_weapons:
+                    continue
+                seen_weapons.add(wname)
+                ws = _weapon_summary(weapons, wname)
+                if ws:
+                    arms.append(ws)
+    out["armaments"] = arms
+    if "Aircraft" in body or "Plane" in body or "Helicopter" in body or src == "aircraft.yaml":
+        out["movement"] = "aircraft"
+    else:
+        mob = body.get("Mobile", {})
+        if isinstance(mob, dict) and mob:
+            loco = str(mob.get("Locomotor", "")).lower().strip()
+            out["movement"] = _LOCO_MAP.get(loco, _SRC_MOVE.get(src) or loco or "ground")
+        elif src == "ships.yaml":
+            out["movement"] = "naval"
+        elif src == "structures.yaml" or "Building" in body:
+            out["movement"] = "building"
+        else:
+            out["movement"] = "?"
+    out["is_building"] = out["movement"] == "building"
+    power = body.get("Power", {})
+    if isinstance(power, dict) and "Amount" in power:
+        try:
+            out["power"] = int(power["Amount"])
+        except Exception:
+            pass
+    return out
+
+
+# Role glossary — short, accurate. Falls back to a generic role when
+# the actor isn't in openra_bench.game_knowledge.ACTOR_GLOSSARY.
+_EXTRA_ROLES = {
+    "v2rl": "V2 rocket launcher (Soviet long-range artillery)",
+    "mnly": "minelayer (drops mines)",
+    "mgg": "mobile gap generator (creates shroud)",
+    "mrj": "mobile radar jammer",
+    "ttnk": "tesla tank (Soviet mobile shocker)",
+    "ftrk": "flak truck (Soviet anti-air vehicle)",
+    "dtrk": "demolition truck (suicide explosive)",
+    "ctnk": "chrono tank (Allied teleporter)",
+    "qtnk": "MAD tank (Soviet shockwave)",
+    "stnk": "phase transport (Allied stealth APC)",
+    "hind": "Hind gunship (Soviet attack helicopter)",
+    "yak": "Yak fighter (Soviet ground-attack plane)",
+    "mig": "MiG attack plane (Soviet)",
+    "tran": "Chinook transport helicopter",
+    "badr": "Badger bomber (paradrop carrier)",
+    "u2": "U-2 spy plane (recon)",
+    "mh60": "Black Hawk helicopter",
+    "ca": "cruiser (Allied long-range naval artillery)",
+    "ss": "submarine (Soviet stealth naval, anti-ship)",
+    "msub": "missile submarine (Soviet long-range)",
+    "pt": "PT boat (light naval, anti-sub)",
+    "lst": "landing craft (transport across water)",
+    "afld": "Soviet airfield (builds planes)",
+    "spen": "Allied sub pen (builds submarines/PT)",
+    "syrd": "Soviet shipyard (builds DD/cruiser/PT/lst)",
+    "iron": "iron curtain (Soviet superweapon: temporary invulnerability)",
+    "stek": "Soviet tech centre (gates top-tier units)",
+    "pdox": "chronosphere (Allied superweapon: teleport unit)",
+    "mslo": "missile silo (Soviet nuke superweapon)",
+    "kenn": "kennel (prerequisite for attack dogs)",
+    "gap": "gap generator (creates shroud over enemy)",
+    "hbox": "camo pillbox (hidden anti-infantry)",
+    "ftur": "flame turret (Soviet anti-infantry, short range)",
+    "agun": "AA gun (Allied anti-air ground turret)",
+    "barb": "barbed wire (inert obstacle)",
+    "sbag": "sandbag wall (cheap obstacle)",
+    "cycl": "chain-link fence (obstacle)",
+    "fenc": "wood fence (obstacle)",
+    "wood": "wood (decorative wall)",
+    "e7": "Tanya (Allied hero; Colt45 vs infantry, C4 vs buildings)",
+}
+
+
+def _role_for(code: str) -> str:
+    # Late import to avoid circulars.
+    try:
+        from .game_knowledge import ACTOR_GLOSSARY
+    except Exception:
+        ACTOR_GLOSSARY = {}  # type: ignore[assignment]
+    c = code.lower()
+    return ACTOR_GLOSSARY.get(c) or _EXTRA_ROLES.get(c, "")
+
+
+_INFANTRY = ["E1", "E2", "E3", "E6", "DOG", "MEDI", "SPY", "THF", "E7"]
+_VEHICLES = ["1TNK", "2TNK", "3TNK", "4TNK", "JEEP", "APC", "ARTY", "HARV",
+             "MCV", "V2RL", "MNLY", "MGG", "MRJ", "TTNK", "FTRK", "DTRK",
+             "CTNK"]
+_AIRCRAFT = ["HELI", "HIND", "YAK", "MIG", "TRAN", "BADR", "U2", "MH60"]
+_SHIPS = ["DD", "CA", "SS", "MSUB", "PT", "LST"]
+_STRUCTURES = ["FACT", "POWR", "APWR", "PROC", "BARR", "TENT", "WEAP",
+               "HPAD", "AFLD", "SPEN", "SYRD", "FIX", "DOME", "SILO",
+               "ATEK", "STEK", "IRON", "MSLO", "PDOX", "KENN", "GAP"]
+_DEFENSES = ["PBOX", "HBOX", "GUN", "FTUR", "TSLA", "SAM", "AGUN"]
+_WALLS = ["BRIK", "SBAG", "CYCL", "FENC", "BARB"]
+
+# Tanya/e7 alias display name
+_DISPLAY = {"e7": "tanya"}  # surface tanya since packs use it
+
+
+def _faction_from_prereqs(prereqs: str) -> str:
+    p = prereqs.lower()
+    if "structures.allies" in p or "vehicles.allies" in p or "infantry.allies" in p:
+        return "Allied"
+    if "structures.soviet" in p or "vehicles.soviet" in p or "infantry.soviet" in p:
+        return "Soviet"
+    # ~barracks (alias for either tent or barr) ⇒ both
+    if "~barracks" in p or "techlevel.infonly" in p and "~barracks" in p:
+        return "Allied+Soviet"
+    parts = [s.strip() for s in p.split(",")]
+    for token, fac in (
+        ("~tent", "Allied"), ("tent", "Allied"),
+        ("~barr", "Soviet"), ("barr", "Soviet"),
+        ("~hpad", "Allied"), ("hpad", "Allied"),
+        ("~afld", "Soviet"), ("afld", "Soviet"),
+        ("~syrd", "Allied"), ("syrd", "Allied"),
+        ("~spen", "Soviet"), ("spen", "Soviet"),
+        ("kenn", "Soviet"), ("atek", "Allied"),
+        ("stek", "Soviet"),
+    ):
+        if token in parts:
+            return fac
+    if "~barracks" in p:
+        return "Allied+Soviet"
+    return "Allied+Soviet"
+
+
+def _clean_prereqs(prereqs: str) -> str:
+    parts = [p.strip() for p in prereqs.split(",")]
+    keep: list[str] = []
+    for p in parts:
+        if not p:
+            continue
+        if "techlevel" in p or "disabled" in p:
+            continue
+        if p.startswith("~!") or p.startswith("!"):
+            continue
+        # strip leading ~ for display (it's an "or-equivalent" marker)
+        keep.append(p.lstrip("~"))
+    return ", ".join(keep) or "(none from construction yard alone)"
+
+
+def _format_row(s: dict) -> str:
+    code = s["code"]
+    disp = _DISPLAY.get(code, code)
+    role = _role_for(code)
+    parts: list[str] = []
+    if s.get("cost") is not None:
+        parts.append(f"${s['cost']}")
+    if s.get("hp") is not None:
+        parts.append(f"hp{s['hp']}")
+    arms = s.get("armaments", [])
+    if arms:
+        a = arms[0]
+        parts.append(f"rng{a['range_cells']:.1f}c")
+        parts.append(f"dps{a['dps']:.1f}")
+        if len(arms) > 1:
+            b = arms[1]
+            parts.append(
+                f"+{b['name']}(rng{b['range_cells']:.1f}c/dps{b['dps']:.1f})"
+            )
+    elif not s.get("is_building"):
+        parts.append("unarmed")
+    if s.get("sight_cells") is not None:
+        parts.append(f"sight{s['sight_cells']:.1f}c")
+    if s.get("movement") and not s.get("is_building"):
+        parts.append(s["movement"])
+    if s.get("power") is not None and s.get("is_building"):
+        pw = s["power"]
+        parts.append(f"power{pw:+d}")
+    stats = " ".join(parts)
+    if role:
+        return f"  {disp:<6} {role} — {stats}"
+    return f"  {disp:<6} — {stats}"
+
+
+def _build_full_codex() -> tuple[str, str]:
+    """Returns (FULL_CODEX_TEXT, TECH_TREE_TEXT). Empty strings if
+    the vendor checkout isn't reachable."""
+    base = _vendor_rules_dir()
+    if base is None:
+        return "", ""
+    try:
+        actors: dict[str, dict] = {}
+        for f in sorted((base / "rules").glob("*.yaml")):
+            text = f.read_text(encoding="utf-8")
+            for k, v in _parse_ra_yaml(text).items():
+                if isinstance(v, dict) and k not in actors:
+                    v["__source__"] = f.name
+                    actors[k] = v
+        weapons: dict[str, dict] = {}
+        for f in sorted((base / "weapons").glob("*.yaml")):
+            text = f.read_text(encoding="utf-8")
+            for k, v in _parse_ra_yaml(text).items():
+                if isinstance(v, dict) and k not in weapons:
+                    weapons[k] = v
+    except Exception as e:
+        logger.debug("Vendor codex build failed: %s", e)
+        return "", ""
+
+    sections: list[tuple[str, list[str]]] = [
+        ("Infantry", _INFANTRY),
+        ("Vehicles", _VEHICLES),
+        ("Aircraft", _AIRCRAFT),
+        ("Ships", _SHIPS),
+        ("Structures", _STRUCTURES),
+        ("Defenses", _DEFENSES),
+        ("Walls", _WALLS),
+    ]
+    out: list[str] = [
+        "UNIT CODEX (full RA reference; identical for every model).",
+        "Each row: <code> <role> — $cost hp<HP> rng<attack range, cells> "
+        "dps<damage/sec> sight<vision, cells> <movement> [power].",
+        "Engine HP / damage scale = vendor / 100; DPS = damage·burst·25 / "
+        "reload·100 (the engine ticks at 25/sec).",
+    ]
+    for title, codes in sections:
+        out.append("")
+        out.append(f"{title}:")
+        for code in codes:
+            yc = _ALIASES.get(code.lower(), code)
+            s = _actor_stats(actors, weapons, yc)
+            # The PBOX in the engine has its M60mg attached at runtime
+            # (gamerules.rs::from_ruleset) since the vendor YAML carries
+            # an AttackGarrisoned armament only. Inject the same M60mg
+            # numbers here so the codex matches engine behaviour.
+            if code.lower() in ("pbox", "hbox") and not s.get("armaments"):
+                ws = _weapon_summary(weapons, "M60mg")
+                if ws:
+                    s["armaments"] = [ws]
+                    s["sight_cells"] = s.get("sight_cells", 6.0)
+            if s.get("cost") is None and s.get("hp") is None:
+                continue
+            out.append(_format_row(s))
+
+    codex_text = "\n".join(out)
+
+    # Tech tree
+    tt: list[str] = [
+        "TECH TREE (faction availability + prerequisites).",
+        "`~X` in vendor YAML = 'any of the X-providing structures'; "
+        "factions are inferred from prereq tags. fact (construction "
+        "yard) is the seed building; place_building does NOT require "
+        "engine-side adjacency in this bench.",
+    ]
+    tt_by_section = [
+        ("Infantry (built at tent/barr)", _INFANTRY),
+        ("Vehicles (built at weap)", _VEHICLES),
+        ("Aircraft (built at hpad / afld)", _AIRCRAFT),
+        ("Ships (built at syrd / spen)", _SHIPS),
+        ("Buildings (built at fact)", _STRUCTURES),
+        ("Defenses (built at fact)", _DEFENSES),
+        ("Walls (built at fact)", _WALLS),
+    ]
+    for title, codes in tt_by_section:
+        tt.append("")
+        tt.append(f"{title}:")
+        for code in codes:
+            yc = _ALIASES.get(code.lower(), code)
+            s = _actor_stats(actors, weapons, yc)
+            if not s.get("buildable"):
+                continue
+            disp = _DISPLAY.get(code.lower(), code.lower())
+            faction = _faction_from_prereqs(s.get("prereqs", ""))
+            prereqs = _clean_prereqs(s.get("prereqs", ""))
+            tt.append(f"  {disp:<6} {faction:<14} prereqs: {prereqs}")
+    tech_text = "\n".join(tt)
+    return codex_text, tech_text
+
+
+FULL_CODEX_TEXT, TECH_TREE_TEXT = _build_full_codex()
+
+
+def _default_reference() -> str:
+    """The canonical RA reference appended to every system prompt.
+    Falls back to the curated legacy `_CODEX` view when the vendor
+    checkout isn't reachable (e.g. wheel-only installs)."""
+    if FULL_CODEX_TEXT and TECH_TREE_TEXT:
+        return FULL_CODEX_TEXT + "\n\n" + TECH_TREE_TEXT
+    # Legacy fallback: the original 30-entry curated codex.
+    body = "\n".join(f"  {c:<5} {desc}" for c, desc in _CODEX.items())
+    return (
+        "UNIT CODEX (legacy fallback; vendor YAML unavailable).\n" + body
+    )
+
+
 def system_prompt(objective_text: str, codex_text: str = "") -> str:
-    """Vendored system_v2.txt with {objective} filled; optional codex
-    appended (the only bench-specific addition)."""
+    """Vendored system_v2.txt with {objective} filled, plus the RA
+    encyclopaedia (full codex + tech tree) appended.
+
+    If a non-empty `codex_text` is passed, it OVERRIDES the default —
+    that's the legacy "scenario-scoped" path (`unit_codex(codes)`).
+    Otherwise the full vendor-derived codex + tech tree is used so
+    every model sees the same uniform reference.
+    """
     s = _SYSTEM_TMPL.replace("{objective}", objective_text or "(none)")
-    if codex_text:
-        s = s.rstrip() + "\n\n" + codex_text
+    ref = codex_text if codex_text else _default_reference()
+    if ref:
+        s = s.rstrip() + "\n\n" + ref
     return s
 
 

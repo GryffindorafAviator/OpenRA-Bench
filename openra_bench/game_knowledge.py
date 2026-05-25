@@ -65,6 +65,7 @@ ACTOR_GLOSSARY: dict[str, str] = {
     "brik": "concrete wall (inert obstacle; no weapon — channels but does not kill)",
     "tsla": "Tesla coil (powerful anti-everything defence)",
     "sam": "SAM site (anti-air defence)",
+    "agun": "AA gun (Allied anti-air ground turret)",
     "mslo": "missile silo (Soviet superweapon; launches a single "
     "high-damage nuke at a target cell after a charge cycle)",
     "atek": "advanced tech centre (gates top-tier units / superweapons)",
