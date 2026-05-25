@@ -20,10 +20,29 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import httpx
+
+
+def _log_retry(attempt: int, exc: Exception, delay: float) -> None:
+    """on_retry callback for resilience.retry_call — surfaces provider-
+    level transient failures (429/503/504/timeouts/malformed-JSON) into
+    stderr so the run_eval.log carries the real retry timeline. Without
+    this, retries are absorbed silently and the operator only sees the
+    eventual outcome — making it impossible to tell whether a slow
+    sweep is provider-throttled or just slow."""
+    msg = str(exc)
+    if len(msg) > 200:
+        msg = msg[:200] + "..."
+    print(
+        f"[retry] attempt={attempt} delay={delay:.1f}s "
+        f"reason={type(exc).__name__}: {msg}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 ProviderName = Literal["openai", "vllm", "openrouter", "bedrock", "together"]
 
@@ -251,7 +270,9 @@ class OpenAICompatibleProvider(ChatProvider):
                 "stream_options", {"include_usage": True}
             )
             reply = retry_call(
-                lambda: self._stream_once(url, headers, body), self._policy
+                lambda: self._stream_once(url, headers, body),
+                self._policy,
+                on_retry=_log_retry,
             )
         else:
             def _call_and_parse():
@@ -277,7 +298,9 @@ class OpenAICompatibleProvider(ChatProvider):
                     rt.transient = True  # type: ignore[attr-defined]
                     rt.retry_after = None  # type: ignore[attr-defined]
                     raise rt from je
-            reply = retry_call(_call_and_parse, self._policy)
+            reply = retry_call(
+                _call_and_parse, self._policy, on_retry=_log_retry
+            )
         u = reply.usage or {}
         self._cost.add(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
         self._cost.check()  # raises BudgetExceeded → evaluate finalizes
@@ -815,6 +838,7 @@ class BedrockProvider(ChatProvider):
                 sys_blocks, br_messages, tool_config, inference_cfg,
             ),
             self._policy,
+            on_retry=_log_retry,
         )
         reply = self._reply_from_bedrock(resp)
         u = reply.usage or {}
