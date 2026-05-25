@@ -1027,12 +1027,12 @@ add(P,'hard',C,M,SZ,'fit',T,
     'Allied base seed-rotated NORTH (y=16) or SOUTH (y=20): fact + proc + powr + weap + 1× harv; far patches at (40,8) and (40,28); $1100',
     'Anti-DRAW fact',
     POST,'',
-    "Commander, this is a harvest-investment drill with seed-rotated base latitude. You hold a Construction Yard, Ore Refinery, Power Plant, War Factory, and one harvester at NORTH (y=16) or SOUTH (y=20), with $1100 cash. Within about 90 turns, reach economy value $21000.",
-    'economy_value ≥$21000 AND ≥1 own unit AND proc, within 8100 ticks.',
+    "Commander, this is a harvest-investment drill with seed-rotated base latitude. You hold a Construction Yard, Ore Refinery, Power Plant, War Factory, and one harvester at NORTH (y=16) or SOUTH (y=20), with $1100 cash. Within about 90 turns, reach economy value $19000.",
+    'economy_value ≥$19000 AND ≥1 own unit AND proc, within 8100 ticks.',
     'No own unit, no proc, or deadline (8100 ticks).',
     90, 8103,
     1100,
-    'Per-spawn 1 harv; multi-patch geography; high $21000 bar',
+    'Per-spawn 1 harv; multi-patch geography; high $19000 bar',
     'Stall → LOSS. Single-harv income → bar unmet → LOSS.')
 
 # ── 26. economy-harvest-timebox ───────────────────────────────────────
