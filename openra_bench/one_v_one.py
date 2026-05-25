@@ -270,10 +270,28 @@ def run_1v1(
             ModelAgent contract — system / user / assistant / tool
             messages with the minimap data-URL), dump the full
             transcript to `messages.json`. Scripted controllers don't
-            carry a history and are silently skipped."""
+            carry a history and are silently skipped.
+
+            FOOTGUN: `_build_1v1_controller` returns
+            `ModelAgent(...).agent_fn` — a BOUND METHOD, not the
+            instance. `as_controller(bound_method)` wraps it in a
+            `FunctionController` (inherits from `BaseController` which
+            has `self.history = []`). A naive `getattr(ctrl, "history")`
+            picks up that empty inherited list instead of the real
+            ModelAgent's history. The fix: unwrap via `.source` (the
+            bound method's `__self__` that `FunctionController.__init__`
+            captures) or `introspection_source(ctrl)`."""
             if pb is None:
                 return
-            hist = getattr(ctrl, "history", None)
+            # Prefer the underlying source (real ModelAgent) for
+            # FunctionController-wrapped bound methods.
+            src = getattr(ctrl, "source", None) or ctrl
+            hist = getattr(src, "history", None)
+            # Fallback: if source has no history, try the wrapper's
+            # inherited list (will be `[]` for scripted; we still write
+            # it so the file exists with the canonical empty shape).
+            if hist is None:
+                hist = getattr(ctrl, "history", None)
             if isinstance(hist, list):
                 try:
                     pb.write_messages(hist)
