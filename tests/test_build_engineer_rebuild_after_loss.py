@@ -1,30 +1,40 @@
 """No-cheat + solvency proof for `build-engineer-rebuild-after-loss`
-(Wave-8 REASONING: PlanBench replanning under exogenous loss /
-disaster recovery / SC2 rebuild-after-trade anchor).
+(Wave-8 REASONING: power-grid continuity through an exogenous strike
+event — PlanBench replanning / disaster recovery / SC2 rebuild-
+after-trade / redundancy engineering anchor).
 
-The pack tests the BUILD-ENGINEER replan: the agent inherits a complete
-production base (fact + proc + powr + weap + harv) but the pre-placed
-Power Plant (`powr`) starts at LOW HEALTH and a pre-placed enemy strike
-force (1× 4tnk on easy, 2× on medium/hard) destroys it on tick 0..90.
-The agent must (1) detect the loss, (2) `build('powr')` with the
-reserve cash, (3) `place_building` it adjacent to the surviving `fact`.
+The pack tests POWER-INFRASTRUCTURE CONTINUITY: the agent inherits a
+complete production base (fact + proc + powr + weap + harv) but the
+pre-placed Power Plant (`powr`) starts at LOW HEALTH and a pre-placed
+enemy strike force (1× 4tnk on easy, 2× on medium/hard) destroys it on
+tick 0..90 unless redundancy was built beforehand. Two rational-operator
+solutions are both first-class WINs:
 
-The happened-before `then:[A,B]` composite enforces the
-destruction-then-rebuild semantics: clause A is `not building_count_gte:
-{powr,1}` (a "powr currently destroyed" frame) — this LATCHES on the
-opening salvo. Clause B is `building_count_gte:{powr,1}` (a "powr
-currently alive" frame) — this LATCHES on the rebuild landing.
-`has_building` cannot be used here (CLAUDE.md footgun: the accumulating
-`own_building_types` set never toggles back to false after destruction).
+  (A) REACTIVE rebuild: `build('powr')` + `place_building` AFTER the
+      destruction. The happened-before `then:[A,B]` composite enforces
+      the destruction-then-rebuild semantics — clause A latches on
+      the destruction frame (live `not building_count_gte:powr:1`),
+      clause B latches on the subsequent rebuild frame.
+  (B) PREEMPTIVE redundancy: `build('powr')` + `place_building`
+      BEFORE the strike so the agent owns ≥2 simultaneous powr at
+      some frame (`building_count_gte:powr:2`). The strike destroys
+      one plant but power never goes dark.
+
+The win is `any_of:[reactive then-latch, preemptive count≥2]` so
+EITHER credits. `has_building` cannot be used here (CLAUDE.md footgun:
+the accumulating `own_building_types` set never toggles back to false
+after destruction, so reactive sequencing cannot be enforced through
+it).
 
 For every level + every hard seed (1-4):
-  * the INTENDED `build('powr') + place_building` chain WINS;
-  * STALL (only `observe`) LOSES — never rebuilds → then-clause B
-    never latches → reachable timeout LOSS;
+  * INTENDED-REACTIVE (rebuild after the loss) WINS;
+  * INTENDED-PREEMPTIVE (build redundancy before the loss) WINS;
+  * STALL (only `observe`) LOSES — never builds at all, neither latch
+    closes → reachable timeout LOSS;
   * WRONG-SPEND (only `build('e1')`, spends the reserve on infantry)
-    LOSES — never rebuilds → LOSS on the deadline.
+    LOSES — never rebuilds powr → LOSS on the deadline.
 
-The 2 lazy plays + 1 intended × 3 levels × 4 seeds gives the full
+The 2 lazy plays + 2 intended × 3 levels × 4 seeds gives the full
 no-defect / no-cheat coverage demanded by CLAUDE.md.
 """
 
@@ -63,10 +73,11 @@ def _wrong_spend(rs, Command):
 
 
 def _intended(rs, Command):
-    """Build-engineer rebuild: notice the low / dropped powr count,
-    queue `build('powr')` (cost 300), place it adjacent to the
+    """REACTIVE build-engineer rebuild: notice the low / dropped powr
+    count, queue `build('powr')` (cost 300), place it adjacent to the
     surviving fact on the safe (west) side. WINS every level × every
-    seed before the deadline."""
+    seed before the deadline via the `then:[not powr, powr]` reactive
+    latch branch of the `any_of`."""
     bldgs = rs.get("own_buildings", []) or []
     own_counts: dict[str, int] = {}
     for b in bldgs:
@@ -84,6 +95,55 @@ def _intended(rs, Command):
         cmds.append(Command.place_building("powr", fx - 2, fy))
         return cmds
     return [Command.observe()]
+
+
+class _PreemptState:
+    """Per-episode one-shot latch — the preemptive policy issues the
+    redundant build on the FIRST observation, before the strike has
+    landed."""
+
+    queued_build: bool = False
+    queued_place: bool = False
+
+
+def _intended_preemptive(rs, Command):
+    """PREEMPTIVE redundancy: recognise on the FIRST observation that
+    the low-HP powr is about to die, queue `build('powr')` (cost 300)
+    and place it adjacent to the surviving fact on the safe (west)
+    side IMMEDIATELY — before the strike. The agent's first decision
+    turn is at tick ~90; the agent's `place_building` schedules a
+    fresh powr to materialise as soon as production completes (powr
+    build time at base ≈ 60 ticks under standard rules). If the
+    timing lines up, the second plant lands while the first is still
+    alive → `building_count_gte:powr:2` latches at that frame and
+    the preemptive WIN branch closes. If the strike beats the
+    preemptive build to the punch (so count goes 1→0→2), the same
+    placement still closes the REACTIVE branch as soon as the new
+    plant lands. Either way the agent wins via the new `any_of`.
+
+    The first-decision-turn queue is the natural "I see the threat,
+    insure against it" play; this test pins that path."""
+    bldgs = rs.get("own_buildings", []) or []
+    fact_b = next((b for b in bldgs if b["type"] == "fact"), None)
+    if fact_b is None:
+        return [Command.observe()]
+    fx, fy = fact_b["cell_x"], fact_b["cell_y"]
+    prod = rs.get("production", []) or []
+    cmds = []
+    if not _PreemptState.queued_build and "powr" not in prod:
+        cmds.append(Command.build("powr"))
+        _PreemptState.queued_build = True
+    # Always (re)issue the place order on the safe west side until the
+    # rebuild has landed — `place_building` is idempotent against an
+    # in-flight production queue; the engine consumes the placement
+    # the moment the produced building is ready.
+    cmds.append(Command.place_building("powr", fx - 2, fy))
+    return cmds or [Command.observe()]
+
+
+def _reset_preempt():
+    _PreemptState.queued_build = False
+    _PreemptState.queued_place = False
 
 
 # ───────────────────────── helpers ────────────────────────────────────────
@@ -161,35 +221,58 @@ def test_every_level_has_a_reachable_timeout_fail(level):
 
 
 @pytest.mark.parametrize("level", LEVELS)
-def test_win_uses_then_destroy_then_rebuild_for_powr(level):
-    """Structural: the win clause uses a `then:[A,B]` composite where
-    clause A is `not building_count_gte:{powr,1}` (powr currently
-    destroyed) and clause B is `building_count_gte:{powr,1}` (powr
-    currently alive). This is the destruction-then-rebuild idiom.
-    Using `has_building` here would NOT work (CLAUDE.md footgun: the
-    accumulating set never toggles back to false after destruction)."""
+def test_win_accepts_reactive_or_preemptive_power_continuity(level):
+    """Structural: the win clause exposes BOTH rational solutions via
+    an `any_of` branch — a `then:[not powr, powr]` reactive
+    destroy-then-rebuild latch AND a `building_count_gte:powr:2`
+    preemptive-redundancy latch. The capability is power-grid
+    continuity through the strike; both paths a real operator would
+    pick are first-class WINs. `has_building` cannot be used here
+    (CLAUDE.md footgun: the accumulating set never toggles back to
+    false after destruction, so reactive sequencing cannot be enforced
+    through it)."""
     c = compile_level(load_pack(PACK), level)
     win = c.win_condition.model_dump()
     all_of = win.get("all_of", [])
-    then_node = next((x["then"] for x in all_of if "then" in x), None)
-    assert then_node is not None, f"{level}: win must include a `then` composite"
+    # The two-paths predicate lives inside an `any_of` branch in `all_of`.
+    any_node = next((x["any_of"] for x in all_of if "any_of" in x), None)
+    assert any_node is not None, (
+        f"{level}: win must include an `any_of` branch carrying the "
+        f"reactive-rebuild OR preemptive-redundancy paths"
+    )
+    # Branch (A) — REACTIVE: `then:[not powr, powr]`.
+    then_node = next((x["then"] for x in any_node if "then" in x), None)
+    assert then_node is not None, (
+        f"{level}: any_of must include a `then` composite (reactive path)"
+    )
     clauses = then_node.get("clauses", [])
     assert len(clauses) == 2, (
         f"{level}: then must have 2 clauses (destruction, rebuild)"
     )
-    # Clause A: not building_count_gte: powr ≥ 1
     a = clauses[0]
-    assert "not" in a, f"{level}: clause A must be `not`: {a}"
-    inner = a["not"]
-    bc = inner.get("building_count_gte") or {}
+    assert "not" in a, f"{level}: reactive clause A must be `not`: {a}"
+    bc = (a["not"] or {}).get("building_count_gte") or {}
     assert bc.get("type") == "powr" and int(bc.get("n", 0)) >= 1, (
-        f"{level}: clause A must be `not building_count_gte powr≥1`: {a}"
+        f"{level}: reactive clause A must be `not building_count_gte "
+        f"powr≥1`: {a}"
     )
-    # Clause B: building_count_gte: powr ≥ 1
     b = clauses[1]
     bc2 = b.get("building_count_gte") or {}
     assert bc2.get("type") == "powr" and int(bc2.get("n", 0)) >= 1, (
-        f"{level}: clause B must be `building_count_gte powr≥1`: {b}"
+        f"{level}: reactive clause B must be `building_count_gte "
+        f"powr≥1`: {b}"
+    )
+    # Branch (B) — PREEMPTIVE: `building_count_gte:{powr, n: 2}`.
+    pre_node = next(
+        (x["building_count_gte"] for x in any_node
+         if "building_count_gte" in x
+         and (x["building_count_gte"] or {}).get("type") == "powr"
+         and int((x["building_count_gte"] or {}).get("n", 0)) >= 2),
+        None,
+    )
+    assert pre_node is not None, (
+        f"{level}: any_of must include a `building_count_gte powr≥2` "
+        f"clause (preemptive-redundancy path); got {any_node}"
     )
     # And an outer `building_count_gte` for proc must keep production
     # gated (per the pack spec).
@@ -258,19 +341,42 @@ def test_pre_placed_strike_force_present(level):
 
 @pytest.mark.parametrize("level", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
-def test_intended_rebuild_wins(level, seed):
-    """The intended capability — detect-loss + build('powr') +
-    place_building adjacent to the surviving fact on the safe west
-    side — WINS every level × every hard seed well inside the
-    deadline."""
+def test_intended_reactive_rebuild_wins(level, seed):
+    """REACTIVE path: detect-loss + build('powr') + place_building
+    adjacent to the surviving fact on the safe west side. WINS every
+    level × every hard seed well inside the deadline via the
+    then-latch branch of the `any_of`."""
     c, r = _run(level, _intended, seed=seed)
     assert r.outcome == "win", (
-        f"{level} seed{seed}: intended rebuild should WIN, got "
+        f"{level} seed{seed}: intended reactive rebuild should WIN, got "
         f"{r.outcome}; types={r.signals.own_building_types}, "
         f"cash={r.signals.cash}, tick={r.signals.game_tick}"
     )
     # Sanity: the rebuilt powr must show up in the accumulating set
     # (it was built during the episode, regardless of subsequent loss).
+    types = set(r.signals.own_building_types)
+    assert "powr" in types, types
+    assert "proc" in types, types
+
+
+@pytest.mark.parametrize("level", LEVELS)
+@pytest.mark.parametrize("seed", SEEDS)
+def test_intended_preemptive_redundancy_wins(level, seed):
+    """PREEMPTIVE path: build('powr') + place_building on the FIRST
+    decision turn — the redundancy play a rational operator picks when
+    they see the threat coming. WINS every level × every hard seed via
+    EITHER `any_of` branch (the redundancy latch fires if the second
+    plant lands while the first is still alive; the reactive latch
+    fires otherwise, because the same placement also satisfies it).
+    The point is: the new predicate stops penalising the rational
+    play that the previous reactive-only predicate forbade."""
+    _reset_preempt()
+    c, r = _run(level, _intended_preemptive, seed=seed)
+    assert r.outcome == "win", (
+        f"{level} seed{seed}: intended preemptive redundancy should WIN, "
+        f"got {r.outcome}; types={r.signals.own_building_types}, "
+        f"cash={r.signals.cash}, tick={r.signals.game_tick}"
+    )
     types = set(r.signals.own_building_types)
     assert "powr" in types, types
     assert "proc" in types, types

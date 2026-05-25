@@ -1,34 +1,46 @@
 # Validate: python -m openra_bench.scenarios.validate packs/build-engineer-rebuild-after-loss.yaml
 # See ../CONTRIBUTING.md for the full win-condition grammar.
 #
-# BUILD-ENGINEER-REBUILD-AFTER-LOSS (Wave-8 REASONING: replanning under
-# exogenous LOSS of a power-grid building mid-episode).
+# BUILD-ENGINEER-REBUILD-AFTER-LOSS (Wave-8 REASONING: power-grid
+# continuity through an exogenous loss event — keep production online by
+# EITHER pre-building redundancy OR rebuilding after the strike).
 #
 # Real-world anchor: PlanBench replanning under exogenous loss /
 # disaster recovery after a critical-infrastructure loss / SC2 rebuild-
 # after-trade / military force-regen / industrial process restart
-# after an unplanned shutdown.
+# after an unplanned shutdown / redundancy engineering.
 #
 # Pack frame: the agent inherits a complete production base
-# (`fact` + `proc` + `powr` + `weap` + harv + ore patch); but the
-# pre-placed Power Plant (`powr`) starts at LOW HEALTH and a pre-placed
-# enemy strike force (1-2× 4tnk, stance:3) sits adjacent and lands its
-# opening salvo on tick 0 — the `powr` is destroyed within the first
-# 1-2 turns. The agent must:
-#   1. notice the `powr` died (the `building_count_gte:powr:1` clause
-#      drops to false on live `own_buildings`),
-#   2. `build('powr')` from the surviving `fact` with the reserve
-#      cash (powr cost = 300),
-#   3. place it adjacent to the `fact` so production continues
-#      (`proc` and `weap` both have `powr` as a prerequisite —
-#      gamerules.rs:340-343 — but here both pre-placed structures
-#      remain intact, so income / production never stops; the
-#      reasoning task is the BUILD-ENGINEER replan AFTER the loss),
-#   AND the win predicate's `then:[not powr, then powr]` happened-before
-#   latch CLOSES only when both a destruction event AND a rebuild event
-#   have been observed in that order; if `powr` is never destroyed (the
-#   strike misses) or never rebuilt (stall / wrong-spend), the win
-#   never fires and the reachable timeout LOSS bites.
+# (`fact` + `proc` + `powr` + `weap` + harv + ore patch); the pre-placed
+# Power Plant (`powr`) starts at LOW HEALTH and a pre-placed enemy
+# strike force (1-2× 4tnk, stance:3) sits adjacent and lands its opening
+# salvo on tick 0 — the `powr` is destroyed within the first 1-2 turns
+# unless the agent has built redundancy beforehand. The capability under
+# test is POWER-INFRASTRUCTURE CONTINUITY through the strike, and there
+# are TWO load-bearing solutions a rational operator would pick:
+#
+#   (A) REACTIVE rebuild: notice the `powr` died (live
+#       `building_count_gte:powr:1` drops to false), `build('powr')`
+#       with the reserve cash (cost 300), `place_building` it adjacent
+#       to the surviving `fact` so production resumes. The
+#       happened-before latch `then:[not powr, powr]` closes when both
+#       the destruction frame and the subsequent rebuild frame have been
+#       observed in order.
+#
+#   (B) PREEMPTIVE redundancy: recognise that the low-HP `powr` is
+#       about to die, `build('powr')` + `place_building` BEFORE the
+#       strike so the agent owns ≥2 simultaneous `powr` at some point
+#       during the episode. The `building_count_gte:powr:2` clause
+#       latches the moment the redundant plant lands — production never
+#       loses power, the strike is shrugged off. This is the natural
+#       engineering "redundancy" play and it is now a first-class WIN
+#       path (was previously falsely penalised by the reactive-only
+#       win predicate).
+#
+# The win is `any_of:[reactive then-latch, preemptive count≥2]` so
+# EITHER path credits. Stall (no build at all), wrong-spend (build
+# only e1), or a destruction-without-rebuild all leave both latches
+# open → reachable timeout LOSS.
 #
 # Difficulty axis (one new controlled variable per tier):
 #   • easy   — LIGHT enemy strike (1× 4tnk staged adjacent to the
@@ -130,33 +142,34 @@
 
 meta:
   id: build-engineer-rebuild-after-loss
-  title: 'Build-Engineer: Rebuild Power Plant After Mid-Episode Loss'
+  title: 'Build-Engineer: Keep Power Online Through an Imminent Strike'
   capability: reasoning
   real_world_meaning: >
-    Reactive replan after exogenous loss of a critical-infrastructure
-    building (the Power Plant) mid-episode. An ongoing operation has
-    its power-grid building unexpectedly destroyed by an enemy strike
-    in the opening; the agent inherits a complete production chain
-    (Construction Yard + Refinery + Power Plant + War Factory + Ore
-    Truck + ore patch) and a reserve cash budget; the deadline is
-    real. The model must notice the destruction (the live building
-    count for the Power Plant drops to zero), commit the reserve to
-    rebuilding the Power Plant (not to army units, not to a different
-    structure, not to nothing) AND place it adjacent to the surviving
-    Construction Yard so production stays online — fast enough that
-    the rebuild closes the happened-before latch before the deadline
-    bites.
+    Power-grid continuity through an imminent exogenous loss. An ongoing
+    operation has a damaged power-grid building (the Power Plant) and a
+    visible enemy strike force adjacent that will destroy it in the
+    opening turn unless action is taken. The agent inherits a complete
+    production chain (Construction Yard + Refinery + Power Plant + War
+    Factory + Ore Truck + ore patch) and a reserve cash budget; the
+    deadline is real. The agent wins by keeping its power infrastructure
+    online — either by REACTIVELY rebuilding the Power Plant after the
+    loss (commit the reserve to a replacement plant adjacent to the
+    surviving Construction Yard) OR by PREEMPTIVELY building a redundant
+    plant before the strike so power is never interrupted in the first
+    place. Both are rational operator solutions; the predicate accepts
+    either. Stalling, spending the reserve on the wrong asset, or
+    leaving the chain power-less all miss the bar.
   robotics_analogue: >
-    Disaster recovery after a critical-infrastructure node is
-    destroyed by an external event mid-mission. The autonomous
-    operator inherits a working processing site, a reserve allowance
-    sufficient for exactly one replacement substation, and a strict
-    operational deadline. Recovery requires identifying the lost
-    asset, committing the reserve to rebuilding the same kind of
-    asset (not to defenders, not to expansion, not to nothing), and
-    siting it safely — close enough to the surviving site that the
-    powered loads stay online, far enough from the lingering threat
-    that the new asset survives.
+    Critical-infrastructure continuity through an imminent failure
+    event. The autonomous operator inherits a working processing site
+    with a known-fragile power node, a reserve allowance sufficient
+    for exactly one replacement substation, and a strict operational
+    deadline. Continuity is preserved by either (a) reacting after the
+    fragile node fails and committing the reserve to a replacement
+    substation, or (b) pre-emptively commissioning a redundant
+    substation BEFORE the failure so the powered loads never go dark.
+    A real operator would pick the redundancy play when the failure
+    is signposted; the predicate credits both.
   benchmark_anchor:
     - "PlanBench replanning under exogenous loss"
     - "disaster recovery"
@@ -213,18 +226,23 @@ levels:
     # a War Factory ('weap'), and one Ore Truck ('harv') with an
     # ore patch — and $500 cash. The Power Plant is at LOW HEALTH
     # and a single enemy heavy tank ('4tnk') is staged adjacent to
-    # it; the Power Plant will be DESTROYED in the opening turn.
-    # To recover: queue another Power Plant ('build' "powr",
-    # cost 300) and place it adjacent to the Construction Yard so
-    # production stays online. Win = the Power Plant must be
-    # DESTROYED and then REBUILT, AND you must still own a
-    # Refinery, before tick 2700. Stalling, ignoring the rebuild,
-    # or spending the reserve on army units all miss the bar.
+    # it; the Power Plant WILL be destroyed in the opening turn
+    # unless you have already built redundancy. Keep your power
+    # infrastructure online through the strike — EITHER by building
+    # a redundant Power Plant ('build' "powr", cost 300) BEFORE the
+    # strike lands (so at some point you own ≥2 powr simultaneously)
+    # OR by REBUILDING the Power Plant after the loss (place a fresh
+    # one adjacent to the Construction Yard). Both paths satisfy the
+    # win predicate. You must still own a Refinery, before tick 2700.
+    # Stalling, ignoring the power-grid task, or spending the reserve
+    # on army units all miss the bar.
     description: >
       You inherit a full base and $500 cash. Your low-HP Power Plant
-      will be destroyed on the opening turn by an adjacent enemy heavy
-      tank. Rebuild the Power Plant and keep your Refinery within about
-      30 turns.
+      sits next to an enemy heavy tank that will destroy it on the
+      opening turn. Keep your power infrastructure online through the
+      strike — EITHER pre-build a redundant Power Plant before the
+      strike or rebuild it after the loss — and keep your Refinery
+      within about 30 turns.
     starting_cash: 500
     overrides:
       actors:
@@ -256,18 +274,31 @@ levels:
         - {type: fact, owner: enemy, position: [56, 20]}
     win_condition:
       all_of:
-        - then:
-            id: build-engineer-rebuild-after-loss-E
-            clauses:
-              # Clause A: powr currently DESTROYED (live count < 1).
-              # `not building_count_gte` reads the LIVE buildings
-              # list per frame, so this latches the destruction
-              # event (unlike `has_building` which uses the
-              # accumulating set and never toggles back to false).
-              - not: {building_count_gte: {type: powr, n: 1}}
-              # Clause B: powr currently ALIVE again (live count
-              # ≥1) — i.e. the rebuild has landed.
-              - building_count_gte: {type: powr, n: 1}
+        # Power continuity satisfied by EITHER the reactive
+        # destroy-then-rebuild latch OR the preemptive redundancy
+        # (≥2 simultaneous powr at any frame). A rational operator
+        # who notices the imminent loss would pick the redundancy
+        # play; an operator who only notices after the strike would
+        # pick the reactive rebuild. Both are credited.
+        - any_of:
+            # (A) REACTIVE rebuild: happened-before latch.
+            #   Clause A1: powr currently DESTROYED (live count < 1).
+            #     `not building_count_gte` reads the LIVE buildings
+            #     list per frame, so it latches the destruction event
+            #     (unlike `has_building` which uses the accumulating
+            #     set and never toggles back to false).
+            #   Clause A2: powr currently ALIVE again — the rebuild
+            #     has landed.
+            - then:
+                id: build-engineer-rebuild-after-loss-E
+                clauses:
+                  - not: {building_count_gte: {type: powr, n: 1}}
+                  - building_count_gte: {type: powr, n: 1}
+            # (B) PREEMPTIVE redundancy: at some frame the agent owns
+            # ≥2 simultaneous powr. `building_count_gte` is a live
+            # per-frame predicate, so the latch fires the instant a
+            # second powr lands while the first is still alive.
+            - building_count_gte: {type: powr, n: 2}
         - building_count_gte: {type: proc, n: 1}
         - within_ticks: 2700
     fail_condition:
@@ -291,21 +322,24 @@ levels:
     # Same base as easy (fact, proc, low-HP powr, weap, harv, mine,
     # one 3tnk defender, $500 reserve) but the enemy strike is now
     # TWO heavy tanks adjacent to the Power Plant. The second tank
-    # guarantees the kill on the opening turn AND will engage a
-    # fresh Power Plant that you place too close to the strike
-    # lane. To recover: queue another Power Plant and place it
-    # ADJACENT TO THE CONSTRUCTION YARD on the far side from the
-    # strike lane (e.g. west of the fact). Win = the Power Plant
-    # must be DESTROYED and then REBUILT, AND you must still own a
-    # Refinery, before tick 2700. Stalling, ignoring the rebuild,
-    # placing the new powr in the strike lane (where the lingering
-    # 4tnks will destroy it again), or spending the reserve on
-    # army units all miss the bar.
+    # guarantees the kill on the opening turn AND will linger to
+    # engage a fresh Power Plant if you place it too close to the
+    # strike lane. Keep your power infrastructure online through the
+    # strike — EITHER pre-build a redundant Power Plant before the
+    # strike (so you own ≥2 powr simultaneously at some point) OR
+    # rebuild after the loss (place a fresh plant ADJACENT TO THE
+    # CONSTRUCTION YARD on the far side from the strike lane, e.g.
+    # west of the fact). Both paths satisfy the win predicate. You
+    # must still own a Refinery, before tick 2700. Stalling, ignoring
+    # the power-grid task, placing the replacement powr in the strike
+    # lane (where the lingering 4tnks will destroy it again), or
+    # spending the reserve on army units all miss the bar.
     description: >
       Same base and $500 reserve, but TWO heavy tanks now sit beside
-      the low-HP Power Plant and will linger after the kill. Rebuild
-      the Power Plant somewhere it can survive, and keep your Refinery,
-      within about 30 turns.
+      the low-HP Power Plant and will linger after the kill. Keep your
+      power infrastructure online — either pre-build a redundant Power
+      Plant before the strike or rebuild it somewhere safe afterwards —
+      and keep your Refinery, within about 30 turns.
     starting_cash: 500
     overrides:
       actors:
@@ -322,11 +356,15 @@ levels:
         - {type: fact, owner: enemy, position: [56, 20]}
     win_condition:
       all_of:
-        - then:
-            id: build-engineer-rebuild-after-loss-M
-            clauses:
-              - not: {building_count_gte: {type: powr, n: 1}}
-              - building_count_gte: {type: powr, n: 1}
+        # Power continuity satisfied by EITHER reactive then-latch OR
+        # preemptive redundancy. See easy-tier comment for full notes.
+        - any_of:
+            - then:
+                id: build-engineer-rebuild-after-loss-M
+                clauses:
+                  - not: {building_count_gte: {type: powr, n: 1}}
+                  - building_count_gte: {type: powr, n: 1}
+            - building_count_gte: {type: powr, n: 2}
         - building_count_gte: {type: proc, n: 1}
         - within_ticks: 2700
     fail_condition:
@@ -357,24 +395,27 @@ levels:
     # contributors. The trimmed version below removes scripted-policy
     # spoilers and cell-coord dumps; load-bearing intent kept.
     #
-    # Same exogenous-loss-and-rebuild task as medium (2× 4tnk
-    # strike, low-HP Power Plant, $500 reserve, tick 2700 deadline)
-    # but your base may begin in the NORTH band (y≈14..22) OR the
-    # SOUTH band (y≈22..30) of the map depending on the seed. Read
-    # the Construction Yard's actual position from the observation
-    # and place the replacement Power Plant adjacent to it on the
-    # far side from the strike lane. A memorised "(10,18)" rebuild
-    # cell will mis-place out of build radius on one of the two
-    # spawns. Win = the Power Plant must be DESTROYED and then
-    # REBUILT, AND you must still own a Refinery, before tick
-    # 2700. The same lazy / wrong-spend plays lose as on medium.
+    # Same power-continuity task as medium (2× 4tnk strike, low-HP
+    # Power Plant, $500 reserve, tick 2700 deadline) but your base
+    # may begin in the NORTH band (y≈14..22) OR the SOUTH band
+    # (y≈22..30) depending on the seed. Read the Construction Yard's
+    # actual position from the observation and place the replacement
+    # (or redundant) Power Plant adjacent to it on the far side from
+    # the strike lane. A memorised "(10,18)" placement cell will
+    # mis-place out of build radius on one of the two spawns. Win =
+    # keep power online through the strike via EITHER reactive
+    # rebuild OR pre-built redundancy, AND still own a Refinery,
+    # before tick 2700. The same lazy / wrong-spend plays lose as on
+    # medium.
     description: >
       You inherit a full base with $500 reserve. TWO enemy heavy tanks
       sit beside your low-HP Power Plant and will destroy it on the
       opening turn, then linger to revisit a fresh plant placed back
       in the strike lane. Your base may sit in the NORTH or SOUTH band
-      depending on seed, so the rebuild cell must be derived from the
-      Construction Yard's actual position. Rebuild the Power Plant and
+      depending on seed, so the placement cell must be derived from
+      the Construction Yard's actual position. Keep your power
+      infrastructure online — either pre-build a redundant Power Plant
+      before the strike or rebuild it somewhere safe afterwards — and
       keep your Refinery within about 30 turns.
     starting_cash: 500
     overrides:
@@ -412,11 +453,15 @@ levels:
         - {type: fact, owner: enemy, position: [56, 20]}
     win_condition:
       all_of:
-        - then:
-            id: build-engineer-rebuild-after-loss-H
-            clauses:
-              - not: {building_count_gte: {type: powr, n: 1}}
-              - building_count_gte: {type: powr, n: 1}
+        # Power continuity satisfied by EITHER reactive then-latch OR
+        # preemptive redundancy. See easy-tier comment for full notes.
+        - any_of:
+            - then:
+                id: build-engineer-rebuild-after-loss-H
+                clauses:
+                  - not: {building_count_gte: {type: powr, n: 1}}
+                  - building_count_gte: {type: powr, n: 1}
+            - building_count_gte: {type: powr, n: 2}
         - building_count_gte: {type: proc, n: 1}
         - within_ticks: 2700
     fail_condition:
