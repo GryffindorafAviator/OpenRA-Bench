@@ -1,16 +1,29 @@
 """Tests for the canonical LLM-vs-LLM macro 1v1 pack.
 
+`adversarial-1v1-macro` is a SINGLE-MAP pack: per the user spec it is
+NOT a difficulty ladder, it's one shared 128x96 bridges-naval arena
+where two real-time decision agents play a head-to-head macro match.
+The bench schema requires all three of {easy, medium, hard} as level
+keys, so the pack declares all three pointing at the SAME compiled
+scenario (a YAML anchor); the `configs:` block exposes ONE runnable
+cell (`main`, pinned to `medium`).
+
 Pins:
-* adversarial-1v1-macro compiles cleanly for all three rungs.
-* mirrored bases sit at non-overlapping positions.
-* both sides have ore reachable within ~12 cells of their fact.
+* adversarial-1v1-macro compiles cleanly for `medium` (the canonical
+  rung) and the easy/hard rungs are identical to medium (anchored).
+* canonical map shape: 128x96 bridges-arena, cordon-adjusted bounds.
+* three ore patches per side at the expected approximate positions
+  + a contested centre patch on the central bridge.
+* mirrored bases sit at non-overlapping positions far apart.
 * the run_1v1 harness is deterministic on identical inputs
   (stall vs stall produces the SAME outcome on repeated calls).
 * a non-stall policy produces a DIFFERENT outcome from stall-vs-
   stall on at least one seed (the engine actually reads commands
   from both sides — the harness wiring is real).
-* at t=0 of medium, neither side observes any of the opponent's
-  own_unit ids — fog of war isolates the two bases.
+* at t=0, neither side observes any of the opponent's own_unit ids
+  — fog of war isolates the two bases.
+* `--side-swap` mirrors outcomes, so the aggregate is fair under
+  any residual slot-2 bias the engine carries.
 """
 
 from __future__ import annotations
@@ -34,16 +47,33 @@ def _stall(_rs, Command):
     return [Command.observe()]
 
 
-def test_pack_compiles_all_three_rungs():
-    """Every rung loads, validates, and finds a Rust-loadable map."""
+def test_pack_compiles_to_single_canonical_map():
+    """`medium` is the canonical rung. The pack is single-map so
+    easy/medium/hard share an identical scenario (YAML anchor)."""
     pack = load_pack(PACK_PATH)
     assert pack.meta.capability == "adversarial"
     # NO `reveal_map` — both sides must explore through fog.
     assert pack.reveal_map is False
-    for lv in ("easy", "medium", "hard"):
-        c = compile_level(pack, lv)
-        assert c.map_supported, f"{lv} map not Rust-loadable"
-        assert c.max_turns == 120
+    # ONE runnable config — the canonical 1v1 cell.
+    assert pack.configs is not None
+    assert len(pack.configs) == 1
+    assert pack.configs[0].name == "main"
+    assert pack.configs[0].level == "medium"
+    # All three level keys present (schema requirement) but identical
+    # (one canonical map). max_turns + starting_cash and description
+    # all match.
+    c_med = compile_level(pack, "medium")
+    c_easy = compile_level(pack, "easy")
+    c_hard = compile_level(pack, "hard")
+    assert c_med.map_supported, "canonical map not Rust-loadable"
+    assert c_med.max_turns == 200
+    assert c_med.starting_cash == 2000
+    for other in (c_easy, c_hard):
+        assert other.max_turns == c_med.max_turns
+        assert other.starting_cash == c_med.starting_cash
+        # Same actor list, same map id ⇒ truly identical scenario.
+        assert other.scenario.base_map == c_med.scenario.base_map
+        assert len(other.scenario.actors) == len(c_med.scenario.actors)
 
 
 def _agent_enemy_facts(c):
@@ -60,27 +90,88 @@ def _agent_enemy_facts(c):
     return tuple(agent.position), tuple(enemy.position)
 
 
-def test_medium_bases_mirrored_and_non_overlapping():
-    """Medium's agent and enemy facts must sit at distinct positions
-    far apart — the mirrored-corner contract."""
+def test_canonical_map_is_128x96_bridges_arena():
+    """The pack's base_map spec must be the 128x96 horizontal-channel
+    bridges arena (the single canonical map). The bounds (after
+    cordon=2) cover the interior playable rectangle."""
+    pack = load_pack(PACK_PATH)
+    bm = pack.base_map
+    assert isinstance(bm, dict), (
+        "base_map must be a generator spec dict, not a string id "
+        "(single-map pack uses generator: bridges-arena directly)"
+    )
+    assert bm["generator"] == "bridges-arena"
+    assert bm["width"] == 128
+    assert bm["height"] == 96
+    assert bm["cordon"] == 2
+    assert bm["axis"] == "horizontal"
+    assert bm["channel_y"] == 48
+    # Three bridges across the channel.
+    bridges = bm.get("bridges") or []
+    assert len(bridges) == 3, f"expected 3 bridges, got {len(bridges)}"
+
+
+def test_bases_mirrored_and_far_apart():
+    """Agent NW and enemy SE facts sit at mirrored corners of the
+    128x96 map (centre = (64, 48)). Diagonal separation is far
+    outside any starting unit's vision range."""
     pack = load_pack(PACK_PATH)
     c = compile_level(pack, "medium")
     a_pos, e_pos = _agent_enemy_facts(c)
-    assert a_pos != e_pos, "agent and enemy facts overlap"
-    # Mirrored about the map centre (40,40) on the 80x80 medium arena.
-    dx = e_pos[0] - a_pos[0]
-    dy = e_pos[1] - a_pos[1]
-    assert dx > 50 and dy > 50, (
-        f"agent fact {a_pos} / enemy fact {e_pos} aren't mirrored at "
-        f"opposite corners (dx={dx}, dy={dy})"
+    assert a_pos == (12, 10), f"agent fact should be at NW (12,10), got {a_pos}"
+    assert e_pos == (116, 86), f"enemy fact should be at SE (116,86), got {e_pos}"
+    # Perfect mirror about (64, 48).
+    cx = (a_pos[0] + e_pos[0]) / 2
+    cy = (a_pos[1] + e_pos[1]) / 2
+    assert cx == 64 and cy == 48, (
+        f"bases not mirrored about (64,48): midpoint = ({cx},{cy})"
     )
+    # Diagonal separation ~128 cells (well outside any starting
+    # unit's vision).
+    import math
+    sep = math.hypot(e_pos[0] - a_pos[0], e_pos[1] - a_pos[1])
+    assert sep > 120, f"bases only {sep:.1f} cells apart (expected > 120)"
+
+
+def test_three_ore_patches_per_side_plus_contested_centre():
+    """The pack declares 5 ore patches total: a safe + an
+    expansion patch on each side (mirrored about (64, 48)) plus
+    one contested centre patch on the central bridge."""
+    pack = load_pack(PACK_PATH)
+    c = compile_level(pack, "medium")
+    patches = c.ore_patches
+    assert len(patches) == 5, (
+        f"expected 5 ore patches (2 per side + 1 centre), got {len(patches)}"
+    )
+    # Classify by region.
+    near_agent = [p for p in patches if p["x"] < 32 and p["y"] < 32]
+    near_enemy = [p for p in patches if p["x"] > 96 and p["y"] > 64]
+    expansion_agent = [
+        p for p in patches if 30 <= p["x"] <= 42 and 24 <= p["y"] <= 32
+    ]
+    expansion_enemy = [
+        p for p in patches if 86 <= p["x"] <= 98 and 64 <= p["y"] <= 72
+    ]
+    centre = [
+        p for p in patches if 60 <= p["x"] <= 68 and 44 <= p["y"] <= 52
+    ]
+    assert len(near_agent) == 1, near_agent
+    assert len(near_enemy) == 1, near_enemy
+    assert len(expansion_agent) == 1, expansion_agent
+    assert len(expansion_enemy) == 1, expansion_enemy
+    assert len(centre) == 1, centre
+    # The contested centre is the richest single patch.
+    centre_amount = centre[0]["amount"]
+    for p in near_agent + near_enemy + expansion_agent + expansion_enemy:
+        assert centre_amount > p["amount"], (
+            f"centre patch {centre[0]} not richer than side patch {p}"
+        )
 
 
 def test_both_sides_have_ore_reachable_from_base():
     """Each side must have at least one ore-patch cell within 12
     cells of its construction yard — safe opening econ for both
-    commanders. Reads the pack-level / level-merged `ore_patches:`
-    list (each `{x, y, radius, amount}` declares a DISK)."""
+    commanders."""
     pack = load_pack(PACK_PATH)
     c = compile_level(pack, "medium")
     a_pos, e_pos = _agent_enemy_facts(c)
@@ -102,6 +193,30 @@ def test_both_sides_have_ore_reachable_from_base():
     )
 
 
+def test_each_side_has_a_shipyard_on_a_shore_water_band():
+    """The naval lane is optional but available: each side has a
+    `syrd` shipyard and a small `water_cells:` band on the shore
+    adjacent to it."""
+    pack = load_pack(PACK_PATH)
+    c = compile_level(pack, "medium")
+    syrds = [a for a in c.scenario.actors if a.type == "syrd"]
+    owners = {a.owner for a in syrds}
+    assert owners == {"agent", "enemy"}, (
+        f"expected one syrd per side, got owners={owners}"
+    )
+    # Water bands mirrored about (64, 48): each side has its own
+    # ≥9-cell shore strip.
+    water_cells = c.water_cells
+    agent_band = [(x, y) for x, y in water_cells if x < 10 and y < 48]
+    enemy_band = [(x, y) for x, y in water_cells if x > 118 and y > 48]
+    assert len(agent_band) >= 9, (
+        f"agent shore-water band too small ({len(agent_band)} cells)"
+    )
+    assert len(enemy_band) >= 9, (
+        f"enemy shore-water band too small ({len(enemy_band)} cells)"
+    )
+
+
 def test_run_1v1_stall_vs_stall_is_deterministic():
     """Two back-to-back calls to `run_1v1(stall, stall, seed=s)`
     must produce the SAME outcome — the harness is deterministic
@@ -113,7 +228,7 @@ def test_run_1v1_stall_vs_stall_is_deterministic():
     c = compile_level(pack, "medium")
     tmp = _scenario_to_tmp_yaml(c)
     # Short horizon — we only need to pin determinism, not a full
-    # 120-turn macro game.
+    # 200-turn macro game.
     a = run_1v1(tmp, _stall, _stall, seed=1, max_turns=10)
     b = run_1v1(tmp, _stall, _stall, seed=1, max_turns=10)
     assert a.winner == b.winner, (
@@ -124,9 +239,10 @@ def test_run_1v1_stall_vs_stall_is_deterministic():
 
 def _rusher_for(side: str):
     """Bench-local rusher policy: attack-move every combat unit
-    toward the opposite corner. Mirrors `_rusher_agent_fn` in
-    run_eval but stays local to keep this test self-contained."""
-    target = (55, 55) if side == "agent" else (10, 10)
+    toward the opposite corner of the canonical 128x96 map. Mirrors
+    `_rusher_agent_fn` in run_eval but stays local to keep this
+    test self-contained."""
+    target = (116, 86) if side == "agent" else (12, 10)
     non_combat = {"harv", "fact", "proc", "powr", "tent", "weap",
                   "syrd", "mcv"}
 
@@ -185,7 +301,7 @@ def test_active_policy_reaches_the_engine_on_both_sides():
 
 
 def test_fog_isolates_the_two_bases_at_t0():
-    """At t=0 of medium, neither side observes any of the OPPONENT's
+    """At t=0, neither side observes any of the OPPONENT's
     own-unit ids — the mirrored bases sit outside each other's
     starting sight, which is the whole point of asymmetric info."""
     from openra_bench.eval_core import _scenario_to_tmp_yaml
@@ -217,8 +333,6 @@ def test_fog_isolates_the_two_bases_at_t0():
         # starting sight.
         a_seen = set(agent_ad.signals.enemies_seen_ids)
         e_seen = set(enemy_ad.signals.enemies_seen_ids)
-        # The agent's view should not see ANY enemy ids (the enemy's
-        # own-unit ids), and vice versa. (At t=0 nothing scouted.)
         assert a_seen.isdisjoint(e_own_ids), (
             f"agent already sees enemy units at t=0: "
             f"{a_seen & e_own_ids}"
@@ -240,8 +354,9 @@ def test_fog_isolates_the_two_bases_at_t0():
 
 def test_run_eval_1v1_cli_smoke(tmp_path):
     """`run_eval --mode 1v1 --provider scripted:stall --opponent
-    scripted:stall` runs end-to-end and emits a valid stats JSON
-    carrying the `adversarial_1v1` headline block."""
+    scripted:stall --levels medium` runs end-to-end and emits a
+    valid stats JSON carrying the `adversarial_1v1` headline block.
+    Single-cell × single-seed ⇒ exactly ONE episode."""
     import json
     from openra_bench.run_eval import main
 
@@ -250,7 +365,7 @@ def test_run_eval_1v1_cli_smoke(tmp_path):
         "run_eval",
         "--mode", "1v1",
         "--packs", str(PACK_PATH),
-        "--levels", "easy",
+        "--levels", "medium",
         "--seeds", "1",
         "--provider", "scripted:stall",
         "--opponent", "scripted:stall",
@@ -261,6 +376,50 @@ def test_run_eval_1v1_cli_smoke(tmp_path):
     assert data["mode"] == "1v1"
     assert "adversarial_1v1" in data
     assert data["adversarial_1v1"]["n_matches"] == 1
+    assert len(data["episodes"]) == 1, (
+        f"expected exactly ONE episode (single cell × 1 seed), "
+        f"got {len(data['episodes'])}"
+    )
     assert data["episodes"][0]["capability"] == "adversarial"
-    assert data["episodes"][0]["cell"] == "adversarial-1v1-macro:easy"
+    assert data["episodes"][0]["cell"] == "adversarial-1v1-macro:medium"
     assert data["episodes"][0]["mode"] == "1v1"
+
+
+def test_run_eval_1v1_side_swap_produces_paired_episodes(tmp_path):
+    """`--side-swap` runs each match twice with sides swapped. With
+    one cell + one seed, that's TWO episodes in the JSON, and the
+    aggregate is fair regardless of any residual engine slot bias
+    in stall-vs-stall."""
+    import json
+    from openra_bench.run_eval import main
+
+    out = tmp_path / "1v1_swap.json"
+    rc = main([
+        "run_eval",
+        "--mode", "1v1",
+        "--packs", str(PACK_PATH),
+        "--levels", "medium",
+        "--seeds", "1",
+        "--side-swap",
+        "--provider", "scripted:stall",
+        "--opponent", "scripted:stall",
+        "--out", str(out),
+    ])
+    assert rc == 0
+    data = json.loads(out.read_text())
+    assert data["mode"] == "1v1"
+    # Side-swap emits both halves (normal + swapped) plus a paired
+    # aggregate episode. n_matches is still 1 (the single paired
+    # match), but the per-half traces give the fairness audit.
+    assert data["adversarial_1v1"]["n_matches"] == 1, (
+        f"expected 1 paired match, got "
+        f"{data['adversarial_1v1']['n_matches']}"
+    )
+    outcomes = [e.get("outcome") for e in data["episodes"]]
+    # Stall vs stall on a symmetric arena: one slot wins from
+    # residual engine bias, the other slot wins the mirrored half,
+    # aggregate is a draw — the slot bias is neutralised.
+    assert "win" in outcomes and "loss" in outcomes, (
+        f"expected paired halves to mirror outcomes (one win + one "
+        f"loss), got {outcomes}"
+    )
