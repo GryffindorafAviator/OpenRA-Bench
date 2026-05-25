@@ -167,20 +167,26 @@ levels:
         # CLAUDE.md auto-done footgun). Placed deep enough that no
         # intended-play tank ever finds it (won't be attacked).
         - {type: fact, owner: enemy, position: [155, 55]}
+    # v1.0 sweep audit (F8 long-horizon): converted from strict `then:`
+    # to STATE-BASED `all_of:` — "at any point have army-of-N AND both
+    # NE/SE facts razed before the deadline". The two-front geometry
+    # (120 cells between corners) + the army-of-N threshold still
+    # enforce the mass-then-split logic: a 1-2-tank dribble cannot
+    # raze either defended fact inside the clock, and a "send 2
+    # starter tanks to one front" play cannot raze the other. Removes
+    # the F8 "N-step plateau" failure mode where destruction-before-
+    # army was credited zero progress.
     win_condition:
       all_of:
-        - then:
-            id: army-then-multifront-easy
-            clauses:
-              - {unit_type_count_gte: {type: 2tnk, n: 4}}            # P1: army
-              - enemy_key_buildings_destroyed_in_region:              # P2: NE razed
-                  {x: 130, y: 15, radius: 8, types: [fact]}
-              - enemy_key_buildings_destroyed_in_region:              # P3: SE razed
-                  {x: 130, y: 45, radius: 8, types: [fact]}
-        - within_ticks: 7203
+        - {unit_type_count_gte: {type: 2tnk, n: 4}}              # army
+        - enemy_key_buildings_destroyed_in_region:                # NE razed
+            {x: 130, y: 15, radius: 8, types: [fact]}
+        - enemy_key_buildings_destroyed_in_region:                # SE razed
+            {x: 130, y: 45, radius: 8, types: [fact]}
+        - within_ticks: 7200
     fail_condition:
       any_of:
-        - {after_ticks: 7204}
+        - {after_ticks: 7201}
         - {not: {building_count_gte: {type: fact, n: 1}}}
         - {not: {own_units_gte: 1}}
     max_turns: 80
@@ -245,20 +251,19 @@ levels:
         # keeps the episode alive past auto-`done` if both objective
         # fact fall (CLAUDE.md auto-done footgun).
         - {type: fact, owner: enemy, position: [155, 55]}
+    # v1.0 sweep audit (F8 long-horizon): converted from `then:` to
+    # state-based `all_of:` — see EASY note above.
     win_condition:
       all_of:
-        - then:
-            id: army-then-multifront-medium
-            clauses:
-              - {unit_type_count_gte: {type: 2tnk, n: 6}}
-              - enemy_key_buildings_destroyed_in_region:
-                  {x: 130, y: 15, radius: 8, types: [fact]}
-              - enemy_key_buildings_destroyed_in_region:
-                  {x: 130, y: 45, radius: 8, types: [fact]}
-        - within_ticks: 7203
+        - {unit_type_count_gte: {type: 2tnk, n: 6}}
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 130, y: 15, radius: 8, types: [fact]}
+        - enemy_key_buildings_destroyed_in_region:
+            {x: 130, y: 45, radius: 8, types: [fact]}
+        - within_ticks: 7200
     fail_condition:
       any_of:
-        - {after_ticks: 7204}
+        - {after_ticks: 7201}
         - {not: {building_count_gte: {type: fact, n: 1}}}
         - {not: {own_units_gte: 1}}
     max_turns: 80
@@ -339,6 +344,17 @@ levels:
         # keeps the episode alive past auto-`done` if both objective
         # fact fall (CLAUDE.md auto-done footgun).
         - {type: fact, owner: enemy, position: [155, 55]}
+    # v1.0 sweep audit (F8 long-horizon): hard KEEPS strict `then:`
+    # ordering (easy/medium were converted to state-based `all_of:`).
+    # Rationale: hard's 8-tank threshold + heavier picket (1 e3 + 2
+    # e1 each front) means by the time both fronts are razed the
+    # surviving tank count is well below the peak. State-based
+    # `unit_type_count_gte:8` is a LIVE snapshot — at no single tick
+    # do "8 tanks alive" + "NE razed" + "SE razed" coincide, even
+    # though the peak was 8 and both fronts ultimately fell. The
+    # `then:` LATCH at the peak preserves the mass-then-split
+    # capability test that state-based cannot. This is the canonical
+    # remaining-ordering example flagged in the F8 audit report.
     win_condition:
       all_of:
         - then:
@@ -349,10 +365,10 @@ levels:
                   {x: 130, y: 15, radius: 8, types: [fact]}
               - enemy_key_buildings_destroyed_in_region:
                   {x: 130, y: 45, radius: 8, types: [fact]}
-        - within_ticks: 7203
+        - within_ticks: 7200
     fail_condition:
       any_of:
-        - {after_ticks: 7204}
+        - {after_ticks: 7201}
         - {not: {building_count_gte: {type: fact, n: 1}}}
         - {not: {own_units_gte: 1}}
     max_turns: 80

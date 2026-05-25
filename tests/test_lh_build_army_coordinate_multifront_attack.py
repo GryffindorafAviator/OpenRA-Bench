@@ -38,6 +38,11 @@ LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
 
 # Per-level army size (the n in unit_type_count_gte: {type:2tnk, n:N}).
+# Easy/medium use state-based `all_of:` (peak vs live coincide because
+# the lighter pickets let nearly all tanks survive to the dual-raze
+# tick). Hard keeps `then:` ordering (the 8-tank peak does not coincide
+# with the dual-raze tick under heavier pickets; state-based would
+# require near-zero attrition, which is unachievable). See pack yaml.
 _ARMY_N = {"easy": 4, "medium": 6, "hard": 8}
 
 # The two fixed enemy fact corners (NE + SE).
@@ -220,24 +225,64 @@ def test_every_level_has_fail_condition():
         assert c.fail_condition is not None, f"{lvl} missing fail_condition"
 
 
-def test_then_composite_used_in_win():
-    """The win is `all_of[ then{army, NE-raze, SE-raze}, within_ticks ]`.
-    Confirms the load-bearing teeth (mass-then-split) is wired."""
+def test_win_predicate_shape():
+    """v1.0 sweep audit (F8 long-horizon):
+    - easy / medium: state-based `all_of:[2tnk≥N, NE-raze, SE-raze, within_ticks]`
+    - hard: KEEPS strict `then:` (the 8-tank peak does not coincide
+      with the dual-raze tick under heavier pickets — see yaml comment).
+    """
+    army_n = {"easy": 4, "medium": 6, "hard": 8}
+    state_based = {"easy", "medium"}
     for lvl in LEVELS:
         c = compile_level(load_pack(PACK), lvl)
         win = c.win_condition.model_dump(exclude_none=True)
         inner = win.get("all_of") or []
-        then_node = None
-        for cl in inner:
-            if "then" in cl:
-                then_node = cl["then"]
-                break
-        assert then_node is not None, f"{lvl} win missing then-chain: {win}"
-        clauses = (then_node or {}).get("clauses") or []
-        # army → NE-raze → SE-raze ⇒ exactly 3 clauses.
-        assert len(clauses) == 3, (
-            f"{lvl} then-chain must have 3 clauses (army, NE, SE); "
-            f"got {clauses}"
+        if lvl in state_based:
+            assert not any("then" in cl for cl in inner), (
+                f"{lvl} should be state-based, found `then:` in {win}"
+            )
+            # Army clause
+            army = next(
+                (cl["unit_type_count_gte"] for cl in inner
+                 if "unit_type_count_gte" in cl), None
+            )
+            assert army and army["type"] == "2tnk" and army["n"] == army_n[lvl], (
+                f"{lvl} missing army clause with n={army_n[lvl]}: {win}"
+            )
+            # Two destruction-in-region clauses (NE and SE)
+            regions = [
+                cl["enemy_key_buildings_destroyed_in_region"]
+                for cl in inner if "enemy_key_buildings_destroyed_in_region" in cl
+            ]
+        else:
+            # Hard: then-chain wraps army + NE + SE; within_ticks lives
+            # next to it inside the outer all_of.
+            then_node = next(
+                (cl["then"] for cl in inner if "then" in cl), None
+            )
+            assert then_node is not None, f"hard should keep `then:`: {win}"
+            clauses = (then_node or {}).get("clauses") or []
+            assert len(clauses) == 3, (
+                f"hard then-chain must have 3 clauses; got {clauses}"
+            )
+            army_cl = clauses[0]
+            assert (army_cl.get("unit_type_count_gte", {}).get("n")
+                    == army_n[lvl])
+            regions = [
+                cl["enemy_key_buildings_destroyed_in_region"]
+                for cl in clauses[1:]
+            ]
+        assert len(regions) == 2, (
+            f"{lvl} expected 2 destruction-in-region clauses; got {regions}"
+        )
+        ys = sorted(r["y"] for r in regions)
+        assert ys == [15, 45], f"{lvl} regions must be NE(15) + SE(45): {ys}"
+        # Deadline
+        flat_within_ticks_count = sum(
+            1 for cl in inner if "within_ticks" in cl
+        )
+        assert flat_within_ticks_count >= 1, (
+            f"{lvl} missing within_ticks deadline"
         )
 
 
@@ -282,11 +327,9 @@ def test_intended_mass_and_split_wins(level, seed):
     the advertised capability."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _intended_mass_and_split_policy(_ARMY_N[level]), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "win", (
         f"intended mass-and-split must WIN on {level} s={seed}; "
-        f"got {res.outcome} (then_progress={tp}, "
-        f"kills={res.signals.units_killed}, "
+        f"got {res.outcome} (kills={res.signals.units_killed}, "
         f"own_buildings={res.signals.own_building_types})"
     )
 
@@ -312,10 +355,8 @@ def test_attack_one_front_only_loses(level, seed):
     never latches, so the then-chain never completes."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _attack_one_front_only_policy(), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "loss", (
-        f"one-front-only must LOSE on {level} s={seed}; "
-        f"got {res.outcome} then_progress={tp}"
+        f"one-front-only must LOSE on {level} s={seed}; got {res.outcome}"
     )
 
 
@@ -328,10 +369,8 @@ def test_send_too_few_each_front_loses(level, seed):
     bounces off the defenders without razing the fact."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _send_too_few_each_front_policy(), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "loss", (
-        f"send-too-few must LOSE on {level} s={seed}; "
-        f"got {res.outcome} then_progress={tp}"
+        f"send-too-few must LOSE on {level} s={seed}; got {res.outcome}"
     )
 
 

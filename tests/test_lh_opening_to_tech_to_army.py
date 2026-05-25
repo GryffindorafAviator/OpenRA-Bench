@@ -235,24 +235,32 @@ def test_every_level_has_fail_condition():
         assert c.fail_condition is not None, f"{lvl} missing fail_condition"
 
 
-def test_then_composite_used_in_win():
-    """Confirms the 4-phase macro chain is wired through to the
-    compiled win condition — the load-bearing teeth of this pack."""
+def test_state_based_win_predicate():
+    """v1.0 sweep audit (F8 long-horizon): the win is now state-based
+    `all_of:[proc, weap, 2tnk≥N, enemy-fact-razed, within_ticks]`.
+    Confirms the four end-state checks + the deadline are wired."""
     for lvl in LEVELS:
         c = compile_level(load_pack(PACK), lvl)
         win = c.win_condition.model_dump(exclude_none=True)
-        # all_of[ then{4 clauses}, within_ticks ]
         inner = win.get("all_of") or []
-        assert any("then" in cl for cl in inner), (
-            f"{lvl} win missing then-chain: {win}"
+        # Must NOT use the strict `then:` ordering (the F8 conversion).
+        assert not any("then" in cl for cl in inner), (
+            f"{lvl} should be state-based, found `then:` in {win}"
         )
-        # The chain must have exactly 4 clauses (proc → weap → army → engage).
+        # The four state checks + within_ticks must all be present.
+        flat = {k: v for cl in inner for k, v in cl.items()}
+        assert "has_building" in flat or any(
+            cl.get("has_building") == "proc" for cl in inner
+        ), f"{lvl} missing has_building checks: {win}"
+        keys_present = set()
         for cl in inner:
-            if "then" in cl:
-                clauses = (cl["then"] or {}).get("clauses") or []
-                assert len(clauses) == 4, (
-                    f"{lvl} then-chain must have 4 clauses; got {clauses}"
-                )
+            keys_present.update(cl.keys())
+        assert "has_building" in keys_present, f"{lvl} missing has_building"
+        assert "unit_type_count_gte" in keys_present, f"{lvl} missing army"
+        assert "enemy_key_buildings_destroyed" in keys_present, (
+            f"{lvl} missing engage clause"
+        )
+        assert "within_ticks" in keys_present, f"{lvl} missing deadline"
 
 
 def test_tick_budget_aligned_with_max_turns():
@@ -290,17 +298,16 @@ def test_tick_budget_aligned_with_max_turns():
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", LEVELS)
 def test_intended_phased_policy_wins(level, seed):
-    """The intended 4-phase macro play (proc → weap → N×2tnk → engage)
-    must WIN on every (level, seed). This is the load-bearing test
-    that the pack is solvable inside the budget by the advertised
-    capability."""
+    """The intended macro play (proc → weap → N×2tnk → engage) must
+    WIN on every (level, seed). After the F8 conversion the win is
+    state-based — any interleaved completion of the same four end-
+    states satisfies, but the natural prereq chain still drives the
+    same execution order."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _intended_phased_policy(_ARMY_N[level]), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "win", (
         f"intended phased macro must WIN on {level} s={seed}; "
-        f"got {res.outcome} (then_progress={tp}, "
-        f"kills={res.signals.units_killed}, "
+        f"got {res.outcome} (kills={res.signals.units_killed}, "
         f"own_buildings={res.signals.own_building_types})"
     )
 
@@ -322,17 +329,14 @@ def test_stall_loses(level, seed):
 @pytest.mark.parametrize("level", LEVELS)
 def test_skip_to_attack_loses(level, seed):
     """A "skip the chain, just attack" policy must LOSE on every
-    (level, seed). The then-chain demands has_building:proc as
-    clause-1 — a policy that never builds proc cannot advance the
-    chain past index 0. Even if the policy somehow destroyed the
-    enemy fact, the `then:` latch would still report 0 because the
-    earlier clauses never latched in order."""
+    (level, seed). The engine prereq chain prevents 2tnk without weap
+    (and weap without proc), so a policy that tries to skip building
+    proc/weap cannot produce an army — the state-based unit_type_count
+    clause never satisfies."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _skip_to_attack_policy(), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "loss", (
-        f"skip-to-attack must LOSE on {level} s={seed}; got "
-        f"{res.outcome} then_progress={tp}"
+        f"skip-to-attack must LOSE on {level} s={seed}; got {res.outcome}"
     )
 
 
@@ -340,14 +344,13 @@ def test_skip_to_attack_loses(level, seed):
 @pytest.mark.parametrize("level", LEVELS)
 def test_pure_econ_loses(level, seed):
     """A "build econ + tech but never an army or engage" policy must
-    LOSE on every (level, seed). Phases 1+2 latch but phases 3+4 never
-    do — the chain stalls at index 2 and the clock expires."""
+    LOSE on every (level, seed). The state-based win still requires
+    both unit_type_count_gte:2tnk AND enemy_key_buildings_destroyed —
+    neither satisfies under pure-econ, so the clock expires."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _pure_econ_policy(), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "loss", (
-        f"pure-econ must LOSE on {level} s={seed}; got "
-        f"{res.outcome} then_progress={tp}"
+        f"pure-econ must LOSE on {level} s={seed}; got {res.outcome}"
     )
 
 
