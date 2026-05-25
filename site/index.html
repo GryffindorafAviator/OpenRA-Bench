@@ -231,6 +231,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
         <button class="btn-play btn-sm" id="game-start-btn" onclick="gameStart()" disabled>Start</button>
         <button class="btn-stop btn-sm" id="game-restart-btn" onclick="gameRestart()" style="display:none" title="Discard the current run and start this scenario fresh">Restart</button>
         <button class="btn-stop btn-sm" id="game-stop-btn" onclick="gameStop()" style="display:none">Stop</button>
+        <button class="btn-secondary btn-sm" id="game-refresh-btn" onclick="gameRefresh()" title="Clear any stuck sessions on the server and re-enable Start. Use if the UI feels frozen.">Refresh</button>
       </div>
     </div>
     <div class="game-body" id="game-body" style="display:none">
@@ -701,6 +702,44 @@ async function gameStop(){
   document.getElementById("game-restart-btn").style.display="none";
   document.getElementById("game-start-btn").disabled=!gameServerOk;
   gameLog("Game stopped.");
+}
+
+// Refresh: one-click recovery when the UI feels stuck (Start
+// unresponsive, modal won't open, etc). Asks the server to clear
+// all stale sessions (typically half-closed sessions from prior
+// crashes that the leak fix in 5e11b577 prevents but doesn't
+// retroactively clean for already-running servers), then resets
+// local frontend state. Saves the user from having to manually
+// restart `python -m site.game_api`.
+async function gameRefresh(){
+  gameLog("Refreshing — clearing server sessions and resetting local state...");
+  try{
+    const r=await fetch(gameServerUrl+"/api/game/sessions/clear",{method:"POST"});
+    if(r.ok){
+      const data=await r.json();
+      const n=(data&&data.cleared)??0;
+      gameLog("Server cleared "+n+" stale session(s).");
+    }else{
+      gameLog("Server refused clear (status "+r.status+"); resetting local state anyway.");
+    }
+  }catch(e){
+    gameLog("Refresh: server unreachable ("+e.message+"); resetting local state anyway.");
+  }
+  // Reset local state unconditionally so the UI is usable again even
+  // if the server didn't respond.
+  gameSession=null; gameState=null;
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
+  gameSelectedBuildings.clear(); gamePoweredDown.clear();
+  document.getElementById("game-body").style.display="none";
+  document.getElementById("game-start-btn").style.display="";
+  document.getElementById("game-start-btn").disabled=!gameServerOk;
+  document.getElementById("game-stop-btn").style.display="none";
+  document.getElementById("game-restart-btn").style.display="none";
+  closeReviewModal();
+  // Re-probe server health so the Start button is correctly enabled
+  // if the server is up.
+  if(typeof checkServer==="function"){try{await checkServer();}catch(_){}}
+  gameLog("UI refreshed.");
 }
 
 // Restart: discard the current run (server-side draft is removed via
