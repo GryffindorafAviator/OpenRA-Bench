@@ -18,7 +18,6 @@ spec_for() {
     qwen3.6-35b-a3b)   echo "together:together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad" ;;
     gpt-5.4-mini)      echo "openai:gpt-5.4-mini-2026-03-17" ;;
     gpt-5.4)           echo "openai:gpt-5.4-2026-03-05" ;;
-   )         echo "together:moonshotai/Kimi-K2.6" ;;
     *) echo "scripted:stall" ;;
   esac
 }
