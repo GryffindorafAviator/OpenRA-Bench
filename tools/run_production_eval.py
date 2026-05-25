@@ -81,10 +81,14 @@ MODELS: tuple[tuple[str, str, str], ...] = (
     # scenarios sweep is preserved in data/runs/v1.1-prod/glm-4.6v/.
     # Re-add this entry to include it in a future sweep.
     # ("glm-4.6v",              "openrouter", "z-ai/glm-4.6v"),
-    # Substituted in for glm-4.6v: Kimi-K2.6 on Together serverless
-    # (chat=2s, tool-use=1s, clean OpenAI-shape tool_calls; lower error
-    # rate / throttling vs OpenRouter's glm-4.6v on this concurrency).
-    ("kimi-k2.6",             "together",   "moonshotai/Kimi-K2.6"),
+    # Kimi-K2.6 (Together serverless) probed and dropped 2026-05-25:
+    # 100% 429 rate-limit errors even at concurrency=1 (serial). The
+    # bench's max_retries=5 with exp backoff (cap=30s) couldn't ride
+    # over Kimi's per-model throttle. Provider explicitly says "steady
+    # traffic + exponential backoff"; would need a paid Together tier
+    # OR a custom retry policy with cap≥120s + max_retries≥15 to use
+    # this endpoint productively. Excluded from v1.1.
+    # ("kimi-k2.6",             "together",   "moonshotai/Kimi-K2.6"),
 )
 
 TYPES: tuple[str, ...] = ("scenarios", "1v1")

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Full 1v1 grid: 21 unordered pairs (incl 6 self) × 8 episodes (4 seeds × side-swap).
-# 6 models (glm-4.6v dropped, kimi-k2.6 added). C(6,2) + 6 self = 15 + 6 = 21 pairs.
+# Full 1v1 grid: 15 unordered pairs (incl 5 self) × 8 episodes (4 seeds × side-swap).
+# 6 models (glm-4.6v dropped, added). C(6,2) + 6 self = 15 + 6 = 21 pairs.
 # Each pair is launched as a separate `run_production_eval launch --type 1v1` so
 # the orchestrator's auto-PR fires on completion.
 set -euo pipefail
@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; source .env; set +a
 
-MODELS=(qwen3.5-9b gemma-4-31b-it qwen3.6-35b-a3b gpt-5.4-mini gpt-5.4 kimi-k2.6)
+MODELS=(qwen3.5-9b gemma-4-31b-it qwen3.6-35b-a3b gpt-5.4-mini gpt-5.4)
 
 # Per-model opponent spec for cross-pair launches
 spec_for() {
@@ -18,12 +18,12 @@ spec_for() {
     qwen3.6-35b-a3b)   echo "together:together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad" ;;
     gpt-5.4-mini)      echo "openai:gpt-5.4-mini-2026-03-17" ;;
     gpt-5.4)           echo "openai:gpt-5.4-2026-03-05" ;;
-    kimi-k2.6)         echo "together:moonshotai/Kimi-K2.6" ;;
+   )         echo "together:moonshotai/Kimi-K2.6" ;;
     *) echo "scripted:stall" ;;
   esac
 }
 
-# Iterate every unordered pair (i ≤ j) — 21 pairs including self
+# Iterate every unordered pair (i ≤ j) — 15 pairs including self
 launched=0
 for ((i=0; i<${#MODELS[@]}; i++)); do
   for ((j=i; j<${#MODELS[@]}; j++)); do
@@ -45,6 +45,6 @@ for ((i=0; i<${#MODELS[@]}; i++)); do
 done
 
 echo
-echo "launched $launched pairs (= C(6,2)+6 = 21)"
+echo "launched $launched pairs (= C(5,2)+5 = 15)"
 sleep 5
 pgrep -af "openra_bench.run_eval" | wc -l | sed 's/^/  alive run_eval children: /'

@@ -9,7 +9,7 @@ set -a; source .env; set +a
 
 PROD_DIR="data/runs/v1.1-prod-pass3"
 
-for model in qwen3.5-9b gemma-4-31b-it qwen3.6-35b-a3b gpt-5.4-mini gpt-5.4 kimi-k2.6; do
+for model in qwen3.5-9b gemma-4-31b-it qwen3.6-35b-a3b gpt-5.4-mini gpt-5.4; do
   nohup python3 tools/run_production_eval.py launch \
     --model "$model" --type scenarios \
     --concurrency 20 --seeds 1 --auto-pr \
