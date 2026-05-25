@@ -58,8 +58,18 @@ def _alive(render_state: dict) -> bool:
     return bool(units) or bool(buildings)
 
 
+def _kills(render_state: dict) -> int:
+    """Cumulative enemy units killed — the primary military-progress metric."""
+    return int(render_state.get("units_killed", 0) or 0)
+
+
+def _own_buildings(render_state: dict) -> int:
+    """Count of own buildings still standing — the secondary military metric."""
+    return len(render_state.get("own_buildings") or [])
+
+
 def _economy_value(render_state: dict) -> int:
-    """Cash + stored resources — the deadline tie-break metric."""
+    """Cash + stored resources — the final-fallback economic metric."""
     return int(render_state.get("cash", 0) or 0) + int(
         render_state.get("resources", 0) or 0
     )
@@ -162,14 +172,30 @@ def run_1v1(
         elif not agent_alive and not enemy_alive:
             winner, reason = "draw", "mutual elimination"
         else:
-            # Both standing — deadline / turn cap. Tie-break on economy.
-            av, ev = _economy_value(a_rs), _economy_value(e_rs)
-            if av > ev:
-                winner, reason = "agent", "deadline — agent ahead on economy"
-            elif ev > av:
-                winner, reason = "enemy", "deadline — enemy ahead on economy"
+            # Both standing — deadline / turn cap. Layered tie-break:
+            # 1) kills (who took down more of the opponent's force),
+            # 2) own buildings remaining (military capital),
+            # 3) economy (cash + resources) as the final tiebreak.
+            # Each layer is consulted only if the previous is tied.
+            ak, ek = _kills(a_rs), _kills(e_rs)
+            if ak > ek:
+                winner, reason = "agent", f"deadline — agent ahead on kills ({ak} vs {ek})"
+            elif ek > ak:
+                winner, reason = "enemy", f"deadline — enemy ahead on kills ({ek} vs {ak})"
             else:
-                winner, reason = "draw", "deadline — even"
+                ab, eb = _own_buildings(a_rs), _own_buildings(e_rs)
+                if ab > eb:
+                    winner, reason = "agent", f"deadline — kills tied at {ak}; agent ahead on buildings ({ab} vs {eb})"
+                elif eb > ab:
+                    winner, reason = "enemy", f"deadline — kills tied at {ak}; enemy ahead on buildings ({eb} vs {ab})"
+                else:
+                    av, ev = _economy_value(a_rs), _economy_value(e_rs)
+                    if av > ev:
+                        winner, reason = "agent", f"deadline — kills+buildings tied; agent ahead on economy ({av} vs {ev})"
+                    elif ev > av:
+                        winner, reason = "enemy", f"deadline — kills+buildings tied; enemy ahead on economy ({ev} vs {av})"
+                    else:
+                        winner, reason = "draw", f"deadline — fully tied (kills={ak}, buildings={ab}, economy={av})"
 
         return OneVOneResult(
             winner=winner,
