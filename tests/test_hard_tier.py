@@ -1513,22 +1513,20 @@ UPGRADED = [
     "combat-heli-flank",  # hard: 2 agent spawn_point groups (north/south heli staging)
     "econ-harvester-defense-raid",  # hard: 2 agent spawn_point groups (north/south base)
     "econ-mine-and-grow",  # hard: 2 agent spawn_point groups (north/south base)
+    # The canonical LLM-vs-LLM 1v1 macro pack. 2026-05-25 update:
+    # carries TWO fully-symmetric spawn_point variants (V0: agent NW
+    # ↔ enemy SE; V1: agent NE ↔ enemy SW), both at the original
+    # ≈128.8-cell diagonal separation. The agent stays in the NORTH
+    # lobe and the enemy in the SOUTH lobe at the SAME variant — the
+    # symmetric-arena fairness contract is preserved (only the
+    # horizontal corner flips per seed). Ablation diversity without
+    # introducing per-seed bias.
+    "adversarial-1v1-macro",  # hard: 2 fully-symmetric spawn_point variants
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
 # exhaustive — every active pack is classified, see the coverage test).
 NOT_APPLICABLE = {
-    # The canonical LLM-vs-LLM 1v1 macro pack. Head-to-head fairness
-    # IS the axis under test: introducing seed-driven `spawn_point`
-    # rotation on a perfectly mirrored arena would create a per-seed
-    # bias (one corner gets attacked from the centre vs from the
-    # rim) and break the symmetric-arena contract. The hard rung
-    # varies map TOPOLOGY (bridges + naval option) instead — the
-    # meaningful difficulty axis on a 1v1 cell.
-    "adversarial-1v1-macro": "1v1 head-to-head pack: mirrored "
-    "symmetric arenas are the fairness contract; spawn_point "
-    "rotation would break the symmetric layout. Hard rung varies "
-    "map topology (bridges + naval option) instead of spawn corner.",
     "economy-investment": "non-spatial: capital allocation, start pos irrelevant",
     "economy-time-box": "non-spatial: budget-under-clock",
     "economy-force-buildup": "non-spatial: production economy",

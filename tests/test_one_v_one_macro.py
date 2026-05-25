@@ -134,35 +134,38 @@ def test_bases_mirrored_and_far_apart():
 
 
 def test_three_ore_patches_per_side_plus_contested_centre():
-    """The pack declares 5 ore patches total: a safe + an
-    expansion patch on each side (mirrored about (64, 48)) plus
-    one contested centre patch on the central bridge."""
+    """The pack declares 9 ore patches total: one safe + one
+    expansion patch in EACH of the four quadrants (NW/NE/SW/SE)
+    plus one contested centre patch on the central bridge.
+    Two spawn_point variants share the same global patch list (ore
+    patches do not honour spawn_point per CLAUDE.md), so all four
+    quadrants must carry near-base + mid-expansion ore — every
+    variant has both sides next to a safe patch at t=0."""
     pack = load_pack(PACK_PATH)
     c = compile_level(pack, "medium")
     patches = c.ore_patches
-    assert len(patches) == 5, (
-        f"expected 5 ore patches (2 per side + 1 centre), got {len(patches)}"
+    assert len(patches) == 9, (
+        f"expected 9 ore patches (2 per quadrant + 1 centre), "
+        f"got {len(patches)}"
     )
-    # Classify by region.
-    near_agent = [p for p in patches if p["x"] < 32 and p["y"] < 32]
-    near_enemy = [p for p in patches if p["x"] > 96 and p["y"] > 64]
-    expansion_agent = [
-        p for p in patches if 30 <= p["x"] <= 42 and 24 <= p["y"] <= 32
-    ]
-    expansion_enemy = [
-        p for p in patches if 86 <= p["x"] <= 98 and 64 <= p["y"] <= 72
-    ]
+    # Classify by quadrant (corner) — each quadrant carries one
+    # near-base safe patch + one mid-expansion patch.
+    in_nw = [p for p in patches if p["x"] < 48 and p["y"] < 36]
+    in_ne = [p for p in patches if p["x"] > 80 and p["y"] < 36]
+    in_sw = [p for p in patches if p["x"] < 48 and p["y"] > 60]
+    in_se = [p for p in patches if p["x"] > 80 and p["y"] > 60]
     centre = [
         p for p in patches if 60 <= p["x"] <= 68 and 44 <= p["y"] <= 52
     ]
-    assert len(near_agent) == 1, near_agent
-    assert len(near_enemy) == 1, near_enemy
-    assert len(expansion_agent) == 1, expansion_agent
-    assert len(expansion_enemy) == 1, expansion_enemy
+    # 2 patches per quadrant (safe + mid-expansion).
+    assert len(in_nw) == 2, in_nw
+    assert len(in_ne) == 2, in_ne
+    assert len(in_sw) == 2, in_sw
+    assert len(in_se) == 2, in_se
     assert len(centre) == 1, centre
     # The contested centre is the richest single patch.
     centre_amount = centre[0]["amount"]
-    for p in near_agent + near_enemy + expansion_agent + expansion_enemy:
+    for p in in_nw + in_ne + in_sw + in_se:
         assert centre_amount > p["amount"], (
             f"centre patch {centre[0]} not richer than side patch {p}"
         )
