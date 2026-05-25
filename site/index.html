@@ -635,6 +635,25 @@ async function checkServer(){
 
 async function gameStart(){
   if(!gameServerOk||currentIdx<0)return;
+  const startBtn=document.getElementById("game-start-btn");
+  // Click-spam guard: a fast double-click on Start used to fire TWO
+  // parallel /api/game/start requests, creating two sessions
+  // server-side and leaking the first (the UI only remembered the
+  // second sid). Disable IMMEDIATELY — before the fetch even
+  // starts — and re-enable in finally so the error path doesn't
+  // wedge the button.
+  if(startBtn&&startBtn.disabled)return;
+  if(startBtn)startBtn.disabled=true;
+  // If a prior session is still alive (e.g. user clicked Start on a
+  // new scenario without going through Stop / Restart), tell the
+  // server to drop it before we open a new one. Without this every
+  // mission switch would pile a new session into _sessions and the
+  // store hits its cap, evicting the OLDEST not the abandoned one.
+  if(gameSession){
+    const stale=gameSession;
+    gameSession=null;
+    try{await fetch(gameServerUrl+"/api/game/stop/"+stale,{method:"POST"});}catch(_){}
+  }
   const s=scenarios[currentIdx];
   const level=document.getElementById("game-level").value;
   if(level!==currentDiff)setDiff(level);
@@ -660,6 +679,12 @@ async function gameStart(){
     gameLog("Game started. Turn 0/"+gameState.max_turns+". "+gameState.objective);
   }catch(e){
     gameLog("ERROR: "+e.message);
+  }finally{
+    // Always re-enable Start so a failed fetch (network blip /
+    // server 4xx) doesn't leave the button greyed-out — that's the
+    // user-reported "Start is not responsive" symptom that used to
+    // require a server restart to clear.
+    if(startBtn)startBtn.disabled=!gameServerOk;
   }
 }
 

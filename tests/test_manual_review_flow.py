@@ -332,3 +332,131 @@ def test_api_discard_endpoint_removes_draft(api_client):
     assert _final_seed_dir(tmp_path) is None
     # Session id is consumed.
     assert sid not in game_api._sessions
+
+
+# ── Error-path session cleanup (the "UI freeze" defect class) ────────
+#
+# These tests pin the invariant: every endpoint that LEAVES a sid
+# unresponsive must ALSO remove it from `_sessions`. Without the
+# defensive `_drop_session` on the error branches the session store
+# leaked one corpse per failed step/commit/discard until the user
+# restarted `python -m site.game_api` — the reported freeze.
+
+
+def test_step_error_drops_session_from_store(api_client):
+    """If submit_turn raises mid-step, the session MUST be evicted —
+    otherwise its sid wedges a slot in `_sessions` forever and
+    subsequent reqs against it 500 instead of 404 (user can't
+    recover without restarting the server)."""
+    client, game_api, _ = api_client
+    compiled = _smallest_easy_pack()
+    assert compiled is not None
+    r = client.post(
+        "/api/game/start",
+        json={"pack_id": compiled.pack_id, "level": "easy", "seed": 1},
+    )
+    assert r.status_code == 200
+    sid = r.json()["session_id"]
+    assert sid in game_api._sessions
+    # Force submit_turn to raise by swapping it on the live session.
+    sess = game_api._sessions[sid]
+
+    def _boom(_actions):
+        raise RuntimeError("simulated engine fault")
+
+    sess.submit_turn = _boom  # type: ignore[method-assign]
+    r = client.post(
+        "/api/game/step",
+        json={"session_id": sid, "actions": []},
+    )
+    assert r.status_code == 500
+    # The sid is now gone — no zombie session left behind.
+    assert sid not in game_api._sessions
+    # And a follow-up request reports the (correct) 404 — NOT a
+    # stale 500 from the same dead session.
+    r2 = client.post(
+        "/api/game/step",
+        json={"session_id": sid, "actions": []},
+    )
+    assert r2.status_code == 404
+
+
+def test_commit_failure_drops_session_from_store(api_client):
+    """commit_playback() returning None (draft missing / already
+    discarded) used to leak the sid in _sessions. The handler now
+    drops it so the user can recover without restarting."""
+    client, game_api, _ = api_client
+    compiled = _smallest_easy_pack()
+    assert compiled is not None
+    sid, _state = _start_and_finish_via_api(client, compiled.pack_id)
+    # Force commit to fail by pre-discarding the draft.
+    sess = game_api._sessions[sid]
+    sess.discard_playback()
+    r = client.post(f"/api/game/commit/{sid}")
+    assert r.status_code == 400
+    # Crucial: even though commit failed, the sid is released.
+    assert sid not in game_api._sessions
+
+
+def test_sessions_debug_endpoint_lists_live_sids(api_client):
+    """The /api/game/sessions debug endpoint lets the user inspect
+    leaked sessions WITHOUT restarting the server — the primary
+    self-recovery hook for the freeze symptom."""
+    client, game_api, _ = api_client
+    compiled = _smallest_easy_pack()
+    assert compiled is not None
+    r = client.post(
+        "/api/game/start",
+        json={"pack_id": compiled.pack_id, "level": "easy", "seed": 1},
+    )
+    assert r.status_code == 200
+    sid = r.json()["session_id"]
+
+    r = client.get("/api/game/sessions")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["count"] >= 1
+    assert any(s["session_id"] == sid for s in payload["sessions"])
+
+    # The /clear endpoint nukes every session — the "restart the
+    # server" escape hatch, but without restarting the server.
+    r = client.post("/api/game/sessions/clear")
+    assert r.status_code == 200
+    assert sid in r.json()["dropped"]
+    assert sid not in game_api._sessions
+
+    r = client.get("/api/game/sessions")
+    assert r.json()["count"] == 0
+
+
+def test_double_start_does_not_leak_first_session(api_client):
+    """When the browser fires multiple Start requests (the click-
+    spam race the frontend used to allow, or a long manual-play
+    session that ran through many missions), the server-side store
+    MUST eventually evict the oldest sessions — otherwise the
+    store grows unbounded and every Start has to walk a longer
+    dict, and pre-MAX leaks would accumulate.
+
+    `_prune_sessions` is called at the TOP of start_game (before
+    insertion), so the post-add steady state is ≤ MAX_SESSIONS + 1.
+    """
+    client, game_api, _ = api_client
+    compiled = _smallest_easy_pack()
+    assert compiled is not None
+    # Fire MAX_SESSIONS + 3 starts. The oldest must have been
+    # evicted; we don't assert on the precise eviction index
+    # because the prune-before-insert ordering keeps one extra
+    # corpse around briefly.
+    sids = []
+    for _ in range(game_api.MAX_SESSIONS + 3):
+        r = client.post(
+            "/api/game/start",
+            json={"pack_id": compiled.pack_id, "level": "easy", "seed": 1},
+        )
+        assert r.status_code == 200
+        sids.append(r.json()["session_id"])
+    # The very oldest must be gone, the newest must be live, and
+    # the store is bounded.
+    assert sids[0] not in game_api._sessions
+    assert sids[-1] in game_api._sessions
+    assert len(game_api._sessions) <= game_api.MAX_SESSIONS + 1

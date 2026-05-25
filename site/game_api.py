@@ -42,15 +42,39 @@ _sessions: dict[str, Any] = {}
 MAX_SESSIONS = 8
 
 
+def _drop_session(sid: str) -> None:
+    """Pop a session from the store and close it best-effort. Never
+    raises — callers use this on error paths where we must NOT mask
+    the original exception with a cleanup failure."""
+    sess = _sessions.pop(sid, None)
+    if sess is None:
+        return
+    try:
+        sess.close()
+    except Exception:  # noqa: BLE001 — cleanup must not raise
+        pass
+
+
 def _prune_sessions():
+    """First sweep dead/closed sessions; then, if still over cap,
+    evict the oldest. Without the dead-sweep a half-closed session
+    (e.g. a step that raised mid-flight) would occupy a slot
+    forever, eventually filling the cap with corpses and making
+    every new Start race a close()."""
+    # Pass 1: drop sessions whose env is already released. Detection
+    # is best-effort — InteractiveSession exposes a private `_closed`
+    # flag, but we don't want to rely on it strictly.
+    for sid in list(_sessions.keys()):
+        sess = _sessions.get(sid)
+        if sess is None:
+            continue
+        if getattr(sess, "_closed", False):
+            _drop_session(sid)
+    # Pass 2: cap by age (dict iteration order = insertion order).
     if len(_sessions) <= MAX_SESSIONS:
         return
     for sid in list(_sessions.keys())[: len(_sessions) - MAX_SESSIONS]:
-        try:
-            _sessions[sid].close()
-        except Exception:
-            pass
-        del _sessions[sid]
+        _drop_session(sid)
 
 
 # ── Request / response models ──────────────────────────────────────────────
@@ -207,6 +231,8 @@ def list_scenarios():
 def start_game(req: StartRequest):
     """Start a new game session. Returns initial state."""
     _prune_sessions()
+    sess = None
+    sid = None
     try:
         from openra_bench.human_labeling import InteractiveSession
 
@@ -222,6 +248,18 @@ def start_game(req: StartRequest):
         _sessions[sid] = sess
         return _serialize_state(sess)
     except Exception as e:
+        # If construction got far enough to create the session but
+        # state-serialization failed, the partial session would
+        # otherwise leak (open env, open turns.jsonl handle). Close
+        # it explicitly so the slot — and the engine handle — are
+        # released before we return 4xx.
+        if sid is not None:
+            _drop_session(sid)
+        elif sess is not None:
+            try:
+                sess.close()
+            except Exception:  # noqa: BLE001
+                pass
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -253,6 +291,13 @@ def step_game(req: StepRequest):
         sess.submit_turn(actions)
         return _serialize_state(sess)
     except Exception as e:
+        # The session is now likely in a half-broken state (engine
+        # raised mid-step, or render_state followed an env shutdown).
+        # Drop it from _sessions so subsequent requests on this sid
+        # surface 404 instead of piling more errors onto a dead
+        # session — and so the slot is freed for the next Start
+        # rather than counting toward MAX_SESSIONS.
+        _drop_session(req.session_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -319,18 +364,27 @@ def commit_game(session_id: str):
             status_code=400,
             detail="Session has not finished yet — nothing to commit",
         )
-    save_path = sess.commit_playback()
+    try:
+        save_path = sess.commit_playback()
+    except Exception as e:
+        # commit_playback() catches its own promote() failures, but
+        # guard the call site too — any unexpected exception must
+        # still release the session slot, not leak it.
+        _drop_session(session_id)
+        raise HTTPException(
+            status_code=500, detail=f"Commit raised: {e}"
+        )
     if save_path is None:
+        # Nothing to promote (already-discarded / draft missing).
+        # Drop the session so the user can start fresh rather than
+        # being wedged on a sid that 400s forever.
+        _drop_session(session_id)
         raise HTTPException(
             status_code=400,
             detail="Commit failed — draft missing or already discarded",
         )
     # Release the engine handle now that the draft has been promoted.
-    try:
-        sess.close()
-    except Exception:
-        pass
-    _sessions.pop(session_id, None)
+    _drop_session(session_id)
     return {"status": "committed", "save_path": save_path}
 
 
@@ -346,13 +400,57 @@ def discard_game(session_id: str):
             status_code=400,
             detail="Session is not in manual-review mode",
         )
-    sess.discard_playback()
+    # discard_playback() already swallows its own exceptions (see
+    # human_labeling.InteractiveSession.discard_playback), but wrap
+    # the call defensively: the contract is that this endpoint MUST
+    # free the session slot regardless of whether the rmtree
+    # succeeded — otherwise a permission-denied / file-lock during
+    # rmtree (Windows / SMB) would wedge the sid in _sessions.
     try:
-        sess.close()
-    except Exception:
+        sess.discard_playback()
+    except Exception:  # noqa: BLE001
         pass
-    _sessions.pop(session_id, None)
+    _drop_session(session_id)
     return {"status": "discarded"}
+
+
+@app.get("/api/game/sessions")
+def list_sessions():
+    """Debug endpoint: enumerate live sessions so the user can see
+    leaked sids without restarting the server. Returns each sid's
+    turn count, done flag, manual-review/finalized/committed state.
+    Useful when the UI freezes — `curl /api/game/sessions` to find
+    out if the slot is stuck."""
+    out = []
+    for sid, sess in _sessions.items():
+        try:
+            out.append({
+                "session_id": sid,
+                "turn": getattr(sess, "turn", None),
+                "max_turns": getattr(sess, "max_turns", None),
+                "done": getattr(sess, "done", None),
+                "outcome": getattr(sess, "outcome", None),
+                "manual_review": getattr(sess, "_manual_review", False),
+                "finalized": getattr(sess, "_finalized", False),
+                "committed": getattr(sess, "_committed", False),
+                "discarded": getattr(sess, "_discarded", False),
+                "closed": getattr(sess, "_closed", False),
+            })
+        except Exception as e:  # noqa: BLE001
+            out.append({"session_id": sid, "error": str(e)})
+    return {"sessions": out, "count": len(out), "cap": MAX_SESSIONS}
+
+
+@app.post("/api/game/sessions/clear")
+def clear_sessions():
+    """Debug endpoint: drop every live session and close it. Recover
+    from a wedged store WITHOUT restarting `python -m site.game_api`
+    — the user's primary complaint. Returns the list of dropped
+    sids."""
+    dropped = list(_sessions.keys())
+    for sid in dropped:
+        _drop_session(sid)
+    return {"dropped": dropped, "count": len(dropped)}
 
 
 @app.get("/api/health")
