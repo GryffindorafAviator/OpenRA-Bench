@@ -170,13 +170,21 @@ levels:
         facing: -1
         count: 2
         spawn_point: 0
+      # SOUTH spawn gets one extra 2tnk (3 vs north's 2) to compensate
+      # for the engine count-spread geometry near the south playable
+      # edge — the spiral expansion of the enemy cluster packs tighter
+      # against the y=37 boundary, hitting the south agent with all 8
+      # enemies on contact rather than the natural 1-2-cell engagement
+      # rhythm seen on north. Asymmetric on purpose to preserve the bar
+      # (intended focus-fire WINS on both spawns); spawn-rotation
+      # still varies the layout per CLAUDE.md hard-tier rule.
       - type: 2tnk
         owner: agent
         position: [6, 33]
         stance: 0
         health: 100
         facing: -1
-        count: 2
+        count: 3
         spawn_point: 1
         randomize:
           position: {base: [6, 33], offset: 3}
@@ -188,6 +196,13 @@ levels:
         facing: -1
         count: 2
         spawn_point: 1
+      # Enemies mirror the agent's seed-chosen spawn so the duel
+      # stays CLOSE (per the pack's "1v1 close-range" thesis) on
+      # either staging. Without this mirror, the south-spawn case
+      # left 8 enemies stranded at y≈20 hunting their way ~14 cells
+      # south — some lost LOS / got stuck during traversal, leaving
+      # human players at 7/8 kills with no findable 8th.
+      # spawn_point: 0 → close to the NORTH agent group (y≈19-21).
       - type: e1
         owner: enemy
         position: [17, 20]
@@ -195,6 +210,7 @@ levels:
         health: 100
         facing: -1
         count: 5
+        spawn_point: 0
       - type: 2tnk
         owner: enemy
         position: [20, 22]
@@ -202,19 +218,54 @@ levels:
         health: 100
         facing: -1
         count: 3
+        spawn_point: 0
+      # spawn_point: 1 → mirrored to the SOUTH agent group (y≈33-35).
+      # Anchored at y=28 (NOT y=34) so the count: spiral can expand
+      # north — y=34 is too close to the playable south edge (y=37),
+      # the spiral clumps tight and one or two enemies fall on the
+      # agent's footprint, dying first turn to a free trade. y=28
+      # gives the same ~6-cell engagement distance as north (agents
+      # at y=33-35 vs enemies at y=20-22 = ~13 cells, but the
+      # randomize:offset:3 on the agent can put it at y=30, which is
+      # 2 cells from the y=28 enemy anchor — close-range duel intact).
+      - type: e1
+        owner: enemy
+        position: [17, 28]
+        stance: 3
+        health: 100
+        facing: -1
+        count: 5
+        spawn_point: 1
+      - type: 2tnk
+        owner: enemy
+        position: [20, 30]
+        stance: 3
+        health: 100
+        facing: -1
+        count: 3
+        spawn_point: 1
     win_condition:
       all_of:
-      - units_killed_gte: 8
+      - units_killed_gte: 7
       - within_ticks: 4000
-      - units_lost_lte: 3
+      - units_lost_lte: 4
     # Deadline reachable within max_turns (tick ≈ 4503 at turn 50);
     # after_ticks 4001 makes a staller LOSE. Exceeding the loss cap
-    # (units_lost > 3) also loses immediately rather than drawing.
-    # Intended maneuvering win ≈ tick 540, far inside the budget.
+    # also loses immediately rather than drawing.
+    #
+    # Bar was 8 kills / 3 losses, but vendor combat math (post-PR#17
+    # embedded data) is tighter than the original tune: even a
+    # focused intended play (4 tanks vs 5 e1 + 3 2tnk) caps out at
+    # ~7 kills with 3 losses — the 8th enemy escapes / hides as the
+    # agent's force dwindles. Humans reported the same 7/8 ceiling.
+    # Bar relaxed to 7 kills / 4 losses to match the achievable
+    # ceiling while still requiring focused engagement: stall LOSES
+    # (engine wipes the holding force), brute charge LOSES (≥5 own
+    # casualties busts the cap), intended focus-fire WINS.
     fail_condition:
       any_of:
       - after_ticks: 4001
-      - {not: {units_lost_lte: 3}}
+      - {not: {units_lost_lte: 4}}
       - {not: {own_units_gte: 1}}
     max_turns: 50
 # Runnable configurations (each a distinct cell):
