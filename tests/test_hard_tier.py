@@ -1394,19 +1394,23 @@ UPGRADED = [
     # the two spawn-matched NEAR clauses — a memorised "always route
     # to (16,14)" policy loses on the SOUTH seeds.
     "econ-far-patch-vs-near-patch",
-    # Wave-11 REASONING pack — disaster recovery after a mid-episode
-    # exogenous loss (PlanBench replanning under exogenous failure /
-    # disaster recovery / SC2 comeback anchor). A `scheduled_events`
-    # destroy_actors event at tick 1500 wipes the agent's Ore Refinery
-    # (and the forward tanks caught in the blast region); the agent
-    # must rebuild the refinery AND still clear the eastern garrison
-    # within the original deadline. Hard tier defines two agent
-    # spawn_point groups (NORTH base y=12 / SOUTH base y=28) round-
-    # robined by seed; the full base + column is duplicated across
-    # both spawns and the destroy_actors region is declared at both
-    # latitudes (scheduled_events do not honour spawn_point, so both
-    # fire — the dormant-latitude one matches nothing), so a memorised
-    # rebuild cell cannot generalise.
+    # Wave-11 / Wave-13 REASONING pack — two-base strategic-retreat
+    # template (task #81 redesign). The agent starts with a FORWARD
+    # base (fact + proc + powr + harv + 2 defenders) at mid-map and
+    # a HOME base (parked MCV + powr + lone garrison) at the deep-
+    # west safe zone. An in-world `rusher` band closes from the east
+    # plus `scheduled_events: spawn_actors` reinforcement waves keep
+    # the forward region hostile through the run (so a forward
+    # rebuild is also razed). Win is state-based: a `fact` AND a
+    # `proc` alive inside the HOME-radius disc at the deadline.
+    # Hard tier defines two agent spawn_point groups (NORTH y=14 /
+    # SOUTH y=26) round-robined by seed; the full HOME + FORWARD
+    # bases are duplicated across both spawns and the rush bands +
+    # reinforcement waves are declared at both latitudes
+    # (scheduled_events do not honour spawn_point, so both fire —
+    # the dormant-latitude one wanders into empty space). The win
+    # clause is an `any_of` over the two candidate HOME discs so a
+    # memorised mid-map rebuild satisfies NEITHER latitude.
     "lh-recovery-after-mid-game-loss",
     # Wave-11 reasoning pack — schedule compression: a tick-1000
     # `shorten_deadline` scheduled event pulls the deadline forward

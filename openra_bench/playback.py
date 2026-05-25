@@ -162,13 +162,50 @@ class Playback:
         if not self.dir.exists():
             # Nothing staged — caller already promoted or never finalized.
             return self.final_dir
+        # Close the per-turn JSONL handle BEFORE moving. On Windows /
+        # NFS the open handle would either block the move outright or
+        # leave the file unreadable at the destination; closing here
+        # is a no-op on POSIX where finalize() already closed it.
+        try:
+            self._turns_fh.close()
+        except Exception:  # noqa: BLE001
+            pass
         # Ensure parent of the final dir exists; replace any stale
         # final dir (e.g. a prior crashed commit) so the new draft
         # wins.
         self.final_dir.parent.mkdir(parents=True, exist_ok=True)
         if self.final_dir.exists():
-            shutil.rmtree(self.final_dir)
-        shutil.move(str(self.dir), str(self.final_dir))
+            # ignore_errors=True so a partial rmtree (permission /
+            # lock on a sub-file) can't wedge promote() into raising —
+            # the subsequent move will either succeed (rmtree cleared
+            # the leaf) or fail with a clearer FileExistsError than
+            # PermissionError mid-walk.
+            shutil.rmtree(self.final_dir, ignore_errors=True)
+        try:
+            shutil.move(str(self.dir), str(self.final_dir))
+        except FileExistsError:
+            # Race with another writer that re-created final_dir
+            # between our rmtree and our move. Best-effort: copy the
+            # contents over and drop the draft. This is the only
+            # branch where promote() can silently merge state, but
+            # it's far better than leaving the draft and the final
+            # both on disk and the caller wedged.
+            self.final_dir.mkdir(parents=True, exist_ok=True)
+            for entry in self.dir.iterdir():
+                target = self.final_dir / entry.name
+                if target.exists():
+                    if target.is_dir():
+                        shutil.rmtree(target, ignore_errors=True)
+                    else:
+                        try:
+                            target.unlink()
+                        except OSError:
+                            pass
+                try:
+                    shutil.move(str(entry), str(target))
+                except OSError:
+                    pass
+            shutil.rmtree(self.dir, ignore_errors=True)
         # Clean now-empty parents of the .draft/ tree.
         self._cleanup_empty_draft_parents()
         self.dir = self.final_dir

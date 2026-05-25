@@ -86,6 +86,15 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .game-minimap{position:relative;background:#0a0c10;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px;cursor:crosshair}
 .game-minimap img,.game-minimap canvas{display:block;width:100%;height:auto;image-rendering:pixelated;user-select:none;-webkit-user-drag:none}
 .game-minimap .placeholder{display:flex;align-items:center;justify-content:center;min-height:320px;color:var(--muted);font-size:14px}
+/* N/E/S/W compass labels over the map edges — saves the human from
+   mentally re-deriving "up=N, down=S, left=W, right=E" every time
+   the briefing references a direction. Pointer-events:none so they
+   never intercept clicks. */
+.game-compass{position:absolute;color:#ffe27a;font-weight:700;font-size:14px;text-shadow:0 0 4px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,.9);pointer-events:none;user-select:none;font-family:ui-monospace,Menlo,monospace;letter-spacing:0.5px}
+.game-compass.n{top:4px;left:50%;transform:translateX(-50%)}
+.game-compass.s{bottom:4px;left:50%;transform:translateX(-50%)}
+.game-compass.w{left:6px;top:50%;transform:translateY(-50%)}
+.game-compass.e{right:6px;top:50%;transform:translateY(-50%)}
 .game-help{font-size:12px;color:var(--muted);margin:-4px 0 10px}
 .game-legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:8px 0 12px}
 .game-legend span{display:inline-flex;align-items:center;gap:4px}
@@ -231,6 +240,7 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
         <button class="btn-play btn-sm" id="game-start-btn" onclick="gameStart()" disabled>Start</button>
         <button class="btn-stop btn-sm" id="game-restart-btn" onclick="gameRestart()" style="display:none" title="Discard the current run and start this scenario fresh">Restart</button>
         <button class="btn-stop btn-sm" id="game-stop-btn" onclick="gameStop()" style="display:none">Stop</button>
+        <button class="btn-secondary btn-sm" id="game-refresh-btn" onclick="gameRefresh()" title="Clear any stuck sessions on the server and re-enable Start. Use if the UI feels frozen.">Refresh</button>
       </div>
     </div>
     <div class="game-body" id="game-body" style="display:none">
@@ -243,6 +253,12 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
             <div class="placeholder" id="game-minimap-ph">Start a game to see the minimap</div>
             <img id="game-minimap-img" style="display:none" draggable="false">
             <div class="game-coords" id="game-coords" style="display:none"></div>
+            <!-- Compass labels — N at top, S at bottom, W at left, E at right.
+                 Bench convention: x grows east, y grows south. -->
+            <div class="game-compass n">N</div>
+            <div class="game-compass s">S</div>
+            <div class="game-compass w">W</div>
+            <div class="game-compass e">E</div>
           </div>
           <div class="game-legend" id="game-legend">
             <span><i class="legend-mark"></i> unit</span>
@@ -336,11 +352,24 @@ async function loadData(){
   renderCapFilters();
   renderCards();
   updateHeaderProgress();
-  // Check URL hash
+  // Resume order:
+  //   1. URL hash `#mission/<id>` — explicit link / share / bookmark.
+  //   2. localStorage last-mission — fresh tab / browser restart.
+  //   3. fall back to the picker (current default).
   if(location.hash.startsWith("#mission/")){
     const id=location.hash.slice(9);
     const idx=scenarios.findIndex(s=>s.scenarioId===id);
-    if(idx>=0)openMission(idx);
+    if(idx>=0){openMission(idx);return;}
+  }
+  const last=loadLastMission();
+  if(last&&last.scenarioId){
+    const idx=scenarios.findIndex(s=>s.scenarioId===last.scenarioId);
+    if(idx>=0){
+      if(last.difficulty)currentDiff=last.difficulty;
+      openMission(idx);
+      // openMission re-applies currentDiff via setDiff downstream;
+      // explicit restore keeps the difficulty tab the user was on.
+    }
   }
 }
 
@@ -522,6 +551,10 @@ function showSelection(){
   document.getElementById("mission").style.display="none";
   document.getElementById("back-btn").style.display="none";
   location.hash="";
+  // User explicitly went back to the picker — drop the persistent
+  // resume so a fresh tab doesn't auto-snap them back into the
+  // mission they just left.
+  try{localStorage.removeItem("openra-last-mission");}catch(e){}
   renderCards();
 }
 function openMission(idx){
@@ -537,8 +570,32 @@ function openMission(idx){
   document.getElementById("mission").style.display="block";
   document.getElementById("back-btn").style.display="";
   location.hash="mission/"+scenarios[idx].scenarioId;
+  // Persist the last-viewed mission so a fresh tab / browser restart
+  // resumes here instead of landing on #1. User reported having to
+  // re-navigate to the same mission every session.
+  saveLastMission();
   renderMission();
   updateHeaderProgress();
+}
+
+// Persistent resume: remember which scenario + difficulty the user
+// was last on so a fresh tab / browser restart reopens it.
+function saveLastMission(){
+  if(currentIdx<0)return;
+  const id=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
+  if(!id)return;
+  try{
+    localStorage.setItem("openra-last-mission", JSON.stringify({
+      scenarioId: id,
+      difficulty: currentDiff,
+      ts: Date.now(),
+    }));
+  }catch(e){/* localStorage may be unavailable in private mode */}
+}
+function loadLastMission(){
+  try{
+    return JSON.parse(localStorage.getItem("openra-last-mission")||"null");
+  }catch(e){return null;}
 }
 function renderMission(){
   const s=scenarios[currentIdx];
@@ -568,6 +625,8 @@ function setDiff(d){
   if(gameLevel)gameLevel.value=d;
   document.querySelectorAll("#diff-tabs .tab").forEach(t=>t.classList.toggle("active",t.dataset.diff===d));
   renderObjective();
+  // Persist so a fresh tab restores the same difficulty tab.
+  if(typeof saveLastMission==="function")saveLastMission();
 }
 function gameLevelChanged(){
   const gameLevel=document.getElementById("game-level");
@@ -639,6 +698,25 @@ async function checkServer(){
 
 async function gameStart(){
   if(!gameServerOk||currentIdx<0)return;
+  const startBtn=document.getElementById("game-start-btn");
+  // Click-spam guard: a fast double-click on Start used to fire TWO
+  // parallel /api/game/start requests, creating two sessions
+  // server-side and leaking the first (the UI only remembered the
+  // second sid). Disable IMMEDIATELY — before the fetch even
+  // starts — and re-enable in finally so the error path doesn't
+  // wedge the button.
+  if(startBtn&&startBtn.disabled)return;
+  if(startBtn)startBtn.disabled=true;
+  // If a prior session is still alive (e.g. user clicked Start on a
+  // new scenario without going through Stop / Restart), tell the
+  // server to drop it before we open a new one. Without this every
+  // mission switch would pile a new session into _sessions and the
+  // store hits its cap, evicting the OLDEST not the abandoned one.
+  if(gameSession){
+    const stale=gameSession;
+    gameSession=null;
+    try{await fetch(gameServerUrl+"/api/game/stop/"+stale,{method:"POST"});}catch(_){}
+  }
   const s=scenarios[currentIdx];
   const level=document.getElementById("game-level").value;
   if(level!==currentDiff)setDiff(level);
@@ -664,6 +742,12 @@ async function gameStart(){
     gameLog("Game started. Turn 0/"+gameState.max_turns+". "+gameState.objective);
   }catch(e){
     gameLog("ERROR: "+e.message);
+  }finally{
+    // Always re-enable Start so a failed fetch (network blip /
+    // server 4xx) doesn't leave the button greyed-out — that's the
+    // user-reported "Start is not responsive" symptom that used to
+    // require a server restart to clear.
+    if(startBtn)startBtn.disabled=!gameServerOk;
   }
 }
 
@@ -680,6 +764,61 @@ async function gameStop(){
   document.getElementById("game-restart-btn").style.display="none";
   document.getElementById("game-start-btn").disabled=!gameServerOk;
   gameLog("Game stopped.");
+}
+
+// Refresh: one-click recovery when the UI feels stuck (Start
+// unresponsive, modal won't open, etc). Asks the server to clear
+// all stale sessions (typically half-closed sessions from prior
+// crashes that the leak fix in 5e11b577 prevents but doesn't
+// retroactively clean for already-running servers), then resets
+// local frontend state. Saves the user from having to manually
+// restart `python -m site.game_api`.
+//
+// DATA-LOSS GUARD: when a session has finished and is sitting in
+// the review modal awaiting Save/Discard, the draft on the server
+// has NOT been promoted. /api/game/sessions/clear drops the
+// underlying InteractiveSession, which closes it, which causes
+// human_labeling.InteractiveSession.close() to call
+// Playback.discard() on the unreviewed draft (the abandoned-draft
+// cleanup path). The playback would silently vanish. Same risk if
+// a live game is mid-play and has accumulated turns the user might
+// want to commit. We confirm explicitly in those two cases.
+async function gameRefresh(){
+  if(gameState){
+    if(gameState.pending_review){
+      if(!confirm("A finished game is waiting for Save / Discard in the review panel. Refresh will DISCARD this playback. Continue?"))return;
+    }else if(gameSession && (gameState.turn||0)>0){
+      if(!confirm("A game is in progress. Refresh will end it and clear the session. The current run will NOT be saved. Continue?"))return;
+    }
+  }
+  gameLog("Refreshing — clearing server sessions and resetting local state...");
+  try{
+    const r=await fetch(gameServerUrl+"/api/game/sessions/clear",{method:"POST"});
+    if(r.ok){
+      const data=await r.json();
+      const n=(data&&data.cleared)??0;
+      gameLog("Server cleared "+n+" stale session(s).");
+    }else{
+      gameLog("Server refused clear (status "+r.status+"); resetting local state anyway.");
+    }
+  }catch(e){
+    gameLog("Refresh: server unreachable ("+e.message+"); resetting local state anyway.");
+  }
+  // Reset local state unconditionally so the UI is usable again even
+  // if the server didn't respond.
+  gameSession=null; gameState=null;
+  gameSelected.clear(); gameQueue=[]; gameRepeatAction=null; gamePlaceItem="";
+  gameSelectedBuildings.clear(); gamePoweredDown.clear();
+  document.getElementById("game-body").style.display="none";
+  document.getElementById("game-start-btn").style.display="";
+  document.getElementById("game-start-btn").disabled=!gameServerOk;
+  document.getElementById("game-stop-btn").style.display="none";
+  document.getElementById("game-restart-btn").style.display="none";
+  closeReviewModal();
+  // Re-probe server health so the Start button is correctly enabled
+  // if the server is up.
+  if(typeof checkServer==="function"){try{await checkServer();}catch(_){}}
+  gameLog("UI refreshed.");
 }
 
 // Restart: discard the current run (server-side draft is removed via
@@ -853,7 +992,20 @@ async function reviewCommit(){
     gameLog("Mission marked complete locally.");
     renderMission();
     // The commit endpoint also closed the session server-side.
-    gameSession=null;
+    gameSession=null; gameState=null;
+    // Reset the in-game UI controls so the leftover Restart/Stop
+    // buttons in the game header don't sit there looking clickable
+    // but dead — same fix shape as reviewDiscard.
+    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null;
+    gamePlaceItem=""; gameSelectedBuildings.clear(); gamePoweredDown.clear();
+    const body=document.getElementById("game-body");
+    if(body)body.style.display="none";
+    const startBtn=document.getElementById("game-start-btn");
+    const stopBtn=document.getElementById("game-stop-btn");
+    const restartBtn=document.getElementById("game-restart-btn");
+    if(startBtn){startBtn.style.display="";startBtn.disabled=!gameServerOk;}
+    if(stopBtn)stopBtn.style.display="none";
+    if(restartBtn)restartBtn.style.display="none";
     // No auto-advance — user explicitly clicks Replay / Next.
     showFollowupActions();
   }catch(e){
@@ -879,6 +1031,22 @@ async function reviewDiscard(){
     status.className="review-status ok";
     gameLog("Episode discarded — not saved.");
     gameSession=null; gameState=null;
+    // Reset the in-game UI controls so the next play starts cleanly.
+    // Without this, the leftover Restart / Stop buttons in the game
+    // header looked clickable but did nothing (gameRestart() and
+    // gameStop() early-return when there's no gameSession), and a
+    // user clicking them got no feedback. Now the header shows the
+    // normal Start state, matching "no game in progress".
+    gameSelected.clear(); gameQueue=[]; gameRepeatAction=null;
+    gamePlaceItem=""; gameSelectedBuildings.clear(); gamePoweredDown.clear();
+    const body=document.getElementById("game-body");
+    if(body)body.style.display="none";
+    const startBtn=document.getElementById("game-start-btn");
+    const stopBtn=document.getElementById("game-stop-btn");
+    const restartBtn=document.getElementById("game-restart-btn");
+    if(startBtn){startBtn.style.display="";startBtn.disabled=!gameServerOk;}
+    if(stopBtn)stopBtn.style.display="none";
+    if(restartBtn)restartBtn.style.display="none";
     // Refresh the mission card so the human sees the unchanged
     // progress state. Stay on this scenario; show follow-up buttons.
     if(typeof renderMission==="function")renderMission();
@@ -1004,7 +1172,31 @@ function gameMinimapClick(e){
   }
   const ownHere=gameNearestStack(gameState.units,p.cx,p.cy,2.6);
   const ownBldgHere=gameNearestStack(gameState.own_buildings||[],p.cx,p.cy,3.8);
-  const enemyHere=gameNearestStack(gameState.enemies,p.cx,p.cy,3.8);
+  // Split enemy click-radius by footprint so a MOVE click near (but
+  // NOT on) a 1×1 enemy doesn't get swallowed as an ATTACK on the
+  // enemy. The pre-fix 3.8 radius was tuned for big enemy buildings
+  // but stole every MOVE click within ~3 cells of any 1×1 enemy
+  // (the `combat-heli-flank` symptom: the 21-cell pbox wall + 5-cell
+  // e1 cluster made the entire mid-map an attack zone, so a heli
+  // selected and pointed at (47,20) or (60,15) issued attack-pbox /
+  // attack-e1 instead of MOVE, and the heli either stalled out of
+  // range or never bypassed the wall — the user-reported
+  // `直升飞机动不了` symptom).
+  //   * 1×1 enemy unit / 1×1 enemy turret (pbox / e1 / e3 / jeep /
+  //     1tnk / …) — radius 1.5 (dist² < 2.25), i.e. click must land
+  //     ON or directly adjacent.
+  //   * Larger enemy building (proc / fact / weap / barr …) — keep
+  //     2.5 so a click on any cell of the 2×2 / 3×3 footprint still
+  //     resolves to attack.
+  // The 1×1-vs-larger split is by `is_building` (RA convention:
+  // every non-`pbox`/`hbox`/`gun` building is ≥2×2; pbox is the only
+  // 1×1 building, and treating it as a 1×1 enemy is desirable here
+  // because it's exactly the case the heli pack hits).
+  const enemyClose=(gameState.enemies||[]).filter(e=>!e.is_building||["pbox","hbox","gun","sam","ftur","agun","tsla"].includes(String(e.type||"").toLowerCase()));
+  const enemyBig=(gameState.enemies||[]).filter(e=>e.is_building&&!["pbox","hbox","gun","sam","ftur","agun","tsla"].includes(String(e.type||"").toLowerCase()));
+  const enemyCloseHere=gameNearestStack(enemyClose,p.cx,p.cy,1.5);
+  const enemyBigHere=gameNearestStack(enemyBig,p.cx,p.cy,2.5);
+  const enemyHere=enemyCloseHere.length?enemyCloseHere:enemyBigHere;
   const harvestHere=gameNearestHarvestPoint(p.cx,p.cy,3.2);
   if(gameHarvestMode){
     if(!gameSelected.size){
@@ -1100,7 +1292,32 @@ function gameCanBuild(){
 }
 
 function gameProductionItems(){
+  // Items in the queue (any state). Kept for back-compat; prefer
+  // gameProductionReadyItems() for "can be placed right now" checks.
   return [...new Set([...(gameState&&gameState.production||[])].map(String).filter(Boolean))];
+}
+
+// Items that the engine reports as `done: true` — i.e. structures
+// that have FINISHED production and are waiting for a place_building
+// order. Distinct from gameProductionItems() (which includes
+// still-building entries). Before this distinction the UI labelled
+// every queued item as "ready", and Place clicks silently no-op'd
+// on a not-yet-done entry — the user's reported "build+place 之后
+// map 上什么都没有" bug.
+function gameProductionReadyItems(){
+  const det=(gameState&&gameState.production_detail)||[];
+  return [...new Set(det.filter(p=>p&&p.done).map(p=>String(p.item||"")).filter(Boolean))];
+}
+
+// In-progress (not yet done) entries — surfaced as
+// "Building proc (47%)" so the user sees forward progress while
+// waiting for the structure to finish and become placeable.
+function gameProductionPendingDescriptions(){
+  const det=(gameState&&gameState.production_detail)||[];
+  return det.filter(p=>p&&!p.done).map(p=>{
+    const pct=Math.round(Math.max(0,Math.min(1,Number(p.progress)||0))*100);
+    return String(p.item||"?")+" ("+pct+"%)";
+  });
 }
 
 function gameBuildItemValue(){
@@ -1162,6 +1379,27 @@ function gameArmPlaceBuilding(){
     gameLog("Ignored Place for "+item+": units don't need Place; they spawn from their production building.");
     return;
   }
+  // Refuse Place when nothing of this type is COMPLETED in the queue.
+  // The engine rejects place_building on a not-yet-`done` entry
+  // (`PLACE BLOCKED: <item> not completed in queue`) and the order
+  // was silently dropped — the user's reported "Build then Place,
+  // nothing appears" bug. Surface the failure mode up front so the
+  // user knows to wait for the structure to finish (or build it at
+  // all if they skipped Build / can't afford it).
+  const ready=gameProductionReadyItems();
+  if(!ready.includes(item)){
+    const det=(gameState&&gameState.production_detail)||[];
+    const pending=det.find(p=>p&&!p.done&&String(p.item||"").toLowerCase()===item);
+    if(pending){
+      const pct=Math.round(Math.max(0,Math.min(1,Number(pending.progress)||0))*100);
+      gameSetBuildHint(item+" is still BUILDING ("+pct+"%). Wait for it to reach 100% (End Turn a few times), then click Place.");
+      gameLog("Ignored Place for "+item+": still building ("+pct+"%). Engine accepts place_building only when the structure is COMPLETE.");
+    }else{
+      gameSetBuildHint("No completed "+item+" waiting. Click Build first; structures must finish (100%) before they can be placed.");
+      gameLog("Ignored Place for "+item+": nothing of that type is ready. Queue with Build first; if cash is short, sell something or wait for income.");
+    }
+    return;
+  }
   gamePlaceItem=item;
   gameLog("Place mode: click the map cell for "+item+".");
   gameRender();
@@ -1199,6 +1437,27 @@ function gameAttackEnemy(enemyId, all=false){
 
 function gameRender(){
   if(!gameState)return;
+  // End-Turn button label reflects what the next click will send so
+  // the human knows whether they're committing real orders or just
+  // ticking time forward. User feedback: with an empty queue and no
+  // visible activity the turn count kept rising and the player
+  // didn't realise End Turn was just sending OBSERVE.
+  const etBtn=document.getElementById("game-endturn-btn");
+  if(etBtn){
+    if(gameState.done){
+      etBtn.textContent="Game over";
+      etBtn.disabled=true;
+    }else if(gameQueue.length>0){
+      etBtn.textContent="End Turn ("+gameQueue.length+" order"+(gameQueue.length>1?"s":"")+")";
+      etBtn.disabled=false;
+    }else if(gameRepeatAction){
+      etBtn.textContent="End Turn (repeat last)";
+      etBtn.disabled=false;
+    }else{
+      etBtn.textContent="End Turn (observe — no orders queued)";
+      etBtn.disabled=false;
+    }
+  }
   // Stats bar
   const obj=document.getElementById("game-objective");
   if(obj)obj.innerHTML="<b>Engine objective ("+esc(document.getElementById("game-level").value)+"):</b> "+esc(gameState.objective||"");
@@ -1244,10 +1503,24 @@ function gameRenderBuildPanel(){
   if(harvestCheck)harvestCheck.checked=!!gameHarvestMode;
   if(!visible)gamePlaceItem="";
   if(visible){
-    const ready=gameProductionItems();
-    gameSetBuildHint(gamePlaceItem
-      ? ("Click map to place "+gamePlaceItem+".")
-      : (ready.length?("Ready: "+ready.join(", ")):"Build queues production; units finish automatically."));
+    const ready=gameProductionReadyItems();
+    const pending=gameProductionPendingDescriptions();
+    let hint;
+    if(gamePlaceItem){
+      hint="Click map to place "+gamePlaceItem+".";
+    }else if(ready.length){
+      hint="Ready (click Place): "+ready.join(", ");
+      if(pending.length)hint+=" — Building: "+pending.join(", ");
+    }else if(pending.length){
+      // Critical hint for the build-then-place user flow: pending
+      // entries are NOT placeable yet. Surface progress so the user
+      // knows to End Turn a few more times rather than clicking
+      // Place and getting a silent no-op.
+      hint="Building (wait for 100%, then Place): "+pending.join(", ");
+    }else{
+      hint="Build queues production; units finish automatically.";
+    }
+    gameSetBuildHint(hint);
   }
 }
 
@@ -1350,7 +1623,16 @@ function gameTypeLabel(type){
   const t=gameTypeKey(type);
   const names={"1tnk":"light tank","2tnk":"medium tank","3tnk":"heavy tank","4tnk":"mammoth tank",
     "harv":"harvester","proc":"refinery","fact":"construction yard","powr":"power plant","weap":"war factory",
-    "barr":"barracks","silo":"silo","e1":"rifle infantry","e3":"rocket soldier","jeep":"ranger","mcv":"MCV"};
+    "barr":"barracks","tent":"barracks","silo":"silo","e1":"rifle infantry","e3":"rocket soldier",
+    "jeep":"ranger","mcv":"MCV","heli":"helicopter","hind":"hind","mig":"MiG","yak":"Yak",
+    "tran":"transport heli","badr":"badger bomber","u2":"spy plane",
+    "pbox":"pillbox","hbox":"camo pillbox","gun":"turret","sam":"SAM site","agun":"AA gun",
+    "ftur":"flame tower","tsla":"Tesla coil","apwr":"adv. power",
+    "dome":"radar dome","hpad":"heli pad","afld":"airfield","spen":"sub pen","syrd":"shipyard",
+    "atek":"tech center","stek":"soviet tech","fix":"service depot","iron":"iron curtain",
+    "mslo":"missile silo","msam":"mobile SAM","stnk":"stealth tank","ftnk":"flame tank",
+    "ttnk":"Tesla tank","v2rl":"V2 launcher","e6":"engineer","tanya":"Tanya","spy":"spy","thf":"thief",
+    "medi":"medic","mech":"mechanic"};
   return names[t]?names[t]+" ("+t+")":t;
 }
 function gameShapeFor(type,isBuilding){
@@ -1543,6 +1825,19 @@ function gameRenderUnits(){
         '<button class="btn-sm" style="background:var(--red);color:#fff;margin-right:6px" onclick="gameSellSelected()" title="Refund a portion of the building cost — building is destroyed">Sell</button>'+
         '<button class="btn-secondary btn-sm" onclick="gameSelectedBuildings.clear();gameRender()">Deselect</button>'+
         '</td></tr>';
+    }else{
+      // Discoverability hint: when no building is selected, surface a
+      // one-line cue that building-targeted actions (Repair / Power
+      // Down / Sell) require clicking a building first. Without this
+      // hint, packs whose only tool is `repair` (e.g.
+      // build-repair-priority-under-fire) showed nothing actionable
+      // to humans — the buttons existed but were gated behind a
+      // selection the user didn't know to make.
+      const hasRepair=(gameState.tools||[]).includes("repair");
+      const hint=hasRepair
+        ? "▸ Click a building row below to select it, then Repair / Power Down / Sell buttons will appear."
+        : "▸ Click a building row below to select it for Power Down / Sell actions.";
+      html+='<tr><td colspan="6" style="padding:6px 12px;color:var(--muted);font-style:italic;font-size:12px">'+hint+'</td></tr>';
     }
     for(const b of gameState.own_buildings){
       const isPD=gamePoweredDown.has(b.id);
@@ -1576,10 +1871,14 @@ function gameRenderUnits(){
       ' on End Turn</div>';
   }
   if(gameCanBuild()){
-    const ready=gameProductionItems();
+    const ready=gameProductionReadyItems();
+    const pending=gameProductionPendingDescriptions();
     html+='<div class="game-production"><b>Production ready:</b> '+
-      (ready.length?ready.map(esc).join(", "):"none")+
-      '<br><span>Ready structures can be placed with Place. Units appear automatically when production completes.</span></div>';
+      (ready.length?ready.map(esc).join(", "):"none");
+    if(pending.length){
+      html+='<br><b>Building:</b> '+pending.map(esc).join(", ");
+    }
+    html+='<br><span>Structures must reach 100% before Place will accept them; units spawn automatically once production completes.</span></div>';
   }
   el.innerHTML=html;
 }

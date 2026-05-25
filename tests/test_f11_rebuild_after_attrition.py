@@ -1,30 +1,30 @@
-"""F11 reactive-idiom pack — `f11-rebuild-after-attrition`.
+"""F11 recovery pack — `f11-rebuild-after-attrition`.
 
-Scripted attrition destroys part of the agent's pre-placed base
-mid-episode. The agent must REBUILD the destroyed production
-building AND continue producing AND finish the offensive under the
-ORIGINAL deadline.
+TWO-BASE STRATEGIC-RETREAT TEMPLATE (task #81). The agent inherits
+a doomed FORWARD production cell (low-HP exposed `weap`, on hard
+also `proc`, grinding under an in-world enemy striker column) and
+a safe HOME production stack at the deep west. The capability test:
+rebuild the lost production at HOME, regenerate the army, and still
+finish the offensive on the ORIGINAL deadline.
 
 Bar (CLAUDE.md "no defect, no cheat"):
 - stall (only observe)         LOSES every (tier, seed).
 - brute (rush starter units    LOSES every (tier, seed).
-   east)
-- pre-attrition-only (build    LOSES every (tier, seed) — the
-   to N tanks pre-tick-800,    `building_count_gte:weap:1` clause
-   then push, no rebuild)      AFTER attrition is not satisfied;
-                               LIVE-count of weap is 0 after the
-                               destroy_actors event.
-- intended (rebuild + produce  WINS every (tier, seed).
-   + strike)
+   east, no production)
+- build-at-forward (place the  LOSES every (tier, seed) — the rebuild
+   rebuilt weap in the strike  is razed by the persistent stance:3
+   arc)                        striker column; cash burned; army quota
+                               + kill quota both miss.
+- intended (build at HOME +    WINS every (tier, seed).
+   produce + strike)
 
 Plus structural pins:
-- `then:` chain wired through into the compiled win condition.
 - `within_ticks` ≤ reachable max (`93 + 90·(max_turns − 1)`).
 - Hard tier has ≥2 agent spawn_point groups (NORTH/SOUTH).
 - BOTH `agent_units_killed: false` AND `enemy_units_killed: false`
-  set per §79 + F11 §74.
-- Scheduled `destroy_actors` event fires at tick 800 (the
-  load-bearing attrition trigger).
+  set on `base.termination`.
+- The FORWARD weap falls in-world (no `scheduled_events` destruction
+  of agent assets) — pinned by an end-to-end probe.
 """
 
 from __future__ import annotations
@@ -54,8 +54,9 @@ def _stall_policy():
 
 def _brute_policy():
     """Push every starter unit east toward the enemy base. No
-    production, no rebuild — fails both the rebuild and the kill
-    clauses."""
+    production. Starter tanks (2 only) cannot satisfy the army quota
+    (≥3 on easy, ≥4 medium, ≥5 hard) and the kill quota is missed
+    too — even if they reach the enemy base they're 2 vs garrison."""
     state = {"issued": set()}
 
     def pol(obs, Cmd):
@@ -73,26 +74,37 @@ def _brute_policy():
     return pol
 
 
-def _pre_attrition_only_policy():
-    """Build to N tanks BEFORE the attrition fires at tick 800, then
-    push. After the attrition wipes the `weap` (and on hard the
-    `proc`), the model never rebuilds. The post-attrition
-    `building_count_gte:weap:1` clause is never satisfied →
-    `then:` chain stalls → deadline LOSS."""
-    state = {"attacked": set()}
+def _build_at_forward_policy(level):
+    """Rebuild the weap (and proc on hard) AT the FORWARD cell — in
+    the strike arc. The 5× 4tnk column razes the rebuild and the
+    cash is wasted; the army quota and kill quota both miss → LOSS.
+    """
+    fx = 50
+    state = {"placed_weap": False, "placed_proc": False, "attacked": set()}
 
     def pol(obs, Cmd):
-        tick = obs.get("game_tick", 0)
-        units = obs.get("units_summary", []) or []
-        tanks = [u for u in units if u.get("type") == "2tnk"]
+        ob = obs.get("own_buildings", []) or []
+        weap_count = sum(1 for b in ob if b["type"] == "weap")
+        proc_count = sum(1 for b in ob if b["type"] == "proc")
         prod = obs.get("production", []) or []
         prod_items = set(prod) if all(isinstance(p, str) for p in prod) else set()
+        units = obs.get("units_summary", []) or []
+        tanks = [u for u in units if u.get("type") == "2tnk"]
         cmds = []
-        # Only build BEFORE the attrition.
-        if tick < 800 and len(tanks) < 5:
-            if "2tnk" not in prod_items:
-                cmds.append(Cmd.build("2tnk"))
-        # Push east always.
+        # Rebuild the weap at the FORWARD cell — repeat as it dies.
+        if weap_count == 0:
+            if "weap" not in prod_items:
+                cmds.append(Cmd.build("weap"))
+        if "weap" in prod_items or weap_count == 0:
+            # Place at FORWARD (in the strike arc) — the rebuild dies.
+            cmds.append(Cmd.place_building("weap", fx, 20))
+        if level == "hard":
+            if proc_count == 0:
+                if "proc" not in prod_items:
+                    cmds.append(Cmd.build("proc"))
+            cmds.append(Cmd.place_building("proc", fx, 16))
+        # Push starter tanks east (no new tanks produced — weap is
+        # doomed at forward).
         for u in tanks:
             uid = u["id"]
             if uid not in state["attacked"]:
@@ -105,55 +117,48 @@ def _pre_attrition_only_policy():
 
 
 def _intended_policy(level):
-    """Detect the attrition (weap_count drops to 0 after tick 800;
-    on hard also proc_count drops to 0 after tick 2000), rebuild
-    the destroyed building(s) via `build` + `place_building`, then
-    continuously train tanks and attack-move east. Two attack
-    phases (initial sweep + re-engage) to ensure helis/tanks hit
-    enemy buildings rather than stalling at the picket cells."""
+    """Build at the HOME base (safe, deep west), train the strike
+    package on the surviving HOME weap, and push east. State-based
+    win at deadline: weap≥1 (HOME weap survives), tanks≥N
+    (HOME-funded production), enemy_buildings_destroyed≥K (strike
+    home)."""
     enemy_x = 80 if level == "easy" else 82
-    state = {
-        "weap_destroyed": False,
-        "proc_destroyed": False,
-        "attacked": set(),
-        "phase2": set(),
-    }
+    n_min_attack = {"easy": 5, "medium": 7, "hard": 9}[level]
+    n_target = {"easy": 6, "medium": 9, "hard": 12}[level]
+    state = {"attacked": set(), "phase2": set()}
 
     def pol(obs, Cmd):
         tick = obs.get("game_tick", 0)
         ob = obs.get("own_buildings", []) or []
-        own_b_types = [b["type"] for b in ob]
-        weap_count = own_b_types.count("weap")
-        proc_count = own_b_types.count("proc")
+        # HOME fact is the deep-west one (x < 30); we never want to
+        # touch the FORWARD weap at x≈50.
         prod = obs.get("production", []) or []
         prod_items = set(prod) if all(isinstance(p, str) for p in prod) else set()
         units = obs.get("units_summary", []) or []
         tanks = [u for u in units if u.get("type") == "2tnk"]
-        base = [b for b in ob if b["type"] == "fact"]
-        bx, by = (base[0]["cell_x"], base[0]["cell_y"]) if base else (12, 20)
+        home_fact = [
+            b for b in ob if b["type"] == "fact" and b["cell_x"] < 30
+        ]
+        bx, by = (
+            (home_fact[0]["cell_x"], home_fact[0]["cell_y"])
+            if home_fact
+            else (12, 20)
+        )
         cmds = []
-        if tick > 850 and weap_count == 0:
-            state["weap_destroyed"] = True
-        if tick > 2050 and proc_count == 0:
-            state["proc_destroyed"] = True
-        if state["weap_destroyed"] and weap_count == 0:
-            if "weap" not in prod_items:
-                cmds.append(Cmd.build("weap"))
-            cmds.append(Cmd.place_building("weap", bx + 8, by + 2))
-        if state["proc_destroyed"] and proc_count == 0:
-            if "proc" not in prod_items:
-                cmds.append(Cmd.build("proc"))
-            cmds.append(Cmd.place_building("proc", bx + 4, by - 4))
-        if weap_count >= 1 and len(tanks) < 9:
+        # Continuously train tanks while HOME weap is alive. (HOME
+        # weap is pre-placed and out of the strike arc — it survives
+        # the whole episode without rebuild.)
+        if len(tanks) < n_target:
             if "2tnk" not in prod_items:
                 cmds.append(Cmd.build("2tnk"))
-        n_min_attack = {"easy": 3, "medium": 4, "hard": 5}[level]
+        # Push when force quota is met.
         if len(tanks) >= n_min_attack:
             for u in tanks:
                 uid = u["id"]
                 if uid not in state["attacked"]:
                     cmds.append(Cmd.attack_move([uid], enemy_x, 20))
                     state["attacked"].add(uid)
+        # Second wave — re-attack with any new tanks past tick 5000.
         if tick > 5000:
             for u in tanks:
                 uid = u["id"]
@@ -182,32 +187,6 @@ def test_meta_benchmark_anchor_set():
     assert anchors, "benchmark_anchor required"
 
 
-def test_then_chain_wired_into_win_condition():
-    """The full-chain `then:` predicate per F11 §68 + §74 — must
-    appear in every level's win condition, and clauses must include
-    a post-attrition gate (`after_ticks`) plus a live-count rebuild
-    check (`building_count_gte:weap:1`)."""
-    for lvl in LEVELS:
-        c = compile_level(load_pack(PACK), lvl)
-        win = c.win_condition.model_dump(exclude_none=True)
-        inner = win.get("all_of") or []
-        assert any("then" in cl for cl in inner), (
-            f"{lvl} win missing then-chain: {win}"
-        )
-        # Find the then-chain clauses and verify the rebuild gate.
-        for cl in inner:
-            if "then" in cl:
-                clauses = (cl["then"] or {}).get("clauses") or []
-                assert any(
-                    "building_count_gte" in c
-                    and (c["building_count_gte"] or {}).get("type") == "weap"
-                    for c in clauses
-                ), f"{lvl} then-chain missing weap rebuild clause"
-                assert any(
-                    "after_ticks" in c for c in clauses
-                ), f"{lvl} then-chain missing post-attrition gate"
-
-
 def test_every_level_has_fail_condition():
     pack = load_pack(PACK)
     for lvl in LEVELS:
@@ -215,12 +194,57 @@ def test_every_level_has_fail_condition():
         assert c.fail_condition is not None, f"{lvl} missing fail_condition"
 
 
+def test_state_based_win_no_scheduled_destruction_of_agent_assets():
+    """Two-base template: WIN must be state-based at deadline (no
+    `then:` chain gating on a destroy event); the pack must NOT
+    declare a `scheduled_events: destroy_actors` targeting the
+    agent. Per task #81 — agent attrition is in-game, not external."""
+    pack = load_pack(PACK)
+    for lvl in LEVELS:
+        L = pack.levels[lvl]
+        events = (L.overrides or {}).get("scheduled_events") or []
+        for e in events:
+            if isinstance(e, dict) and e.get("type") == "destroy_actors":
+                filt = e.get("filter") or {}
+                assert filt.get("owner") != "agent", (
+                    f"{lvl} declares scheduled destroy_actors against "
+                    f"the agent — the two-base template forbids "
+                    f"externally-scripted attrition of agent assets: "
+                    f"{e}"
+                )
+
+
+def test_win_has_state_based_floors():
+    """Each level's win condition must include live-count floors
+    (weap, fact, 2tnk, enemy_buildings_destroyed) — the state-based
+    win shape per the two-base template."""
+    for lvl in LEVELS:
+        c = compile_level(load_pack(PACK), lvl)
+        win = c.win_condition.model_dump(exclude_none=True)
+        inner = win.get("all_of") or []
+
+        def _flatten_keys(node):
+            out = []
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    out.append(k)
+                    out.extend(_flatten_keys(v))
+            elif isinstance(node, list):
+                for v in node:
+                    out.extend(_flatten_keys(v))
+            return out
+
+        keys = _flatten_keys(inner)
+        assert "building_count_gte" in keys, f"{lvl} missing building_count_gte"
+        assert "unit_type_count_gte" in keys, f"{lvl} missing unit_type_count_gte"
+        assert "enemy_buildings_destroyed_gte" in keys, (
+            f"{lvl} missing enemy_buildings_destroyed_gte"
+        )
+
+
 def test_timeout_loss_is_reachable_on_every_level():
     """`within_ticks` ≤ reachable max tick `93 + 90·(N-1)` AND <
-    `base.termination.max_ticks` (engine commit 493898e removed the
-    historical 10000-tick hard cap; the scenario-declared
-    `termination.max_ticks` is now the authoritative ceiling).
-    Without this the deadline never bites → DRAW."""
+    `base.termination.max_ticks`."""
     pack = load_pack(PACK)
     engine_cap = (pack.base.get("termination") or {}).get("max_ticks")
     assert engine_cap is not None, "base.termination.max_ticks missing"
@@ -269,7 +293,7 @@ def test_hard_tier_has_seed_driven_spawn_groups():
 
 
 def test_hard_spawns_round_robin_across_seeds():
-    """Seeds 1 and 2 must place the agent fact at different cells."""
+    """Seeds 1 and 2 must place the HOME agent fact at different cells."""
     c = compile_level(load_pack(PACK), "hard")
 
     def probe():
@@ -281,7 +305,7 @@ def test_hard_spawns_round_robin_across_seeds():
                 facts = [
                     (b["cell_x"], b["cell_y"])
                     for b in bs
-                    if b["type"] == "fact" and b["cell_x"] < 50
+                    if b["type"] == "fact" and b["cell_x"] < 30
                 ]
                 if facts:
                     captured["fact_pos"] = facts[0]
@@ -299,12 +323,9 @@ def test_hard_spawns_round_robin_across_seeds():
     )
 
 
-def test_both_termination_flags_set_for_attrition_pack():
-    """Per F11 §74 + CLAUDE.md: rebuild-after-attrition MUST set
-    BOTH `agent_units_killed: false` AND `enemy_units_killed: false`.
-    The former keeps the run alive past mid-episode unit loss; the
-    latter prevents DRAW when the strike kills enemy combat units
-    before razing buildings."""
+def test_both_termination_flags_set():
+    """Per F11 §79 + CLAUDE.md: this pack must set BOTH
+    `agent_units_killed: false` AND `enemy_units_killed: false`."""
     pack = load_pack(PACK)
     term = pack.base.get("termination") or {}
     assert term.get("agent_units_killed") is False, (
@@ -315,78 +336,61 @@ def test_both_termination_flags_set_for_attrition_pack():
     )
 
 
-def test_attrition_event_scheduled_at_tick_800():
-    """Per F11 §74: the canonical attrition event fires at tick
-    ~800. Every level must schedule a `destroy_actors` event at
-    that tick."""
-    pack = load_pack(PACK)
-    for lvl in LEVELS:
-        L = pack.levels[lvl]
-        events = (L.overrides or {}).get("scheduled_events") or []
-        destroy_ticks = [
-            e.get("tick")
-            for e in events
-            if isinstance(e, dict) and e.get("type") == "destroy_actors"
-        ]
-        assert 800 in destroy_ticks, (
-            f"{lvl} must schedule destroy_actors at tick 800; "
-            f"got destroy_ticks={destroy_ticks}"
-        )
-
-
-def test_hard_has_second_attrition_event_at_tick_2000():
-    """Hard tier additionally schedules a second `destroy_actors`
-    at tick 2000 (per F11 §74 hard-tier: TWO destroy events at
-    different ticks — weap @ 800, proc @ 2000)."""
-    pack = load_pack(PACK)
-    L = pack.levels["hard"]
-    events = (L.overrides or {}).get("scheduled_events") or []
-    destroy_ticks = sorted(
-        {
-            e.get("tick")
-            for e in events
-            if isinstance(e, dict) and e.get("type") == "destroy_actors"
-        }
-    )
-    assert destroy_ticks == [800, 2000], (
-        f"hard needs destroy_actors at ticks [800, 2000]; got "
-        f"{destroy_ticks}"
-    )
-
-
-def test_attrition_event_actually_destroys_weap_on_engine():
-    """End-to-end pin: with a stall policy the pre-placed weap is
-    LIVE at turn 1 (well before tick 800) and is GONE by turn ≥10
-    (well after tick 800). This proves the scheduled
-    `destroy_actors` filter targets the right region and the
-    engine's destroy_actors event handler is wired through."""
+def test_forward_weap_falls_in_world():
+    """End-to-end pin: with a stall policy the FORWARD weap (at the
+    mid-map cell, distinct from the HOME weap at x<30) is alive at
+    turn 1 and is destroyed in-world (by the stance:3 striker
+    column) before tick 800. The HOME weap remains alive — this is
+    NOT an externally-scripted destruction; the strikers do the
+    work in-game."""
     c = compile_level(load_pack(PACK), "easy")
 
     def probe():
-        snap = {"early_weap": None, "post_weap": None}
+        snap = {
+            "early_fwd": None,
+            "early_home": None,
+            "post_fwd": None,
+            "post_home": None,
+        }
 
         def pol(obs, Cmd):
             tick = obs.get("game_tick", 0)
             ob = obs.get("own_buildings", []) or []
-            weap_count = sum(1 for b in ob if b["type"] == "weap")
-            if tick <= 100 and snap["early_weap"] is None:
-                snap["early_weap"] = weap_count
-            if tick >= 900 and snap["post_weap"] is None:
-                snap["post_weap"] = weap_count
+            fwd_weap = sum(
+                1 for b in ob if b["type"] == "weap" and b["cell_x"] >= 30
+            )
+            home_weap = sum(
+                1 for b in ob if b["type"] == "weap" and b["cell_x"] < 30
+            )
+            if tick <= 30 and snap["early_fwd"] is None:
+                snap["early_fwd"] = fwd_weap
+                snap["early_home"] = home_weap
+            if tick >= 800 and snap["post_fwd"] is None:
+                snap["post_fwd"] = fwd_weap
+                snap["post_home"] = home_weap
             return [Cmd.observe()]
         pol.snap = snap
         return pol
 
     p = probe()
     run_level(c, p, seed=1)
-    early = p.snap["early_weap"]
-    post = p.snap["post_weap"]
-    assert early == 1, (
-        f"early-tick weap count must be 1 (pre-placed); got {early}"
+    early_fwd = p.snap["early_fwd"]
+    early_home = p.snap["early_home"]
+    post_fwd = p.snap["post_fwd"]
+    post_home = p.snap["post_home"]
+    assert early_fwd == 1, (
+        f"early-tick FORWARD weap must be 1 (pre-placed); got {early_fwd}"
     )
-    assert post == 0, (
-        f"post-tick-800 weap count must be 0 (destroyed by attrition "
-        f"event); got {post}"
+    assert early_home == 1, (
+        f"early-tick HOME weap must be 1 (pre-placed); got {early_home}"
+    )
+    assert post_fwd == 0, (
+        f"post-tick-800 FORWARD weap must be 0 (destroyed in-world by "
+        f"the striker column); got {post_fwd}"
+    )
+    assert post_home == 1, (
+        f"post-tick-800 HOME weap must be 1 (safe from strikers); "
+        f"got {post_home}"
     )
 
 
@@ -417,31 +421,28 @@ def test_brute_loses(level, seed):
 
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", LEVELS)
-def test_pre_attrition_only_loses(level, seed):
-    """Per F11 §74: a model that builds to N tanks pre-attrition
-    and never rebuilds the destroyed weap LOSES — the
-    `building_count_gte:weap:1` post-attrition clause is not
-    satisfied so the `then:` chain never advances."""
+def test_build_at_forward_loses(level, seed):
+    """Two-base template: build-at-forward LOSES — the rebuild is
+    razed by the in-world striker column; cash is wasted; the army
+    quota and kill quota both miss → LOSS."""
     c = compile_level(load_pack(PACK), level)
-    res = run_level(c, _pre_attrition_only_policy(), seed=seed)
+    res = run_level(c, _build_at_forward_policy(level), seed=seed)
     assert res.outcome == "loss", (
-        f"pre-attrition-only must LOSE on {level} s={seed}; got "
+        f"build-at-forward must LOSE on {level} s={seed}; got "
         f"{res.outcome} (tick={res.signals.game_tick})"
     )
 
 
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", LEVELS)
-def test_intended_rebuild_wins(level, seed):
-    """Detect the attrition + rebuild + produce + strike — must
-    WIN on every (level, seed). This is the load-bearing test
-    that the pack is solvable inside the budget."""
+def test_intended_build_at_home_wins(level, seed):
+    """Build at the safe HOME base + produce + push east — must
+    WIN on every (level, seed). This is the load-bearing test that
+    the pack is solvable inside the budget."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _intended_policy(level), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "win", (
-        f"intended rebuild must WIN on {level} s={seed}; got "
+        f"intended build-at-home must WIN on {level} s={seed}; got "
         f"{res.outcome} (tick={res.signals.game_tick}, "
-        f"then_progress={tp}, "
         f"kills={res.signals.units_killed})"
     )

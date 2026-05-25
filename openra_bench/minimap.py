@@ -67,15 +67,44 @@ def render_b64(render_state: dict, terrain_png: bytes | None = None) -> str | No
 
 CELL = 6  # px per map cell (≈768×240 for a 128×40 map — legible)
 
-# (R,G,B)
-_BG_UNKNOWN = (18, 18, 22)      # '#'  fog / never seen
-_BG_EXPLORED = (70, 74, 82)     # '.'  revealed terrain
+# (R,G,B) — three shroud states, RA semantics:
+#   _BG_UNKNOWN  ('#') — never explored, full shroud (darkest)
+#   _BG_FOGGED   ('.') — explored once but NO live vision NOW (mid)
+#   _BG_VISIBLE  ('+') — within an agent actor's sight RIGHT NOW (bright)
+# The fogged tint is intentionally distinguishable at a glance from the
+# bright tint — without this, a unit that retreats from a region leaves
+# the region looking like it still has live vision while the enemy
+# markers vanish (the user-reported "the enemy disappeared" bug). For
+# legacy `.` callers that don't write `+` cells, `.` keeps the old
+# bright tint (back-compat: a 2-state grid renders identical to before).
+_BG_UNKNOWN = (18, 18, 22)      # '#'  unexplored
+_BG_FOGGED = (44, 46, 52)       # '.'  fogged-only (3-state callers)
+_BG_VISIBLE = (70, 74, 82)      # '+'  currently visible
+_BG_EXPLORED = _BG_VISIBLE      # legacy 2-state alias for '.'
 _OWN = (60, 200, 90)            # your units
 _OWN_BLD = (60, 130, 230)       # your buildings
 _ENEMY = (225, 60, 55)          # enemy units
 _ENEMY_BLD = (240, 160, 40)     # enemy buildings
 _OBJECTIVE = (255, 218, 70)     # objective / target region
 _ORE = (185, 150, 70)           # visible ore/resource cells
+
+
+def _bg_for(ch: str, has_visible_mark: bool) -> tuple[int, int, int] | None:
+    """Map an ASCII shroud char → RGB for the 3-state shroud, or None
+    for unexplored (caller leaves the default unknown background).
+
+    `has_visible_mark` is True iff the ASCII grid contains any '+'
+    cells (the 3-state encoding). When False the grid is a legacy
+    2-state map — we render '.' as bright (back-compat) so existing
+    callers don't see their maps go dim. When True we render '.' as
+    DIM and '+' as bright — the new 3-state shroud.
+    """
+    if ch == "#":
+        return None
+    if ch == "+":
+        return _BG_VISIBLE
+    # ch == '.' or any other non-'#' char
+    return _BG_FOGGED if has_visible_mark else _BG_EXPLORED
 
 
 def _draw_cell(px, w: int, h: int, cx: int, cy: int, rgb, r: int = 1) -> None:
@@ -103,12 +132,15 @@ def render_png_b64(render_state: dict) -> str | None:
 
     img = Image.new("RGB", (w * CELL, h * CELL), _BG_UNKNOWN)
     px = img.load()
+    has_visible = any("+" in r for r in rows)
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
-            if ch != "#":  # explored / visible
-                for sy in range(CELL):
-                    for sx in range(CELL):
-                        px[x * CELL + sx, y * CELL + sy] = _BG_EXPLORED
+            bg = _bg_for(ch, has_visible)
+            if bg is None:
+                continue
+            for sy in range(CELL):
+                for sx in range(CELL):
+                    px[x * CELL + sx, y * CELL + sy] = bg
 
     def _plot(items, rgb_unit, rgb_bld):
         for it in items or []:
@@ -371,14 +403,18 @@ def render_tactical_minimap(
     img = Image.new("RGB", (w * cp, h * cp + legend_h), _BG_UNKNOWN)
     draw = ImageDraw.Draw(img)
 
-    # Explored terrain.
+    # Shroud terrain — 3-state when the grid contains '+' marks
+    # (visible), 2-state legacy bright fill otherwise.
+    has_visible = any("+" in r for r in rows)
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
-            if ch != "#":
-                draw.rectangle(
-                    [x * cp, y * cp, (x + 1) * cp - 1, (y + 1) * cp - 1],
-                    fill=_BG_EXPLORED,
-                )
+            bg = _bg_for(ch, has_visible)
+            if bg is None:
+                continue
+            draw.rectangle(
+                [x * cp, y * cp, (x + 1) * cp - 1, (y + 1) * cp - 1],
+                fill=bg,
+            )
 
     for i, region in enumerate(render_state.get("objective_regions") or [], 1):
         if isinstance(region, dict):
