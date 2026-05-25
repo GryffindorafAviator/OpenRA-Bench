@@ -1616,14 +1616,17 @@ NOT_APPLICABLE = {
     "and three cover clusters that force the spy onto a single safe "
     "corridor; controlled variable is the cover-vs-defender threading "
     "decision. Spawn variation would dilute the corridor-reading signal.",
-    "spec-thief-steal-cash": "hard adds a stance:2 defender at the silo "
-    "AND requires TWO thief steals (cash bar 800 vs 400); controlled "
-    "variable is the redundancy + survival-under-fire discipline on a "
-    "fixed corridor map.",
-    "spec-tanya-c4-strike": "hard adds two stance:2 e1 defenders "
-    "covering the proc; controlled variable is the survive-the-trade "
-    "decision (Tanya's HP absorbs the trade) on a fixed geometry. Spawn "
-    "variation would dilute the commit-direct-strike signal.",
+    "spec-thief-steal-cash": "hard adds a second direct gap, a gun-turret "
+    "east flank closure, AND requires TWO thief steals (cash bar 800 vs "
+    "400); controlled variable is the simultaneous routing-under-threat "
+    "for two thieves on a fixed flank-arena map. Spawn rotation would "
+    "dilute the wall-end vs pbox-overwatch reading signal.",
+    "spec-tanya-c4-strike": "hard uses the rear-ambush idiom (four "
+    "stance:2 e1 riflemen ~5 cells behind Tanya) on a fixed geometry; "
+    "Tanya must commit to the c4_detonate walk-up to escape the kill "
+    "zone, while attack_unit stand-and-fire dies before the proc falls. "
+    "Spawn variation would dilute the load-bearing commit-or-die "
+    "signal.",
     "spec-engineer-capture": "hard introduces two staggered water-"
     "obstacle clusters that force a serpentine route + a stance:2 "
     "south-of-proc defender + redundant 2nd engineer; the controlled "
