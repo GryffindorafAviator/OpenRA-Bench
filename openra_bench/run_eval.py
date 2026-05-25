@@ -188,12 +188,15 @@ def _agg(scores: list) -> dict:
                  if s.outcome == "win" and s.speed > 0]
             ), 4
         ) if any(s.outcome == "win" and s.speed > 0 for s in scores) else 0.0,
+        # NoneType-safe: errored cells can carry `win_turns=None` (the
+        # finalize path used to crash on `None > 0` and torch the whole
+        # eval_stats.json write). Coerce None → 0 in the comparison.
         "win_turns_mean": round(
             statistics.fmean(
                 [s.win_turns for s in scores
-                 if s.outcome == "win" and s.win_turns > 0]
+                 if s.outcome == "win" and (s.win_turns or 0) > 0]
             ), 2
-        ) if any(s.outcome == "win" and s.win_turns > 0 for s in scores) else 0.0,
+        ) if any(s.outcome == "win" and (s.win_turns or 0) > 0 for s in scores) else 0.0,
         "weakest_link_hist": dict(Counter(s.weakest_link for s in scores)),
     }
 
