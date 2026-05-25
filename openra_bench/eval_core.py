@@ -143,6 +143,79 @@ class EpisodeResult:
 _CMD_NAME_RE = __import__("re").compile(r"Command::([A-Z][A-Za-z0-9]*)")
 
 
+def _spawn_point_metadata(compiled: Any, render_state: dict, seed: int) -> dict:
+    """Snapshot the (agent, enemy) spawn point selected for this episode.
+
+    Mirrors the engine's per-owner `spawn_point` filter (see
+    CLAUDE.md "spawn_point filter is PER OWNER"): we infer the
+    selected spawn_idx by intersecting the actors visible in the
+    first turn's render_state with the pack-declared `spawn_point`
+    groups. Returned shape (keys absent when not derivable):
+
+      {
+        "spawn_idx_agent": <int>,
+        "spawn_idx_enemy": <int>,
+        "spawn_point_agent": [x, y],   # representative actor cell
+        "spawn_point_enemy": [x, y],
+        "spawn_seed_basis": seed,
+      }
+
+    Lightweight & defensive — any exception turns into an empty
+    dict; this is metadata, not load-bearing for outcomes."""
+    out: dict = {"spawn_seed_basis": int(seed)}
+    try:
+        from .human_labeling import _actor_field  # local import — small surface
+    except Exception:  # noqa: BLE001
+        return out
+    actors = list(getattr(compiled.scenario, "actors", []) or [])
+
+    def _observed_cells(side: str) -> set[tuple[int, int]]:
+        cells: set[tuple[int, int]] = set()
+        if side == "agent":
+            seqs = [
+                render_state.get("units_summary") or [],
+                render_state.get("own_buildings") or [],
+            ]
+        else:
+            seqs = [
+                render_state.get("enemy_summary") or [],
+                render_state.get("enemy_buildings") or [],
+            ]
+        for seq in seqs:
+            for item in seq:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    cells.add((int(item["cell_x"]), int(item["cell_y"])))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return cells
+
+    for owner_key, side in (("agent", "agent"), ("enemy", "enemy")):
+        observed = _observed_cells(side)
+        counts: dict = {}
+        rep_pos: dict = {}
+        for actor in actors:
+            if str(_actor_field(actor, "owner") or "").lower() != owner_key:
+                continue
+            sp = _actor_field(actor, "spawn_point")
+            if sp is None:
+                continue
+            pos = _actor_field(actor, "position")
+            if not pos or len(pos) < 2:
+                continue
+            cell = (int(pos[0]), int(pos[1]))
+            if cell in observed:
+                counts[sp] = counts.get(sp, 0) + 1
+                rep_pos.setdefault(sp, list(cell))
+        if counts:
+            chosen = max(counts, key=counts.get)
+            out[f"spawn_idx_{owner_key}"] = chosen
+            if chosen in rep_pos:
+                out[f"spawn_point_{owner_key}"] = rep_pos[chosen]
+    return out
+
+
 def _cmd_tool_name(cmd: Any) -> str | None:
     """Decode the snake_case tool name from a Command repr.
 
@@ -299,6 +372,16 @@ def run_level(
         turns = 0
         issued = warned = 0
         conceded = False
+        # Snapshot the engine-selected spawn point ONCE, from the first
+        # render_state after env.reset(seed=...). Used downstream to
+        # stamp the manifest so per-episode metadata records the
+        # actual spawn corner (hard-tier rotation) for each (seed, rep).
+        try:
+            _spawn_meta = _spawn_point_metadata(
+                compiled, adapter.render_state(), seed
+            )
+        except Exception:  # noqa: BLE001 — metadata only
+            _spawn_meta = {"spawn_seed_basis": int(seed)}
         # Persistent fog history so the SAVED minimap == the image the
         # model actually saw (same vendored _minimap_v2, accumulating).
         _pb_explored: set = set()
@@ -560,60 +643,70 @@ def run_level(
             hist = getattr(agent_obj, "history", None)
             if isinstance(hist, list):
                 playback.write_messages(hist)
-            playback.finalize(
-                {
+            _mf = {
+                "scenario": result.scenario,
+                "pack_id": compiled.pack_id,
+                "level": compiled.level,
+                "capability": compiled.meta.capability,
+                "run_id": getattr(playback, "run_id", None),
+                "model": getattr(playback, "model", None),
+                "seed": seed,
+                "repeat": int(getattr(playback, "repeat", 0) or 0),
+                "outcome": outcome,
+                "turns": turns,
+                "max_turns": compiled.max_turns,
+                "actions_issued": issued,
+                "actions_warned": warned,
+                "agent_stats": getattr(agent_obj, "stats", None),
+                "objective_progress": result.objective_progress,
+                "objective_blocking_ratio": result.objective_blocking_ratio,
+                "leaves_final": result.leaves_final,
+                "reward_vector": result.reward_vector,
+                "signals": {
+                    "economy_value": adapter.signals.cash
+                    + adapter.signals.resources,
+                    "explored_percent": round(
+                        adapter.signals.explored_percent, 2
+                    ),
+                    "units_killed": adapter.signals.units_killed,
+                    "units_lost": adapter.signals.units_lost,
+                },
+            }
+            # Per-episode spawn-point metadata — see _spawn_point_metadata
+            # docstring. Lifted directly into the manifest so the viewer
+            # / inter-rep analysis can attribute outcomes to the
+            # selected spawn corner without re-running env.reset.
+            if isinstance(_spawn_meta, dict):
+                _mf.update(_spawn_meta)
+            playback.finalize(_mf)
+        if full_playback is not None:
+            try:
+                _fp_extra = {
                     "scenario": result.scenario,
                     "pack_id": compiled.pack_id,
                     "level": compiled.level,
                     "capability": compiled.meta.capability,
-                    "run_id": getattr(playback, "run_id", None),
-                    "model": getattr(playback, "model", None),
                     "seed": seed,
+                    "repeat": int(getattr(full_playback, "repeat", 0) or 0),
                     "outcome": outcome,
                     "turns": turns,
                     "max_turns": compiled.max_turns,
                     "actions_issued": issued,
                     "actions_warned": warned,
-                    "agent_stats": getattr(agent_obj, "stats", None),
+                    "agent_stats": getattr(
+                        introspection_source(controller), "stats", None
+                    ),
                     "objective_progress": result.objective_progress,
                     "objective_blocking_ratio": result.objective_blocking_ratio,
                     "leaves_final": result.leaves_final,
                     "reward_vector": result.reward_vector,
-                    "signals": {
-                        "economy_value": adapter.signals.cash
-                        + adapter.signals.resources,
-                        "explored_percent": round(
-                            adapter.signals.explored_percent, 2
-                        ),
-                        "units_killed": adapter.signals.units_killed,
-                        "units_lost": adapter.signals.units_lost,
-                    },
                 }
-            )
-        if full_playback is not None:
-            try:
+                if isinstance(_spawn_meta, dict):
+                    _fp_extra.update(_spawn_meta)
                 full_playback.finalize(
                     outcome=outcome,
                     final_obs=final_rs,
-                    manifest_extra={
-                        "scenario": result.scenario,
-                        "pack_id": compiled.pack_id,
-                        "level": compiled.level,
-                        "capability": compiled.meta.capability,
-                        "seed": seed,
-                        "outcome": outcome,
-                        "turns": turns,
-                        "max_turns": compiled.max_turns,
-                        "actions_issued": issued,
-                        "actions_warned": warned,
-                        "agent_stats": getattr(
-                            introspection_source(controller), "stats", None
-                        ),
-                        "objective_progress": result.objective_progress,
-                        "objective_blocking_ratio": result.objective_blocking_ratio,
-                        "leaves_final": result.leaves_final,
-                        "reward_vector": result.reward_vector,
-                    },
+                    manifest_extra=_fp_extra,
                 )
             except Exception:  # noqa: BLE001 — never break a run on I/O
                 pass

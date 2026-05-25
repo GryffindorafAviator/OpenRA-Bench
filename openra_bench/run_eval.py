@@ -259,26 +259,39 @@ def _git_sha() -> str:
 
 
 def _score_path_candidates(playback_root, run_id, safe_model,
-                           cell: str, split: str, seed: int) -> list[Path]:
+                           cell: str, split: str, seed: int,
+                           repeat: int = 0) -> list[Path]:
     """Candidate on-disk `score.json` locations for a journaled cell.
 
     The Playback writer (see `playback.py`) builds dirs under
-    `<playback_root>/<run_id>__<safe_model>/<sanitized-cell:split>__seed<N>/`.
+    `<playback_root>/<run_id>__<safe_model>/<sanitized-cell:split>__seedN[_repR]/`.
     We don't replicate the sanitizer's exact rules here — instead we
-    glob for any `score.json` whose parent dir starts with a
-    prefix matching the cell+split+seed signature, which is what the
-    production sweeps use. Returns ALL matches so the caller can pick
-    the first that exists."""
+    glob for any `score.json` whose parent dir matches the
+    cell+split+seed[+rep] signature, which is what the production
+    sweeps use. Returns ALL matches so the caller can pick the first
+    that exists.
+
+    `repeat`: when 0 (the default), the legacy bare `seed<N>` dir is
+    matched FIRST (back-compat with pre-PR data) and falls back to
+    `seed<N>_rep0` for paranoia. When > 0, ONLY the `_rep<R>` dirs
+    are matched — the strict-resume gate must not conflate reps."""
     if not playback_root:
         return []
     root = Path(playback_root) / f"{run_id}__{safe_model}"
     if not root.exists():
         return []
     # Tolerate any sanitizer that swapped ":" / "/" / "|" for "_".
-    # Cell+split+seed are deterministic; just glob.
     safe_cell = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{cell}:{split}")
-    pattern = f"{safe_cell}*seed{seed}*/score.json"
-    return sorted(root.glob(pattern))
+    if int(repeat) > 0:
+        # rep>0 → MUST be the per-rep dir.
+        pattern = f"{safe_cell}*seed{seed}_rep{int(repeat)}*/score.json"
+        return sorted(root.glob(pattern))
+    # rep==0: prefer the legacy bare `seed<N>` layout (so back-compat
+    # data resumes), then fall back to a possible `seed<N>_rep0` dir
+    # if a writer ever emitted one. Glob both and order legacy first.
+    legacy = sorted(root.glob(f"{safe_cell}*seed{seed}/score.json"))
+    rep0 = sorted(root.glob(f"{safe_cell}*seed{seed}_rep0/score.json"))
+    return legacy + rep0
 
 
 def _strict_resume_gate(journal, prior: list[dict],
@@ -305,6 +318,7 @@ def _strict_resume_gate(journal, prior: list[dict],
         cell = r.get("cell", "")
         split = r.get("split", "public")
         seed = r.get("seed", 0)
+        repeat = int(r.get("repeat", 0) or 0)
         outcome = r.get("outcome")
         # Errors never count as done (mirror the loose-resume path),
         # so the existing done_keys() filter handles them. Strict
@@ -313,6 +327,7 @@ def _strict_resume_gate(journal, prior: list[dict],
             continue
         cands = _score_path_candidates(
             playback_root, run_id, safe_model, cell, split, seed,
+            repeat=repeat,
         )
         sc_path = next((c for c in cands if c.exists()), None)
         if sc_path is None:
@@ -620,24 +635,29 @@ def evaluate(
     def _run_one(task: tuple) -> dict:
         compiled, cell, split, seed, rep = task
         pb = None
-        # Only the first repeat writes a Playback — the records (the
-        # lightweight per-rep results) carry the pass^k data; saving N
-        # full per-turn dumps per cell would just bloat disk.
-        if playback_root is not None and rep == 0:
+        # Every rep writes its own Playback under a distinct
+        # seed<N>_rep<R> dir (rep > 0). Pre-PR runs used to gate this
+        # on `rep == 0` to "save disk", which silently OVERWROTE
+        # per-turn transcripts for reps 1..N-1 — the journal kept the
+        # outcomes but the messages.json / turns.jsonl / minimaps for
+        # every non-first rep were lost. We need per-rep transcripts
+        # for inter-rep behavioural-variance analysis on pass^N
+        # stability sweeps, so write them all.
+        if playback_root is not None:
             from .playback import Playback
 
             pb = Playback(
                 Path(playback_root) / f"{run_id}__{_safe_model}",
                 f"{cell}:{split}",
                 seed,
+                repeat=rep,
             )
             pb.run_id, pb.model = run_id, model
-        # Audit-format playback (FullPlayback): one JSONL per cell at the
-        # canonical `<pack>__<level>__seed<N>__<fog>.jsonl` path the
-        # paper-collection script consumes. Same first-repeat gating as
-        # the legacy Playback.
+        # Audit-format playback (FullPlayback): one JSONL per cell at
+        # `<pack>__<level>__seed<N>__<fog>[__rep<R>].jsonl` (rep>0
+        # appended only when needed for pass^N stability sweeps).
         fpb = None
-        if full_playback_root is not None and rep == 0:
+        if full_playback_root is not None:
             from .full_playback import FullPlayback
 
             # Derive (pack_id, level, fog_mode) from the cell. For
@@ -670,6 +690,7 @@ def evaluate(
                 level=_level,
                 seed=seed,
                 fog_mode=_fog,
+                repeat=rep,
             )
         ctrl = factory(compiled)
         if handoff_sweep and ":handoff-" in cell:
