@@ -262,7 +262,20 @@ base:
   # Generous budget — the deadline is the `max_turns` cap (200), so
   # reachable max tick ≈ 93 + 90·199 = 17 993. 20 000 ticks is ample
   # headroom for the harness.
-  termination: {max_ticks: 20000}
+  # 1v1 wipe-out objective: a side LOSES only when its combat units
+  # AND its buildings are ALL gone. The engine's default
+  # `_units_killed: true` auto-`done`s as soon as either side has
+  # zero combat units (regardless of buildings) — which would end the
+  # match before a true wipe-out and force a tie-break decision on
+  # half-empty boards. Setting both flags `false` keeps the run alive
+  # so the harness's `_alive` check (units OR buildings) is the only
+  # death gate. Matches run until one side is fully razed or the
+  # 200-turn deadline hits (then the kills→buildings→economy
+  # tie-break applies).
+  termination:
+    max_ticks: 20000
+    agent_units_killed: false
+    enemy_units_killed: false
   # ── Canonical actor layout ─────────────────────────────────────
   # Agent base — NORTH-WEST corner. Mirror of every (x, y) below
   # about the map centre (64, 48) is (128-x, 96-y), producing the
@@ -312,12 +325,18 @@ levels:
       the central bridge. You cannot see the contested patch or
       the opponent's base from your starting position. Build
       economy, field an army, cross the river when you can, and
-      eliminate the opponent's Construction Yard before they do
-      the same to yours. The naval lane is optional — the
-      shipyard expands the action set (ships, transports) but a
-      land-only macro game still works through the bridges. The
-      game ends when one base falls or after 200 decision turns
-      (economy tie-breaks on the deadline).
+      RAZE the opponent entirely — every building AND every
+      combat unit must fall. (Destroying only the Construction
+      Yard is not enough; surviving buildings keep the opponent
+      in the game even if they can no longer rebuild a new one,
+      since the Construction Yard is the only source of new
+      buildings.) The naval lane is optional — the shipyard
+      expands the action set (ships, transports) but a land-only
+      macro game still works through the bridges. The match ends
+      when one side is fully razed (zero units AND zero
+      buildings) or after 200 decision turns; at the deadline
+      victory goes by layered tie-break (kills then own
+      buildings remaining then economy).
     starting_cash: 2000
     # Stub predicates — the 1v1 harness (`run_1v1`) decides the
     # winner from the final boards (base alive ⇒ in the game)
