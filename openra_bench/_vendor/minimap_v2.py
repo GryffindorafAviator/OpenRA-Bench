@@ -677,7 +677,15 @@ def render(
             x = margin_x
             if prefix:
                 draw.text((x, y_offset), prefix, fill=(180, 180, 180, 230), font=legend_font)
-                x += 32
+                # Measure the actual text width (Pillow textlength) +
+                # padding so a longer prefix like "enemy:" doesn't
+                # overlap the first marker. Falls back to a safe
+                # constant on PIL versions without `textlength`.
+                try:
+                    pw = int(draw.textlength(prefix, font=legend_font))
+                except (AttributeError, TypeError):
+                    pw = len(prefix) * 7  # ~7px per char at size 11
+                x += pw + 8  # 8px gap between prefix and first marker
             for label, shape, fill in items:
                 _draw_unit_marker(draw, x, y_offset + 7, 5, shape, fill)
                 draw.text((x + 8, y_offset), label,
