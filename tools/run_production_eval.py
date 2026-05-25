@@ -692,7 +692,18 @@ def open_paper_pr(prod_dir: Path, slug: str, type_: str, *,
     # (paper reproducibility). Pulled from the campaign manifest +
     # ProviderConfig defaults — overrides hot-loaded if a future
     # version stores per-cell overrides.
-    from openra_bench.providers import ProviderConfig
+    # Import at use-site fails when this function is reached after the
+    # orchestrator has chdir'd into the paper repo for git ops — fall
+    # back to a manual sys.path fix-up so the dataclass defaults are
+    # still discoverable.
+    try:
+        from openra_bench.providers import ProviderConfig
+    except ModuleNotFoundError:
+        import sys
+        _BENCH_ROOT = str(Path(__file__).resolve().parent.parent)
+        if _BENCH_ROOT not in sys.path:
+            sys.path.insert(0, _BENCH_ROOT)
+        from openra_bench.providers import ProviderConfig
     _slug, provider, model_id = _model_by_slug(slug)
     # Read the cell's manifest record (state, concurrency, seeds, etc.)
     mf = load_manifest(prod_dir)
