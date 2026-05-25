@@ -139,8 +139,14 @@ def _now_iso() -> str:
 
 
 def _atomic_write_json(path: Path, payload: dict) -> None:
+    # Per-process temp suffix so concurrent launchers don't race on the
+    # shared `manifest.json.tmp` filename (last writer's replace() would
+    # FileNotFound on the others' tmps). PID + os.urandom yields a unique
+    # path even under fork.
+    import os
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    suffix = f".tmp.{os.getpid()}.{os.urandom(4).hex()}"
+    tmp = path.with_suffix(path.suffix + suffix)
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
     tmp.replace(path)
 
