@@ -380,7 +380,13 @@ def render(
     # later) overlay on top exactly as they do over grass / water.
     # Gated by `explored_history` (cumulative) so ore the agent has
     # never seen stays hidden in the dark band.
+    #
+    # Capture the set of ore cells so the legend grass-swatch sampler
+    # downstream can avoid landing on an ore tile (which used to make
+    # the legend label gold cells as "grass" when the centre patch sat
+    # at the playable midpoint — the 1v1-macro centre patch case).
     ore_rgb = np.asarray(RESOURCE_TERRAIN_RGB, dtype=np.float32) / 255.0
+    ore_set: set[tuple[int, int]] = set()
     for rc in obs.get("resource_cells") or []:
         if not isinstance(rc, dict):
             continue
@@ -388,6 +394,7 @@ def render(
         ry = int(rc.get("cell_y", -1))
         if not (0 <= rx < map_width and 0 <= ry < map_height):
             continue
+        ore_set.add((rx, ry))
         if (rx, ry) not in explored_history:
             continue
         terrain[ry, rx] = ore_rgb
@@ -601,10 +608,41 @@ def render(
         # the whole canvas), these swatches still match the in-image
         # terrain colors because they're drawn pre-theming with the same
         # source pixels.
+        #
+        # Footgun fixed (2026-05-25): the grass sampler used to read
+        # `terrain[centre]` UNCONDITIONALLY. After the ore-tile injection
+        # block (above) overwrote ore cells with gold, the legend
+        # sampler at the playable midpoint landed on the 1v1-macro
+        # CENTRE ORE PATCH — so the swatch showed gold labelled
+        # "grass". Skip ore-tinted cells via a spiral search outward
+        # from the centre, fall back to the original cell if nothing
+        # non-ore can be found within the playable rect.
         terrain_x = lx + 290
         bx_, by_, bw_, bh_ = bounds
-        # Grass: center of playable area (typical interior cell)
-        grass_cx, grass_cy = bx_ + bw_ // 2, by_ + bh_ // 2
+        cx0 = bx_ + bw_ // 2
+        cy0 = by_ + bh_ // 2
+
+        def _is_grass_candidate(cx: int, cy: int) -> bool:
+            if not (bx_ <= cx < bx_ + bw_ and by_ <= cy < by_ + bh_):
+                return False
+            return (cx, cy) not in ore_set
+
+        grass_cx, grass_cy = cx0, cy0
+        if not _is_grass_candidate(cx0, cy0):
+            # outward ring search — bounded to half-playable to keep this O(1)
+            found = False
+            max_r = max(bw_, bh_) // 2
+            for r in range(1, max_r + 1):
+                for dy in range(-r, r + 1):
+                    for dx in range(-r, r + 1):
+                        if abs(dx) != r and abs(dy) != r:
+                            continue  # ring boundary only
+                        if _is_grass_candidate(cx0 + dx, cy0 + dy):
+                            grass_cx, grass_cy = cx0 + dx, cy0 + dy
+                            found = True
+                            break
+                    if found: break
+                if found: break
         grass_color = tuple(int(c) for c in terrain[grass_cy, grass_cx] * 255) + (255,)
         # Water: a corner just inside the impassable border (rush-hour
         # has water at y=0..2 and y=37..39)
