@@ -1312,25 +1312,41 @@ def evaluate_1v1(
                             agent_spec, compiled, "enemy",
                             provider_cfg=provider_cfg,
                         )
-                    # Per-turn transcript persistence: write both sides'
-                    # LLM message history to disk every turn so an
-                    # operator tailing the file sees the live
-                    # conversation rather than waiting 30-60 min for
-                    # the episode to finish. A mid-episode crash
-                    # also preserves the partial transcript.
-                    transcript_dir = None
+                    # Per-turn full Playback persistence: both sides
+                    # write turns.jsonl + messages.json (when the
+                    # controller exposes `.history`) + per-turn
+                    # minimap PNGs + manifest.json + score.json into
+                    # sibling `agent_side/` and `enemy_side/` dirs
+                    # under this leaf. An operator tailing the file
+                    # sees the live LLM conversation rather than
+                    # waiting 30-60 min for the episode to finish;
+                    # a mid-episode crash preserves the partial run.
+                    # The bench's Playback UI uses the same on-disk
+                    # shape as the scenarios path, so 1v1 episodes
+                    # replay through the standard viewer.
+                    leaf_root = None
                     if playback_root:
                         safe = re.sub(r"[^a-z0-9-]+", "-",
                                       (model or "agent").lower()).strip("-")
-                        transcript_dir = (
+                        leaf_root = (
                             Path(playback_root) / f"{run_id}__{safe}"
                             / f"{cell.replace(':', '_')}_{half}"
-                            / f"seed{seed}"
                         )
                     res = run_1v1(
                         tmp, agent_ctrl, enemy_ctrl,
                         seed=seed, max_turns=compiled.max_turns,
-                        transcript_dir=transcript_dir,
+                        playback_root=leaf_root,
+                        cell=cell,
+                        half=half,
+                        run_id=run_id,
+                        agent_model=(
+                            opponent_label if half == "swapped" else model
+                        ),
+                        enemy_model=(
+                            model if half == "swapped" else opponent_label
+                        ),
+                        base_map=compiled.scenario.base_map,
+                        level=lv,
                     )
                     # Map raw winner ("agent"|"enemy"|"draw") to the
                     # AGENT's POV, accounting for the side swap.

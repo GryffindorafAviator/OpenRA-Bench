@@ -77,6 +77,27 @@ def _economy_value(render_state: dict) -> int:
     )
 
 
+def _render_side_minimap(render_state, base_map, explored_set, *, level: str):
+    """Render the same minimap PNG the model would see for ONE side's
+    render_state. Returns base64-encoded PNG bytes or None. Never
+    raises — playback persistence must NEVER break the engine run."""
+    try:
+        from .minimap import terrain_png_for
+        from .prompt_v2 import minimap_b64 as _v2_mm
+
+        terrain = terrain_png_for(base_map) if base_map else None
+        png = _v2_mm(
+            render_state, terrain, explored_set,
+            constant_colors=level in ("easy", "medium"),
+        )
+        if png is None:
+            from .agent import _render_minimap_b64
+            png = _render_minimap_b64(render_state, terrain)
+        return png
+    except Exception:  # noqa: BLE001 — playback never breaks a run
+        return None
+
+
 def run_1v1(
     scenario_path: str,
     agent_controller: Any,
@@ -84,7 +105,15 @@ def run_1v1(
     seed: int = 0,
     max_turns: int = 200,
     progress: bool = True,
-    transcript_dir=None,
+    playback_root=None,
+    *,
+    cell: str | None = None,
+    half: str | None = None,
+    run_id: str | None = None,
+    agent_model: str | None = None,
+    enemy_model: str | None = None,
+    base_map: str | None = None,
+    level: str = "easy",
 ) -> OneVOneResult:
     """Run one full-macro 1v1 match and return the result.
 
@@ -94,6 +123,17 @@ def run_1v1(
     externally controlled (no `enemy.bot_type`); if it declares an
     engine bot, that bot co-drives the enemy actors alongside this
     harness's enemy controller.
+
+    When `playback_root` is given, two `Playback` instances are
+    created under it — `<playback_root>/agent_side/seed<N>/` and
+    `<playback_root>/enemy_side/seed<N>/` — each capturing its
+    respective controller's per-turn `render_state`, commands,
+    signals, minimap PNG, and (for LLM controllers carrying a
+    `.history` attribute) the full chat transcript. The caller is
+    responsible for assembling the cell/half/run-id portion of the
+    path; this function only owns the per-side leaf split. Manifest +
+    score.json are written on both sides at episode end so the
+    Playback UI can replay either perspective.
     """
     from openra_rl_training.training.rust_env_pool import RustEnvPool
 
@@ -148,64 +188,97 @@ def run_1v1(
         # bench harness from serializing the round-trips.
         executor = ThreadPoolExecutor(max_workers=2)
 
-        # Per-turn LLM transcript persistence (1v1). When the caller
-        # passes a transcript_dir, both sides' message histories are
-        # flushed to disk every turn — `tail -f` on these files shows
-        # the live LLM conversation rather than waiting 30-60 min for
-        # the episode to complete (and a mid-episode crash preserves
-        # the partial transcript instead of losing it).
+        # Per-turn full Playback persistence. When the caller passes a
+        # playback_root, both sides get a sibling Playback under it so
+        # the standard bench replay UI works on 1v1 episodes exactly
+        # as on single-player ones (turns.jsonl + messages.json +
+        # minimap_turn*.png + manifest.json + score.json). The earlier
+        # ad-hoc `agent_history.json` / `enemy_history.json` route is
+        # gone — messages.json (written by Playback.write_messages) is
+        # the canonical LLM transcript.
+        import json as _json
         import time as _time
+        from pathlib import Path as _Path
+
         _episode_t0 = _time.monotonic()
-        _td = None
-        if transcript_dir:
-            import json as _json
-            from pathlib import Path as _Path
-            _td = _Path(transcript_dir)
-            _td.mkdir(parents=True, exist_ok=True)
+        _agent_pb = None
+        _enemy_pb = None
+        _pb_root = None
+        if playback_root:
+            _pb_root = _Path(playback_root)
+            _pb_root.mkdir(parents=True, exist_ok=True)
+            try:
+                from .playback import Playback
 
-            def _unwrap(ctrl):
-                obj = ctrl
-                for attr in ("_agent", "agent", "wrapped", "controller"):
-                    if hasattr(obj, attr):
-                        inner = getattr(obj, attr)
-                        if hasattr(inner, "history"):
-                            return inner
-                return obj if hasattr(obj, "history") else None
+                _agent_pb = Playback(_pb_root, "agent_side", seed)
+                _agent_pb.run_id = run_id
+                _agent_pb.model = agent_model
+                _enemy_pb = Playback(_pb_root, "enemy_side", seed)
+                _enemy_pb.run_id = run_id
+                _enemy_pb.model = enemy_model
+            except Exception:  # noqa: BLE001 — playback never breaks a run
+                _agent_pb = None
+                _enemy_pb = None
 
-            _agent_inner = _unwrap(agent)
-            _enemy_inner = _unwrap(enemy)
+        # Accumulating per-side fog history so the minimap shows the
+        # explored-cells overlay correctly (same shape as the model's
+        # input image, mirroring eval_core's `_pb_explored`).
+        _agent_explored: set = set()
+        _enemy_explored: set = set()
 
-            def _flush_transcripts(turn_n: int):
+        def _accumulate_explored(rs: dict, store: set) -> None:
+            try:
+                obs = rs.get("_raw") or {}
+                for cell_xy in obs.get("explored_cells") or []:
+                    if isinstance(cell_xy, (list, tuple)) and len(cell_xy) == 2:
+                        store.add((int(cell_xy[0]), int(cell_xy[1])))
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _flush_progress(turn_n: int) -> None:
+            """Live rate metrics — same shape as the legacy
+            progress.json the monitor reads. Writes under both side
+            dirs so either tail target works."""
+            if not (_agent_pb or _enemy_pb):
+                return
+            try:
+                elapsed = _time.monotonic() - _episode_t0
+                tps = (turn_n / elapsed) if elapsed > 0 else 0.0
+                eta_s = ((max_turns - turn_n) / tps) if tps > 0 else 0.0
+                row = {
+                    "turn": turn_n,
+                    "max_turns": max_turns,
+                    "seed": seed,
+                    "elapsed_s": round(elapsed, 1),
+                    "turns_per_second": round(tps, 3),
+                    "sec_per_turn": round(1.0 / tps, 2) if tps > 0 else None,
+                    "eta_s": round(eta_s, 1),
+                }
+                if _agent_pb is not None:
+                    (_agent_pb.dir / "progress.json").write_text(
+                        _json.dumps(row)
+                    )
+                if _enemy_pb is not None:
+                    (_enemy_pb.dir / "progress.json").write_text(
+                        _json.dumps(row)
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _flush_messages(ctrl, pb) -> None:
+            """If the controller exposes a `.history` attribute (the
+            ModelAgent contract — system / user / assistant / tool
+            messages with the minimap data-URL), dump the full
+            transcript to `messages.json`. Scripted controllers don't
+            carry a history and are silently skipped."""
+            if pb is None:
+                return
+            hist = getattr(ctrl, "history", None)
+            if isinstance(hist, list):
                 try:
-                    if _agent_inner is not None:
-                        (_td / "agent_history.json").write_text(
-                            _json.dumps(getattr(_agent_inner, "history", []),
-                                        default=str, indent=2)
-                        )
-                    if _enemy_inner is not None:
-                        (_td / "enemy_history.json").write_text(
-                            _json.dumps(getattr(_enemy_inner, "history", []),
-                                        default=str, indent=2)
-                        )
-                    # Real-time rate metrics — operator-traceable
-                    # turns/sec without parsing the engine log. The
-                    # episode-rate watcher reads progress.json.
-                    elapsed = _time.monotonic() - _episode_t0
-                    tps = (turn_n / elapsed) if elapsed > 0 else 0.0
-                    eta_s = ((max_turns - turn_n) / tps) if tps > 0 else 0.0
-                    (_td / "progress.json").write_text(_json.dumps({
-                        "turn": turn_n,
-                        "max_turns": max_turns,
-                        "seed": seed,
-                        "elapsed_s": round(elapsed, 1),
-                        "turns_per_second": round(tps, 3),
-                        "sec_per_turn": round(1.0 / tps, 2) if tps > 0 else None,
-                        "eta_s": round(eta_s, 1),
-                    }))
-                except Exception:  # noqa: BLE001 — transcript never breaks a run
+                    pb.write_messages(hist)
+                except Exception:  # noqa: BLE001
                     pass
-        else:
-            def _flush_transcripts(turn_n: int): return  # no-op
 
         try:
             for turns in range(1, max_turns + 1):
@@ -219,7 +292,39 @@ def run_1v1(
                 a_obs, e_obs, done, _info = raw.step_1v1(a_cmds, e_cmds)
                 agent_ad.observe(a_obs, done=done)
                 enemy_ad.observe(e_obs, done=done)
-                _flush_transcripts(turns)
+
+                # Playback: snapshot the POST-step render_state (what
+                # the controller will see next turn) on both sides.
+                if _agent_pb is not None or _enemy_pb is not None:
+                    a_rs_post = agent_ad.render_state()
+                    e_rs_post = enemy_ad.render_state()
+                    _accumulate_explored(a_rs_post, _agent_explored)
+                    _accumulate_explored(e_rs_post, _enemy_explored)
+                    if _agent_pb is not None:
+                        a_png = _render_side_minimap(
+                            a_rs_post, base_map, _agent_explored, level=level
+                        )
+                        try:
+                            _agent_pb.record_turn(
+                                turns, a_rs_post, a_cmds,
+                                agent_ad.signals, a_png,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                        _flush_messages(agent, _agent_pb)
+                    if _enemy_pb is not None:
+                        e_png = _render_side_minimap(
+                            e_rs_post, base_map, _enemy_explored, level=level
+                        )
+                        try:
+                            _enemy_pb.record_turn(
+                                turns, e_rs_post, e_cmds,
+                                enemy_ad.signals, e_png,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                        _flush_messages(enemy, _enemy_pb)
+                    _flush_progress(turns)
 
                 agent_trace.append(
                     {
@@ -296,29 +401,103 @@ def run_1v1(
                     else:
                         winner, reason = "draw", f"deadline — fully tied (kills={ak}, buildings={ab}, economy={av})"
 
-        # Final-state transcript flush + episode completion stamp.
-        # The rate-history.jsonl file (one row per completed episode)
-        # is the source of truth for "episodes/min" — tail it to see
-        # the running rate.
-        if _td is not None:
-            _flush_transcripts(turns)
+        # Episode-completion writes: manifest.json + score.json on both
+        # sides, plus a final transcript + progress flush. The
+        # rate-history.jsonl append is preserved (one row per
+        # completed episode, the episodes/min source-of-truth that the
+        # monitor reads).
+        if _agent_pb is not None or _enemy_pb is not None:
+            _flush_progress(turns)
             try:
-                import json as _json
                 ep_elapsed = _time.monotonic() - _episode_t0
+                # Agent-side outcome (win/loss/draw) is from the agent
+                # POV; enemy-side outcome is the mirror.
+                if winner == "agent":
+                    a_outcome, e_outcome = "win", "loss"
+                elif winner == "enemy":
+                    a_outcome, e_outcome = "loss", "win"
+                else:
+                    a_outcome, e_outcome = "draw", "draw"
+
+                def _manifest(side_outcome: str, side_label: str,
+                              side_model: str | None) -> dict:
+                    return {
+                        "mode": "1v1",
+                        "scenario_path": str(scenario_path),
+                        "cell": cell,
+                        "half": half,
+                        "seed": seed,
+                        "side": side_label,
+                        "model": side_model,
+                        "run_id": run_id,
+                        "outcome": side_outcome,
+                        "winner": winner,
+                        "reason": reason,
+                        "turns": turns,
+                        "ticks": agent_ad.signals.game_tick,
+                        "episode_seconds": round(ep_elapsed, 1),
+                        "agent_name": getattr(agent, "name", "agent"),
+                        "enemy_name": getattr(enemy, "name", "enemy"),
+                    }
+
+                def _score(side_outcome: str) -> dict:
+                    """Minimal score.json so the resume-gate + journal
+                    cross-check sees a consistent on-disk record. The
+                    1v1 mode doesn't run the scenario-grade composite
+                    (perception/reasoning/action) — those depend on
+                    a win_condition predicate, which 1v1 deliberately
+                    stubs out — so we emit only the load-bearing
+                    `outcome` field plus the raw winner/reason."""
+                    return {
+                        "outcome": side_outcome,
+                        "winner": winner,
+                        "reason": reason,
+                        "composite": (
+                            1.0 if side_outcome == "win"
+                            else 0.0 if side_outcome == "loss"
+                            else 0.5
+                        ),
+                    }
+
+                if _agent_pb is not None:
+                    _flush_messages(agent, _agent_pb)
+                    _agent_pb.finalize(_manifest(a_outcome, "agent", agent_model))
+                    (_agent_pb.dir / "score.json").write_text(
+                        _json.dumps(_score(a_outcome), indent=2)
+                    )
+                if _enemy_pb is not None:
+                    _flush_messages(enemy, _enemy_pb)
+                    _enemy_pb.finalize(_manifest(e_outcome, "enemy", enemy_model))
+                    (_enemy_pb.dir / "score.json").write_text(
+                        _json.dumps(_score(e_outcome), indent=2)
+                    )
+
+                # Cell-level rate history (one row per completed
+                # episode). Written at the playback_root parent so a
+                # tailer can watch ALL seeds of a cell in one file.
                 rate_row = {
                     "winner": winner,
                     "reason": reason,
                     "turns": turns,
                     "seed": seed,
                     "episode_seconds": round(ep_elapsed, 1),
-                    "turns_per_second": round(turns / ep_elapsed, 3) if ep_elapsed > 0 else 0.0,
+                    "turns_per_second": (
+                        round(turns / ep_elapsed, 3) if ep_elapsed > 0 else 0.0
+                    ),
                     "completed_at": _time.time(),
                 }
-                # Cell-level history (one file per cell, append per seed/half)
-                (_td.parent / "rate-history.jsonl").open("a").write(
-                    _json.dumps(rate_row) + "\n"
-                )
-            except Exception:  # noqa: BLE001
+                try:
+                    # Aggregate at the cell-level dir (one row per
+                    # completed seed). The previous layout buried this
+                    # under the seed dir so each file held a single
+                    # row; hoisting up one level makes "episodes/min
+                    # for this cell" a one-file tail.
+                    (_pb_root / "rate-history.jsonl").open("a").write(
+                        _json.dumps(rate_row) + "\n"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            except Exception:  # noqa: BLE001 — never break the run
                 pass
         return OneVOneResult(
             winner=winner,
