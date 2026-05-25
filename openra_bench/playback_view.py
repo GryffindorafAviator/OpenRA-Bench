@@ -228,17 +228,54 @@ def render_streamlit(root: str) -> None:  # pragma: no cover - UI glue
                 g = t.get("goal") or {}
                 if g:
                     st.markdown(
-                        f"**objective progress: "
-                        f"{g.get('objective_progress', 0):.0%}**"
-                        + ("  ✅ won" if g.get("won") else "")
+                        "**objective leaves**"
+                        + ("  won" if g.get("won") else "")
                     )
-                    for leaf in g.get("leaves", []):
-                        st.progress(
-                            min(1.0, float(leaf.get("ratio", 0.0))),
-                            text=f"{leaf['name']} "
-                            f"{leaf.get('current')}/{leaf.get('target')}",
-                        )
+                    # Per-leaf table is the source of truth: explicit
+                    # current/target + check mark per predicate. The
+                    # legacy `objective_progress` percentage averaged
+                    # unrelated leaves (e.g. a missed within_ticks +
+                    # half-met kill count averaged to 0.79 "near win"
+                    # even when both clauses failed) — it is dropped
+                    # entirely in favour of this row-by-row table.
+                    st.code(render_leaves_table(g.get("leaves", [])))
                     rv = g.get("reward_vector", {})
                     st.caption("reward vector: " + "  ".join(
                         f"{k}={v:.2f}" for k, v in rv.items()
                     ))
+
+
+def render_leaves_table(leaves: list[dict]) -> str:
+    """Format the per-leaf goal table as plain-text rows.
+
+    Each row reads ``{name}: {current}/{target} {✓ | x}`` so a glance
+    tells you EXACTLY which clauses are met and which are blocking —
+    no scalar averaging that collapses unrelated predicates into a
+    misleading percentage. Used by the Streamlit playback view and
+    the unit tests that pin the no-percentage rendering. Returns the
+    empty string for an empty input (no goal recorded yet).
+
+    Examples (the kind of row the table emits):
+        units_killed_gte: 4/7 x
+        within_ticks: tick 4203/4000 x
+        explored_pct_gte: 82.5/80 ✓
+    """
+    if not leaves:
+        return ""
+    rows: list[str] = []
+    for leaf in leaves:
+        name = leaf.get("name", "?")
+        target = leaf.get("target")
+        cur = leaf.get("current")
+        sat = leaf.get("satisfied")
+        # `within_ticks` / `after_ticks` are clock predicates — prefix
+        # the current with `tick ` so the row reads naturally.
+        if name in ("within_ticks", "after_ticks") and cur is not None:
+            cur_disp = f"tick {cur}"
+        elif cur is None:
+            cur_disp = "—"
+        else:
+            cur_disp = cur
+        mark = "✓" if sat else "x"
+        rows.append(f"{name}: {cur_disp}/{target} {mark}")
+    return "\n".join(rows)

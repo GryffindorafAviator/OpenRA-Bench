@@ -991,9 +991,17 @@ class InteractiveSession:
             "actions_issued": self._issued,
             "actions_warned": 0,
             "agent_stats": {"turns": self.turn},
+            # Deprecated alias + new blocking-ratio scalar + the
+            # per-leaf snapshot. See goal_tracker for the rationale.
             "objective_progress": final_goal.get(
-                "objective_progress", 0.0
+                "objective_blocking_ratio",
+                final_goal.get("objective_progress", 0.0),
             ),
+            "objective_blocking_ratio": final_goal.get(
+                "objective_blocking_ratio",
+                final_goal.get("objective_progress", 0.0),
+            ),
+            "leaves_final": list(final_goal.get("leaves") or []),
             "reward_vector": final_goal.get("reward_vector", {}),
             "signals": {
                 "economy_value": sig.cash + sig.resources,

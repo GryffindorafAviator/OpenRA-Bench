@@ -126,10 +126,17 @@ class EpisodeResult:
     actions_warned: int = 0  # commands the engine rejected/warned on
     trace: list[dict] = field(default_factory=list)
     # Final goal-tracker snapshot (always computed, playback or not).
-    # objective_progress is continuous partial credit toward the
-    # scenario win condition; reward_vector is the normalized
-    # cumulative, scenario-agnostic vector (see goal_tracker).
-    objective_progress: float = 0.0
+    # `objective_blocking_ratio` is the worst-leaf ratio — i.e. the
+    # bottleneck constraint, since an `all_of` win needs every leaf
+    # satisfied (see goal_tracker for why min beats mean). `leaves_final`
+    # carries the per-predicate `{name, target, current, ratio,
+    # satisfied}` snapshot from the final turn — the SOURCE OF TRUTH
+    # for "how close to the win" reporting. `objective_progress` is
+    # kept as a deprecated alias of `objective_blocking_ratio` for
+    # one release so older readers don't crash.
+    objective_progress: float = 0.0  # deprecated alias of objective_blocking_ratio
+    objective_blocking_ratio: float = 0.0
+    leaves_final: list[dict] = field(default_factory=list)
     reward_vector: dict = field(default_factory=dict)
 
 
@@ -490,6 +497,13 @@ def run_level(
                 [f"(episode end: {('loss' if conceded else outcome)})"],
                 adapter.signals, _fpng, interrupt=None, goal=final_goal,
             )
+        # `final_goal` always exposes the new `objective_blocking_ratio`
+        # key (and the deprecated `objective_progress` alias). Read the
+        # new key first; fall back for paranoia in case a hand-built
+        # dict is ever injected here.
+        _blk = final_goal.get(
+            "objective_blocking_ratio", final_goal.get("objective_progress", 0.0)
+        )
         result = EpisodeResult(
             scenario=f"{compiled.pack_id}:{compiled.level}",
             seed=seed,
@@ -499,7 +513,9 @@ def run_level(
             actions_issued=issued,
             actions_warned=warned,
             trace=trace,
-            objective_progress=final_goal["objective_progress"],
+            objective_progress=_blk,
+            objective_blocking_ratio=_blk,
+            leaves_final=list(final_goal.get("leaves") or []),
             reward_vector=final_goal["reward_vector"],
         )
         if playback is not None:
@@ -526,6 +542,8 @@ def run_level(
                     "actions_warned": warned,
                     "agent_stats": getattr(agent_obj, "stats", None),
                     "objective_progress": result.objective_progress,
+                    "objective_blocking_ratio": result.objective_blocking_ratio,
+                    "leaves_final": result.leaves_final,
                     "reward_vector": result.reward_vector,
                     "signals": {
                         "economy_value": adapter.signals.cash
@@ -558,6 +576,8 @@ def run_level(
                             introspection_source(controller), "stats", None
                         ),
                         "objective_progress": result.objective_progress,
+                        "objective_blocking_ratio": result.objective_blocking_ratio,
+                        "leaves_final": result.leaves_final,
                         "reward_vector": result.reward_vector,
                     },
                 )

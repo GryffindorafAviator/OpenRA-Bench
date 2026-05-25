@@ -502,7 +502,12 @@ def evaluate(
                         "reasoning": sc.reasoning,
                         "action": sc.action,
                         "weakest_link": sc.weakest_link,
+                        # `objective_progress` is deprecated and equals
+                        # `objective_blocking_ratio`; kept for one
+                        # release of journal back-compat.
                         "objective_progress": res.objective_progress,
+                        "objective_blocking_ratio": res.objective_blocking_ratio,
+                        "leaves_final": res.leaves_final,
                         "reward_vector": res.reward_vector,
                         "notes": sc.notes,
                     },
@@ -521,7 +526,13 @@ def evaluate(
             "reasoning": sc.reasoning,
             "action": sc.action,
             "weakest_link": sc.weakest_link,
+            # `objective_progress` is the deprecated alias of
+            # `objective_blocking_ratio`, kept one release for
+            # journal back-compat. New consumers should read
+            # `leaves_final` directly for per-leaf detail.
             "objective_progress": res.objective_progress,
+            "objective_blocking_ratio": res.objective_blocking_ratio,
+            "leaves_final": res.leaves_final,
             "reward_vector": res.reward_vector,
             "turns": res.turns,
             "speed": sc.speed,
@@ -638,6 +649,8 @@ def evaluate(
                     "action": 0.0,
                     "weakest_link": "n/a",
                     "objective_progress": 0.0,
+                    "objective_blocking_ratio": 0.0,
+                    "leaves_final": [],
                     "reward_vector": {},
                     "turns": 0,
                     "notes": [msg[:500]],
@@ -699,6 +712,13 @@ def _shim(r: dict):
     sc = r.get("_sc")
     if sc is not None:
         return sc
+    # Prefer the new `objective_blocking_ratio` scalar; fall back to
+    # the deprecated `objective_progress` so a v1.0 journal row still
+    # aggregates correctly. Both hold the same min-of-leaves scalar
+    # post-fix — only the v1.0 rows carry the old (misleading) mean.
+    obj = r.get("objective_blocking_ratio")
+    if obj is None:
+        obj = r.get("objective_progress", 0.0)
     return _ScoreShim(
         composite=r.get("composite", 0.0),
         outcome=r.get("outcome", "draw"),
@@ -706,7 +726,7 @@ def _shim(r: dict):
         reasoning=r.get("reasoning", 0.0),
         action=r.get("action", 0.0),
         weakest_link=r.get("weakest_link", "n/a"),
-        dimensions={"objective": r.get("objective_progress", 0.0)},
+        dimensions={"objective": obj},
         speed=r.get("speed", 0.0),
         win_turns=r.get("win_turns", r.get("turns", 0)),
     )
