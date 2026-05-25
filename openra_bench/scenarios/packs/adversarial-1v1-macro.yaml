@@ -319,13 +319,31 @@ levels:
       game ends when one base falls or after 200 decision turns
       (economy tie-breaks on the deadline).
     starting_cash: 2000
-    # Stub predicates only — the 1v1 harness decides the winner from
-    # the final boards (base alive ⇒ in the game). These describe the
-    # same condition for hygiene-test compliance.
+    # Stub predicates — the 1v1 harness (`run_1v1`) decides the
+    # winner from the final boards (base alive ⇒ in the game)
+    # independent of these clauses. They serve TWO purposes:
+    #   (a) hygiene-test compliance (schema requires both clauses);
+    #   (b) make a single-player accidental run produce a real
+    #       reachable LOSS (timeout) rather than a degenerate DRAW.
+    #
+    # F9 sweep audit fix (2026-05-25): the previous fail clause was
+    # `not: {has_building: fact}` (mirror of win) — in single-player
+    # the agent's fact predicate never flips (no scripted opponent
+    # razes it) and the engine auto-terminates well before
+    # `max_turns` for opaque reasons (ore depletion / power loss
+    # cascade), so the episode ended as a degenerate DRAW. The new
+    # fail clause adds an `after_ticks` arm at a tick reachable
+    # IN SINGLE-PLAYER (1000, well below the typical auto-`done`
+    # tick of ~12000 measured during the audit) so an accidental
+    # single-player run terminates as a real LOSS instantly. The
+    # 1v1 path is unaffected — `run_1v1` doesn't consult
+    # `fail_condition`; it decides the outcome from final boards.
     win_condition:
       not: {has_building: fact}
     fail_condition:
-      not: {has_building: fact}
+      any_of:
+        - not: {has_building: fact}
+        - after_ticks: 1000
     max_turns: 200
   medium: *canonical
   hard: *canonical
@@ -333,6 +351,15 @@ levels:
 # ONE runnable config — the canonical 1v1 cell. Pinned to `medium`
 # (per the bench's level-name conventions, the "default" rung) so
 # a `--mode 1v1 --packs adversarial-1v1-macro.yaml` invocation
-# produces ONE episode per seed, not three identical ones.
+# produces ONE episode per seed, not three identical ones. The
+# `configs:` block is also the single-player filter — when a pack
+# declares `configs:`, `run_eval.evaluate` iterates the configs
+# instead of {easy, medium, hard}, so a default single-player sweep
+# of this pack produces ONE cell (`:main`) rather than three. This
+# pack is intended for `--mode 1v1`; the single-player `:main`
+# cell relies on the `after_ticks` fail clause above so an
+# accidental single-player run terminates as a real LOSS rather
+# than a DRAW (mirror-fact win/fail predicates never fire when no
+# one attacks the agent's base).
 configs:
   - {name: main, level: medium, fog_mode: vision}
