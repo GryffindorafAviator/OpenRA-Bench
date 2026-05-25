@@ -17,18 +17,16 @@ set -a; source .env; set +a
 # Order: gpt-5.4-mini-involving FIRST (cheaper @ $0.75/$4.50 per 1M)
 #        gpt-5.4-involving LAST (4× pricier)
 PAIRS=(
-  # 4× gpt-5.4-mini pairs (cheapest)
+  # Currently running in queue (pair 1):
   "qwen3.5-9b gpt-5.4-mini together:Qwen/Qwen3.5-9B openai:gpt-5.4-mini-2026-03-17"
-  "qwen3.6-35b-a3b gpt-5.4-mini together:together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad openai:gpt-5.4-mini-2026-03-17"
+  # NOTE: 4 pairs removed (running in parallel since 13:30):
+  #   gpt-5.4-mini × gpt-5.4-mini, gpt-5.4-mini × gpt-5.4, gpt-5.4 × gpt-5.4,
+  #   qwen3.6-35b-a3b × gpt-5.4-mini
+  # Remaining for sequential queue (no overlap with parallel launches):
   "gemma-4-31b-it gpt-5.4-mini together:together_sso/google/gemma-4-31B-it-f5dbf8ad openai:gpt-5.4-mini-2026-03-17"
-  "gpt-5.4-mini gpt-5.4-mini openai:gpt-5.4-mini-2026-03-17 openai:gpt-5.4-mini-2026-03-17"
-  # The cross-tier pair (gpt-5.4-mini vs gpt-5.4)
-  "gpt-5.4-mini gpt-5.4 openai:gpt-5.4-mini-2026-03-17 openai:gpt-5.4-2026-03-05"
-  # 4× gpt-5.4 pairs (most expensive — run last)
   "qwen3.5-9b gpt-5.4 together:Qwen/Qwen3.5-9B openai:gpt-5.4-2026-03-05"
   "qwen3.6-35b-a3b gpt-5.4 together:together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad openai:gpt-5.4-2026-03-05"
   "gemma-4-31b-it gpt-5.4 together:together_sso/google/gemma-4-31B-it-f5dbf8ad openai:gpt-5.4-2026-03-05"
-  "gpt-5.4 gpt-5.4 openai:gpt-5.4-2026-03-05 openai:gpt-5.4-2026-03-05"
 )
 
 mkdir -p /tmp/openai_1v1_seq
