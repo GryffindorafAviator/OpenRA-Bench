@@ -41,6 +41,20 @@ A scenario is defective if any of the following hold:
 7. The pack is `UPGRADED` in `tests/test_hard_tier.py` but its hard
    tier does not produce ≥2 distinct seed-driven spawns (or there is
    no documented `NOT_APPLICABLE` reason).
+8. **A pre-placed `harv` adjacent to a `proc` auto-routes to nearby
+   ore from t=0** (engine `auto_route_idle_harvesters` in
+   `OpenRA-Rust/openra-sim/src/world.rs:2233`). This is intentional
+   game behaviour, NOT an engine bug. The consequence for pack
+   tuning: any `economy_value_gte: N` bar must sit ABOVE the
+   unattended auto-harvest ceiling at the pack's deadline; otherwise
+   a stall (observe-only) policy WINS by free baseline income, and
+   the no-cheat bar is broken. Measure the ceiling with a temporary
+   bar of 100000 (so the episode runs to the deadline rather than
+   triggering early), then set the real bar comfortably above it.
+   Three packs were silently violating this until 2026-05-24:
+   `economy-harvest-timebox` easy, `rob-cash-depletion-recovery`
+   easy, both since fixed. See `tools/validate_pack_bar.py` (below)
+   for the audit script that surfaces this defect class.
 
 ## Authoritative docs (read these, in order)
 
@@ -87,6 +101,21 @@ A scenario is defective if any of the following hold:
 - **The 21 no-cheat-redesign commits on `main`** are worked examples
   of every capability/predicate/bot combination. Browse with
   `git log --oneline --grep "no-cheat redesign"` and read the bodies.
+- **`tools/validate_pack_bar.py`** — sweep-runs `observe()`-only
+  (stall) against every active pack × level × seed 1–4 and emits
+  `audits/pack_bar_status.csv`. Any cell where stall WINS is a
+  no-cheat-bar break (cheat policies must LOSE per the bar). Run
+  before merging any pack edit:
+  ```
+  python3 tools/validate_pack_bar.py
+  python3 tools/analyze_pack_bar.py audits/pack_bar_status.csv
+  ```
+  Catches the auto-harvest-baseline defect class (above) and any
+  win predicate that's structurally satisfiable without agent
+  action (e.g. `within_ticks:N` with no objective predicate).
+  The intended-must-WIN half of the bar is still verified by each
+  pack's `tests/test_*.py` — the validator is the missing piece
+  for the cheats-must-LOSE half.
 
 ## Audit-doc workflow (binding for every pack edit)
 
@@ -118,23 +147,32 @@ Before editing any scenario pack:
 
 ## Engine facts you must internalise
 
-- **Vendor RA YAML is the SINGLE source of unit data.** The historical
-  hardcoded `GameRules::defaults()` table in
-  `OpenRA-Rust/openra-sim/src/gamerules.rs` was removed in PR #15
-  (replacing the earlier sync). All actor / weapon stats — HP, cost,
-  speed, footprint, weapons, prereqs — now come exclusively from
-  `OpenRA-Rust/vendor/OpenRA/mods/ra/rules/*.yaml`, parsed by
-  `from_ruleset()` and reached via:
-  - `GameRules::from_vendor()` — fresh parse, panics with a clear
-    message if the vendor directory is unreachable.
+- **Embedded RA YAML is the SINGLE source of unit data.** Originally
+  seeded from upstream OpenRA at SHA `0938a27` (bleed branch), the RA
+  rules / weapons YAML now lives in-repo at
+  `OpenRA-Rust/openra-data/src/embedded/{rules,weapons}/*.yaml` and is
+  parsed at runtime via `include_str!`. The runtime vendor-checkout
+  dependency was removed by the engine refactor that introduced this
+  section — history: an earlier `GameRules::defaults()` stub was
+  removed in PR #15 making the vendor checkout strict-required, then
+  the vendor-checkout dependency itself was removed when the YAML
+  files were embedded into the binary. See
+  `OpenRA-Rust/VENDOR_DATA.md` for the snapshot / bump procedure.
+  All actor / weapon stats — HP, cost, speed, footprint, weapons,
+  prereqs — flow through `GameRules::from_ruleset` exactly as before,
+  reached via:
+  - `GameRules::from_vendor()` — fresh parse of the embedded data
+    (no filesystem). Can't fail unless an explicit `OPENRA_VENDOR_DIR`
+    override is broken.
   - `GameRules::vendor_cached()` — `OnceLock`-cached clone, suitable
     for tests that spin up many worlds (parity sweeps, etc.).
   - `openra-train/src/env.rs::load_rules_strict()` — runtime entry
-    point for the bench wheel; panics on missing vendor.
+    point for the bench wheel. Reads the embedded data by default;
+    honours `OPENRA_VENDOR_DIR` as an opt-in override for power users
+    testing against an alternate snapshot.
   - `openra-sim/src/world.rs::build_world(map, ..., None, ...)` — the
-    `None` fallback now hits `vendor_cached()` instead of the deleted
-    `defaults()` stub, so every test that passes `None` for rules
-    transparently inherits vendor truth.
+    `None` fallback hits `vendor_cached()`, so every test that passes
+    `None` for rules transparently inherits the embedded RA truth.
   **Footguns this closes**: the stub used to drift from vendor — `fact`
   footprint was 3×2 but vendor is 3×4; pillbox/tanya weapons were
   hand-coded stubs (`AAStub`, `TanyaPistol`) rather than the real

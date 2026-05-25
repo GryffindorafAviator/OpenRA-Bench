@@ -135,7 +135,7 @@ def _intended_scout_then_counter_policy(easy_mode: bool):
     queue 4× e3 and attack-move them at the near unit cluster.
 
     Demonstrates the scout-then-counter chain end-to-end:
-      1. jeep moves east to (118, 5) / (118, 38) / (115, 18 on easy)
+      1. jeep moves east to (92, 5) / (92, 38) / (88, 18 on easy)
       2. enemy fact discovered ⇒ then[0] latches
       3. ≥4 e3 produced ⇒ then[1] latches
       4. e3 attack-move kills ≥3 enemies ⇒ units_killed clause
@@ -155,22 +155,24 @@ def _intended_scout_then_counter_policy(easy_mode: bool):
         if jeep and not state["scouted"]:
             jy = jeep["cell_y"]
             if easy_mode:
-                cmds.append(Cmd.move_units([jeep["id"]], 115, 18))
-            elif jy < 18:  # NW base — NE fact at (122, 5)
-                cmds.append(Cmd.move_units([jeep["id"]], 118, 5))
-            else:           # SW base — SE fact at (122, 38)
-                cmds.append(Cmd.move_units([jeep["id"]], 118, 38))
+                cmds.append(Cmd.move_units([jeep["id"]], 88, 18))
+            elif jy < 18:  # NW base — NE fact at (92, 5)
+                cmds.append(Cmd.move_units([jeep["id"]], 92, 5))
+            else:           # SW base — SE fact at (92, 38)
+                cmds.append(Cmd.move_units([jeep["id"]], 92, 38))
         if "tent" in own_b and e3_count < 4 and "e3" not in prod:
             cmds.append(Cmd.build("e3"))
         if e3_count >= 4 and state["scouted"]:
             e3_ids = [u["id"] for u in units if u.get("type") == "e3"]
             jy = jeep["cell_y"] if jeep else 18
             if easy_mode:
-                cmds.append(Cmd.attack_move(e3_ids, 108, 18))
+                cmds.append(Cmd.attack_move(e3_ids, 84, 18))
             elif jy < 18:
-                cmds.append(Cmd.attack_move(e3_ids, 90, 10))
+                # NW base — e1 cluster offset south of NE fact, at (90, 18)
+                cmds.append(Cmd.attack_move(e3_ids, 90, 18))
             else:
-                cmds.append(Cmd.attack_move(e3_ids, 90, 30))
+                # SW base — 2tnk cluster offset north of SE fact, at (90, 22)
+                cmds.append(Cmd.attack_move(e3_ids, 90, 22))
         if not cmds:
             cmds.append(Cmd.observe())
         return cmds
@@ -356,7 +358,7 @@ def test_pre_pick_B_loses_on_medium_and_hard(level, seed, target_xy):
     """Pre-pick counter-B WITHOUT scouting: every (medium/hard,
     seed, target-corner) must LOSS — same chain teeth as
     pre-pick-A. 2tnks attacking the unit cluster at (90, *) don't
-    drift close enough to (122, 5)/(122, 38) to surface the enemy
+    drift close enough to (92, 5)/(92, 38) to surface the enemy
     fact (~32 cells off-axis vs 2tnk sight=6)."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _pre_pick_B_policy(*target_xy), seed=seed)

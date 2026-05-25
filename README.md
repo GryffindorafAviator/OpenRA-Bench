@@ -12,49 +12,41 @@ license: gpl-3.0
 
 # OpenRA-Bench
 
-Standardized benchmark and leaderboard for AI agents playing Red Alert through [OpenRA-RL](https://openra-rl.dev).
+Standardized benchmark and leaderboard for LLM/RL agents playing
+Red Alert through the OpenRA-Rust engine. The bench measures
+isolated capabilities (combat micro, economy, scouting, long-horizon
+planning, …) via scripted scenarios with a strict no-cheat bar.
 
-## Features
+## What's here
 
-- **Leaderboard**: Ranked agent comparison with composite scoring
-- **Filtering**: By agent type (Scripted/LLM/RL) and opponent difficulty
-- **Evaluation harness**: Automated N-game benchmarking with metrics collection
-- **OpenEnv rubrics**: Composable scoring (win/loss, military efficiency, economy)
-- **Replay verification**: Replay files linked to leaderboard entries
-- **Mission Player**: Static game-like website for browsing, annotating, and reviewing scenarios
-- **Bilingual**: English and Chinese scenario instructions generated deterministically
+- **Scenario suite** — 200+ packs under `openra_bench/scenarios/packs/`,
+  grouped into 11 capability families.
+- **Rust engine** — the embedded-data engine at `OpenRA-Rust/` (see
+  `OpenRA-Rust/VENDOR_DATA.md` for the unit-data provenance).
+- **LLM evaluation harness** — `openra_bench.run_eval` runs an LLM
+  agent through any subset of packs and produces structured
+  per-turn + per-episode artifacts under `result/`.
+- **Human evaluation UI** — `site/index.html` + `site/game_api.py`,
+  a dark static-site app for humans to play scenarios with a
+  **review-before-save** modal (no auto-save of accidental or
+  contaminated runs).
+- **Leaderboard browser** — `app.py` Gradio tabs for viewing
+  existing leaderboard / capability-leaderboard / scenario catalog
+  / battle viewer. The legacy Play / Playlist / Submit tabs were
+  removed; the static site is the canonical human-eval UI.
 
 ## Quick Start
 
-### View the leaderboard
+### Browse the leaderboard
 
 ```bash
 pip install -r requirements.txt
 python app.py
 # Opens at http://localhost:7860
+# Tabs: Leaderboard, Capability Leaderboard, Scenarios, Battle Viewer, About
 ```
 
-### Run an evaluation
-
-```bash
-# Against the HuggingFace-hosted environment (no Docker needed)
-python evaluate.py \
-    --agent scripted \
-    --agent-name "MyBot-v1" \
-    --opponent Normal \
-    --games 10 \
-    --server https://openra-rl-openra-rl.hf.space
-
-# Or against a local Docker server
-python evaluate.py \
-    --agent scripted \
-    --agent-name "MyBot-v1" \
-    --opponent Normal \
-    --games 10 \
-    --server http://localhost:8000
-```
-
-### Run an LLM scenario eval
+### Run an LLM scenario evaluation
 
 `python -m openra_bench.run_eval` drives the Rust engine through the
 scenario packs in `openra_bench/scenarios/packs/` against an LLM
@@ -62,125 +54,121 @@ agent. Supported providers: `openrouter`, `vllm`, `openai`,
 `together`, `bedrock`.
 
 ```bash
-# OpenRouter / OpenAI / vLLM (set the matching API_KEY env var first):
+# OpenRouter / OpenAI / vLLM / Together (set the matching API_KEY first):
 python -m openra_bench.run_eval \
     --packs openra_bench/scenarios/packs/perception-target-vs-fog.yaml \
     --levels easy --seeds 1 \
     --provider openrouter --model anthropic/claude-3.5-sonnet \
     --out eval_stats.json
+```
 
-# AWS Bedrock — Claude Sonnet 4.6 via the cross-region inference profile.
-# Auth is the standard boto3 credential chain (env / shared config /
-# role); never hardcoded. The on-demand model id throws
-# ValidationException; only the profile id below is callable.
-aws sts get-caller-identity   # confirm credentials
+For a full sweep:
+
+```bash
 python -m openra_bench.run_eval \
-    --packs openra_bench/scenarios/packs/perception-target-vs-fog.yaml \
-    --levels easy --seeds 1 \
-    --provider bedrock \
-    --model us.anthropic.claude-sonnet-4-6 \
-    --bedrock-region us-west-2 \
-    --out eval_stats.json
+    --provider together --model "Qwen/Qwen3.5-9B" \
+    --family all \
+    --levels easy,medium,hard --seeds 1 \
+    --concurrency 20 --qps 10 \
+    --out data/runs/<run_name>/ \
+    --playback data/runs/<run_name>/playback
+```
+
+After the sweep, consolidate into the canonical `result/` layout:
+
+```bash
+python3 tools/consolidate_results.py --input data/runs/ --output result/ --symlink
 ```
 
 A 5-pack end-to-end smoke test of the Bedrock path lives in
 [`docs/BEDROCK_SMOKE.md`](docs/BEDROCK_SMOKE.md).
 
-### Submit results
+### Run a human evaluation
 
-**Via CLI (recommended):**
-
-```bash
-pip install openra-rl
-openra-rl bench submit result.json
-openra-rl bench submit result.json --replay game.orarep --agent-name "MyBot" --agent-url "https://github.com/user/mybot"
-```
-
-Results from `openra-rl play` are auto-submitted after each game.
-
-**Via PR:**
-
-1. Fork this repo
-2. Run evaluation (appends to `data/results.csv`)
-3. Open a PR with your results
-
-### Agent identity
-
-Customize your leaderboard entry:
-
-| Field | Description |
-|-------|-------------|
-| `agent_name` | Display name (e.g. "DeathBot-9000") |
-| `agent_type` | `Scripted`, `LLM`, or `RL` |
-| `agent_url` | GitHub/project URL — renders as a clickable link on the leaderboard |
-
-### Replay downloads
-
-Entries submitted with a `.orarep` replay file show a download link in the Replay column. Replays are stored on the Space and served at `/replays/<filename>`.
-
-### API endpoints
-
-The Gradio app exposes these API endpoints (Gradio 5+ SSE protocol):
-
-| Endpoint | Description |
-|----------|-------------|
-| `submit` | Submit JSON results (no replay) |
-| `submit_with_replay` | Submit JSON + replay file |
-| `filter_leaderboard` | Query/filter leaderboard data |
-
-## Mission Player (Static Site)
-
-A game-like mission selection and annotation website in `site/`. No framework, no build step -- a single HTML file deployable to GitHub Pages.
-
-### For players / annotators
-
-Open `site/index.html` via any HTTP server:
+The canonical human-play UI is the static site under `site/`. It
+serves a dark-themed game-like interface with the **review-before-save**
+modal: every game-over surfaces a turn-by-turn summary; the human
+clicks **Save to dataset** (promotes the draft to `data/runs/...`)
+or **Discard** (drops it). Until clicked, nothing lands on disk.
 
 ```bash
+# 1. Start the FastAPI backend:
+python -m site.game_api
+# Listens on http://localhost:8000 by default
+
+# 2. Serve the static UI:
 cd site && python3 -m http.server 8765
 # Open http://localhost:8765/index.html
 ```
 
-Workflow: browse scenario cards, pick a mission, read bilingual objectives (EN/ZH toggle), switch difficulty (easy/medium/hard), annotate the map with point/region tools, tag and add notes, mark complete, navigate to next mission, export annotations as JSON.
+Workflow: pick a scenario from the assigned annotator queue (or any
+pack), play turn-by-turn, see end-of-game review modal, decide
+save/discard, advance to the next assigned scenario.
 
-### For maintainers
-
-Generate or refresh static data after scenario changes:
+The static site also has a no-server browse-only mode:
 
 ```bash
-python site/generate.py            # generate scenarios.json + map thumbnails
+cd site && python3 -m http.server 8765
+# Open http://localhost:8765/index.html
+# (Browse + annotate without running games — no backend needed.)
+```
+
+Generate or refresh the static catalog after scenario changes:
+
+```bash
+python site/generate.py            # regenerate scenarios.json + thumbnails
 python site/generate.py --dry-run  # print counts without writing
 ```
 
-Map thumbnails require the Rust engine wheel (`openra_train`). Without it, the site works with a placeholder map area; annotations still work on the placeholder.
-
 Deploy by copying `site/index.html` and `site/public/` to any static host.
 
-See `docs/IMPLEMENTATION_NOTES.md` for full details.
+See `docs/IMPLEMENTATION_NOTES.md` for full details on the static site.
+
+### Validate the no-cheat bar
+
+After editing any pack, run the bar validator to confirm no stall
+(observe-only) policy WINS on any (pack, level, seed):
+
+```bash
+python3 tools/validate_pack_bar.py
+python3 tools/analyze_pack_bar.py audits/pack_bar_status.csv
+```
+
+CI runs this on every PR (`.github/workflows/test.yml`) and fails on
+any stall-wins cell.
 
 ### Running tests
 
 ```bash
-# Data pipeline + coverage invariant tests (Python)
-python -m pytest tests/test_site.py tests/test_app.py -v
+# Engine wheel must be installed (see OpenRA-Rust/VENDOR_DATA.md):
+cd OpenRA-Rust && maturin develop --release
 
-# E2E DOM interaction tests (Node.js + jsdom)
-npm install   # first time only
-node tests/test_site_e2e.mjs
+# Bench suite:
+python3 -m pytest tests/ -n auto --timeout=120 --tb=short
 ```
+
+## Reproducibility
+
+The bench's runtime behaviour is fully defined by ONE pair of
+commits — the bench commit and the engine commit. See `VERSION` at
+the repo root for the pinned pair. The engine embeds the RA unit
+data (originally sourced from upstream OpenRA at SHA `0938a27`)
+directly in its source tree — no runtime dependency on upstream.
+
+Bumping either commit invalidates published bench numbers; re-run
+the canonical sweep against the new pair.
 
 ## Scoring
 
 | Component | Weight | Description |
 |-----------|--------|-------------|
-| Win Rate | 50% | Games won / total games |
-| Military Efficiency | 25% | Kill/death cost ratio (normalized) |
-| Economy | 25% | Final asset value (normalized) |
+| Outcome (win / draw / loss) | 50% | The bar |
+| Composite signals (kills, EV, exploration, …) | 30% | Per-pack dimension weights |
+| Perception / Reasoning / Action diagnostics | 20% | Per-cell breakdown identifying weakest link |
+
+See `openra_bench/scoring.py` for the full breakdown.
 
 ## Links
 
-- [OpenRA-RL Documentation](https://openra-rl.dev)
-- [OpenRA-RL GitHub](https://github.com/yxc20089/OpenRA-RL)
-- [OpenEnv Framework](https://huggingface.co/openenv)
+- [OpenRA-Rust engine repo](https://github.com/yxc20089/OpenRA-Rust)
 - [Leaderboard Space](https://huggingface.co/spaces/openra-rl/OpenRA-Bench)
-- [Environment Space](https://huggingface.co/spaces/openra-rl/OpenRA-RL)

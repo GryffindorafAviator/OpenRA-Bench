@@ -101,8 +101,12 @@ def _tanks_at(n, x=100, y=20):
 @pytest.mark.parametrize("lvl", ["easy", "medium", "hard"])
 def test_win_requires_four_units_in_east_region(lvl):
     c = compile_level(load_pack(PACK_PATH), lvl)
-    # easy/medium cap=1, hard cap=0.
-    cap = 0 if lvl == "hard" else 1
+    # easy cap=0 (tightened post engine PR #15 — vendor HP lets a
+    # bound-and-cover policy take zero losses, and the in-lane e3
+    # screens make the lone-column single-squad lose ≥1 tank;
+    # cap=1 would degenerate single-squad into a DRAW); medium
+    # cap=1 (middle tier); hard cap=0 (the tightest bar).
+    cap = 0 if lvl in ("easy", "hard") else 1
     # 4 tanks in win region, within cap, in time → WIN
     assert evaluate(c.win_condition,
                     _ctx(units=_tanks_at(4), tick=2000, lost=cap))

@@ -10,18 +10,31 @@ proc mid-episode (medium ≈ tick 540; hard ≈ tick 450; on easy the
 defenders intercept the lone 4tnk and the proc survives). The agent
 must `build('proc') + place_building` and re-issue `harvest`.
 
+EV bars per tier:
+  * easy   — 15000. Vendor `auto_route_idle_harvesters` cycles the
+             starting harv onto the patches as soon as a refinery is
+             present, so stall (no agent input) accumulates ~10400 EV
+             by the deadline. The bar sits ABOVE that ceiling and
+             BELOW the dual-proc expansion ceiling (~19500), so the
+             discriminator on easy is "commit the $1400 reserve to a
+             SECOND refinery" — a real `build('proc') + place_building`
+             action.
+  * medium — 2500. The original proc is destroyed; without a rebuild
+             income halts at the starting $1400 (well below the bar).
+             Intended rebuild reaches ~12175 EV.
+  * hard   — 2500. Same as medium plus a destroyed tent (which is NOT
+             on the win predicate); the agent must prioritise the proc
+             rebuild.
+
 For every level + every hard seed (1-4):
-  * INTENDED chain (notice the destruction, build proc, place, re-
-    issue harvest) WINS;
-  * STALL (only `observe`) LOSES every tier — no harvest income, EV
-    stays at the starting $1400, bar (2500) unmet, clock bites;
-  * NO-REBUILD (harvest with the starting harv but never `build`
-    proc) is the EASY FLOOR (wins easy where the proc survives) but
-    LOSES medium/hard (the structural `has_building:proc` clause
-    fails after the proc is destroyed);
+  * INTENDED chain (on easy: build a 2nd proc with the reserve; on
+    medium/hard: rebuild the destroyed proc and re-issue harvest) WINS;
+  * STALL (only `observe`) LOSES every tier — on medium/hard there is
+    no working refinery so EV stays at $1400; on easy the single-proc
+    auto-route hits ~10400 which is below the 15000 expansion bar;
   * BUILD-ARMY (spend the 1400 reserve on powr → tent → e1 instead
-    of replacing the proc) LOSES medium/hard — the reserve is
-    starved, the proc rebuild never completes, the bar is unmet.
+    of replacing/expanding the proc) LOSES — the reserve is drained
+    on assets that don't earn income, EV never reaches the bar.
 """
 
 from __future__ import annotations
@@ -75,8 +88,13 @@ def _current_building_types(res):
 
 
 def _stall(rs, Command):
-    """Idle: never harvests, never rebuilds. EV stays at starting
-    $1400, bar (2500) unmet → reachable timeout LOSS every tier."""
+    """Idle: only `observe`. On medium/hard the original proc is
+    destroyed by the scripted strike (~tick 273) and never rebuilt,
+    so the harv has no refinery and EV stays at the starting $1400
+    (well below the 2500 bar). On easy the proc survives and vendor
+    `auto_route_idle_harvesters` cycles the starting harv onto the
+    patches without any input, accumulating ~10400 EV — BELOW the
+    15000 expansion bar. Reachable timeout LOSS every tier."""
     return [Command.observe()]
 
 
@@ -165,16 +183,29 @@ def _build_army_factory():
 
 
 def _intended_rebuild_factory():
-    """Intended recovery chain: harvest with the starting harv → if
-    proc disappears, `build('proc')` + place adjacent to the fact →
-    once the new proc lands, re-issue `harvest` for the surviving
-    harv. WINS every tier × every seed (on easy the proc never
-    falls; on medium/hard the rebuild fires)."""
+    """Intended recovery / expansion chain:
 
-    state = {"moved": set(), "placed_proc": False}
+      * easy   — original proc survives the light strike; the engine
+                 auto-routes the starting harv onto the patches, but
+                 the single-proc ceiling (~10400) is below the 15000
+                 bar. Commit the $1400 reserve to a SECOND refinery
+                 (build('proc') + place_building one row south of the
+                 original). The engine auto-spawns a fresh harv at the
+                 new proc; combined two-refinery throughput clears
+                 15000 with ~30% headroom.
+      * medium / hard — the scripted strike destroys the original
+                 proc. The same logic — keep building procs while the
+                 count is below 2 — first rebuilds the destroyed
+                 refinery (n_proc 0 -> 1) and then expands. On these
+                 tiers reaching n_proc=1 is enough to clear the 2500
+                 bar via auto-route harvest income.
+
+    The policy intentionally does NOT issue `move_units` / `harvest`
+    on the starting harv — vendor RA auto-routing handles that as
+    soon as a refinery exists, and explicit move orders override the
+    auto-route loop, suppressing income."""
 
     def policy(rs, Command):
-        units = rs.get("units_summary", []) or []
         bldgs = rs.get("own_buildings", []) or []
         own_types = [b["type"] for b in bldgs]
         prod = rs.get("production", []) or []
@@ -183,36 +214,20 @@ def _intended_rebuild_factory():
         if fact_b is None:
             return [Command.observe()]
         fx, fy = fact_b["cell_x"], fact_b["cell_y"]
-        patches = _patches_for_fact(fy)
         n_proc = sum(1 for t in own_types if t == "proc")
 
-        harvs = [
-            (u["id"], u.get("cell_x"), u.get("cell_y"))
-            for u in units
-            if str(u.get("type", "")).lower() == "harv"
-        ]
-
         cmds = []
-        # If proc is gone, queue a rebuild and spam place_building.
-        if n_proc < 1:
+        # While we have fewer than 2 procs: keep queueing+placing one.
+        # On easy this is "expand"; on medium/hard the strike has
+        # taken the original to n_proc=0 and the first iteration
+        # rebuilds it.
+        if n_proc < 2:
             if cash >= 1400 and "proc" not in prod:
                 cmds.append(Command.build("proc"))
-            # Place at the original proc spot (fx+4, fy) — adjacent to
-            # the fact, in-bounds on the rush-hour map.
-            cmds.append(Command.place_building("proc", fx + 4, fy))
-
-        # Always nudge each harv onto a patch and harvest. Re-issue
-        # the harvest order EVERY turn so that when the new proc
-        # lands, the auto-cycle resumes (it does not auto-resume
-        # across a destroy-rebuild gap).
-        for i, (uid, cx, cy) in enumerate(harvs):
-            uid_s = str(uid)
-            px, py = patches[i % len(patches)]
-            if uid_s not in state["moved"]:
-                cmds.append(Command.move_units([uid_s], target_x=px, target_y=py))
-                if abs(cx - px) <= 3 and abs(cy - py) <= 3:
-                    state["moved"].add(uid_s)
-            cmds.append(Command.harvest([uid_s], px, py))
+            # Place one row south of the fact — clear of the original
+            # proc footprint at (fx+4, fy) and the defender ring at
+            # x=18, in-bounds on the 128×32 arena.
+            cmds.append(Command.place_building("proc", fx + 4, fy + 3))
         return cmds if cmds else [Command.observe()]
 
     return policy
@@ -344,8 +359,10 @@ def test_intended_rebuild_wins(level, seed):
 @pytest.mark.parametrize("level", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
 def test_stall_loses(level, seed):
-    """Stall (only `observe`) must LOSE every tier × every seed — no
-    harvest income, EV stays at $1400, bar 2500 unmet, clock bites."""
+    """Stall (only `observe`) must LOSE every tier × every seed.
+    On easy the single-proc auto-route ceiling (~10400) is below
+    the 15000 expansion bar; on medium/hard the strike destroys
+    the proc and harvest income halts at $1400 (below 2500)."""
     c, r = _run(level, _stall, seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed{seed} stall must LOSE; got {r.outcome} "
@@ -353,40 +370,39 @@ def test_stall_loses(level, seed):
     )
 
 
+@pytest.mark.parametrize("level", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
-def test_no_rebuild_is_easy_floor(seed):
-    """No-rebuild (harvest with starting harv only) is the EASY
-    FLOOR — the lone 4tnk is killed by the defender ring, the proc
-    survives, harvest income clears the 2500 bar comfortably."""
-    c, r = _run("easy", _no_rebuild_factory, seed=seed)
-    assert r.outcome == "win", (
-        f"easy seed{seed} no-rebuild should be the FLOOR and WIN; "
-        f"got {r.outcome} (ev={_ev(r)}, "
-        f"types={r.signals.own_building_types})"
-    )
+def test_no_rebuild_loses_every_level(level, seed):
+    """No-rebuild (harvest with starting harv only, never `build`)
+    LOSES every tier:
 
-
-@pytest.mark.parametrize("level", ("medium", "hard"))
-@pytest.mark.parametrize("seed", SEEDS)
-def test_no_rebuild_loses_medium_and_hard(level, seed):
-    """No-rebuild LOSES medium/hard — the strike destroys the proc;
-    the `has_building:proc` clause fails permanently regardless of
-    cash/EV. This is the discriminator that the recovery chain
-    (`build('proc') + place_building`) is actually exercised."""
+    * easy — the proc survives the light strike, but the single-
+      refinery auto-route ceiling (~10400 EV) is BELOW the 15000
+      expansion bar (engine auto-routes harvesters the moment a
+      proc is present; the agent's explicit `move_units` orders
+      further suppress income vs pure stall). Without committing
+      the $1400 reserve to a SECOND refinery, EV never crosses the
+      bar — reachable timeout LOSS.
+    * medium / hard — the scripted strike destroys the original
+      proc; `has_building:proc` fails permanently regardless of
+      cash/EV. This is the discriminator that the recovery chain
+      (`build('proc') + place_building`) is actually exercised.
+    """
     c, r = _run(level, _no_rebuild_factory, seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed{seed} no-rebuild must LOSE; got {r.outcome} "
         f"(ev={_ev(r)}, types={r.signals.own_building_types})"
     )
-    # The proc must have actually been destroyed for the
-    # discrimination to be real (not an EV-bar miss). Note:
-    # `own_building_types` is accumulative; use `own_buildings`
-    # (current per-frame list) for the "alive now" check.
-    cur = _current_building_types(r)
-    assert "proc" not in cur, (
-        f"{level}: no-rebuild should observe proc destroyed; "
-        f"currently-alive types={cur}"
-    )
+    if level != "easy":
+        # On medium/hard the proc must have actually been destroyed
+        # for the discrimination to be real (not an EV-bar miss).
+        # `own_building_types` is accumulative; use `own_buildings`
+        # (current per-frame list) for the "alive now" check.
+        cur = _current_building_types(r)
+        assert "proc" not in cur, (
+            f"{level}: no-rebuild should observe proc destroyed; "
+            f"currently-alive types={cur}"
+        )
 
 
 @pytest.mark.parametrize("level", ("medium", "hard"))

@@ -128,16 +128,18 @@ def test_pack_loads_and_meta_active():
 
 
 def test_uses_custom_tight_arena():
-    """The pack must declare its 64x40 arena (not the generic 128x40
-    rush-hour-arena). Width 64 keeps the near-vs-far decision crisp."""
+    """The pack must declare a procedural arena (not a shared rush-hour-
+    arena). Width 128 / height 48 keeps the near-vs-far decision crisp
+    (FAR patch at x=58 vs NEAR patch at x=24 — ~34 cells apart, enough
+    travel cost to dominate the steady-state throughput delta)."""
     pack = load_pack(PACK)
     bm = pack.base_map
     assert isinstance(bm, dict), (
         f"base_map must be a generator spec dict, got {type(bm).__name__}"
     )
     assert bm.get("generator") == "arena"
-    assert bm.get("width") == 64
-    assert bm.get("height") == 40
+    assert bm.get("width") == 128
+    assert bm.get("height") == 48
 
 
 def test_harv_pre_placed_adjacent_to_far_patch():

@@ -53,9 +53,9 @@ PACK = PACKS_DIR / "proc-checklist-no-deviation.yaml"
 
 # Per-level expected checklist (must mirror the YAML clauses).
 _POINTS = {
-    "easy":   [(40, 4), (75, 36), (118, 20)],
-    "medium": [(40, 4), (75, 36), (95, 4), (118, 36)],
-    "hard":   [(40, 4), (75, 36), (95, 4), (118, 36), (118, 20)],
+    "easy":   [(12, 4), (22, 28), (28, 16)],
+    "medium": [(12, 4), (22, 28), (26, 4), (28, 28)],
+    "hard":   [(12, 4), (22, 28), (26, 4), (28, 28), (28, 16)],
 }
 
 SEEDS = (1, 2, 3, 4)

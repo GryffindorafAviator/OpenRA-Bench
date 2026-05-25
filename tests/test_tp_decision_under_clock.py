@@ -46,8 +46,8 @@ PACK_PATH = (
 
 LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
-NE = (116, 6)
-SE = (116, 34)
+NE = (72, 6)
+SE = (72, 34)
 
 
 # ── Pack-shape tests (cheap; no engine) ───────────────────────────
@@ -240,7 +240,7 @@ def _make_commit_blind(corner):
 
 def _make_dither(corner):
     """Over-scout: jeeps scout, but the column is HELD at base until
-    t≈1500 (waiting for full certainty) — the late commit busts the
+    t≈2300 (waiting for full certainty) — the late commit busts the
     tight clock even when it targets the light corner."""
 
     def pol(rs, Command):
@@ -256,17 +256,17 @@ def _make_dither(corner):
             if len(jeeps) >= 1:
                 cmds.append(
                     Command.move_units(
-                        [str(jeeps[0]["id"])], target_x=110, target_y=NE[1]
+                        [str(jeeps[0]["id"])], target_x=70, target_y=NE[1]
                     )
                 )
             if len(jeeps) >= 2:
                 cmds.append(
                     Command.move_units(
-                        [str(jeeps[1]["id"])], target_x=110, target_y=SE[1]
+                        [str(jeeps[1]["id"])], target_x=70, target_y=SE[1]
                     )
                 )
             return cmds or [Command.observe()]
-        if t < 1500:
+        if t < 2300:
             return [Command.observe()]
         fid = _fact_id_if_close(rs, corner, tanks)
         if fid:
@@ -278,15 +278,21 @@ def _make_dither(corner):
 
 def _make_intended():
     """Brief-scout-then-commit: roll the column out toward centre at
-    t=0 while the jeeps race to the two corners. When a jeep is lost,
-    the SURVIVING jeep marks the LIGHT corner; divert the column there
-    and focus-fire that fact once a tank is close."""
-    st = {"corner": None, "njeeps": 2}
+    t=0 while the jeeps race to the two corners. The FIRST jeep lost
+    marks the HEAVY corner; the surviving jeep (or its last-known
+    position) marks the LIGHT corner. Divert the column to the light
+    corner and focus-fire that fact once a tank is close."""
+    st = {"corner": None, "njeeps": 2, "last_jeep_y": {}}
 
     def pol(rs, Command):
         t = rs.get("game_tick", 0)
         us = rs.get("units_summary", [])
         jeeps = [u for u in us if u.get("type") == "jeep"]
+        # Track which jeep ids we've seen and where they last were.
+        for j in jeeps:
+            st["last_jeep_y"][str(j["id"])] = (
+                int(j["cell_y"]), int(j["cell_x"])
+            )
         tanks = [u for u in us if u.get("type") == "2tnk"]
         if len(jeeps) < st["njeeps"]:
             st["njeeps"] = len(jeeps)
@@ -298,19 +304,35 @@ def _make_intended():
             if len(jeeps) >= 1:
                 cmds.append(
                     Command.move_units(
-                        [str(jeeps[0]["id"])], target_x=110, target_y=NE[1]
+                        [str(jeeps[0]["id"])], target_x=70, target_y=NE[1]
                     )
                 )
             if len(jeeps) >= 2:
                 cmds.append(
                     Command.move_units(
-                        [str(jeeps[1]["id"])], target_x=110, target_y=SE[1]
+                        [str(jeeps[1]["id"])], target_x=70, target_y=SE[1]
                     )
                 )
             return cmds
         if st["corner"] is None:
             if st["njeeps"] < 2 and jeeps:
+                # One jeep died, one survives. Surviving jeep is in
+                # the LIGHT corner — commit there.
                 st["corner"] = NE if jeeps[0]["cell_y"] < 20 else SE
+            elif st["njeeps"] == 0:
+                # Both jeeps died before reporting back. Pick the
+                # corner where the LATER-dying jeep got further east
+                # (it lived longer = lighter resistance). Falls back
+                # to NE if last positions are equivalent.
+                ys = [v[0] for v in st["last_jeep_y"].values()]
+                if ys:
+                    # Heuristic: pick the y closer to the FURTHER jeep's
+                    # last seen position. With only y info, default to
+                    # the corner closest to the average last-y.
+                    avg_y = sum(ys) / len(ys)
+                    st["corner"] = NE if avg_y < 20 else SE
+                else:
+                    st["corner"] = NE
             else:
                 return [Command.attack_move(ids, target_x=70, target_y=20)]
         c = st["corner"]

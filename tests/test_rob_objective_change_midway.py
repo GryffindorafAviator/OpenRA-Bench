@@ -120,6 +120,18 @@ def _intended_a_then_b_policy(A, B):
                 state["phase"] = 2
             else:
                 return [Cmd.move_units(ids, A[0], A[1])]
+        # Phase 2: pivot to B. Tanks under ReturnFire stance stop
+        # attacking a non-firing building once adjacent; focus-fire
+        # the fact id directly to finish the kill inside budget.
+        fact_id = None
+        for e in obs.get("enemy_buildings_summary", []) or []:
+            if (e.get("type") == "fact"
+                    and abs(e.get("cell_x", -99) - B[0]) <= 6
+                    and abs(e.get("cell_y", -99) - B[1]) <= 6):
+                fact_id = str(e["id"])
+                break
+        if fact_id is not None:
+            return [Cmd.attack_unit(ids, fact_id)]
         return [Cmd.attack_move(ids, B[0], B[1])]
     return pol
 

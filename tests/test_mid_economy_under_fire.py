@@ -223,20 +223,24 @@ def test_uses_raider_bot():
 
 def _intended(rs, Command):
     """Fire-support-around-the-ore-patch: keep harvesters in
-    `harvest` mode each turn (the ring of tank defenders auto-engages
-    the inbound raider on Defend stance). Throughput climbs while the
-    raider dies on contact with the ring."""
+    `harvest` mode each turn AND flip the tank ring to AttackAnything
+    (stance:3) so they advance to hunt the inbound raider — the raider
+    bot drives toward harvesters, but a Defend-only ring (stance:2)
+    only fires once the raider enters weapon range, which on this map
+    happens out past where the raider lurks. AttackAnything closes the
+    distance and kills the raider, satisfying units_killed_gte."""
     cmds = []
-    harv_ids = [
-        str(u["id"]) for u in (rs.get("units_summary", []) or [])
-        if u.get("type") == "harv"
-    ]
+    units = rs.get("units_summary", []) or []
+    harv_ids = [str(u["id"]) for u in units if u.get("type") == "harv"]
+    tnk_ids = [str(u["id"]) for u in units if u.get("type") == "1tnk"]
     # Try every known patch; the engine picks whichever is reachable
     # for the active seed (north / south / central).
     patches = [(22, 14), (22, 18), (22, 22), (22, 26)]
     for i, hid in enumerate(harv_ids):
         mx, my = patches[i % len(patches)]
         cmds.append(Command.harvest([hid], mx, my))
+    if tnk_ids:
+        cmds.append(Command.set_stance(tnk_ids, 3))
     return cmds or [Command.observe()]
 
 

@@ -86,7 +86,15 @@ base:
   enemy: {faction: soviet, cash: 0, bot_type: raider}
   tools: [observe, harvest, move_units, attack_unit, attack_move, stop]
   planning: true
-  termination: {max_ticks: 7000}
+  termination:
+    max_ticks: 7000
+    # The intended policy flips defenders to stance:3 (AttackAnything) so
+    # they hunt the inbound raider — but stance:3 then chains to the far
+    # persistent enemy `fact` marker at (120,20) and the engine would
+    # auto-`done` on enemy-elimination, collapsing the run to a DRAW
+    # before the EV bar / deadline is evaluated. Keep the run alive past
+    # an enemy-side wipe so the within_ticks teeth fire as designed.
+    enemy_units_killed: false
   actors:
     # Base seed — fact for the marker, proc to refine, harvs to work.
     - {type: fact, owner: agent, position: [8, 18]}
@@ -107,9 +115,9 @@ base:
     # the enemy's last MustBeDestroyed building falls). stance:2 holds
     # the ring on the patch so the episode runs to the win/fail
     # predicate.
-    - {type: '1tnk', owner: agent, position: [26, 18], stance: 0}
-    - {type: '1tnk', owner: agent, position: [26, 20], stance: 0}
-    - {type: '1tnk', owner: agent, position: [26, 22], stance: 0}
+    - {type: '1tnk', owner: agent, position: [26, 18], stance: 2}
+    - {type: '1tnk', owner: agent, position: [26, 20], stance: 2}
+    - {type: '1tnk', owner: agent, position: [26, 22], stance: 2}
     # Two ore patches east of the proc — sustained harvesting target.
     - {type: mine, owner: neutral, position: [22, 18]}
     - {type: mine, owner: neutral, position: [22, 22]}
@@ -195,9 +203,9 @@ levels:
         - {type: harv, owner: agent, position: [14, 18]}
         - {type: harv, owner: agent, position: [14, 20]}
         - {type: harv, owner: agent, position: [14, 22]}
-        - {type: '1tnk', owner: agent, position: [26, 18], stance: 0}
-        - {type: '1tnk', owner: agent, position: [26, 20], stance: 0}
-        - {type: '1tnk', owner: agent, position: [26, 22], stance: 0}
+        - {type: '1tnk', owner: agent, position: [26, 18], stance: 2}
+        - {type: '1tnk', owner: agent, position: [26, 20], stance: 2}
+        - {type: '1tnk', owner: agent, position: [26, 22], stance: 2}
         - {type: mine, owner: neutral, position: [22, 18]}
         - {type: mine, owner: neutral, position: [22, 22]}
         # Two staggered raiders — the second arrives ~9 turns after
@@ -293,7 +301,13 @@ levels:
         - {type: fact, owner: enemy, position: [120, 20]}
     win_condition:
       all_of:
-        - {economy_value_gte: 4000}
+        # Bar 3000 (lowered from 4000 after engine PR #15: vendor HP
+        # plus stance-flip discipline means the intended play hunts the
+        # raiders and the harv yield caps near 3000 EV when defenders
+        # leave the patch to chase). Cheats still LOSE on the
+        # `unit_type_count_gte: harv:2` / `units_lost_lte: 2` clauses
+        # rather than on the EV bar.
+        - {economy_value_gte: 3000}
         - {unit_type_count_gte: {type: harv, n: 2}}
         - {units_killed_gte: 3}
         - {units_lost_lte: 2}

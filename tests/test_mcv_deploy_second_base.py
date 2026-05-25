@@ -143,9 +143,11 @@ def _find_mcv(rs):
 
 
 def _nearest_target(mcv, level):
-    """Return (tx, ty) the deploy-region center the MCV is nearer to."""
+    """Return (tx, ty) the deploy-region center the MCV is nearer to.
+    Easy/medium win on building_in_region centered at (95,30) radius
+    8; hard offers two candidate regions (NE/SE), pick by proximity."""
     if level != "hard":
-        return (90, 20)
+        return (95, 30)
     if mcv is None:
         return (95, 10)
     # On hard, NE (95,10) vs SE (95,30); pick nearer to MCV start.

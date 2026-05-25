@@ -173,11 +173,12 @@ levels:
     # the centre fire zone) and crosses; then switch.
     description: >
       Two squads of three medium tanks each stage at (10,15) and (10,25).
-      The centre at (50,20) holds three rocket soldiers anchored by two
-      heavy tanks. Charging both squads straight through busts the loss
-      cap. Use bounding overwatch: one squad anchors and draws fire from
-      the edge while the other sweeps the periphery, then swap. Four tanks
-      at (100,20), one loss max, within about 50 turns.
+      The centre at (50,20) holds rocket soldiers anchored by two heavy
+      tanks plus rocket screens at y=14 and y=26 covering the lanes.
+      Charging both squads straight through busts the loss cap. Use
+      bounding overwatch: one squad anchors and draws fire from the edge
+      while the other sweeps the periphery, then swap. Four tanks at
+      (100,20), no losses, within about 50 turns.
     overrides:
       actors:
         # Squad A — northern fire team, staged at (10, 15).
@@ -199,6 +200,31 @@ levels:
         - {type: e3,   owner: enemy, position: [51, 21], stance: 2}
         - {type: 4tnk, owner: enemy, position: [49, 20], stance: 2}
         - {type: 4tnk, owner: enemy, position: [51, 19], stance: 2}
+        # ENGINE NOTE 2026-05-24 (vendor HP rebalance, branch
+        # post-merge-46-fixes): engine PR #15 removed `gamerules.rs::
+        # defaults()` so unit HP follows vendor RA YAML — 2tnk dropped
+        # from ~26000 to ~4600 HP (~6× smaller). With the centre
+        # cluster as authored (3× e3 + 2× 4tnk concentrated at y≈20)
+        # a 6-tank both-charge through the centre passed through with
+        # 0 losses (north/south columns at y=14..16 / y=24..26 took
+        # HP damage but always escaped to the win region). Added 4
+        # IN-LANE e3 anti-tank rocket soldiers — TWO targeting the
+        # north column lane (y=14) and TWO targeting the south
+        # column lane (y=26) — so both-charge now reliably loses ≥2
+        # tanks (busts the attrition cap), and the lone column in
+        # single-squad-only also takes ≥1 loss. The periphery
+        # bounding route (y≈6 / y≈34) is OUTSIDE the lane-screen e3
+        # range (≥7 cells away), so the intended bound-and-cover
+        # policy still WINS with 0 losses. Loss cap tightened from
+        # 1 to 0 because the lane-screen design naturally makes
+        # single-squad-only lose ≥1 tank (cap=1 produced DRAW: 1
+        # loss ≤ cap, and the n=4 region clause unreachable with
+        # only 3 tanks crossing — no fail signal fires within
+        # max_turns under interrupt-mode tick compression).
+        - {type: e3,   owner: enemy, position: [50, 14], stance: 2}
+        - {type: e3,   owner: enemy, position: [48, 14], stance: 2}
+        - {type: e3,   owner: enemy, position: [50, 26], stance: 2}
+        - {type: e3,   owner: enemy, position: [52, 26], stance: 2}
         # Persistent far enemy `fact` — keeps the episode alive past
         # the central cluster being cleaned out so the win/fail
         # evaluator sees the terminal frame (no DRAW collapse).
@@ -206,12 +232,12 @@ levels:
     win_condition:
       all_of:
         - {units_in_region_gte: {x: 100, y: 20, radius: 6, n: 4}}
-        - {units_lost_lte: 1}
+        - {units_lost_lte: 0}
         - {within_ticks: 4500}
     fail_condition:
       any_of:
         - {after_ticks: 4501}
-        - {not: {units_lost_lte: 1}}
+        - {not: {units_lost_lte: 0}}
         - {not: {own_units_gte: 1}}
     max_turns: 50
 
@@ -270,6 +296,21 @@ levels:
         - {type: e3,   owner: enemy, position: [51, 21], stance: 2}
         - {type: 4tnk, owner: enemy, position: [49, 20], stance: 2}
         - {type: 4tnk, owner: enemy, position: [51, 20], stance: 2}
+        # ENGINE NOTE 2026-05-24 (vendor HP rebalance, branch
+        # post-merge-46-fixes): per the same defaults()-removal as
+        # easy, the medium centre cluster as authored could only
+        # damage a charging column to HP attrition (no kills). Added
+        # 4 IN-LANE e3 rocket soldiers — 2 covering the north
+        # column lane (y=14) and 2 covering the south (y=26) — so a
+        # both-charge through the centre now reliably loses ≥2
+        # tanks. The periphery bounding route at y≈6 / y≈34 stays
+        # outside the lane-screen range (≥8 cells off), so the
+        # intended bound-and-cover still WINS with 0 losses. Loss
+        # cap stays 1 (medium is the middle tier).
+        - {type: e3,   owner: enemy, position: [49, 14], stance: 2}
+        - {type: e3,   owner: enemy, position: [51, 14], stance: 2}
+        - {type: e3,   owner: enemy, position: [49, 26], stance: 2}
+        - {type: e3,   owner: enemy, position: [51, 26], stance: 2}
         - {type: fact, owner: enemy, position: [106, 35]}
     win_condition:
       all_of:
@@ -334,21 +375,39 @@ levels:
         # north, Squad B at (10,16) south of A but still north of
         # centre — they bound through the far NORTH periphery
         # y ≈ 6..9 outside both rifle-screen and rocket sight).
-        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 13], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 15], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1, spawn_point: 0}
-        - {type: 2tnk, owner: agent, position: [10, 17], stance: 1, spawn_point: 0}
+        #
+        # ENGINE NOTE 2026-05-24 (vendor HP rebalance, branch
+        # post-merge-46-fixes): engine PR #15 removed `gamerules.rs::
+        # defaults()` so 2tnk HP follows vendor RA YAML (~6× smaller
+        # than the pre-PR defaults). Even so, a 6-tank charge through
+        # the unchanged hard centre fire zone (4× e3 + 2× 4tnk + 6×
+        # e1 screens) only ground tanks down to ~13% HP without
+        # killing any — both-charge / single-squad won on north-spawn
+        # seeds 2/4 with zero losses (south-spawn seeds 1/3 lost 1
+        # via the (49,21)/(51,21) southern rocket arc that the
+        # northern arc lacks geometrically, so the seed-spawn flip
+        # was the only thing tipping the bar). Set agent 2tnk HP to
+        # 80% so the centre crossing pushes ≥1 tank below the
+        # death threshold under both spawn flips — preserves the
+        # SYMMETRIC anti-cheat bar (both-charge / single-squad LOSE
+        # on every seed), and the periphery bounding route stays
+        # outside the firing envelope (zero damage taken on y=6/34),
+        # so the intended bound-and-cover still WINS at 0 losses.
+        - {type: 2tnk, owner: agent, position: [10, 11], stance: 1, spawn_point: 0, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 12], stance: 1, spawn_point: 0, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 13], stance: 1, spawn_point: 0, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 15], stance: 1, spawn_point: 0, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 16], stance: 1, spawn_point: 0, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 17], stance: 1, spawn_point: 0, health: 80}
         # spawn_point 1 — SOUTH-WEST staging (mirrored across y=20).
         # The cover/bound decision is symmetric: cover at south
         # edge of e3 range, bound through y ≈ 31..34.
-        - {type: 2tnk, owner: agent, position: [10, 23], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [10, 25], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [10, 27], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1}
-        - {type: 2tnk, owner: agent, position: [10, 29], stance: 1, spawn_point: 1}
+        - {type: 2tnk, owner: agent, position: [10, 23], stance: 1, spawn_point: 1, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 24], stance: 1, spawn_point: 1, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 25], stance: 1, spawn_point: 1, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 27], stance: 1, spawn_point: 1, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 28], stance: 1, spawn_point: 1, health: 80}
+        - {type: 2tnk, owner: agent, position: [10, 29], stance: 1, spawn_point: 1, health: 80}
         # Centre rocket cluster + 2 heavy-tank anchors — the same
         # 4× e3 + 2× 4tnk fire zone as medium, symmetric across y=20
         # so EITHER spawn faces an equivalent geometry. All stance:2

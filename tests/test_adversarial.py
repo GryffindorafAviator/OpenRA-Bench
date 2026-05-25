@@ -93,9 +93,17 @@ def test_adversarial_pack_compiles_and_runs(pid):
     from openra_bench.scenarios.loader import compile_level
 
     pack = load_pack(PACKS / f"{pid}.yaml")
+    # Read the expected capability from the pack itself rather than
+    # hardcoding 'adversarial'. The `adversarial-duel` pack was
+    # deliberately downgraded from `capability: adversarial` to
+    # `capability: action` (commit 47d9bab) because the engine's 1v1
+    # adversarial channel is not wired; pinning a stale literal here
+    # made this test fail post-merge. Reading from the pack keeps the
+    # test honest if the capability is re-promoted later.
+    expected_capability = pack.meta.capability
     for lvl in RUNGS:
         c = compile_level(pack, lvl)
-        assert c.meta.capability == "adversarial"
+        assert c.meta.capability == expected_capability
         assert c.map_supported, f"{pid}:{lvl} map must be Rust-loadable"
     c = compile_level(pack, "easy")
     res = run_level(c, lambda rs, C: [C.observe()], seed=1)

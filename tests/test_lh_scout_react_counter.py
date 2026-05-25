@@ -82,7 +82,7 @@ def _skip_scout_attack_blind_policy():
             return [Cmd.observe()]
         # Attack-move directly at the enemy fact coordinate. No
         # scout move issued.
-        return [Cmd.attack_move(tnk_ids, 122, target_y)]
+        return [Cmd.attack_move(tnk_ids, 82, target_y)]
     return pol
 
 
@@ -122,7 +122,7 @@ def _scout_only_no_attack_policy():
         state["ticks_since_outpost"] += 1
         if state["ticks_since_outpost"] >= 8 and not state["went_corner"]:
             state["went_corner"] = True
-            return [Cmd.move_units([jeep["id"]], 120, fact_y)]
+            return [Cmd.move_units([jeep["id"]], 82, fact_y)]
         return [Cmd.observe()]
     return pol
 
@@ -155,30 +155,35 @@ def _intended_scout_react_counter_policy(easy_mode: bool):
         cmds = []
 
         # Pick near corner by agent latitude, and the outpost
-        # coordinate that matches the level's layout.
+        # coordinate that matches the level's layout (drive the
+        # jeep DIRECTLY ON the tent so the outpost is registered
+        # — the prior (60,*) waypoint left the tent out of sight
+        # range on the redirect path).
         if easy_mode:
             fact_y = 18
-            outpost = (60, 36)        # easy outpost far south
+            outpost = (42, 36)        # easy outpost (tent at 42,36)
         elif agent_fact and agent_fact["cell_y"] < 18:
             fact_y = 5
-            outpost = (60, 20)        # medium/hard shared mid outpost
+            outpost = (42, 20)        # medium/hard shared mid outpost
         else:
             fact_y = 38
-            outpost = (60, 20)
+            outpost = (42, 20)
 
-        # 1a. SCOUT — first dispatch jeep to the off-axis outpost.
+        # 1a. SCOUT — first dispatch jeep onto the off-axis outpost
+        #    tent's footprint so it surfaces in enemy_buildings.
         if jeep is not None and not state["outpost_dispatched"]:
             cmds.append(Cmd.move_units([jeep["id"]], *outpost))
             state["outpost_dispatched"] = True
         # 1b. Then redirect jeep east to the near fact's y-band
-        #     (give it a few turns to traverse to the outpost
-        #     and surface the tent in enemy_buildings).
+        #     AFTER it has reached the outpost vicinity (so the
+        #     tent registers in enemy_buildings before the redirect
+        #     pulls the jeep away).
         elif (jeep is not None
               and state["outpost_dispatched"]
               and not state["scout_dispatched"]):
-            state["scout_ticks"] += 1
-            if state["scout_ticks"] >= 8:
-                cmds.append(Cmd.move_units([jeep["id"]], 120, fact_y))
+            if (abs(jeep["cell_x"] - outpost[0]) < 8
+                    and abs(jeep["cell_y"] - outpost[1]) < 8):
+                cmds.append(Cmd.move_units([jeep["id"]], 82, fact_y))
                 state["scout_dispatched"] = True
 
         # 2 + 3. REACT + COUNTER — dispatch the tanks early; one
@@ -190,7 +195,7 @@ def _intended_scout_react_counter_policy(easy_mode: bool):
         #    once each becomes true, and the rush takes long
         #    enough that the jeep's scout completes first.
         if tnk_ids and not state["attack_dispatched"]:
-            cmds.append(Cmd.attack_move(tnk_ids, 122, fact_y))
+            cmds.append(Cmd.attack_move(tnk_ids, 82, fact_y))
             state["attack_dispatched"] = True
 
         if not cmds:

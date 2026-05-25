@@ -83,7 +83,7 @@ def _rush_east_policy():
         fresh = [i for i in strike if i not in seen]
         if fresh:
             cmds.append(Cmd.set_stance(fresh, 3))
-            cmds.append(Cmd.attack_move(fresh, 118, 20))
+            cmds.append(Cmd.attack_move(fresh, 85, 20))
             seen.update(fresh)
         if not cmds:
             cmds.append(Cmd.observe())
@@ -174,7 +174,7 @@ def _intended_phased_policy(level: str):
             fresh = [u["id"] for u in strike if u["id"] not in pushed]
             if fresh:
                 cmds.append(Cmd.set_stance(fresh, 3))
-                cmds.append(Cmd.attack_move(fresh, 118, 20))
+                cmds.append(Cmd.attack_move(fresh, 85, 20))
                 pushed.update(fresh)
         if not cmds:
             cmds.append(Cmd.observe())

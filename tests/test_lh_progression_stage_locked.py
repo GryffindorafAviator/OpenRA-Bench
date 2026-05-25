@@ -44,7 +44,9 @@ SEEDS = (1, 2, 3, 4)
 _M = {"easy": 3500, "medium": 3000, "hard": 3000}
 _K = {"easy": 2, "medium": 3, "hard": 3}
 # Mid-east kill cluster centre (well separated from the sentinel facts).
-_TGT = {"easy": (90, 30), "medium": (90, 30), "hard": (90, 20)}
+# Targets the cluster directly so the assault stops on contact rather
+# than carrying past the cluster toward an unreachable / sentinel cell.
+_TGT = {"easy": (60, 30), "medium": (60, 30), "hard": (60, 20)}
 
 
 # ── Obs helpers ───────────────────────────────────────────────────
@@ -99,6 +101,7 @@ def _intended_policy(level: str):
     tx, ty = _TGT[level]
     stance_set: set = set()
     attacked: set = set()
+    cap_hit = {"v": False}
 
     def pol(obs, Cmd):
         units = obs.get("units_summary", []) or []
@@ -134,8 +137,13 @@ def _intended_policy(level: str):
         # STAGE 2 — intake.
         if build_stage("proc", 1400, 2, 4):
             return cmds or [Cmd.observe()]
-        # STAGE 3 — capital reserve (wait for harvest income).
-        if ev < M:
+        # STAGE 3 — capital reserve (wait for harvest income). Once
+        # the M reserve is observed at least once, the `then:` latch
+        # has credited stage 3 and we proceed regardless of subsequent
+        # spend-down (spending on weap drops the live ev back below M).
+        if ev >= M:
+            cap_hit["v"] = True
+        if not cap_hit["v"]:
             return cmds or [Cmd.observe()]
         # STAGE 4 — tech.
         if build_stage("weap", 2000, 6, 4):

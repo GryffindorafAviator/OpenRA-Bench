@@ -80,7 +80,7 @@ def _skip_to_attack_policy():
         # Attack-move any existing units east toward the enemy fact.
         own_ids = [u["id"] for u in units]
         if own_ids:
-            cmds.append(Cmd.attack_move(own_ids, 115, 30))
+            cmds.append(Cmd.attack_move(own_ids, 80, 30))
         if not cmds:
             cmds.append(Cmd.observe())
         return cmds
@@ -117,7 +117,7 @@ def _pure_econ_policy():
 def _intended_phased_policy(army_n: int):
     """The intended capability play: PHASE 1 build proc → PHASE 2
     build weap → PHASE 3 build N×2tnk → PHASE 4 attack-move all tanks
-    onto the enemy fact at (115, 30) to destroy it.
+    onto the enemy fact at (80, 30) to destroy it.
 
     Uses a sticky milestone latch (the policy remembers which phases
     it has completed once-and-for-all, so a building destroyed
@@ -171,14 +171,27 @@ def _intended_phased_policy(army_n: int):
             # the enemy fact so their travel time overlaps production.
             if tnk:
                 tnk_ids = [u["id"] for u in tnk]
-                cmds.append(Cmd.attack_move(tnk_ids, 115, 30))
+                cmds.append(Cmd.attack_move(tnk_ids, 80, 30))
             if not cmds:
                 cmds.append(Cmd.observe())
             return cmds
-        # PHASE 4: send the army to the enemy fact.
+        # PHASE 4: send the army to the enemy fact. Once tanks are
+        # adjacent to a non-shooting building under ReturnFire stance
+        # they stop firing — switch to focus-fire `attack_unit` on the
+        # fact id once it's visible to finish the kill inside budget.
         if tnk:
             tnk_ids = [u["id"] for u in tnk]
-            cmds.append(Cmd.attack_move(tnk_ids, 115, 30))
+            fact_id = None
+            for e in obs.get("enemy_buildings_summary", []) or []:
+                if (e.get("type") == "fact"
+                        and abs(e.get("cell_x", -99) - 80) <= 6
+                        and abs(e.get("cell_y", -99) - 30) <= 6):
+                    fact_id = str(e["id"])
+                    break
+            if fact_id is not None:
+                cmds.append(Cmd.attack_unit(tnk_ids, fact_id))
+            else:
+                cmds.append(Cmd.attack_move(tnk_ids, 80, 30))
         if not cmds:
             cmds.append(Cmd.observe())
         return cmds
