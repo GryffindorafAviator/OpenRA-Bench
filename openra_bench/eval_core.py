@@ -96,6 +96,22 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     # no fog of war — the clear half of the perception ablation grid.
     if getattr(compiled, "reveal_map", False):
         data["reveal_map"] = True
+    # Per-scenario `build_speed_multiplier:` — production-tick scaling.
+    # Default None ⇒ engine default 1.0 ⇒ unchanged for every existing
+    # pack. `adversarial-1v1-macro` declares 4.0 so 1v1 episodes have
+    # ~4× faster production. The engine reads this top-level key in
+    # `oramap.rs::parse_scenario_yaml`; if `compiled.scenario` already
+    # carries the field via `ScenarioDefinition`, it round-trips by
+    # default through `model_dump` above — but the field is on the
+    # CompiledLevel itself too (lifted at compile time), so prefer
+    # that as the source of truth.
+    bsm = getattr(compiled, "build_speed_multiplier", None)
+    if bsm is not None:
+        data["build_speed_multiplier"] = float(bsm)
+    else:
+        # If the scenario model dump leaked it, drop it (None means
+        # engine default — don't emit a bogus key).
+        data.pop("build_speed_multiplier", None)
     # Naval-MVP overlay: forward declared `water_cells:` and
     # `water_rect:` so the Rust engine marks the corresponding
     # terrain cells as ship-passable / ground-impassable. Without
