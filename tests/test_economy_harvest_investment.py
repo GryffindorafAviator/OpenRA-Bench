@@ -216,6 +216,31 @@ def test_hard_has_two_seed_driven_spawn_groups():
     assert len(sp) >= 2, f"hard must define ≥2 agent spawn_point groups; got {sorted(sp)}"
 
 
+def test_hard_spawn_groups_have_starter_harv_without_cell_collisions():
+    """Each hard spawn needs the advertised starter harv, and it must not
+    share a cell with another agent actor."""
+    c = compile_level(load_pack(PACK), "hard")
+    by_spawn = {}
+    for a in c.scenario.actors:
+        if a.owner != "agent":
+            continue
+        sp = a.spawn_point if a.spawn_point is not None else 0
+        by_spawn.setdefault(sp, []).append(a)
+
+    assert len(by_spawn) >= 2
+    for sp, actors in by_spawn.items():
+        harvs = [a for a in actors if a.type == "harv"]
+        assert len(harvs) == 1, f"spawn {sp}: expected one starter harv, got {harvs}"
+
+        occupied = {}
+        for a in actors:
+            pos = tuple(a.position)
+            assert pos not in occupied, (
+                f"spawn {sp}: {a.type} overlaps {occupied[pos]} at {pos}"
+            )
+            occupied[pos] = a.type
+
+
 # ---------------------------------------------------------------- intended WINS
 
 
@@ -277,18 +302,17 @@ def test_hedge_loses_medium():
     )
 
 
-@pytest.mark.parametrize("seed", [1, 3])
-def test_hedge_loses_hard_south_spawn(seed):
-    """Hedge on hard SOUTH spawn (seeds 1,3 via round-robin): DEEP
-    ceiling is exactly 19000 on these spawns, hedge ceiling is ~18350
-    — clear LOSS gap. On the NORTH spawn (seeds 2,4) the DEEP ceiling
-    is much higher (~22500) and hedge sneaks past 19000 by ~50 ev —
-    those seeds are an engine-noise corner that's tolerated; the
-    strict LOSS bar on STALL/WIDE/baseline holds on every seed."""
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_hedge_loses_hard_every_seed(seed):
+    """The hard bar separates clean DEEP from delayed hedge.
+
+    With the starter harv no longer overlapping a power plant, DEEP
+    reaches at least 21500 EV on every seed, while the cheap-decoy hedge
+    tops out at 20850 EV. The 21000 hard bar keeps the reinvestment
+    decision load-bearing on both spawn latitudes."""
     _, res = _run("hard", _make_hedge, seed=seed)
     assert res.outcome == "loss", (
-        f"hard seed{seed} (SOUTH spawn): hedge must LOSE; got "
-        f"{res.outcome} ev={_ev(res)}"
+        f"hard seed{seed}: hedge must LOSE; got {res.outcome} ev={_ev(res)}"
     )
 
 
