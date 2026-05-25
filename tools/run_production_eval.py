@@ -272,10 +272,14 @@ def build_run_eval_argv(*, slug: str, provider: str, model_id: str,
     # journal — the resilience-layer header check would refuse to merge
     # them without explicit acknowledgement. The orchestrator IS that
     # acknowledgement: each `launch` invocation is a continuation of
-    # the same campaign-level cell, regardless of process id. So we
-    # always pass --ignore-run-id from this entry point.
-    if _check_run_eval_flag("--ignore-run-id"):
-        argv.append("--ignore-run-id")
+    # the same campaign-level cell, regardless of process id.
+    # Unconditional (not feature-detected) because the bench's
+    # `run_eval --help` itself currently crashes on a malformed help-
+    # string and the feature-detect probe always returns False —
+    # ignore-run-id has been on the CLI since the resume-hardening
+    # commit and a future run_eval without it would surface a clear
+    # CLI error rather than silently merging journals.
+    argv.append("--ignore-run-id")
     if type_ == "1v1":
         argv += ["--mode", "1v1", "--opponent", opponent, "--side-swap"]
     argv += list(extra)
