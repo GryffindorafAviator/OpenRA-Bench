@@ -427,15 +427,26 @@ def summarise_run(stats: dict, *, slug: str, type_: str) -> dict:
     summary = stats.get("summary") or {}
     episodes = stats.get("episodes") or []
 
-    # per-family roll-up
+    # per-family roll-up. Provider-error cells are NOT model-failure data
+    # — they are records of a 5xx / malformed-JSON / timeout where the
+    # bench never got a model response to score. Counting them as
+    # losses produces misleading 0% win-rate columns on families that
+    # happened to fall during a provider outage. Track them separately
+    # and compute win_rate over completed cells only (`n_eval = n -
+    # errors`).
     fam_acc: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"n": 0, "wins": 0, "comp_sum": 0.0, "leaves_block": 0})
+        lambda: {"n": 0, "wins": 0, "comp_sum": 0.0,
+                 "leaves_block": 0, "errors": 0})
     for ep in episodes:
         pack = (ep.get("cell") or "").split(":", 1)[0]
         fam = pack_family(pack)
         f = fam_acc[fam]
         f["n"] += 1
-        f["wins"] += 1 if ep.get("outcome") == "win" else 0
+        outcome = ep.get("outcome")
+        if outcome == "error":
+            f["errors"] += 1
+            continue  # error cells excluded from win/composite stats
+        f["wins"] += 1 if outcome == "win" else 0
         f["comp_sum"] += float(ep.get("composite") or 0.0)
         wl = ep.get("weakest_link")
         if wl and wl != "objective":
@@ -443,12 +454,15 @@ def summarise_run(stats: dict, *, slug: str, type_: str) -> dict:
     fam_rows = []
     for fam, acc in sorted(fam_acc.items()):
         n = acc["n"]
+        n_eval = n - acc["errors"]
         fam_rows.append({
             "family": fam,
             "n": n,
-            "win_rate": (acc["wins"] / n) if n else 0.0,
-            "composite_mean": (acc["comp_sum"] / n) if n else 0.0,
-            "leaves_block_rate": (acc["leaves_block"] / n) if n else 0.0,
+            "errors": acc["errors"],
+            "n_eval": n_eval,
+            "win_rate": (acc["wins"] / n_eval) if n_eval else None,
+            "composite_mean": (acc["comp_sum"] / n_eval) if n_eval else None,
+            "leaves_block_rate": (acc["leaves_block"] / n_eval) if n_eval else None,
         })
 
     # per-cell composite ranks (top 5 / bottom 5)
@@ -495,21 +509,26 @@ def summarise_run(stats: dict, *, slug: str, type_: str) -> dict:
             })
 
     n_eps = len(episodes)
+    n_errors = sum(1 for e in episodes if e.get("outcome") == "error")
     n_wins = sum(1 for e in episodes if e.get("outcome") == "win")
     n_losses = sum(1 for e in episodes if e.get("outcome") == "loss")
     n_draws = sum(1 for e in episodes if e.get("outcome") == "draw")
+    n_eval = n_eps - n_errors  # cells the model actually played
     leaves_block = sum(1 for e in episodes
-                       if e.get("weakest_link")
+                       if e.get("outcome") != "error"
+                       and e.get("weakest_link")
                        and e.get("weakest_link") != "objective")
 
     return {
         "model_slug": slug,
         "type": type_,
         "episodes": n_eps,
+        "errors": n_errors,
+        "n_eval": n_eval,
         "wins": n_wins, "losses": n_losses, "draws": n_draws,
-        "win_rate": (n_wins / n_eps) if n_eps else 0.0,
+        "win_rate": (n_wins / n_eval) if n_eval else None,
         "composite_mean": overall.get("composite_mean"),
-        "leaves_block_rate": (leaves_block / n_eps) if n_eps else 0.0,
+        "leaves_block_rate": (leaves_block / n_eval) if n_eval else None,
         "per_family": fam_rows,
         "best_cells": best,
         "worst_cells": worst,
@@ -522,23 +541,33 @@ def summarise_run(stats: dict, *, slug: str, type_: str) -> dict:
 def render_summary_md(summary: dict) -> str:
     lines: list[str] = []
     L = lines.append
+    errors = summary.get("errors", 0)
+    n_eval = summary.get("n_eval", summary["episodes"] - errors)
     L(f"# {summary['model_slug']} / {summary['type']}")
     L("")
     L(f"- model: `{summary.get('model')}`")
     L(f"- run_id: `{summary.get('run_id')}`")
-    L(f"- episodes: {summary['episodes']}")
+    L(f"- episodes: {summary['episodes']}  "
+      f"(evaluated: {n_eval}, provider errors: {errors})")
     L(f"- wins / losses / draws: "
       f"{summary['wins']} / {summary['losses']} / {summary['draws']}")
+    L(f"- win rate (over evaluated cells): {_safe(summary.get('win_rate'))}")
     L(f"- mean composite: {_safe(summary.get('composite_mean'))}")
     L(f"- leaves-final-blocking ratio: "
       f"{_safe(summary['leaves_block_rate'])}")
+    if errors:
+        L("")
+        L(f"> **Note**: {errors} cells errored on the provider side "
+          f"(5xx / malformed JSON / timeout). These are EXCLUDED from "
+          f"win-rate and composite stats. Per-family `n` shows total cells; "
+          f"`err` shows errored cells; rates are over `n - err`.")
     L("")
     L("## per family")
     L("")
-    L("| family | n | win rate | composite | blocked |")
-    L("| --- | ---:| ---:| ---:| ---:|")
+    L("| family | n | err | win rate | composite | blocked |")
+    L("| --- | ---:| ---:| ---:| ---:| ---:|")
     for r in summary["per_family"]:
-        L(f"| {r['family']} | {r['n']} | "
+        L(f"| {r['family']} | {r['n']} | {r.get('errors', 0)} | "
           f"{_safe(r['win_rate'])} | {_safe(r['composite_mean'])} | "
           f"{_safe(r['leaves_block_rate'])} |")
     if summary["best_cells"]:
