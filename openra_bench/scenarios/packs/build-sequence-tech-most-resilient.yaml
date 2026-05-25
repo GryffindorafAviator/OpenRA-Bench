@@ -1,111 +1,103 @@
 # build-sequence-tech-most-resilient.yaml
 #
-# REASONING capability — Wave-11 robust build-order planning. The
-# agent must REACH a tech capability (a powered war factory) AND
-# KEEP it through a mid-episode strike. The classic resilient-design
-# inversion: a build order that provisions only ONE power plant
-# (`powr`) is a single point of failure — a scheduled enemy strike
-# razes that powr mid-episode and the war factory drops to LOW POWER
-# (the engine's `power_drained > power_provided` gate halves
-# production speed), so the army never completes inside the budget.
-# The resilient build order pre-builds a SECOND, redundant `powr`
-# BEFORE the strike: when the strike razes one plant the other keeps
-# the grid in surplus, production runs at full speed, and the army
-# finishes on the clock.
+# REASONING capability — robust build-order planning under spatial
+# attrition. The two-base strategic-retreat template (task #81):
 #
-# This is the PlanBench "robust planning" idiom — find a plan that
-# achieves the goal AND survives a disturbance — and the classic
-# N+1 resilient-design rule: never run a critical capability on a
-# single point of failure; provision the redundant prerequisite
-# AHEAD of the foreseen failure, not after it.
+#   START
+#     • HOME — a complete safe base in the deep west (fact + proc +
+#       powr + harv + ore patch).
+#     • FORWARD — a partial doomed base on the east side (fact +
+#       proc + powr). Convenient-looking (has a refinery, has
+#       power, near the front), but every asset there is on a
+#       repeated strike-rotation kill list.
 #
-# ── ENGINE FACTS verified on the live engine (2026-05-20) ─────────
+#   THREAT
+#     • `scheduled_events: destroy_actors` razes the entire forward
+#       zone at THREE ticks (1200, 2400, 3600). Anything the agent
+#       builds inside the strike region between waves is killed by
+#       the NEXT wave. HOME (deep west) is well outside the strike
+#       radius and stays untouched.
 #
-#  1. Power model (vendor RA rules, loaded via GameRules::from_ruleset):
-#       POWR  Power +100      PROC  Power -30
-#       WEAP  Power -30       FIX   Power -30      FACT  Power 0
-#     A `World.compute_player_power` recompute sums every live (not
-#     powered-down) building each snapshot. Power budget on the
-#     INTENDED path (pre-placed proc -30, fix -30, exposed powr +100;
-#     agent builds redundant powr +100, weap -30):
-#       before strike:  provided 200, drained 90  → surplus +110
-#       after strike (one powr razed): provided 100, drained 90 → +10
-#     so the resilient base stays in SURPLUS through the strike. On
-#     the SINGLE-powr path (no redundant powr) the strike razes the
-#     only plant: provided 0, drained 90 → drained > provided → LOW
-#     POWER for the rest of the episode.
-#  2. LOW-POWER PRODUCTION SLOWDOWN (world.rs ~L3234): when a player's
-#     `power_drained > power_provided`, the production queue advances
-#     only on odd ticks — 50% speed. This is the load-bearing teeth:
-#     after the strike a single-`powr` base goes low-power and its
-#     `2tnk` queue crawls; a two-`powr` base stays in surplus and
-#     produces at full speed.
-#  3. `2tnk` (medium tank) costs 800; its build prerequisites are
-#     `weap` (war factory) AND `fix` (service depot). `weap`'s
-#     prerequisite is `proc` (ore refinery). `proc` and `fix` are
-#     pre-placed here, so the agent's build task is purely
-#     powr-redundancy + weap + the tank army. (`fix` drains -30
-#     power too — folded into the power budget below.)
-#  4. `scheduled_events: destroy_actors` (Wave-9 engine feature,
+#   WIN  (state-based, evaluated at the deadline — no `then:` chain)
+#     • a War Factory (`weap`) alive
+#     • 3 medium tanks (`2tnk`) alive
+#     • a Power Plant (`powr`) alive
+#     • the Construction Yard (`fact`) alive
+#     • within the deadline
+#
+# Both bases count toward the win. A rational operator who builds at
+# HOME wins; a redundancy-fan who builds at BOTH bases also wins
+# (HOME assets survive even if the FORWARD copies are razed). The
+# pack DOES NOT punish preemptive redundancy — it punishes only
+# building at FORWARD ONLY (no surviving copy) and not building at
+# all.
+#
+# This is the resilient-planning idiom reframed as a goal-state
+# predicate rather than a sequence-of-events latch:
+#   • the disturbance is real (the strike rotation razes the forward
+#     zone repeatedly);
+#   • a build order that places the war factory and tanks in the
+#     safe HOME base survives the disturbance;
+#   • a build order that places them in the doomed FORWARD base
+#     loses everything to the next strike wave;
+#   • a stall builds nothing and runs out the clock.
+#
+# ── ENGINE FACTS verified on the live engine (2026-05-24) ─────────
+#
+#  1. `scheduled_events: destroy_actors` (Wave-9 engine feature,
 #     oramap.rs::read_scheduled_events / env.rs::fire_scheduled_events)
-#     removes every actor matching `filter:` (owner + optional
-#     circular region) when `world_tick >= tick`. Here it razes the
-#     ONE pre-placed exposed `powr` at tick 1500 — the mid-episode
-#     strike. The region is tight around the exposed powr so it can
-#     never catch the agent's redundant powr in the safe west base.
-#  5. `then:` happened-before composite — clause k latches only after
-#     clause k-1 has been observed true. `[has_building:powr,
-#     has_building:weap]` encodes "power the grid, THEN stand up the
-#     factory" (the engine refuses `weap` before its `proc` prereq;
-#     `powr` is the grid the whole tech path runs on).
-#  6. `building_count_gte` reads the LIVE `own_buildings` list per
-#     frame (NOT the accumulating `own_building_types` set used by
-#     `has_building`). `building_count_gte:{powr,1}` toggles FALSE
-#     the instant the last live `powr` is razed and only re-satisfies
-#     if a redundant `powr` is still standing — this is the redundancy
-#     teeth the win predicate hangs on.
-#  7. `place_building` does NOT enforce build-adjacency (CLAUDE.md);
-#     a `build('powr') + place_building` chain works at arbitrary
-#     in-bounds coords — the redundant powr goes in the safe west
-#     base next to the Construction Yard.
-#  8. The persistent unarmed enemy `fact` marker far east keeps the
+#     removes every agent actor inside `filter.region` when
+#     `world_tick >= tick`. Re-firing on tick 1200/2400/3600 means
+#     even buildings placed AFTER the first wave will be razed by
+#     the next wave if they sit inside the forward strike region.
+#  2. `place_building` does NOT enforce build-adjacency (CLAUDE.md);
+#     a `build('weap') + place_building` chain works at arbitrary
+#     in-bounds coords. The HOME and FORWARD bases each carry a
+#     `fact` so either location can host a fresh `weap` placement.
+#  3. `2tnk` (medium tank) costs 800; its build prerequisites are
+#     `weap` AND `fix` — BUT a `fact` is the implicit construction
+#     yard prerequisite, and `weap` alone unlocks medium-tank
+#     production when the pack drops `fix` from prereqs in the
+#     vendor ruleset path. We pre-place `fix` at HOME as well so
+#     the tech path is intact whether the agent builds the war
+#     factory at HOME or copies it at FORWARD.
+#  4. `weap` (war factory) costs 2000; its prerequisite is `proc`
+#     (pre-placed at both HOME and FORWARD).
+#  5. `building_count_gte` reads the LIVE `own_buildings` list per
+#     frame, so a `weap` razed in a forward strike wave drops the
+#     clause back to FALSE for the rest of the episode (unless
+#     a HOME copy is also alive). This is the load-bearing teeth
+#     on the placement decision.
+#  6. The persistent unarmed enemy `fact` marker far east keeps the
 #     engine all-enemies-eliminated auto-`done` path gated, so a
-#     non-winner reaches the deadline as a real LOSS, not a DRAW
-#     (CLAUDE.md engine auto-`done` footgun).
-#  9. Tick alignment (CLAUDE.md): max tick ≈ 93 + 90·(max_turns−1).
+#     non-winner reaches the deadline as a real reachable timeout
+#     LOSS, not a DRAW (CLAUDE.md engine auto-`done` footgun).
+#  7. Tick alignment (CLAUDE.md): max tick = 93 + 90·(max_turns−1).
 #     easy max_turns 60 → ceiling 5403 ≥ within_ticks 5400, fail
-#     after_ticks 5401 ✓. medium/hard max_turns 50 → ceiling 4503 ≥
-#     within_ticks 4500, fail after_ticks 4501 ✓.
-# 10. Hard `spawn_point` rule (CLAUDE.md oramap.rs): ANY agent actor
-#     with a spawn_point causes agent actors WITHOUT one to be
-#     filtered out — the FULL base (fact + proc + fix + harv +
-#     exposed powr) is DUPLICATED across both spawn groups at
-#     spawn-matched cells. Enemy / neutral actors do NOT honour
-#     spawn_point; the
-#     exposed-powr strike region and the strike geometry are
-#     duplicated per latitude.
+#     after_ticks 5401 ✓. medium/hard max_turns 50 → ceiling 4503
+#     ≥ within_ticks 4500, fail after_ticks 4501 ✓.
+#  8. Hard `spawn_point` rule (CLAUDE.md oramap.rs): ANY agent
+#     actor with a spawn_point causes agent actors WITHOUT one to
+#     be filtered out — the FULL HOME + FORWARD base pair is
+#     DUPLICATED across both spawn groups at spawn-matched cells.
+#     Enemy / neutral actors do NOT honour spawn_point; the strike
+#     region is duplicated per latitude.
 #
 # ── THE BAR (CLAUDE.md "no defect, no cheat") ─────────────────────
 #
-#   • stall (observe only) — builds nothing; the exposed powr is
-#     razed at tick 1500, `weap` is never built, `2tnk` count stays
-#     0 → after_ticks LOSS.
-#   • single-powr (build weap + spam `2tnk`, never a redundant powr)
-#     — relies on the lone exposed powr. The strike razes it at tick
-#     1500; the base drops to low power (drained 60 > provided 0) and
-#     the `2tnk` queue runs at 50% for the rest of the episode.
-#     `building_count_gte:{powr,1}` is FALSE (no live powr) AND the
-#     tank army cannot finish before the deadline → after_ticks
-#     LOSS. This is the single-point-of-failure inversion the pack
-#     is built to catch.
-#   • intended resilient (build a redundant 2nd `powr` in the safe
-#     west base BEFORE the strike, build `weap`, produce 3× `2tnk`)
-#     — the strike razes the exposed powr but the redundant one
-#     survives; the grid stays in surplus, production runs at full
-#     speed, the army finishes on the clock. WIN.
-#
-# Real LOSS not DRAW: `fail after_ticks: T+1` is reachable inside
-# max_turns and the enemy `fact` marker blocks the auto-done path.
+#   • stall (observe only) — builds nothing; no weap, no tanks ⇒
+#     LOSS on every (level, seed).
+#   • build-at-FORWARD (place weap + tanks at the forward base) —
+#     the next strike wave razes the forward weap and any tanks
+#     that haven't moved out of the strike radius ⇒ LOSS on every
+#     (level, seed).
+#   • build-at-HOME (place weap + tanks at the safe west base) —
+#     all assets survive; production runs to completion ⇒ WIN on
+#     every (level, seed).
+#   • build-at-BOTH (redundancy: copies at HOME and at FORWARD) —
+#     HOME copies survive the strike rotation even if the FORWARD
+#     copies are razed ⇒ WIN on every (level, seed). The pack
+#     credits the redundancy play instead of punishing it.
 #
 # Validate (no model / no network):
 #   cd /Users/berta/Projects/OpenRA-Bench && \
@@ -113,39 +105,40 @@
 
 meta:
   id: build-sequence-tech-most-resilient
-  title: 'Resilient War Factory — Redundant Power Survives a Strike (N+1 Build Order)'
+  title: 'Resilient War Factory — Build in the Safe Zone, Not the Strike Lane'
   capability: reasoning
   real_world_meaning: >
-    Robust build-order planning: reach a tech capability AND keep it
-    through a foreseeable disturbance. The agent must bring a war
-    factory online and field an armoured force, but a mid-episode
-    enemy strike razes one power plant. A build order that provisions
-    only a single power plant is a single point of failure — when the
-    strike lands the factory drops to low power and the army never
-    completes in time. The resilient build order pre-builds a second,
-    redundant power plant before the strike, so the grid stays in
-    surplus and production never slows. Tests whether the model plans
-    for the disturbance (N+1 redundancy on the critical prerequisite)
-    rather than merely planning the shortest path to the goal.
+    Robust build-order planning under spatial attrition. The agent has
+    two bases: a SAFE one in the deep rear and a FORWARD one in a
+    contested zone that suffers periodic enemy strikes. The agent must
+    end up with a war factory online and an armoured force in the
+    field. A naive build order places the war factory and tanks at the
+    convenient-looking forward base (closer to the front, has its own
+    refinery) and loses everything to the next strike wave. A resilient
+    build order places the critical tech in the safe rear, where it
+    survives. Both bases count toward the goal, so preemptive
+    redundancy (build at both) is also credited — only building in the
+    strike lane with no rear copy loses. Tests whether the model plans
+    around a foreseeable spatial threat rather than taking the
+    shortest-distance shortcut.
   robotics_analogue: >
-    N+1 redundancy on a critical utility. An autonomous production
-    cell depends on a power feed to run its assembly machine; a known
-    hazard will knock out one feed mid-shift. Resilient planning
-    commissions a second, independent feed BEFORE the outage, so the
-    assembly machine never drops below rated throughput. Provisioning
-    only one feed — the shortest plan to first article — halts the
-    line the moment the hazard strikes and blows the delivery
-    deadline.
+    Site selection under a known hazard. An autonomous operator runs
+    two facilities — a hardened rear site and a forward site in a
+    hazard zone with periodic outages. The operator must deliver
+    finished goods by a deadline. Placing the assembly line at the
+    forward site (closer to inputs) is the shortest-path play, but
+    every hazard cycle razes whatever is there. Standing the assembly
+    line up at the hardened rear site delivers on the deadline;
+    running parallel lines at both is also acceptable (the rear line
+    carries the deadline when the forward line is razed). Provisioning
+    only the forward line is the failure mode the rear site exists to
+    prevent.
   benchmark_anchor:
     - "PlanBench robust planning"
-    - "N+1 resilient design"
-    - "redundancy"
+    - "site selection under known hazard"
+    - "spatial redundancy"
   author: openra-bench-wave-11
 
-# rush-hour-arena: 128×40, playable bounds (2,2,124,36). Agent base
-# at the WEST (x≈8..20). The inherited exposed `powr` sits forward at
-# the EAST edge of the base; a scheduled strike razes it at tick 1500.
-# The redundant `powr` belongs in the safe west base next to `fact`.
 base_map:
   generator: arena
   name: build-sequence-tech-most-resilient-64x40
@@ -156,14 +149,14 @@ base_map:
 
 base:
   agent: {faction: allies}
-  # No scripted bot — the only threat is the scripted `destroy_actors`
-  # strike on the exposed powr. A hunt bot would turn an N+1 build-
-  # order test into a combat-survival test.
+  # No scripted bot — the only threat is the scripted forward-zone
+  # strike rotation. A hunt bot would convert this into a combat
+  # survival test rather than a placement-decision test.
   enemy: {faction: soviet, bot_type: ''}
-  # Build palette: build + place_building drive the redundant powr
-  # and the war factory + tank army; harvest keeps income credible;
-  # move_units + stop allow repositioning. No offensive verbs — this
-  # is a build-order planning pack.
+  # Build palette: build + place_building drive the war factory + tank
+  # army; harvest keeps income credible; move_units + stop let the
+  # agent reposition. No offensive verbs — this is a placement-
+  # decision pack.
   tools: [observe, build, place_building, harvest, move_units, stop]
   spawn_mcvs: false
   planning: true
@@ -172,93 +165,69 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Bare skill: recognise that the inherited exposed power plant is a
-  # single point of failure that WILL be razed, pre-build a redundant
-  # `powr` in the safe west base, build the war factory, field 3
-  # tanks. Generous clock (within_ticks 5400, max_turns 60 → ceiling
-  # 5403 ✓). The strike fires at tick 1500.
+  # Bare skill: recognise that the forward base sits in a recurring
+  # strike zone, build the war factory and tanks in the safe HOME
+  # base, end with weap + 3× 2tnk + powr + fact alive at tick 5400.
+  # max_turns 60 → ceiling 5403 ✓.
   easy:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # You inherit a partial base — a Construction Yard ('fact'), an
-    # Ore Refinery ('proc'), a Service Depot ('fix'), an Ore Truck
-    # ('harv') with an ore patch, and ONE Power Plant ('powr'). That
-    # power plant sits FORWARD at the east edge of your base and is
-    # EXPOSED: an enemy strike will RAZE it at tick 1500. It is your
-    # only power. If it is your only power when the strike lands,
-    # your grid goes negative, your war factory drops to half
-    # production speed, and your tank army cannot finish in time. To
-    # stay resilient: build a SECOND Power Plant ('build' "powr",
-    # cost 300) and place it next to your Construction Yard in the
-    # safe west base BEFORE tick 1500, build a War Factory ('build'
-    # "weap", cost 2000), then produce three medium tanks ('build'
-    # "2tnk", cost 800 each). WIN = you brought power then a war
-    # factory online, you still own a Power Plant, you have 3 medium
-    # tanks, and you still own your Construction Yard, before tick
-    # 5400. Stalling, or relying on the single exposed power plant
-    # with no redundant backup, misses the bar.
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # You inherit a base with $6000 and one forward Power Plant that an
-    # enemy strike razes at turn 17. End up owning a Power Plant, a War
-    # Factory, and three medium tanks (2tnk) within about 60 turns,
-    # keeping your Construction Yard.
     description: >
-      You inherit a base with $6000 and a single forward power plant that
-      an enemy strike will raze around turn 17. Build a backup power plant
-      beside your construction yard before the strike lands, then add a
-      war factory and roll out three medium tanks. Keep the yard alive
-      within about 60 turns.
+      You hold two bases. The western base has a Construction Yard,
+      a Refinery, a Power Plant, a Service Depot, and an Ore Truck
+      on a nearby ore patch. The eastern base has a Construction
+      Yard, a Refinery, and a Power Plant. Enemy raiders sweep the
+      eastern zone in three waves — at roughly turn 13, turn 27,
+      and turn 40 — and any of your assets caught inside that
+      eastern strike radius are destroyed each wave. $6000 in the
+      bank. End the episode owning a War Factory ('weap', $2000),
+      three medium tanks ('2tnk', $800 each), a Power Plant, and a
+      Construction Yard, within about 60 turns.
+    starting_cash: 6000
     overrides:
       actors:
-        # ── Safe WEST base ─────────────────────────────────────────
+        # ── HOME (safe, deep west) ────────────────────────────────
         - {type: fact, owner: agent, position: [8, 18]}
         - {type: proc, owner: agent, position: [12, 18]}
-        # Service Depot — the `2tnk` build prerequisite (alongside
-        # `weap`). Pre-placed so the agent's build task is purely the
-        # redundant powr + war factory + tank army.
+        - {type: powr, owner: agent, position: [8, 22]}
         - {type: fix,  owner: agent, position: [16, 18]}
-        # Income (credible, not load-bearing for the win predicate).
         - {type: harv, owner: agent, position: [12, 22]}
         - {type: mine, owner: neutral, position: [20, 22]}
-        # ── The EXPOSED single-point-of-failure Power Plant ────────
-        # Forward at the east edge of the base. Razed by the tick-1500
-        # `destroy_actors` strike. Far enough from the west base that
-        # the strike region can never catch a redundant powr placed
-        # next to the Construction Yard.
-        - {type: powr, owner: agent, position: [40, 18]}
+        # ── FORWARD (doomed, east) ────────────────────────────────
+        - {type: fact, owner: agent, position: [40, 18]}
+        - {type: proc, owner: agent, position: [44, 18]}
+        - {type: powr, owner: agent, position: [40, 22]}
         # Persistent far enemy marker — LOSS-not-DRAW guarantee.
         - {type: fact, owner: enemy, position: [56, 30]}
       scheduled_events:
-        # Mid-episode strike: raze the exposed forward Power Plant at
-        # tick 1500. The region is a tight circle around (40,18); the
-        # safe west base (x≈8..16) is ~24 cells away, well outside
-        # radius 6, so a redundant powr there is never caught.
-        - tick: 1500
+        # Three strike waves on the forward zone. Region is a wide
+        # disc around the forward base (radius 8) — large enough to
+        # catch any weap / tank placed at the forward fact. HOME
+        # (x≈8..16) is ~24 cells away and never caught.
+        - tick: 1200
           type: destroy_actors
           filter:
             owner: agent
-            region: {x: 40, y: 18, radius: 6}
+            region: {x: 42, y: 20, radius: 8}
+        - tick: 2400
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 42, y: 20, radius: 8}
+        - tick: 3600
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 42, y: 20, radius: 8}
     win_condition:
       all_of:
-        # Reach the tech capability IN ORDER: power the grid, then
-        # stand up the war factory.
-        - then:
-            id: bsr-easy
-            clauses:
-              - {has_building: powr}
-              - {has_building: weap}
-        # ≥1 Power Plant ALIVE at end — FALSE after the strike unless
-        # a redundant powr was built (the redundancy teeth).
-        - building_count_gte: {type: powr, n: 1}
-        # 3 medium tanks — only reachable at FULL production speed,
-        # i.e. with the grid kept in surplus through the strike.
+        # War Factory alive — either at HOME or a surviving forward
+        # copy. A forward-only build is razed by the next strike.
+        - building_count_gte: {type: weap, n: 1}
+        # 3 medium tanks alive — production-line throughput proof.
         - unit_type_count_gte: {type: '2tnk', n: 3}
-        # Construction Yard alive (mirrors the fail clause).
+        # Power Plant alive — HOME powr is safe; forward powr is
+        # razed waves 1/2/3 but the HOME copy keeps this true.
+        - building_count_gte: {type: powr, n: 1}
+        # Construction Yard alive — mirrors the fail clause.
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 5400
     fail_condition:
@@ -269,63 +238,52 @@ levels:
 
   # ── MEDIUM ───────────────────────────────────────────────────────
   # +1 controlled variable: the clock tightens (within_ticks 4500,
-  # max_turns 50 → ceiling 4503 ✓). The resilient N+1 build order
-  # still wins comfortably, but a hesitant opening that dallies
-  # before committing the redundant powr now risks the deadline. The
-  # single-point-of-failure failure modes lose exactly as on easy.
+  # max_turns 50 → ceiling 4503 ✓). The safe HOME build still wins
+  # comfortably, but a hesitant opening that dallies before
+  # committing the war factory now risks the deadline. The
+  # build-at-FORWARD failure mode loses exactly as on easy.
   medium:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Same inherited base as easy — a Construction Yard, an Ore
-    # Refinery, a Service Depot, an Ore Truck with an ore patch, and
-    # ONE EXPOSED Power Plant forward at the east edge that an enemy
-    # strike will RAZE at tick 1500. Build a SECOND Power Plant
-    # ('build' "powr", 300) in the safe west base next to your
-    # Construction Yard BEFORE tick 1500, build a War Factory
-    # ('build' "weap", 2000), then produce three medium tanks
-    # ('build' "2tnk", 800 each).
-    # The deadline is tighter — tick 4500 — so commit the redundant
-    # power plant early; do not wait for the exposed one to fall. If
-    # the strike leaves you with no power, the war factory halves its
-    # output and the army misses the clock. WIN = you brought power
-    # then a war factory online, you still own a Power Plant, you
-    # have 3 medium tanks, and you still own your Construction Yard,
-    # before tick 4500. Stalling, or relying on the single exposed
-    # power plant, misses the bar.
     description: >
-      You inherit a base with $6000 and a single exposed forward power
-      plant that an enemy strike will raze around turn 17. The deadline is
-      tighter than before. Commit a backup power plant beside the
-      construction yard before the strike lands, then build a war factory
-      and roll out three medium tanks. Keep the yard standing within about
-      50 turns.
+      Same two-base layout as easy — a complete western base and a
+      partial eastern base with three strike waves sweeping the
+      eastern zone around turns 13, 27, and 40. $6000 in the bank,
+      and the deadline is now about 50 turns. End the episode owning
+      a War Factory, three medium tanks, a Power Plant, and a
+      Construction Yard, within the tighter clock.
     starting_cash: 6000
     overrides:
       actors:
         - {type: fact, owner: agent, position: [8, 18]}
         - {type: proc, owner: agent, position: [12, 18]}
+        - {type: powr, owner: agent, position: [8, 22]}
         - {type: fix,  owner: agent, position: [16, 18]}
         - {type: harv, owner: agent, position: [12, 22]}
         - {type: mine, owner: neutral, position: [20, 22]}
-        - {type: powr, owner: agent, position: [40, 18]}
+        - {type: fact, owner: agent, position: [40, 18]}
+        - {type: proc, owner: agent, position: [44, 18]}
+        - {type: powr, owner: agent, position: [40, 22]}
         - {type: fact, owner: enemy, position: [56, 30]}
       scheduled_events:
-        - tick: 1500
+        - tick: 1200
           type: destroy_actors
           filter:
             owner: agent
-            region: {x: 40, y: 18, radius: 6}
+            region: {x: 42, y: 20, radius: 8}
+        - tick: 2400
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 42, y: 20, radius: 8}
+        - tick: 3600
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 42, y: 20, radius: 8}
     win_condition:
       all_of:
-        - then:
-            id: bsr-medium
-            clauses:
-              - {has_building: powr}
-              - {has_building: weap}
-        - building_count_gte: {type: powr, n: 1}
+        - building_count_gte: {type: weap, n: 1}
         - unit_type_count_gte: {type: '2tnk', n: 3}
+        - building_count_gte: {type: powr, n: 1}
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 4500
     fail_condition:
@@ -336,59 +294,52 @@ levels:
 
   # ── HARD ─────────────────────────────────────────────────────────
   # +1 controlled variable on top of medium: TWO seed-driven AGENT
-  # spawn_point groups (NORTH base y=12 / SOUTH base y=26) round-
+  # spawn_point groups (NORTH band y=12 / SOUTH band y=26) round-
   # robined by seed. Per CLAUDE.md `spawn_point` rules: ANY agent
   # actor with spawn_point ⇒ agent actors WITHOUT one are filtered
-  # out, so the FULL base (fact + proc + fix + harv + exposed powr)
-  # is DUPLICATED across both spawn groups at spawn-matched cells.
-  # Enemy / neutral actors do NOT honour spawn_point; the strike
-  # region is duplicated per latitude (a `destroy_actors` whose
-  # region misses the active base simply removes nothing). A
-  # memorised "place the redundant powr at (11,18)" opening cannot
-  # generalise — the agent must read the actual Construction Yard
-  # latitude and place the redundant power plant beside it.
+  # out, so the FULL HOME + FORWARD base pair is DUPLICATED across
+  # both spawn groups at spawn-matched cells. Enemy / neutral actors
+  # do NOT honour spawn_point; the strike regions are duplicated per
+  # latitude (a `destroy_actors` whose region misses the active
+  # latitude simply removes nothing). A memorised "place weap at
+  # (14,18)" opening cannot generalise — the agent must read the
+  # actual HOME Construction Yard latitude and place the war factory
+  # beside it there.
   hard:
-    # Original (pre-verbosity-sweep) description preserved for
-    # contributors. The trimmed version below removes scripted-policy
-    # spoilers and cell-coord dumps; load-bearing intent kept.
-    #
-    # Same N+1 build-order task as medium (one EXPOSED Power Plant
-    # forward at the east edge that an enemy strike razes at tick
-    # 1500, $6000, tick 4500 deadline) but your base may begin in
-    # the NORTH band (y≈12) OR the SOUTH band (y≈26) of the map
-    # depending on the seed. Read the Construction Yard's actual
-    # position from the observation and place the redundant Power
-    # Plant beside it in the safe west base BEFORE tick 1500; build a
-    # War Factory; then produce three medium tanks. A memorised
-    # placement cell will mis-place out of build radius on one of the
-    # two spawns. WIN = you brought power then a war factory online,
-    # you still own a Power Plant, you have 3 medium tanks, and you
-    # still own your Construction Yard, before tick 4500. The same
-    # single-point-of-failure plays — stalling, or relying on the
-    # lone exposed power plant — lose as on medium.
     description: >
-      Same backup-power-then-tanks task, but the base may spawn in the
-      NORTH (y=12) or SOUTH (y=26) band. Read the construction yard's
-      actual cell and place the redundant power plant beside it — a
-      memorised opening misses on the flipped seed. Three medium tanks
-      and a surviving yard within about 50 turns.
+      Same two-base, three-strike-wave task as medium, but your
+      bases may spawn in the NORTH band (y=12) or the SOUTH band
+      (y=26) depending on seed. Read the actual Construction Yard
+      coordinates from the observation — a memorised placement cell
+      will mis-place on the flipped seed. End with a War Factory,
+      three medium tanks, a Power Plant, and a Construction Yard
+      alive within about 50 turns.
     starting_cash: 6000
     overrides:
       actors:
-        # ── SPAWN 0 (NORTH base, y=12) ─────────────────────────────
+        # ── SPAWN 0 (NORTH bases, y=12) ───────────────────────────
+        # HOME (safe west)
         - {type: fact, owner: agent, position: [8, 12],  spawn_point: 0}
         - {type: proc, owner: agent, position: [12, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [8, 16],  spawn_point: 0}
         - {type: fix,  owner: agent, position: [16, 12], spawn_point: 0}
         - {type: harv, owner: agent, position: [12, 16], spawn_point: 0}
-        - {type: powr, owner: agent, position: [40, 12], spawn_point: 0}
-        # ── SPAWN 1 (SOUTH base, y=26) ─────────────────────────────
+        # FORWARD (doomed east)
+        - {type: fact, owner: agent, position: [40, 12], spawn_point: 0}
+        - {type: proc, owner: agent, position: [44, 12], spawn_point: 0}
+        - {type: powr, owner: agent, position: [40, 16], spawn_point: 0}
+        # ── SPAWN 1 (SOUTH bases, y=26) ───────────────────────────
+        # HOME (safe west)
         - {type: fact, owner: agent, position: [8, 26],  spawn_point: 1}
         - {type: proc, owner: agent, position: [12, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [8, 30],  spawn_point: 1}
         - {type: fix,  owner: agent, position: [16, 26], spawn_point: 1}
         - {type: harv, owner: agent, position: [12, 30], spawn_point: 1}
-        - {type: powr, owner: agent, position: [40, 26], spawn_point: 1}
-        # Neutral ore patches — one per latitude (neutral actors
-        # ignore the spawn_point filter, like enemy actors).
+        # FORWARD (doomed east)
+        - {type: fact, owner: agent, position: [40, 26], spawn_point: 1}
+        - {type: proc, owner: agent, position: [44, 26], spawn_point: 1}
+        - {type: powr, owner: agent, position: [40, 30], spawn_point: 1}
+        # Neutral ore patches — one per latitude.
         - {type: mine, owner: neutral, position: [20, 16]}
         - {type: mine, owner: neutral, position: [20, 30]}
         # Persistent far enemy marker — LOSS-not-DRAW guarantee.
@@ -397,26 +348,42 @@ levels:
         # Strike regions DUPLICATED per latitude (enemy/neutral and
         # scheduled events do not honour spawn_point). The region
         # matching the dormant latitude removes nothing; the one
-        # matching the active base razes its exposed powr.
-        - tick: 1500
+        # matching the active base razes the forward zone there.
+        - tick: 1200
           type: destroy_actors
           filter:
             owner: agent
-            region: {x: 40, y: 12, radius: 6}
-        - tick: 1500
+            region: {x: 42, y: 14, radius: 8}
+        - tick: 2400
           type: destroy_actors
           filter:
             owner: agent
-            region: {x: 40, y: 26, radius: 6}
+            region: {x: 42, y: 14, radius: 8}
+        - tick: 3600
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 42, y: 14, radius: 8}
+        - tick: 1200
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 42, y: 28, radius: 8}
+        - tick: 2400
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 42, y: 28, radius: 8}
+        - tick: 3600
+          type: destroy_actors
+          filter:
+            owner: agent
+            region: {x: 42, y: 28, radius: 8}
     win_condition:
       all_of:
-        - then:
-            id: bsr-hard
-            clauses:
-              - {has_building: powr}
-              - {has_building: weap}
-        - building_count_gte: {type: powr, n: 1}
+        - building_count_gte: {type: weap, n: 1}
         - unit_type_count_gte: {type: '2tnk', n: 3}
+        - building_count_gte: {type: powr, n: 1}
         - building_count_gte: {type: fact, n: 1}
         - within_ticks: 4500
     fail_condition:
