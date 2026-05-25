@@ -76,7 +76,15 @@ MODELS: tuple[tuple[str, str, str], ...] = (
     ("qwen3.6-35b-a3b",       "together",   "together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad"),
     ("gpt-5.4-mini",          "openai",     "gpt-5.4-mini-2026-03-17"),
     ("gpt-5.4",               "openai",     "gpt-5.4-2026-03-05"),
-    ("glm-4.6v",              "openrouter", "z-ai/glm-4.6v"),
+    # glm-4.6v dropped from v1.1 paper baseline for cost — see PR #6
+    # (KaiserWhoLearns/RedAlertBenchPaper, closed 2026-05-25). Partial
+    # scenarios sweep is preserved in data/runs/v1.1-prod/glm-4.6v/.
+    # Re-add this entry to include it in a future sweep.
+    # ("glm-4.6v",              "openrouter", "z-ai/glm-4.6v"),
+    # Substituted in for glm-4.6v: Kimi-K2.6 on Together serverless
+    # (chat=2s, tool-use=1s, clean OpenAI-shape tool_calls; lower error
+    # rate / throttling vs OpenRouter's glm-4.6v on this concurrency).
+    ("kimi-k2.6",             "together",   "moonshotai/Kimi-K2.6"),
 )
 
 TYPES: tuple[str, ...] = ("scenarios", "1v1")
@@ -242,6 +250,7 @@ def build_run_eval_argv(*, slug: str, provider: str, model_id: str,
                         type_: str, out_dir: Path,
                         concurrency: int,
                         levels: str, seeds: str,
+                        repeats: int = 1,
                         opponent: str = "scripted:stall",
                         extra: Iterable[str] = ()) -> list[str]:
     """Build the argv we hand to `python3 -m openra_bench.run_eval`.
@@ -259,6 +268,7 @@ def build_run_eval_argv(*, slug: str, provider: str, model_id: str,
         "--model", model_id,
         "--levels", levels,
         "--seeds", seeds,
+        "--repeats", str(max(1, int(repeats))),
         "--concurrency", str(concurrency),
         "--out", str(out_json),
         "--playback", str(playback),
@@ -290,6 +300,7 @@ def launch_cell(prod_dir: Path, slug: str, type_: str, *,
                 concurrency: int = 20,
                 levels: str = "easy,medium,hard",
                 seeds: str = "1,2,3",
+                repeats: int = 1,
                 opponent: str = "scripted:stall",
                 extra: Iterable[str] = (),
                 dry_run: bool = False) -> int:
@@ -304,7 +315,8 @@ def launch_cell(prod_dir: Path, slug: str, type_: str, *,
     argv = build_run_eval_argv(
         slug=slug, provider=provider, model_id=model_id, type_=type_,
         out_dir=out_dir, concurrency=concurrency,
-        levels=levels, seeds=seeds, opponent=opponent, extra=extra,
+        levels=levels, seeds=seeds, repeats=repeats,
+        opponent=opponent, extra=extra,
     )
 
     update_cell_state(prod_dir, slug, type_,
@@ -312,7 +324,7 @@ def launch_cell(prod_dir: Path, slug: str, type_: str, *,
                       started_at=_now_iso(),
                       cmd=" ".join(shlex.quote(a) for a in argv),
                       concurrency=concurrency,
-                      levels=levels, seeds=seeds,
+                      levels=levels, seeds=seeds, repeats=repeats,
                       provider=provider, model_id=model_id)
 
     if dry_run:
@@ -840,6 +852,7 @@ def cmd_launch(args: argparse.Namespace) -> int:
         prod, args.model, args.type,
         concurrency=args.concurrency,
         levels=args.levels, seeds=args.seeds,
+        repeats=args.repeats,
         opponent=args.opponent,
         dry_run=args.dry_run,
     )
@@ -920,6 +933,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_launch.add_argument("--concurrency", type=int, default=20)
     p_launch.add_argument("--levels", default="easy,medium,hard")
     p_launch.add_argument("--seeds", default="1,2,3")
+    p_launch.add_argument("--repeats", type=int, default=1,
+                          help="how many attempts per (cell, seed) — for "
+                          "pass^k reliability at temperature > 0")
     p_launch.add_argument("--opponent", default="scripted:stall",
                           help="1v1 opponent spec (ignored for scenarios)")
     p_launch.add_argument("--auto-pr", action="store_true",
