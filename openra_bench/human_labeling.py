@@ -403,6 +403,8 @@ class HumanAction:
     * ``attack`` — `units` + either `target_id` (an enemy actor) or a
       `target` cell (falls back to `attack_move`).
     * ``guard`` — `units` + `target_id` (ally to escort).
+    * ``capture_actor`` / ``c4_detonate`` / ``infiltrate`` —
+      `units` + `target_id` (enemy building/special target).
     * ``stop`` / ``deploy`` / ``sell`` / ``repair`` / ``power_down`` /
       ``set_primary`` / ``unload`` / ``patrol`` — `units` only.
     * ``set_stance`` — `units` + `stance` (0–3).
@@ -455,6 +457,16 @@ class HumanAction:
                 return None
             return {
                 "name": "guard",
+                "arguments": {
+                    "unit_ids": list(self.units),
+                    "target_id": str(self.target_id),
+                },
+            }
+        if m in ("capture_actor", "c4_detonate", "infiltrate"):
+            if not self.units or self.target_id is None:
+                return None
+            return {
+                "name": m,
                 "arguments": {
                     "unit_ids": list(self.units),
                     "target_id": str(self.target_id),
