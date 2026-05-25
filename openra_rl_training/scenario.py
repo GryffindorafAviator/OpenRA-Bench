@@ -328,6 +328,19 @@ class ScenarioDefinition(BaseModel):
     planning: bool = Field(default=False, description="Enable pre-game planning phase")
     difficulty: int = Field(default=1, description="Difficulty level for ordering")
     tags: list[str] = Field(default_factory=list, description="Tags for filtering")
+    # Per-scenario production speed multiplier (default None ⇒ engine
+    # default 1.0 ⇒ unchanged behaviour). The engine
+    # (`oramap.rs::MapDef.build_speed_multiplier`,
+    # `world.rs::World.build_speed_multiplier`) scales the per-tick
+    # production queue advance by this factor: 4.0 ⇒ ~4× faster,
+    # 0.5 ⇒ ~2× slower. Lifted to the engine YAML by
+    # `_scenario_to_tmp_yaml`. Only `adversarial-1v1-macro` declares
+    # this today; every other pack inherits 1.0 (no change).
+    build_speed_multiplier: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Per-scenario production speed multiplier (engine default 1.0).",
+    )
 
     @field_validator("tools")
     @classmethod
