@@ -62,7 +62,7 @@ class StartRequest(BaseModel):
 
 
 class ActionItem(BaseModel):
-    mode: str  # "move" | "attack" | "observe" | "build" | "place_building" | "surrender"
+    mode: str  # "move" | "attack" | "observe" | "build" | "place_building" | "surrender" | "power_down"
     unit_ids: List[str] = []
     target_x: Optional[int] = None
     target_y: Optional[int] = None
