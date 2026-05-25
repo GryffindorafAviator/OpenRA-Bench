@@ -18,7 +18,6 @@ set -a; source .env; set +a
 #        gpt-5.4-involving LAST (4× pricier)
 PAIRS=(
   # Currently running in queue (pair 1):
-  "qwen3.5-9b gpt-5.4-mini together:Qwen/Qwen3.5-9B openai:gpt-5.4-mini-2026-03-17"
   # NOTE: 4 pairs removed (running in parallel since 13:30):
   #   gpt-5.4-mini × gpt-5.4-mini, gpt-5.4-mini × gpt-5.4, gpt-5.4 × gpt-5.4,
   #   qwen3.6-35b-a3b × gpt-5.4-mini
