@@ -349,11 +349,24 @@ async function loadData(){
   renderCapFilters();
   renderCards();
   updateHeaderProgress();
-  // Check URL hash
+  // Resume order:
+  //   1. URL hash `#mission/<id>` — explicit link / share / bookmark.
+  //   2. localStorage last-mission — fresh tab / browser restart.
+  //   3. fall back to the picker (current default).
   if(location.hash.startsWith("#mission/")){
     const id=location.hash.slice(9);
     const idx=scenarios.findIndex(s=>s.scenarioId===id);
-    if(idx>=0)openMission(idx);
+    if(idx>=0){openMission(idx);return;}
+  }
+  const last=loadLastMission();
+  if(last&&last.scenarioId){
+    const idx=scenarios.findIndex(s=>s.scenarioId===last.scenarioId);
+    if(idx>=0){
+      if(last.difficulty)currentDiff=last.difficulty;
+      openMission(idx);
+      // openMission re-applies currentDiff via setDiff downstream;
+      // explicit restore keeps the difficulty tab the user was on.
+    }
   }
 }
 
@@ -535,6 +548,10 @@ function showSelection(){
   document.getElementById("mission").style.display="none";
   document.getElementById("back-btn").style.display="none";
   location.hash="";
+  // User explicitly went back to the picker — drop the persistent
+  // resume so a fresh tab doesn't auto-snap them back into the
+  // mission they just left.
+  try{localStorage.removeItem("openra-last-mission");}catch(e){}
   renderCards();
 }
 function openMission(idx){
@@ -550,8 +567,32 @@ function openMission(idx){
   document.getElementById("mission").style.display="block";
   document.getElementById("back-btn").style.display="";
   location.hash="mission/"+scenarios[idx].scenarioId;
+  // Persist the last-viewed mission so a fresh tab / browser restart
+  // resumes here instead of landing on #1. User reported having to
+  // re-navigate to the same mission every session.
+  saveLastMission();
   renderMission();
   updateHeaderProgress();
+}
+
+// Persistent resume: remember which scenario + difficulty the user
+// was last on so a fresh tab / browser restart reopens it.
+function saveLastMission(){
+  if(currentIdx<0)return;
+  const id=scenarios[currentIdx]&&scenarios[currentIdx].scenarioId;
+  if(!id)return;
+  try{
+    localStorage.setItem("openra-last-mission", JSON.stringify({
+      scenarioId: id,
+      difficulty: currentDiff,
+      ts: Date.now(),
+    }));
+  }catch(e){/* localStorage may be unavailable in private mode */}
+}
+function loadLastMission(){
+  try{
+    return JSON.parse(localStorage.getItem("openra-last-mission")||"null");
+  }catch(e){return null;}
 }
 function renderMission(){
   const s=scenarios[currentIdx];
@@ -581,6 +622,8 @@ function setDiff(d){
   if(gameLevel)gameLevel.value=d;
   document.querySelectorAll("#diff-tabs .tab").forEach(t=>t.classList.toggle("active",t.dataset.diff===d));
   renderObjective();
+  // Persist so a fresh tab restores the same difficulty tab.
+  if(typeof saveLastMission==="function")saveLastMission();
 }
 function gameLevelChanged(){
   const gameLevel=document.getElementById("game-level");
@@ -1115,7 +1158,31 @@ function gameMinimapClick(e){
   }
   const ownHere=gameNearestStack(gameState.units,p.cx,p.cy,2.6);
   const ownBldgHere=gameNearestStack(gameState.own_buildings||[],p.cx,p.cy,3.8);
-  const enemyHere=gameNearestStack(gameState.enemies,p.cx,p.cy,3.8);
+  // Split enemy click-radius by footprint so a MOVE click near (but
+  // NOT on) a 1×1 enemy doesn't get swallowed as an ATTACK on the
+  // enemy. The pre-fix 3.8 radius was tuned for big enemy buildings
+  // but stole every MOVE click within ~3 cells of any 1×1 enemy
+  // (the `combat-heli-flank` symptom: the 21-cell pbox wall + 5-cell
+  // e1 cluster made the entire mid-map an attack zone, so a heli
+  // selected and pointed at (47,20) or (60,15) issued attack-pbox /
+  // attack-e1 instead of MOVE, and the heli either stalled out of
+  // range or never bypassed the wall — the user-reported
+  // `直升飞机动不了` symptom).
+  //   * 1×1 enemy unit / 1×1 enemy turret (pbox / e1 / e3 / jeep /
+  //     1tnk / …) — radius 1.5 (dist² < 2.25), i.e. click must land
+  //     ON or directly adjacent.
+  //   * Larger enemy building (proc / fact / weap / barr …) — keep
+  //     2.5 so a click on any cell of the 2×2 / 3×3 footprint still
+  //     resolves to attack.
+  // The 1×1-vs-larger split is by `is_building` (RA convention:
+  // every non-`pbox`/`hbox`/`gun` building is ≥2×2; pbox is the only
+  // 1×1 building, and treating it as a 1×1 enemy is desirable here
+  // because it's exactly the case the heli pack hits).
+  const enemyClose=(gameState.enemies||[]).filter(e=>!e.is_building||["pbox","hbox","gun","sam","ftur","agun","tsla"].includes(String(e.type||"").toLowerCase()));
+  const enemyBig=(gameState.enemies||[]).filter(e=>e.is_building&&!["pbox","hbox","gun","sam","ftur","agun","tsla"].includes(String(e.type||"").toLowerCase()));
+  const enemyCloseHere=gameNearestStack(enemyClose,p.cx,p.cy,1.5);
+  const enemyBigHere=gameNearestStack(enemyBig,p.cx,p.cy,2.5);
+  const enemyHere=enemyCloseHere.length?enemyCloseHere:enemyBigHere;
   if(gameSelected.size>0&&enemyHere.length>0){
     gameQueueAttack(enemyHere[0]);
   }else if(ownHere.length>0){
@@ -1483,7 +1550,16 @@ function gameTypeLabel(type){
   const t=gameTypeKey(type);
   const names={"1tnk":"light tank","2tnk":"medium tank","3tnk":"heavy tank","4tnk":"mammoth tank",
     "harv":"harvester","proc":"refinery","fact":"construction yard","powr":"power plant","weap":"war factory",
-    "barr":"barracks","silo":"silo","e1":"rifle infantry","e3":"rocket soldier","jeep":"ranger","mcv":"MCV"};
+    "barr":"barracks","tent":"barracks","silo":"silo","e1":"rifle infantry","e3":"rocket soldier",
+    "jeep":"ranger","mcv":"MCV","heli":"helicopter","hind":"hind","mig":"MiG","yak":"Yak",
+    "tran":"transport heli","badr":"badger bomber","u2":"spy plane",
+    "pbox":"pillbox","hbox":"camo pillbox","gun":"turret","sam":"SAM site","agun":"AA gun",
+    "ftur":"flame tower","tsla":"Tesla coil","apwr":"adv. power",
+    "dome":"radar dome","hpad":"heli pad","afld":"airfield","spen":"sub pen","syrd":"shipyard",
+    "atek":"tech center","stek":"soviet tech","fix":"service depot","iron":"iron curtain",
+    "mslo":"missile silo","msam":"mobile SAM","stnk":"stealth tank","ftnk":"flame tank",
+    "ttnk":"Tesla tank","v2rl":"V2 launcher","e6":"engineer","tanya":"Tanya","spy":"spy","thf":"thief",
+    "medi":"medic","mech":"mechanic"};
   return names[t]?names[t]+" ("+t+")":t;
 }
 function gameShapeFor(type,isBuilding){
