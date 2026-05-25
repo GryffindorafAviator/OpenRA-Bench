@@ -218,6 +218,16 @@ class RunJournal:
         self.ignore_run_id = ignore_run_id
         # Seed the in-memory dedupe set from existing rows so a resume
         # can't re-append a key the prior process already wrote.
+        #
+        # FOOTGUN HISTORY: errored rows used to be added here, which
+        # crashed the launcher when the resume gate (correctly) retried
+        # them — `done_keys()` excluded the error row from the done set,
+        # so the task got re-submitted; on completion `append()` then
+        # raised `DuplicateJournalKey` because `_seen_keys` still held
+        # the error row's key. The fix mirrors `done_keys()`: errored
+        # rows are NOT added to the dedupe set, so a retry's append is
+        # allowed through. Downstream readers must dedup by `_key`
+        # (`done_keys()` already does — uses a set + filters errors).
         self._seen_keys: set[str] = set()
         if self.path.exists():
             for line in self.path.read_text().splitlines():
@@ -231,6 +241,8 @@ class RunJournal:
                 if rec.get("_meta"):
                     self._verify_header(rec)
                     continue
+                if rec.get("outcome") == "error":
+                    continue  # retry must be allowed to append
                 k = rec.get("_key")
                 if k is not None:
                     self._seen_keys.add(k)

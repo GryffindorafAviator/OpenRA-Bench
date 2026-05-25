@@ -115,6 +115,35 @@ def test_journal_roundtrip_and_torn_line(tmp_path):
     assert len(j.records()) == 2  # torn tail tolerated
 
 
+def test_journal_error_row_allows_retry_append(tmp_path):
+    """Regression: an errored row in the journal must NOT prevent a retry
+    from being appended. Pre-fix the in-memory `_seen_keys` was seeded
+    from EVERY prior row including errors, so when the resume gate
+    correctly retried an errored cell the second append raised
+    `DuplicateJournalKey` and crashed the launcher. Mirror `done_keys()`:
+    error rows are excluded from the dedupe set so retries succeed."""
+    jp = tmp_path / "j.jsonl"
+    j = RunJournal(jp)
+    k = episode_key("scout-jeep", "easy", "public", 1, "vision", repeat=1)
+    # First attempt: provider 500 ⇒ recorded as error.
+    j.append(k, {"cell": "scout-jeep:easy", "outcome": "error",
+                 "notes": ["FatalProviderError: 500"]})
+    # Re-open the journal as a fresh process would (resume-from-crash).
+    j2 = RunJournal(jp)
+    # done_keys excludes errors — confirms retry is intended.
+    assert k not in j2.done_keys()
+    # The retry's append MUST succeed, not raise DuplicateJournalKey.
+    j2.append(k, {"cell": "scout-jeep:easy", "outcome": "win",
+                  "composite": 0.85})
+    # Both rows persist; done_keys returns the key once (the success).
+    assert k in j2.done_keys()
+    # Records returns both rows (caller dedups by `_key` keeping latest).
+    rows = [r for r in j2.records() if r.get("_key") == k]
+    assert len(rows) == 2
+    assert rows[0]["outcome"] == "error"
+    assert rows[1]["outcome"] == "win"
+
+
 # ── bounded chat history ───────────────────────────────────────────────────
 
 
