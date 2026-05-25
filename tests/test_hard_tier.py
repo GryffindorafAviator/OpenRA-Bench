@@ -1518,6 +1518,17 @@ UPGRADED = [
 # Consciously NOT spawn-varied, with the reason (keeps the curation
 # exhaustive — every active pack is classified, see the coverage test).
 NOT_APPLICABLE = {
+    # The canonical LLM-vs-LLM 1v1 macro pack. Head-to-head fairness
+    # IS the axis under test: introducing seed-driven `spawn_point`
+    # rotation on a perfectly mirrored arena would create a per-seed
+    # bias (one corner gets attacked from the centre vs from the
+    # rim) and break the symmetric-arena contract. The hard rung
+    # varies map TOPOLOGY (bridges + naval option) instead — the
+    # meaningful difficulty axis on a 1v1 cell.
+    "adversarial-1v1-macro": "1v1 head-to-head pack: mirrored "
+    "symmetric arenas are the fairness contract; spawn_point "
+    "rotation would break the symmetric layout. Hard rung varies "
+    "map topology (bridges + naval option) instead of spawn corner.",
     "economy-investment": "non-spatial: capital allocation, start pos irrelevant",
     "economy-time-box": "non-spatial: budget-under-clock",
     "economy-force-buildup": "non-spatial: production economy",

@@ -1,0 +1,409 @@
+# ADVERSARIAL-1V1-MACRO — the canonical LLM-vs-LLM full-macro 1v1 pack.
+#
+# This is the FIRST pack designed end-to-end for the bench's
+# `step_1v1` two-player command channel (engine: `openra-train/src/
+# env.rs:step_1v1`, harness: `openra_bench/one_v_one.py::run_1v1`).
+# Both sides are driven by Controllers (LLM / human / scripted) and
+# see their OWN fog-of-war observation; the winner is decided from
+# the FINAL boards by `run_1v1` (base elimination, then economy
+# tie-break), not by a per-side win predicate.
+#
+# Hard constraints (binding for every authored 1v1 cell):
+#
+# 1. NO `reveal_map`. Both sides explore through fog. The whole
+#    point is asymmetric information — mirrored bases sit outside
+#    each other's starting sight (vehicle vision ~6c, base
+#    separation chosen so no opponent actor is observable at t=0).
+#
+# 2. Mirrored symmetric layout. Identical starting roster on both
+#    sides (`fact`, `proc`, `harv`, `powr`, `weap`, `tent`, 2
+#    starter combat units), identical `starting_cash: 2000`,
+#    identical factions (`allies` both — faction-asymmetry is a
+#    separate future ladder rung), default stances (omitted). Side
+#    ore patches mirrored close to each base; a richer CONTESTED
+#    centre patch neither side can see at t=0 forces a map-control
+#    decision.
+#
+# 3. No load-bearing per-side win/fail predicates. The schema
+#    requires `win_condition` so we declare a symmetric pair
+#    (`not has_building: fact`) — they describe the same condition
+#    the harness already checks (base alive ⇒ side still in the
+#    game) and serve only as a "this scenario is well-formed" stub.
+#    Outcome decision lives in `run_1v1`.
+#
+# 4. `max_turns: 120` — reachable max tick ≈ 93 + 90·119 = 10803,
+#    well clear of any plausible deadline. Real macro requires time
+#    for economy → tech → engagement; turn caps tighter than this
+#    short-circuit the test back into a combat-micro pack.
+#
+# 5. `capability: adversarial` so `pairwise.py` / `adversarial.py`
+#    ladder rating treats this pack as a head-to-head rung.
+#
+# Three rungs:
+#   easy   — 60×60 arena, central ore patch only. Quick games.
+#   medium — 80×80 arena, central ore + safe side ore patches.
+#            The default macro cell.
+#   hard   — 96×72 `bridges-arena` with a horizontal water channel
+#            + bridges, ONE shore-water band per side, a `syrd`
+#            shipyard each. Naval optional, never forced.
+#
+# Hard-tier curation: head-to-head fairness vs `step_1v1` IS the
+# axis under test; introducing seed-driven `spawn_point` rotation
+# would create a per-seed bias on a perfectly symmetric arena
+# (one corner gets attacked from the centre vs from the rim). The
+# hard rung varies the MAP TOPOLOGY (bridge geometry + naval
+# option) instead — the meaningful difficulty axis on a 1v1 cell.
+# Declared NOT_APPLICABLE in `tests/test_one_v_one_macro.py` (and
+# in `tests/test_hard_tier.py::NOT_APPLICABLE` with the reason
+# above) so the suite hygiene test passes.
+#
+# Engine API the pack relies on:
+#   • `step_1v1(agent_cmds, enemy_cmds) -> (a_obs, e_obs, done, info)`
+#   • `enemy_observation()` for the t=0 enemy snapshot
+#   • `bot_type:''` on both `agent` and `enemy` so NO scripted
+#     engine bot co-drives either side — the Controller is the only
+#     hand on the wheel.
+
+meta:
+  id: adversarial-1v1-macro
+  title: '1v1 Macro — Mirrored Full-Game Adversarial Match'
+  capability: adversarial
+  real_world_meaning: >
+    A symmetric full-macro head-to-head match against another
+    real-time decision agent. Both commanders start with the same
+    base (Construction Yard, Refinery, Power Plant, War Factory,
+    Barracks, one Ore Truck, two starter combat units) and the
+    same $2000 in the bank. Side ore patches sit safely next to
+    each base; a richer contested patch sits in the middle of the
+    map and is not visible at game start. The decision is the
+    full RTS macro stack — when to expand for income, when to
+    tech, when to attack, when to scout — against an opponent
+    making the same choices on the same clock. Asymmetric
+    information: neither side can see the other's base at t=0;
+    everything is learned by scouting through the fog.
+  robotics_analogue: >
+    Two-agent symmetric strategic interaction under partial
+    observability — each agent owns identical resources and
+    capabilities, sees only its own local observation, and must
+    plan over multi-stage commitments (capacity-build, fielding,
+    engagement) while inferring the other agent's plan from
+    sparse evidence (units sighted, structures lost). This is the
+    cleanest abstraction the bench owns for two-LLM strategic
+    play.
+  benchmark_anchor:
+    - "SC2 1v1 macro ladder"
+    - "MicroRTS 1v1 head-to-head"
+    - "multi-agent reinforcement learning, symmetric two-agent game"
+    - "head-to-head LLM Elo / pairwise ranking"
+  author: openra-bench
+
+# Pack-level base_map is the logical id of the per-level arena
+# materialised by `openra_bench.mapgen.materialize` at compile time
+# (same idiom as econ-second-base-race). The .oramap is content-
+# addressed into `data/maps/`.
+base_map: adversarial-1v1-macro-arena-medium
+starting_cash: 2000
+
+base:
+  # Per-player cash plumbing (CLAUDE.md: per-player starting cash is
+  # plumbed end-to-end and overrides the top-level when set). Setting
+  # `cash: 2000` on BOTH sides is the explicit symmetric budget — no
+  # `bot_type:''` ambiguity, no fallback path.
+  agent: {faction: allies, cash: 2000, bot_type: ''}
+  enemy: {faction: allies, cash: 2000, bot_type: ''}
+  # Full macro tool palette — every verb the engine exposes that a
+  # 1v1 agent might want. Both sides see this same list.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - build
+    - place_building
+    - harvest
+    - set_stance
+    - set_primary
+    - sell
+    - repair
+    - power_down
+    - stop
+  spawn_mcvs: false
+  planning: true
+  # Re-decide as the world changes — combat contact, production
+  # complete, unit lost. The 1v1 harness honours interrupts on both
+  # sides independently.
+  interrupts:
+    enemy_unit_spotted: true
+    own_unit_destroyed: true
+    production_complete: true
+  # Generous budget — the deadline is the `max_turns` cap on the
+  # bench side, which the harness uses to bound the per-turn loop.
+  # `step_1v1` does not auto-`done` on either side's wipe (the
+  # harness reads the final boards and decides), so 12000 ticks is
+  # ample.
+  termination: {max_ticks: 12000}
+  actors: []
+
+levels:
+  # ── EASY ─────────────────────────────────────────────────────────
+  # 60×60 arena, mirrored NW (agent) / SE (enemy). Central ore patch
+  # only; no side patches. Quick games — the small map keeps macro
+  # phases compressed and contact within a handful of turns.
+  easy:
+    description: >
+      Commander, this is a 1v1 macro match on a 60x60 arena. You hold a
+      Construction Yard (fact), Refinery (proc), Power Plant (powr), War
+      Factory (weap), Barracks (tent), one harvester (an unarmed Ore
+      Truck) and two starter combat units (a light tank and a
+      rifleman) in the NORTH-WEST corner. A second commander — your
+      opponent — holds an identical base in the SOUTH-EAST corner. A
+      rich contested ore patch sits at the centre of the map; you
+      cannot see it from your starting position. Build economy, field
+      an army, and eliminate the opponent's Construction Yard before
+      they do the same to yours. The game ends when one base falls or
+      after 120 decision turns (economy tie-breaks on the deadline).
+    starting_cash: 2000
+    overrides:
+      base_map:
+        generator: arena
+        name: adversarial-1v1-macro-arena-easy
+        width: 60
+        height: 60
+        cordon: 2
+        title: 'Adversarial 1v1 Macro Arena 60x60'
+      actors:
+        # Agent base — NW corner. Standard macro footprint with a
+        # 3-cell stride between buildings (vendor footprints).
+        - {type: fact, owner: agent, position: [8, 8]}
+        - {type: powr, owner: agent, position: [12, 8]}
+        - {type: proc, owner: agent, position: [8, 12]}
+        - {type: tent, owner: agent, position: [12, 12]}
+        - {type: weap, owner: agent, position: [8, 16]}
+        - {type: harv, owner: agent, position: [12, 16]}
+        - {type: 1tnk, owner: agent, position: [15, 10]}
+        - {type: e1,   owner: agent, position: [15, 12]}
+        # Enemy base — SE corner. Mirrored about the map centre
+        # (60-8=52, 60-12=48, etc.). The agent (NW) and enemy (SE)
+        # start ~58 cells apart — far outside vehicle vision range.
+        - {type: fact, owner: enemy, position: [50, 50]}
+        - {type: powr, owner: enemy, position: [46, 50]}
+        - {type: proc, owner: enemy, position: [50, 46]}
+        - {type: tent, owner: enemy, position: [46, 46]}
+        - {type: weap, owner: enemy, position: [50, 42]}
+        - {type: harv, owner: enemy, position: [46, 42]}
+        - {type: 1tnk, owner: enemy, position: [43, 48]}
+        - {type: e1,   owner: enemy, position: [43, 46]}
+      ore_patches:
+        # Central contested patch. ~80 cells of L1 distance from
+        # either base ⇒ unscouted at t=0.
+        - {x: 30, y: 30, amount: 8000, radius: 3}
+    # Stub predicates only — the 1v1 harness decides the winner from
+    # the final boards (base alive ⇒ in the game). These describe the
+    # same condition for hygiene-test compliance.
+    win_condition:
+      not: {has_building: fact}
+    fail_condition:
+      not: {has_building: fact}
+    max_turns: 120
+
+  # ── MEDIUM ───────────────────────────────────────────────────────
+  # 80×80 arena. Adds SAFE side ore patches near each base (so the
+  # opening economy is comfortable) plus the central contested
+  # patch (so map-control still matters). The default 1v1 cell.
+  medium:
+    description: >
+      Commander, this is a 1v1 macro match on an 80x80 arena. You hold a
+      Construction Yard (fact), Refinery (proc), Power Plant (powr), War
+      Factory (weap), Barracks (tent), one harvester (an unarmed Ore
+      Truck) and two starter combat units (a light tank and a
+      rifleman) in the NORTH-WEST corner. A second commander — your
+      opponent — holds an identical base in the SOUTH-EAST corner. A
+      small safe ore patch sits next to your base, and a richer
+      contested ore patch sits at the centre of the map; you cannot
+      see the centre from your starting position. Build economy,
+      field an army, and eliminate the opponent's Construction Yard
+      before they do the same to yours. The game ends when one base
+      falls or after 120 decision turns (economy tie-breaks on the
+      deadline).
+    starting_cash: 2000
+    overrides:
+      base_map:
+        generator: arena
+        name: adversarial-1v1-macro-arena-medium
+        width: 80
+        height: 80
+        cordon: 2
+        title: 'Adversarial 1v1 Macro Arena 80x80'
+      actors:
+        # Agent base — NW corner (8,8).
+        - {type: fact, owner: agent, position: [8, 8]}
+        - {type: powr, owner: agent, position: [12, 8]}
+        - {type: proc, owner: agent, position: [8, 12]}
+        - {type: tent, owner: agent, position: [12, 12]}
+        - {type: weap, owner: agent, position: [8, 16]}
+        - {type: harv, owner: agent, position: [12, 16]}
+        - {type: 1tnk, owner: agent, position: [15, 10]}
+        - {type: e1,   owner: agent, position: [15, 12]}
+        # Enemy base — SE corner (70,70) mirrored about (40,40).
+        - {type: fact, owner: enemy, position: [70, 70]}
+        - {type: powr, owner: enemy, position: [66, 70]}
+        - {type: proc, owner: enemy, position: [70, 66]}
+        - {type: tent, owner: enemy, position: [66, 66]}
+        - {type: weap, owner: enemy, position: [70, 62]}
+        - {type: harv, owner: enemy, position: [66, 62]}
+        - {type: 1tnk, owner: enemy, position: [63, 68]}
+        - {type: e1,   owner: enemy, position: [63, 66]}
+      ore_patches:
+        # Central contested patch — high amount, large radius. ~100
+        # cells of L1 distance from either base.
+        - {x: 40, y: 40, amount: 12000, radius: 4}
+        # Mirrored safe side patches — sized so the opening econ is
+        # comfortable on both sides (a half-engaged harvester sees
+        # this through home shroud immediately).
+        - {x: 18, y: 18, amount: 3000, radius: 2}
+        - {x: 62, y: 62, amount: 3000, radius: 2}
+    win_condition:
+      not: {has_building: fact}
+    fail_condition:
+      not: {has_building: fact}
+    max_turns: 120
+
+  # ── HARD ─────────────────────────────────────────────────────────
+  # 96×72 `bridges-arena` with a horizontal water channel splitting
+  # NORTH lobe (agent) from SOUTH lobe (enemy). Three bridges cross
+  # the channel. ONE shore-water band per side (declared via
+  # `water_cells:` mirrored about the channel midline) puts a
+  # shipyard slot offshore for each commander. The naval lane is
+  # optional, never required: a land-only macro game still works
+  # through the bridges.
+  #
+  # NOT a `spawn_point` axis. The hard rung varies the MAP TOPOLOGY
+  # (bridges + naval option) instead — the meaningful difficulty
+  # axis on a symmetric 1v1 cell. See the pack header comment for
+  # the rationale; declared NOT_APPLICABLE in test_hard_tier.py.
+  hard:
+    description: >
+      Commander, this is a 1v1 macro match on a 96x72 bridges arena. A
+      central water channel splits the NORTH lobe (your side) from the
+      SOUTH lobe (your opponent's side); three bridges cross the
+      channel. You hold a Construction Yard (fact), Refinery (proc),
+      Power Plant (powr), War Factory (weap), Barracks (tent), one
+      Shipyard (syrd, on a small shore-water band), one harvester
+      (Ore Truck) and two starter combat units (a light tank and a
+      rifleman) in the NORTH-WEST corner. A second commander — your
+      opponent — holds an identical base mirrored in the SOUTH-EAST
+      corner. A rich contested ore patch sits at the centre of the
+      map; you cannot see it from your starting position. A safe ore
+      patch sits next to your base. The naval lane is optional — the
+      shipyard expands the action set (ships, transports) but a
+      land-only macro game still works through the bridges. Build
+      economy, field an army, cross the river, and eliminate the
+      opponent's Construction Yard before they do the same to yours.
+      The game ends when one base falls or after 120 decision turns
+      (economy tie-breaks on the deadline).
+    starting_cash: 2000
+    overrides:
+      base_map:
+        generator: bridges-arena
+        name: adversarial-1v1-macro-arena-hard
+        width: 96
+        height: 72
+        cordon: 2
+        axis: horizontal
+        channel_y: 35
+        channel_width: 2
+        bridges:
+          - {pos: 24, width: 3}
+          - {pos: 48, width: 3}
+          - {pos: 72, width: 3}
+        title: 'Adversarial 1v1 Macro Bridges Arena 96x72'
+      actors:
+        # Agent base — NORTH-WEST (north lobe). Shipyard sits on
+        # the shore-water band declared below.
+        - {type: fact, owner: agent, position: [10, 8]}
+        - {type: powr, owner: agent, position: [14, 8]}
+        - {type: proc, owner: agent, position: [10, 12]}
+        - {type: tent, owner: agent, position: [14, 12]}
+        - {type: weap, owner: agent, position: [10, 16]}
+        - {type: harv, owner: agent, position: [14, 16]}
+        - {type: syrd, owner: agent, position: [4, 12]}
+        - {type: 1tnk, owner: agent, position: [18, 10]}
+        - {type: e1,   owner: agent, position: [18, 12]}
+        # Enemy base — SOUTH-EAST (south lobe). Mirrored about the
+        # channel y=35 (so the enemy fact at y=64 is symmetric with
+        # the agent fact at y=8 ⇒ 64-35 = 29 = 35-8 + 2-cell channel).
+        - {type: fact, owner: enemy, position: [82, 64]}
+        - {type: powr, owner: enemy, position: [78, 64]}
+        - {type: proc, owner: enemy, position: [82, 60]}
+        - {type: tent, owner: enemy, position: [78, 60]}
+        - {type: weap, owner: enemy, position: [82, 56]}
+        - {type: harv, owner: enemy, position: [78, 56]}
+        - {type: syrd, owner: enemy, position: [88, 60]}
+        - {type: 1tnk, owner: enemy, position: [74, 62]}
+        - {type: e1,   owner: enemy, position: [74, 60]}
+      ore_patches:
+        # Central contested patch sits ON the channel-spanning land
+        # strip between the middle two bridges — controlling it
+        # means controlling river crossings.
+        - {x: 48, y: 36, amount: 14000, radius: 4}
+        # Mirrored safe side patches near each base.
+        - {x: 20, y: 18, amount: 4000, radius: 2}
+        - {x: 76, y: 54, amount: 4000, radius: 2}
+      # ONE shore-water band per side, mirrored about the channel
+      # midline. Each band is a 3-cell-wide L-shape adjacent to the
+      # corresponding shipyard so ships have water to launch into.
+      # Bands sit ENTIRELY inside the lobe (above / below the
+      # central channel) so the channel itself remains the
+      # land-engagement axis.
+      water_cells:
+        # Agent (north lobe) shore band — west wall, x in 2..4,
+        # y in 14..20.
+        - [2, 14]
+        - [3, 14]
+        - [4, 14]
+        - [2, 15]
+        - [3, 15]
+        - [4, 15]
+        - [2, 16]
+        - [3, 16]
+        - [4, 16]
+        - [2, 17]
+        - [3, 17]
+        - [4, 17]
+        - [2, 18]
+        - [3, 18]
+        - [4, 18]
+        - [2, 19]
+        - [3, 19]
+        - [4, 19]
+        - [2, 20]
+        - [3, 20]
+        - [4, 20]
+        # Enemy (south lobe) shore band — east wall, x in 88..90,
+        # y in 52..58.
+        - [88, 52]
+        - [89, 52]
+        - [90, 52]
+        - [88, 53]
+        - [89, 53]
+        - [90, 53]
+        - [88, 54]
+        - [89, 54]
+        - [90, 54]
+        - [88, 55]
+        - [89, 55]
+        - [90, 55]
+        - [88, 56]
+        - [89, 56]
+        - [90, 56]
+        - [88, 57]
+        - [89, 57]
+        - [90, 57]
+        - [88, 58]
+        - [89, 58]
+        - [90, 58]
+    win_condition:
+      not: {has_building: fact}
+    fail_condition:
+      not: {has_building: fact}
+    max_turns: 120

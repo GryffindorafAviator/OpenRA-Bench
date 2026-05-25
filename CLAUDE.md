@@ -657,6 +657,86 @@ and the **intended** capability policy. The bar (above) must hold.
 **No model / OpenRouter / network runs are needed for validation** —
 scripted policies are sufficient and free.
 
+## 1v1 LLM-vs-LLM mode
+
+The bench supports head-to-head LLM-vs-LLM matches via the engine's
+`step_1v1` two-player command channel
+(`OpenRA-Rust/openra-train/src/env.rs::step_1v1`) and the
+`openra_bench.one_v_one.run_1v1` harness. The canonical adversarial
+cell is `openra_bench/scenarios/packs/adversarial-1v1-macro.yaml` —
+a mirrored full-macro arena across three rungs (60×60 / 80×80 /
+96×72 bridges + naval) where each commander starts with an
+identical roster (`fact` + `proc` + `harv` + `powr` + `weap` +
+`tent` + 2 combat units, $2000), each side sees ONLY its own
+fog of war, and the winner is decided from the FINAL boards (base
+elimination > economy tie-break).
+
+**Pack convention for adversarial 1v1 cells**:
+
+* `capability: adversarial` so `pairwise.py` / `adversarial.py`
+  ladder picks the pack up.
+* **NO `reveal_map`**. Both sides explore through fog; asymmetric
+  information is the whole point. The engine's `reveal_map`
+  flag only applies to the AGENT viewer
+  (`env.rs:1938`), so it would break the symmetric contract
+  even if enabled — don't add it.
+* Mirrored symmetric layout: identical roster on both sides,
+  identical `starting_cash`, identical factions, ore patches
+  mirrored around the map centre, contested middle patch outside
+  starting sight.
+* Per-side `agent: {bot_type: ''}` AND `enemy: {bot_type: ''}` so
+  no scripted engine bot co-drives either side — the Controller
+  is the only hand on the wheel.
+* No load-bearing per-side win/fail predicates. The schema
+  requires a `win_condition`; declare a symmetric stub
+  (`not has_building: fact` for both clauses); `run_1v1` decides
+  the winner from final boards. Predicates exist only for schema
+  hygiene.
+* `max_turns: 120` is the working budget — reachable max tick ≈
+  93 + 90·119 = 10803, well clear of any plausible deadline.
+* Hard-tier rule: a perfectly symmetric arena cannot use
+  `spawn_point` rotation without introducing a per-seed bias
+  (one corner gets attacked from the centre vs the rim). Vary
+  MAP TOPOLOGY (bridges, naval lanes) on hard instead, and add
+  the pack to `tests/test_hard_tier.py::NOT_APPLICABLE` with the
+  symmetric-arena rationale.
+
+**CLI invocation**:
+
+```
+python3 -m openra_bench.run_eval \
+    --mode 1v1 \
+    --packs openra_bench/scenarios/packs/adversarial-1v1-macro.yaml \
+    --levels easy,medium,hard \
+    --seeds 1,2,3 \
+    --provider openrouter --model anthropic/claude-3.5-sonnet \
+    --opponent openrouter:openai/gpt-4o-mini \
+    --side-swap \
+    --out 1v1_stats.json
+```
+
+`--opponent` accepts `scripted:<kind>` (`stall`, `rusher`) for
+deterministic baselines or `<provider>:<model>` for LLM
+opponents. `--side-swap` plays each match twice with sides
+swapped and reports the aggregate as a draw when one half wins
+and the other loses — the symmetric-arena tie-break.
+
+`--provider scripted:stall` (and `scripted:rusher`) is the
+analogous escape hatch on the AGENT side, useful for CLI smoke
+tests and for the fairness probe.
+
+**Fairness contract**:
+
+* Both sides have fog of war (no `reveal_map`).
+* Identical roster, cash, faction, stances at t=0.
+* Both sides receive their OWN shroud-scoped observation through
+  `enemy_observation()` and the per-player observation channels
+  of `step_1v1`.
+* No engine-side asymmetry beyond the engine's residual playerRNG
+  slot ordering, which `--side-swap` is designed to neutralise.
+* `run_1v1` is deterministic given identical inputs (pinned by
+  `tests/test_one_v_one_macro.py`).
+
 ## Working on `main` (PRs vs direct push)
 
 - The default branch is `main`.

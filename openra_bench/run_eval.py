@@ -31,6 +31,93 @@ from .scenarios.loader import PACKS_DIR, compile_level
 from .scenarios.schema import CompiledLevel
 from .scoring import score_episode
 
+# A bare scripted "stall" — observe only. Useful as a 1v1 opponent
+# baseline (the canonical-baseline-side of the LLM-vs-LLM cell) and as
+# a 1v1 escape hatch for the `--provider scripted:stall` /
+# `--opponent scripted:stall` CLI affordance.
+def _stall_agent_fn(_rs, Command):
+    return [Command.observe()]
+
+
+# A bare scripted "rusher" — march every own COMBAT unit toward the
+# opposite corner of the map (agent NW → SE; enemy SE → NW). Tuned
+# for the canonical adversarial-1v1-macro layout but degenerates
+# gracefully on any map (units just charge in the chosen compass
+# direction). Coarse but real: it advances ticks of agency on the
+# engine. The fairness test uses it as the asymmetry probe — a
+# rusher beats stall regardless of which slot it occupies.
+_NON_COMBAT_TYPES = frozenset({"harv", "fact", "proc", "powr",
+                               "tent", "weap", "syrd", "mcv"})
+
+
+def _rusher_agent_fn(side: str):
+    # Each side rushes a generic FAR-CORNER on the opposite half of
+    # the map. Clamped well inside the playable bounds of all three
+    # adversarial-1v1-macro rungs (60x60 / 80x80 / 96x72).
+    target = (55, 55) if side == "agent" else (10, 10)
+
+    def _fn(render_state, Command):
+        cmds = []
+        # Prefer attack-on-sight: if any opposing unit/building is
+        # already in fog-of-war view, slam every combat unit at the
+        # nearest one. Otherwise, keep marching toward the opposite
+        # corner — attack-move so units engage en route.
+        enemy_positions = render_state.get("enemy_positions") or []
+        enemy_buildings = render_state.get("enemy_buildings_seen") or []
+        tx, ty = target
+        for u in render_state.get("units_summary", []) or []:
+            uid = u.get("id")
+            if uid is None:
+                continue
+            if str(u.get("type", "")).lower() in _NON_COMBAT_TYPES:
+                continue
+            # Target the nearest visible enemy actor/building if any.
+            best = None
+            ux, uy = u.get("cell_x", 0), u.get("cell_y", 0)
+            for e in enemy_positions + enemy_buildings:
+                ex, ey = e.get("cell_x", -999), e.get("cell_y", -999)
+                if ex < 0:
+                    continue
+                d2 = (ex - ux) ** 2 + (ey - uy) ** 2
+                if best is None or d2 < best[0]:
+                    best = (d2, ex, ey, e.get("id"))
+            if best is not None and best[3] is not None:
+                cmds.append(Command.attack_unit(str(uid), str(best[3])))
+            else:
+                cmds.append(Command.attack_move(
+                    [str(uid)], target_x=tx, target_y=ty,
+                ))
+        return cmds or [Command.observe()]
+    return _fn
+
+
+# Map a `scripted:<kind>` opponent / provider spec to a side-aware
+# controller factory. Used by `--mode 1v1` to wire stall/rusher
+# without requiring an LLM provider config. Extend by adding entries
+# to this dict; the CLI parses `--provider scripted:stall` /
+# `--opponent scripted:rusher` and looks the kind up here.
+_SCRIPTED_1V1: dict = {
+    "stall": lambda _side: _stall_agent_fn,
+    "rusher": lambda side: _rusher_agent_fn(side),
+}
+
+
+def _is_scripted_spec(spec: str | None) -> bool:
+    return isinstance(spec, str) and spec.startswith("scripted:")
+
+
+def _scripted_factory_for_1v1(spec: str, side: str):
+    """Resolve `scripted:<kind>` (kind in _SCRIPTED_1V1) to a bare
+    agent_fn appropriate for the given side. Raises a clear ValueError
+    for unknown kinds so a typo fails fast at CLI parse time."""
+    kind = spec.split(":", 1)[1].strip().lower()
+    if kind not in _SCRIPTED_1V1:
+        raise ValueError(
+            f"unknown scripted controller {kind!r}; known kinds: "
+            f"{sorted(_SCRIPTED_1V1)}"
+        )
+    return _SCRIPTED_1V1[kind](side)
+
 # agent_factory: (CompiledLevel) -> agent_fn(render_state, Command)->[Command]
 AgentFactory = Callable[[CompiledLevel], Callable]
 
@@ -774,6 +861,287 @@ def _resolve_packs(spec: str | None,
     return sorted(p.glob("*.yaml")) if p.is_dir() else [p]
 
 
+def _build_1v1_controller(spec: str | None, compiled: CompiledLevel,
+                          side: str, *, provider_cfg=None):
+    """Build a Controller (or bare agent_fn) for ONE side of a 1v1
+    match. `spec` may be a `scripted:<kind>` literal (escape hatch
+    for stall/rusher baselines) or None — None falls back to the
+    LLM provider_cfg (if any) via the usual AgentFactory. The
+    returned object is passed straight to `run_1v1`."""
+    if _is_scripted_spec(spec):
+        return _scripted_factory_for_1v1(spec, side)
+    # LLM path: identical to the single-player factory, but the
+    # ModelAgent gets a side-stamped name so traces are
+    # distinguishable.
+    if provider_cfg is None:
+        # No provider and no scripted spec → fall back to the
+        # canonical scripted_explore_agent baseline so the harness
+        # still runs (the CLI smoke / scripted-baseline flow).
+        return scripted_explore_agent
+    from .agent import ModelAgent
+    from .game_knowledge import (actor_codes, objective_brief,
+                                 scenario_primer)
+    from .prompt_v2 import unit_codex as _codex
+    from .game_knowledge import _condition_codes
+
+    codes = (
+        actor_codes(compiled.scenario)
+        | _condition_codes(compiled.win_condition)
+        | _condition_codes(compiled.fail_condition)
+    )
+    return ModelAgent(
+        provider_cfg,
+        allowed_tools=compiled.scenario.tools,
+        objective=objective_brief(
+            compiled.scenario.description,
+            compiled.win_condition,
+            compiled.fail_condition,
+            compiled.max_turns,
+            getattr(compiled, "objective_coords", "exact"),
+        ),
+        system_extra=scenario_primer(compiled),
+        base_map=compiled.scenario.base_map,
+        unit_codex=_codex(codes),
+        level=compiled.level,
+        fog_mode=getattr(compiled, "fog_mode", "vision"),
+    ).agent_fn
+
+
+def evaluate_1v1(
+    packs: list[Path],
+    levels: list[str],
+    seeds: list[int],
+    *,
+    provider_cfg=None,
+    agent_spec: str | None = None,
+    opponent_spec: str | None = "scripted:stall",
+    side_swap: bool = False,
+    report_path: str | Path | None = None,
+    run_id: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """The 1v1 sibling of `evaluate()` — drives `run_1v1` over
+    `pack:level:seed` cells and emits an episode-record-compatible
+    stats dict. `provider_cfg` runs the agent side; `opponent_spec`
+    is a `scripted:<kind>` or `provider:model` opponent (resolved
+    identically to provider_cfg via the providers module). When
+    `side_swap` is true each match plays TWICE with sides swapped;
+    an "ambivalent" outcome (1 win + 1 loss across the two halves)
+    is the symmetric draw.
+
+    The stats dict has the same top-level shape as `evaluate()`:
+    `run_id`, `model`, `episodes`, `summary` per cell, `overall`,
+    and an `adversarial_1v1` block carrying the per-cell win/loss/
+    draw breakdown so callers can summarise head-to-head results.
+    """
+    from .eval_core import _scenario_to_tmp_yaml
+    from .one_v_one import run_1v1
+
+    # Opponent provider_cfg: a `provider:model` string is parsed via
+    # the same ProviderConfig path the agent uses, so an LLM
+    # opponent and an LLM agent share the wire layer.
+    opp_provider_cfg = None
+    if opponent_spec and not _is_scripted_spec(opponent_spec):
+        from .providers import ProviderConfig
+        prov, _, model_id = opponent_spec.partition(":")
+        opp_provider_cfg = ProviderConfig(
+            provider=prov.strip() or "openrouter",
+            model=(model_id.strip() or "anthropic/claude-3.5-sonnet"),
+        )
+
+    run_id = run_id or time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    model = (
+        model
+        or getattr(provider_cfg, "model", None)
+        or "scripted-baseline"
+    )
+    opponent_label = (
+        opponent_spec
+        if _is_scripted_spec(opponent_spec)
+        else (opponent_spec or "scripted:stall")
+    )
+
+    episodes: list[dict] = []
+    skipped: list[str] = []
+    for pack_path in packs:
+        pack = load_pack(pack_path)
+        if getattr(pack.meta, "status", "active") == "quarantine":
+            skipped.append(f"{pack.meta.id} (quarantine)")
+            continue
+        if pack.meta.capability != "adversarial":
+            skipped.append(
+                f"{pack.meta.id} (capability {pack.meta.capability} != "
+                f"adversarial — only adversarial packs are valid 1v1 cells)"
+            )
+            continue
+        for lv in levels:
+            compiled = compile_level(pack, lv)
+            if not compiled.map_supported:
+                skipped.append(f"{pack.meta.id}:{lv} (map not Rust-loadable)")
+                continue
+            cell = f"{pack.meta.id}:{lv}"
+            tmp = _scenario_to_tmp_yaml(compiled)
+            for seed in seeds:
+                halves = ["normal"] + (["swapped"] if side_swap else [])
+                outcomes_this_seed: list[str] = []
+                for half in halves:
+                    if half == "normal":
+                        agent_ctrl = _build_1v1_controller(
+                            agent_spec, compiled, "agent",
+                            provider_cfg=provider_cfg,
+                        )
+                        enemy_ctrl = _build_1v1_controller(
+                            opponent_spec, compiled, "enemy",
+                            provider_cfg=opp_provider_cfg,
+                        )
+                    else:
+                        # Swap: agent-slot driven by the opponent,
+                        # enemy-slot driven by the agent. Outcome from
+                        # the agent's POV is inverted at the end.
+                        agent_ctrl = _build_1v1_controller(
+                            opponent_spec, compiled, "agent",
+                            provider_cfg=opp_provider_cfg,
+                        )
+                        enemy_ctrl = _build_1v1_controller(
+                            agent_spec, compiled, "enemy",
+                            provider_cfg=provider_cfg,
+                        )
+                    res = run_1v1(
+                        tmp, agent_ctrl, enemy_ctrl,
+                        seed=seed, max_turns=compiled.max_turns,
+                    )
+                    # Map raw winner ("agent"|"enemy"|"draw") to the
+                    # AGENT's POV, accounting for the side swap.
+                    if half == "normal":
+                        if res.winner == "agent":
+                            outcome = "win"
+                        elif res.winner == "enemy":
+                            outcome = "loss"
+                        else:
+                            outcome = "draw"
+                    else:
+                        if res.winner == "enemy":
+                            outcome = "win"
+                        elif res.winner == "agent":
+                            outcome = "loss"
+                        else:
+                            outcome = "draw"
+                    outcomes_this_seed.append(outcome)
+                    episodes.append({
+                        "cell": cell,
+                        "capability": "adversarial",
+                        "split": "public",
+                        "seed": seed,
+                        "side_half": half,
+                        "outcome": outcome,
+                        "opponent_outcome": (
+                            "loss" if outcome == "win"
+                            else "win" if outcome == "loss"
+                            else "draw"
+                        ),
+                        "turns": res.turns,
+                        "ticks": res.ticks,
+                        "reason": res.reason,
+                        "agent_name": res.agent_name,
+                        "enemy_name": res.enemy_name,
+                        "opponent_label": opponent_label,
+                        "mode": "1v1",
+                    })
+                # Side-swap ambivalence: one win + one loss across the
+                # two halves is the symmetric DRAW — recorded as a
+                # third synthetic record for the cell so callers can
+                # see the aggregated head-to-head outcome.
+                if side_swap and len(outcomes_this_seed) == 2:
+                    wins = sum(1 for o in outcomes_this_seed if o == "win")
+                    losses = sum(1 for o in outcomes_this_seed if o == "loss")
+                    if wins == 1 and losses == 1:
+                        agg = "draw"
+                    elif wins == 2:
+                        agg = "win"
+                    elif losses == 2:
+                        agg = "loss"
+                    else:
+                        agg = "draw"  # any half drew
+                    episodes.append({
+                        "cell": cell,
+                        "capability": "adversarial",
+                        "split": "public",
+                        "seed": seed,
+                        "side_half": "aggregate",
+                        "outcome": agg,
+                        "turns": 0,
+                        "ticks": 0,
+                        "reason": "side-swap aggregate",
+                        "opponent_label": opponent_label,
+                        "mode": "1v1",
+                    })
+
+    # Per-cell summary + headline.
+    by_cell: dict[str, list[dict]] = {}
+    for ep in episodes:
+        # Side-swap aggregates are the canonical per-seed outcome when
+        # present; otherwise the per-half records each count once.
+        by_cell.setdefault(ep["cell"], []).append(ep)
+    summary: dict[str, dict] = {}
+    for c, eps in by_cell.items():
+        # When side-swap aggregates exist for this cell, they are the
+        # canonical outcomes (each seed yields one aggregate); when
+        # absent, each per-half record counts once.
+        canon = [e for e in eps if e.get("side_half") == "aggregate"] or [
+            e for e in eps if e.get("side_half") != "aggregate"
+        ]
+        n = len(canon)
+        wins = sum(1 for e in canon if e["outcome"] == "win")
+        losses = sum(1 for e in canon if e["outcome"] == "loss")
+        draws = sum(1 for e in canon if e["outcome"] == "draw")
+        summary[c] = {
+            "n": n,
+            "wins": wins, "losses": losses, "draws": draws,
+            "win_rate": round(wins / n, 4) if n else 0.0,
+        }
+
+    all_canon = [
+        e for e in episodes
+        if e.get("side_half") in (None, "aggregate", "normal")
+    ]
+    if side_swap:
+        all_canon = [e for e in episodes if e.get("side_half") == "aggregate"]
+    n_all = len(all_canon)
+    overall = {
+        "n": n_all,
+        "wins": sum(1 for e in all_canon if e["outcome"] == "win"),
+        "losses": sum(1 for e in all_canon if e["outcome"] == "loss"),
+        "draws": sum(1 for e in all_canon if e["outcome"] == "draw"),
+        "win_rate": round(
+            sum(1 for e in all_canon if e["outcome"] == "win") / n_all, 4
+        ) if n_all else 0.0,
+    }
+
+    out = {
+        "run_id": run_id,
+        "model": model,
+        "mode": "1v1",
+        "opponent": opponent_label,
+        "side_swap": bool(side_swap),
+        "episodes": episodes,
+        "summary": summary,
+        "overall": overall,
+        "skipped": skipped,
+        # Headline block — `adversarial_1v1` is the 1v1-specific
+        # roll-up; the existing `adversarial` ladder summary still
+        # picks the same packs up when they're scored via `evaluate`.
+        "adversarial_1v1": {
+            "opponent": opponent_label,
+            "win_rate": overall["win_rate"],
+            "n_matches": n_all,
+            "by_cell": summary,
+        },
+    }
+    if report_path is not None:
+        write_report(out, report_path)
+    return out
+
+
 def _load_dotenv(path: str | Path = ".env") -> None:
     """Minimal, dependency-free .env loader: populate os.environ from
     `KEY=VALUE` lines (skips comments/blanks; never overrides an
@@ -914,10 +1282,38 @@ def main(argv: list[str]) -> int:
                     help="sampling temperature for the model "
                     "(overrides ProviderConfig.temperature). Set > 0 "
                     "to make --repeats meaningful.")
+    # --- 1v1 LLM-vs-LLM mode ---
+    # Default is single-player (back-compat). `1v1` routes each
+    # (pack, level, seed) through `run_1v1` against the --opponent.
+    # Only adversarial-capability packs are valid 1v1 cells; non-
+    # adversarial packs are skipped with a reason.
+    ap.add_argument(
+        "--mode", default="single-player",
+        choices=["single-player", "1v1"],
+        help="evaluation mode. `single-player` (default) runs the "
+        "legacy `run_level` path against scripted bots / scenario "
+        "predicates. `1v1` runs each pack:level:seed through "
+        "`run_1v1` against the --opponent.",
+    )
+    ap.add_argument(
+        "--opponent", default="scripted:stall",
+        help="1v1 opponent spec: `scripted:<kind>` (stall, rusher) "
+        "OR `<provider>:<model>` (e.g. openrouter:anthropic/claude-"
+        "3.5-sonnet). Ignored in single-player mode.",
+    )
+    ap.add_argument(
+        "--side-swap", action="store_true",
+        help="1v1 only: play each match twice with sides swapped, "
+        "and emit an aggregate `draw` outcome when one half is won "
+        "and the other lost — the symmetric-arena tie-break.",
+    )
     a = ap.parse_args(argv[1:])
 
     cfg = None
-    if a.provider:
+    # `scripted:<kind>` is a 1v1-mode escape hatch (no ProviderConfig);
+    # it's recognised by `evaluate_1v1` directly so skip the LLM
+    # ProviderConfig path entirely for it.
+    if a.provider and not _is_scripted_spec(a.provider):
         from .providers import ProviderConfig
 
         extra_body: dict = {}
@@ -947,6 +1343,48 @@ def main(argv: list[str]) -> int:
 
     if a.packs and a.family:
         ap.error("--packs and --family are mutually exclusive")
+
+    # ── 1v1 LLM-vs-LLM branch ────────────────────────────────────────
+    # Routes through `evaluate_1v1` which uses `run_1v1` instead of
+    # `run_level`. Single-player paths are NOT touched.
+    if a.mode == "1v1":
+        # The agent side: `--provider scripted:stall` is an escape
+        # hatch for the smoke test; otherwise the usual ProviderConfig
+        # built above drives the agent. The `agent_spec` carries a
+        # `scripted:<kind>` literal through to evaluate_1v1 (its
+        # `agent_spec` arg) so the scripted controller for the
+        # AGENT side is built identically to the one for the
+        # opponent side.
+        agent_cfg = cfg
+        agent_label = a.model
+        agent_spec: str | None = None
+        if _is_scripted_spec(a.provider):
+            agent_cfg = None
+            agent_label = a.provider
+            agent_spec = a.provider
+        stats = evaluate_1v1(
+            _resolve_packs(a.packs, a.family),
+            a.levels.split(","),
+            [int(s) for s in a.seeds.split(",")],
+            provider_cfg=agent_cfg,
+            agent_spec=agent_spec,
+            opponent_spec=a.opponent,
+            side_swap=a.side_swap,
+            report_path=a.out,
+            model=agent_label,
+        )
+        write_report(stats, a.out)
+        o = stats["overall"]
+        print(f"\nwrote {a.out}")
+        print(
+            f"1v1 overall: n={o.get('n', 0)} win_rate={o.get('win_rate', 0)} "
+            f"wins={o.get('wins', 0)} losses={o.get('losses', 0)} "
+            f"draws={o.get('draws', 0)} opponent={stats['opponent']}"
+        )
+        for s in stats["skipped"]:
+            print(f"  skipped: {s}")
+        return 0
+
     stats = evaluate(
         _resolve_packs(a.packs, a.family),
         a.levels.split(","),
