@@ -254,10 +254,30 @@ class OpenAICompatibleProvider(ChatProvider):
                 lambda: self._stream_once(url, headers, body), self._policy
             )
         else:
-            resp = retry_call(
-                lambda: self._post_once(url, headers, body), self._policy
-            )
-            reply = self._reply_from_data(resp.json())
+            def _call_and_parse():
+                resp = self._post_once(url, headers, body)
+                try:
+                    return self._reply_from_data(resp.json())
+                except json.JSONDecodeError as je:
+                    # Some providers (notably OpenRouter on large
+                    # tool-calling + vision prompts to glm-4.6v) ship
+                    # truncated response bodies on flaky links — the
+                    # HTTP status is 200 but the body parses as
+                    # incomplete JSON. Treat as transient so retry_call
+                    # gives it another go instead of recording an
+                    # outcome=error on a network glitch. After
+                    # max_retries the original JSONDecodeError surface
+                    # is preserved for diagnostics.
+                    body_snippet = resp.text[-300:] if resp.text else "(empty)"
+                    rt = RuntimeError(
+                        f"JSONDecodeError parsing provider response "
+                        f"({len(resp.text or '')} bytes): "
+                        f"{je}\ntail: {body_snippet}"
+                    )
+                    rt.transient = True  # type: ignore[attr-defined]
+                    rt.retry_after = None  # type: ignore[attr-defined]
+                    raise rt from je
+            reply = retry_call(_call_and_parse, self._policy)
         u = reply.usage or {}
         self._cost.add(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
         self._cost.check()  # raises BudgetExceeded → evaluate finalizes
