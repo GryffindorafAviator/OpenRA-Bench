@@ -819,34 +819,49 @@ def evaluate(
                 return parts[1]  # pack:level OR pack:config_name
             return compiled.level
         # Pass^N resume: --repeats N generates N tasks per (cell, seed),
-        # all sharing the same episode_key (key doesn't carry rep). The
-        # naive `key not in done` filter would skip every task as soon
-        # as the journal had ONE record for that key, blocking pass^3
-        # from ever running rep=1/rep=2. Count journal records per key
-        # and keep `max(0, repeats - done_count)` tasks per key. The
-        # in-process journal-append dedupe is per-key-per-process so it
-        # would also fire on the second append of the same key in the
-        # same run — make this explicit so the journal allows repeats.
-        from collections import Counter
-        # Tally journal records by (base-key) — rep-suffixed and bare
-        # keys collapse to the same base so existing pass@1 data counts
-        # toward the pass^N quota.
+        # each carrying an explicit `rep` index (0, 1, ..., N-1). The
+        # task list contains every (cell, seed, rep) triple. The
+        # resume gate skips a task IFF its specific (cell, rep) slot is
+        # already in the journal; otherwise it keeps it.
+        #
+        # FOOTGUN HISTORY (commit 3ab9b417 → fixed here): The previous
+        # gate counted journal records per cell and kept the first
+        # `repeats - done_count` tasks regardless of which rep slot
+        # they targeted. For a pass@1-done cell with repeats=3, that
+        # logic kept the rep=0 task again, whose journal append then
+        # collided with the existing pass@1 record under the bare-key
+        # encoding (`pack|level|split|seed|fog`) and raised
+        # `DuplicateJournalKey` — silently for 280 episodes over a
+        # 50-minute window. The fix below uses per-slot set membership
+        # so the rep=0 task is skipped when rep=0 is already done.
         def _base_key(k: str) -> str:
             return k.split("|rep")[0] if "|rep" in k else k
-        done_count: Counter[str] = Counter()
+        def _rep_of(k: str) -> int:
+            if "|rep" not in k:
+                return 0
+            tail = k.rsplit("|rep", 1)[1]
+            try:
+                return int(tail)
+            except ValueError:
+                return 0
+        done_slots: set[tuple[str, int]] = set()
         for rec in prior:
-            base = _base_key(rec.get("_key") or "")
-            if base:
-                done_count[base] += 1
+            k = rec.get("_key") or ""
+            if not k:
+                continue
+            done_slots.add((_base_key(k), _rep_of(k)))
         kept: list = []
-        slots: Counter[str] = Counter()
+        in_run_slots: set[tuple[str, int]] = set()
         for t in tasks:
-            base_k = episode_key(t[0].meta.id, _suffix_of(t[1], t[0]),
-                                 t[2], t[3], _cell_fog(t[0]))
-            already = done_count[base_k] + slots[base_k]
-            if already < max(1, repeats):
-                kept.append(t)
-                slots[base_k] += 1
+            compiled = t[0]
+            base_k = episode_key(compiled.meta.id, _suffix_of(t[1], compiled),
+                                 t[2], t[3], _cell_fog(compiled))
+            rep = int(t[4]) if len(t) > 4 else 0
+            slot = (base_k, rep)
+            if slot in done_slots or slot in in_run_slots:
+                continue
+            kept.append(t)
+            in_run_slots.add(slot)
         tasks = kept
 
     def _persist(rec: dict) -> None:
