@@ -27,12 +27,34 @@ from openra_bench.resilience import (
 
 
 def test_retry_policy_delay_exponential_capped_and_retry_after():
-    p = RetryPolicy(base=1.0, cap=30.0, max_attempts=6)
+    # Disable jitter to assert the deterministic exponential backoff curve.
+    p = RetryPolicy(base=1.0, cap=30.0, max_attempts=6, jitter=0.0)
     assert [p.delay(a) for a in (1, 2, 3, 4, 10)] == [1.0, 2.0, 4.0, 8.0, 30.0]
     # server Retry-After wins when larger; still capped
     assert p.delay(1, retry_after=5.0) == 5.0
     assert p.delay(1, retry_after=999) == 30.0
     assert p.is_transient_status(429) and not p.is_transient_status(400)
+
+
+def test_retry_policy_jitter_spreads_concurrent_retries():
+    """Regression: under high concurrency N workers hitting 429 at the
+    same instant must NOT all back off by an identical interval (the
+    pre-fix bug — `jitter` field existed but was `* 0`'d in `delay()`,
+    producing a thundering-herd pattern on every retry attempt). With
+    jitter active, the delay for a fixed attempt is sampled uniformly
+    from a ±10% window around the deterministic backoff, so a fleet of
+    20 workers fans out instead of stampeding."""
+    import random as _r
+    rng = _r.Random(42)
+    p = RetryPolicy(base=4.0, cap=30.0, jitter=0.1)
+    # Sample 200 retries at attempt=2 (deterministic backoff=8.0)
+    samples = [p.delay(2, _rng=rng) for _ in range(200)]
+    # All in the ±10% window
+    assert all(7.19 < s < 8.81 for s in samples), \
+        f"samples outside ±10%: min={min(samples)} max={max(samples)}"
+    # Spread is non-trivial (at least 50 distinct values out of 200)
+    assert len(set(samples)) > 50, \
+        f"jitter not active — only {len(set(samples))} unique delays"
 
 
 def test_retry_call_succeeds_after_transient_then_stops_on_fatal():

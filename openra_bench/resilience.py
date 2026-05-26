@@ -11,6 +11,7 @@ Nothing here imports the engine or a provider — fully unit-testable.
 from __future__ import annotations
 
 import json
+import random
 import threading
 import time
 from dataclasses import dataclass, field
@@ -37,18 +38,34 @@ class RetryPolicy:
     max_attempts: int = 5
     base: float = 1.0       # seconds; exponential: base * 2**(attempt-1)
     cap: float = 30.0       # max single sleep
-    jitter: float = 0.1     # fraction of delay added deterministically*0
+    jitter: float = 0.1     # ± fraction of delay (uniform random)
 
     def is_transient_status(self, status: int) -> bool:
         return status in _TRANSIENT_STATUS
 
-    def delay(self, attempt: int, retry_after: float | None = None) -> float:
+    def delay(self, attempt: int, retry_after: float | None = None,
+              _rng: random.Random | None = None) -> float:
         """Sleep before retry `attempt` (1-based). Honors a server
-        Retry-After when present and larger than our backoff."""
+        Retry-After when present and larger than our backoff.
+
+        Adds ±`jitter` fraction (uniform random) to break thundering-
+        herd retries: under high concurrency, N workers that hit a
+        429 at the same instant would otherwise back off by the
+        EXACT same window and re-collide on the next attempt. The
+        jitter spreads them out across [d*(1-j), d*(1+j)] so the
+        provider sees a smoother retry rate.
+
+        `_rng` is for tests — production callers omit it and get the
+        thread-local default random generator."""
         backoff = min(self.cap, self.base * (2 ** max(0, attempt - 1)))
         if retry_after is not None and retry_after > 0:
-            return min(self.cap, max(backoff, retry_after))
-        return backoff
+            backoff = min(self.cap, max(backoff, retry_after))
+        if self.jitter > 0:
+            r = _rng if _rng is not None else random
+            backoff *= 1.0 + r.uniform(-self.jitter, self.jitter)
+        # Don't sleep negative time (defensive — only happens if
+        # jitter > 1.0 which would be a pathological config).
+        return max(0.0, backoff)
 
 
 def retry_call(fn, policy: RetryPolicy, *, on_retry=None, sleep=time.sleep):
