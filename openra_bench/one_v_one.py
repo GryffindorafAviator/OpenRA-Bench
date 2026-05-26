@@ -379,6 +379,23 @@ def run_1v1(
                     )
                 if done:
                     break
+                # Early-termination: when one side has lost ALL units AND
+                # buildings the match is decided. Without this the loop
+                # runs to `max_turns` (default 200) wasting LLM calls,
+                # because adversarial-1v1-macro sets
+                # `termination.{agent,enemy}_units_killed: false` to keep
+                # the engine alive past wipe (so the deadline tie-break
+                # below has full state to read). The post-loop winner
+                # logic already reads the final state, so breaking here
+                # produces the same outcome — just saves the 100+ wasted
+                # turns of the losing side issuing observe()/no-ops.
+                # Use the POST-step render_state (the obs the next turn
+                # would receive); the top-of-loop a_rs/e_rs reflect the
+                # PRE-step world.
+                _a_post = agent_ad.render_state()
+                _e_post = enemy_ad.render_state()
+                if not _alive(_a_post) or not _alive(_e_post):
+                    break
         finally:
             executor.shutdown(wait=False)
 
