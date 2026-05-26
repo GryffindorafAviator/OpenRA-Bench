@@ -70,17 +70,26 @@ from typing import Any, Iterable
 
 # (slug, provider, model_id). The slug is the FILESYSTEM-SAFE identity used
 # in the run-dir tree; the model_id is what we forward to `--model`.
-MODELS: tuple[tuple[str, str, str], ...] = (
-    ("qwen3.5-9b",            "together",   "Qwen/Qwen3.5-9B"),
-    ("gemma-4-31b-it",        "openrouter", "google/gemma-4-31b-it:nitro"),
-    ("qwen3.6-35b-a3b",       "together",   "together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad"),
-    ("gpt-5.4-mini",          "openai",     "gpt-5.4-mini-2026-03-17"),
-    ("gpt-5.4",               "openai",     "gpt-5.4-2026-03-05"),
+#
+# 4-tuple form: (slug, provider, model_id, or_provider) — the 4th field
+# is the OpenRouter routing spec (`<provider>[/<quant>]`) passed via
+# `run_eval --or-provider`. Empty string = let OpenRouter auto-route.
+# Only meaningful when provider="openrouter".
+MODELS: tuple[tuple[str, str, str, str], ...] = (
+    ("qwen3.5-9b",            "together",   "Qwen/Qwen3.5-9B",                                       ""),
+    # gemma routed through OpenRouter auto-route (Venice/DeepInfra/Novita).
+    # Strict provider pins (e.g. "deepinfra/fp8" with allow_fallbacks=False)
+    # produce 404 "No endpoints found" under concurrent vision-mode load —
+    # both Venice and DeepInfra ran out of capacity that way.
+    ("gemma-4-31b-it",        "openrouter", "google/gemma-4-31b-it",                                 ""),
+    ("qwen3.6-35b-a3b",       "together",   "together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad",        ""),
+    ("gpt-5.4-mini",          "openai",     "gpt-5.4-mini-2026-03-17",                               ""),
+    ("gpt-5.4",               "openai",     "gpt-5.4-2026-03-05",                                    ""),
     # glm-4.6v dropped from v1.1 paper baseline for cost — see PR #6
     # (KaiserWhoLearns/RedAlertBenchPaper, closed 2026-05-25). Partial
     # scenarios sweep is preserved in data/runs/v1.1-prod/glm-4.6v/.
     # Re-add this entry to include it in a future sweep.
-    # ("glm-4.6v",              "openrouter", "z-ai/glm-4.6v"),
+    # ("glm-4.6v",              "openrouter", "z-ai/glm-4.6v",                                          ""),
     # Kimi-K2.6 (Together serverless) probed and dropped 2026-05-25:
     # 100% 429 rate-limit errors even at concurrency=1 (serial). The
     # bench's max_retries=5 with exp backoff (cap=30s) couldn't ride
@@ -88,7 +97,7 @@ MODELS: tuple[tuple[str, str, str], ...] = (
     # traffic + exponential backoff"; would need a paid Together tier
     # OR a custom retry policy with cap≥120s + max_retries≥15 to use
     # this endpoint productively. Excluded from v1.1.
-    # ("kimi-k2.6",             "together",   "moonshotai/Kimi-K2.6"),
+    # ("kimi-k2.6",             "together",   "moonshotai/Kimi-K2.6",                                    ""),
 )
 
 TYPES: tuple[str, ...] = ("scenarios", "1v1")
@@ -99,7 +108,7 @@ PAPER_REPO_URL = "https://github.com/KaiserWhoLearns/RedAlertBenchPaper"
 PAPER_REPO_CLONE = Path("/tmp/RedAlertBenchPaper")
 
 
-def _model_by_slug(slug: str) -> tuple[str, str, str]:
+def _model_by_slug(slug: str) -> tuple[str, str, str, str]:
     for m in MODELS:
         if m[0] == slug:
             return m
@@ -256,6 +265,7 @@ def build_run_eval_argv(*, slug: str, provider: str, model_id: str,
                         levels: str, seeds: str,
                         repeats: int = 1,
                         opponent: str = "scripted:stall",
+                        or_provider: str = "",
                         extra: Iterable[str] = ()) -> list[str]:
     """Build the argv we hand to `python3 -m openra_bench.run_eval`.
 
@@ -279,6 +289,10 @@ def build_run_eval_argv(*, slug: str, provider: str, model_id: str,
         "--journal", str(journal),
         "--resume",
     ]
+    if or_provider:
+        # OpenRouter routing override — e.g. "deepinfra/fp8" pins to
+        # DeepInfra+fp8 instead of OpenRouter's auto-routing.
+        argv += ["--or-provider", or_provider]
     if _check_run_eval_flag("--strict-resume"):
         argv.append("--strict-resume")
     # Resume operations across orchestrator restarts (or post-error-cell
@@ -312,7 +326,7 @@ def launch_cell(prod_dir: Path, slug: str, type_: str, *,
 
     Returns the subprocess exit code (0 = success).
     """
-    _slug, provider, model_id = _model_by_slug(slug)
+    _slug, provider, model_id, or_provider = _model_by_slug(slug)
     out_dir = cell_dir(prod_dir, slug, type_)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -320,7 +334,7 @@ def launch_cell(prod_dir: Path, slug: str, type_: str, *,
         slug=slug, provider=provider, model_id=model_id, type_=type_,
         out_dir=out_dir, concurrency=concurrency,
         levels=levels, seeds=seeds, repeats=repeats,
-        opponent=opponent, extra=extra,
+        opponent=opponent, or_provider=or_provider, extra=extra,
     )
 
     update_cell_state(prod_dir, slug, type_,
@@ -733,7 +747,7 @@ def open_paper_pr(prod_dir: Path, slug: str, type_: str, *,
         if _BENCH_ROOT not in sys.path:
             sys.path.insert(0, _BENCH_ROOT)
         from openra_bench.providers import ProviderConfig
-    _slug, provider, model_id = _model_by_slug(slug)
+    _slug, provider, model_id, or_provider = _model_by_slug(slug)
     # Read the cell's manifest record (state, concurrency, seeds, etc.)
     mf = load_manifest(prod_dir)
     cell_state = (mf.get("cells") or {}).get(f"{slug}:{type_}") or {}

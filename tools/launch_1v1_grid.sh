@@ -14,7 +14,7 @@ MODELS=(qwen3.5-9b gemma-4-31b-it qwen3.6-35b-a3b gpt-5.4-mini gpt-5.4)
 spec_for() {
   case "$1" in
     qwen3.5-9b)        echo "together:Qwen/Qwen3.5-9B" ;;
-    gemma-4-31b-it)    echo "openrouter:google/gemma-4-31b-it:nitro" ;;
+    gemma-4-31b-it)    echo "openrouter:google/gemma-4-31b-it" ;;
     qwen3.6-35b-a3b)   echo "together:together_sso/Qwen/Qwen3.6-35B-A3B-FP8-46d45bad" ;;
     gpt-5.4-mini)      echo "openai:gpt-5.4-mini-2026-03-17" ;;
     gpt-5.4)           echo "openai:gpt-5.4-2026-03-05" ;;
