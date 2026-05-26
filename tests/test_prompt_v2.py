@@ -71,6 +71,47 @@ def test_system_prompt_has_objective_and_codex_no_placeholder():
     assert "UNIT CODEX" in s and "2tnk" in s and "hp" in s
 
 
+def test_system_prompt_default_appends_full_codex_and_tech_tree():
+    """Paper baseline: every model call (no scenario-scoped override)
+    sees the FULL RA codex + tech tree — equal information for every
+    model, equivalent to a human reading the RA manual."""
+    s = P.system_prompt("WIN WHEN: build 2 destroyers.", "")
+    # Full codex header + all major categories present
+    assert "UNIT CODEX (full RA reference" in s
+    for section in ("Infantry:", "Vehicles:", "Aircraft:", "Ships:",
+                    "Structures:", "Defenses:"):
+        assert section in s, f"missing section {section!r} in default codex"
+    # Naval units must be visible — the load-bearing fix vs the old
+    # scenario-scoped filter (a syrd pack used to hide ship stats).
+    for ship in ("dd ", "ca ", "ss ", "pt ", "lst "):
+        assert ship in s, f"ship code {ship!r} not in default codex"
+    # Tech tree section + at least one prereq line
+    assert "TECH TREE" in s
+    assert "Ships (built at syrd / spen)" in s
+    # Faction + prereq present for a Ship row (dd is Allied + needs syrd)
+    assert "Allied" in s and "syrd" in s
+
+
+def test_full_codex_text_constants_populated_from_vendor():
+    """The vendor-derived constants must be non-empty whenever the
+    in-repo vendor YAML is reachable (which it is in the bench
+    checkout — that's how the engine wheel is built)."""
+    assert P.FULL_CODEX_TEXT.startswith("UNIT CODEX (full RA reference")
+    assert P.TECH_TREE_TEXT.startswith("TECH TREE")
+    # Spot-check one row: dd has cost 1000 and hp400 in vendor YAML.
+    dd_row = [l for l in P.FULL_CODEX_TEXT.splitlines() if l.startswith("  dd ")][0]
+    assert "$1000" in dd_row and "hp400" in dd_row and "naval" in dd_row
+
+
+def test_default_codex_size_reasonable():
+    """Sanity: the default system prompt must fit comfortably under a
+    25 KB budget (well within any 128 K-context LLM)."""
+    s = P.system_prompt("any objective", "")
+    assert len(s) < 25_000, (
+        f"system prompt grew too large: {len(s)} bytes"
+    )
+
+
 def test_minimap_b64_is_valid_png_with_terrain():
     pytest.importorskip("PIL")
     from PIL import Image

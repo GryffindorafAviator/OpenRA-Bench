@@ -21,10 +21,22 @@
 # is consumed.
 #
 # Capability under test: "infiltrate to STEAL — convert proximity to
-# an enemy cash-store into a wallet transfer". The load-bearing win
-# predicate is `cash_gte: M` with the agent starting at 0 and no
-# other cash source available — so the M can ONLY come from the
-# infiltration steal.
+# an enemy cash-store into a wallet transfer, but ROUTE THE THIEF
+# AROUND ENEMY DEFENSES first". The load-bearing win predicate is
+# `cash_gte: M` with the agent starting at 0 and no other cash source
+# available — so the M can ONLY come from the infiltration steal.
+#
+# Why the trivial "one infiltrate" policy LOSES (the 2026-05-25
+# routing upgrade): every level fortifies the SHORT path between the
+# thief spawn and the depot with stance:2 pillboxes. A pillbox fires
+# the M60mg burst (Damage 1000 × Burst 5 → 7500 dmg vs unarmored
+# infantry per burst); a thief has HP 8000 and is consumed inside
+# a pbox kill zone before reaching adjacency. The pathfinder
+# triggered by a bare `infiltrate` call A*-routes through the SHORT
+# path (engine `find_path` is shortest-cost, not threat-aware) and
+# the thief dies in transit. The correct play is a TWO-STEP order:
+# `move_units([thf], <safe-flank-cell>)` to bypass pillbox range,
+# THEN `infiltrate(thf, silo|proc)` for the kill.
 #
 # Why brute / stall / wrong-target policies LOSE:
 #   * `stall` (observe-only) — wallet stays at 0; timeout.
@@ -33,62 +45,84 @@
 #   * `infiltrate` against a non-cash building (e.g. a powr) — the
 #     thief is consumed but no cash transfers (only proc/silo are
 #     stealable in the parity model).
-# Only `Command.infiltrate([thf_id], <proc-or-silo-id>)` wins.
+#   * `infiltrate` direct (no flank) — pathfinder routes through
+#     the pbox kill zone; thief dies before reaching the depot.
+# Only `move_units(thf, <flank>)` + `infiltrate(thf, depot)` wins.
 #
-# Real-world anchor: opportunistic asset extraction — a small mobile
-# crew transfers value (cash / data / ammunition) from an
-# under-defended depot to the operator's pool. Single-use action;
-# the crew does not return.
+# Real-world anchor: opportunistic asset extraction under air-defense
+# coverage — a small mobile crew transfers value (cash / data /
+# ammunition) from an under-defended depot to the operator's pool.
+# The depot is itself unguarded but its short approach is overlooked
+# by a defensive overwatch; the crew must take the longer
+# unobserved arc.
 #
 # Map design (per-pack, NOT the shared rush-hour arena):
-# `spec-thief-chokepoint-40x20` — a compact chokepoint-arena (40x20,
-# corridor at y=10, width 4, pinch at x=20, wall thickness 4). The
-# corridor frames the depot's natural defense: there is exactly ONE
-# route to the cash-store and the depot sits at the chokepoint exit.
-# This is the canonical "infiltrator picks the target and commits"
-# map — small (vision constraint), no excess room. Each level adds a
-# persistent enemy `fact` keep-alive marker at the east corner so
-# the engine doesn't auto-`done` when the silo/proc is the only
-# enemy MustBeDestroyed building.
+# `spec-thief-flank-arena` — a 48×24 (easy) / 56×28 (medium) /
+# 64×32 (hard) open arena split by a thick horizontal WATER wall.
+# The wall has a single direct gap dead-centre on a vertical line
+# from the thief spawn to the depot; pillboxes flank the gap so a
+# direct walk-through dies. The wall ENDS several cells short of
+# both map edges, leaving a clear arc around either end of the
+# wall — the unobserved flank. The geometry is intentionally
+# legible: the wall + pbox annotation in the briefing tells the
+# model the short path is hostile and a flank is required.
 
 meta:
   id: spec-thief-steal-cash
   title: 'Thief Steal Cash — Drain an Enemy Depot'
   capability: action
   real_world_meaning: >
-    Specialist tasked with VALUE EXTRACTION rather than destruction:
-    proximity to an enemy cash-store transfers a fixed quantum to
-    the operator's wallet and consumes the asset. The decision is
-    "which depot to hit" under a single-use crew constraint.
+    Specialist tasked with VALUE EXTRACTION rather than destruction,
+    operating UNDER OVERWATCH: proximity to an enemy cash-store
+    transfers a fixed quantum to the operator's wallet and consumes
+    the asset. The decision is "which approach to take" — the direct
+    line is covered by hostile fire; a longer flanking arc bypasses
+    the kill zone.
   robotics_analogue: >
-    A loadout-extraction drone dispatched to an under-defended
-    cache; on arrival it transfers a fixed inventory quantum to the
-    operator's pool and is consumed in the process.
+    A loadout-extraction drone dispatched to an under-defended cache
+    that sits behind a defended corridor; the drone must route AROUND
+    the corridor's overwatch before its on-arrival inventory transfer.
   benchmark_anchor:
     - "BFCL tool fidelity"
     - "specialist unit action"
+    - "spatial routing under threat overlay"
   author: engine-infiltrate-task
 
 base_map:
-  generator: chokepoint-arena
-  name: spec-thief-chokepoint-40x20
-  width: 40
-  height: 20
+  generator: arena
+  name: spec-thief-flank-arena-48x24
+  width: 48
+  height: 24
   cordon: 2
-  pinch_x: 20
-  pinch_width: 4
-  corridor_width: 4
-  corridor_y: 10
-  title: Thief Chokepoint 40x20
+  title: Thief Flank Arena 48x24
+  # Thick horizontal water wall splits the map north/south. A single
+  # direct gap at x=24 (column passes through y=10..14). The wall ENDS
+  # at x=4 (west) and x=43 (east); the cordon is at x=0..1 and
+  # x=46..47, so cells x=2..3 and x=44..45 are CLEAR corridors around
+  # each end of the wall (the flanking arcs).
+  obstacles:
+    # West half of wall, before the direct gap
+    - {x: 4,  y: 10, w: 20, h: 5}
+    # East half of wall, after the direct gap (x=25..43)
+    - {x: 25, y: 10, w: 18, h: 5}
+
 starting_cash: 0
+# Routing-under-threat is the load-bearing capability — perception
+# is NOT (the model should reason about the threat overlay, not
+# hunt for the silo through fog). Reveal the map so the silo id
+# and the pbox positions are visible at t=0; the agent can then
+# choose between the direct path and the flank.
+reveal_map: true
 
 base:
   agent: {faction: allies}
   # Enemy seeded with cash — that's where the steal comes from.
   enemy: {faction: soviet, cash: 3000}
   # Minimal toolset — infiltrate is the load-bearing verb;
-  # move_units / attack_unit are present so the brute / wander /
-  # wrong-target policies can be expressed and observed to LOSE.
+  # move_units is the load-bearing FLANK verb (a direct infiltrate
+  # routes through the pbox kill zone). attack_unit is here so the
+  # wrong-target / attack-the-silo policies can be expressed and
+  # observed to LOSE.
   tools: [observe, move_units, attack_unit, infiltrate]
   spawn_mcvs: false
   planning: true
@@ -97,91 +131,170 @@ base:
 
 levels:
   # ── EASY ─────────────────────────────────────────────────────────
-  # Thief at the corridor mouth, enemy proc at the corridor exit.
-  # The proc is the target AND a persistent MustBeDestroyed marker
-  # (proc IS MustBeDestroyed, so no auto-done on infiltrate). A
-  # second enemy `fact` keep-alive at the far corner guarantees a
-  # persistent enemy building even if the proc footprint is
-  # consumed mid-episode.
-  # One infiltrate call wins.
+  # Single thief at the NW corner. Direct gap is flanked by two
+  # pillboxes (one west, one east of the gap) — a thief walking
+  # through the gap is in pbox range for 5+ cells from BOTH
+  # pillboxes simultaneously and dies inside the kill zone before
+  # reaching the silo on the south side. The flank arcs go around
+  # the west wall-end (x=2..3, well clear of pbox Chebyshev range 4)
+  # or the east wall-end (x=44..45). Either flank delivers the
+  # thief to the silo at (24, 18) safely.
+  # Correct play: move_units([thf], (44, 18)) then
+  # infiltrate(thf, silo). One steal = $500 ≥ $400 win bar.
   easy:
     description: >
-      Thief at the west corridor mouth, undefended enemy refinery
-      one step into the corridor. One infiltrate call drains some
-      enemy cash into your wallet. Win = own cash ≥400 before tick
-      1350.
+      A single thief at the NW corner. A horizontal wall splits the
+      map; the silo sits south of the wall at (24, 18). The wall's
+      single direct gap (x=24) is covered by two pillboxes
+      (pbox at (20, 12) and (28, 12)) — a thief walking straight
+      south through the gap dies inside the pbox kill zone. Route
+      the thief AROUND either wall-end (x≤3 west, or x≥44 east) to
+      bypass the defenders, then infiltrate the silo. One steal
+      drains $500 (capped). Win = own cash ≥400 before tick 4500.
     starting_cash: 0
     overrides:
       actors:
-        - {type: thf,  owner: agent, position: [16, 10]}
-        - {type: proc, owner: enemy, position: [20, 10]}
-        - {type: fact, owner: enemy, position: [35, 4]}
+        - {type: thf,  owner: agent, position: [5, 5]}
+        # Two pillboxes flanking the direct gap. Pbox range 4 cells
+        # (Chebyshev) → kill zone is the rectangle around (20,12)
+        # and (28,12). A thief in the direct corridor at x=24,
+        # y=10..14 is within Chebyshev 4 of BOTH pillboxes for the
+        # full 5-cell traverse, so both bursts (7500 dmg each)
+        # overlap on the thief (HP 8000) and kill it inside the
+        # corridor.
+        - {type: pbox, owner: enemy, position: [20, 12], stance: 2}
+        - {type: pbox, owner: enemy, position: [28, 12], stance: 2}
+        - {type: silo, owner: enemy, position: [24, 18]}
+        # Persistent enemy keep-alive in NE corner so the engine
+        # doesn't auto-`done` if the silo dies / is captured.
+        - {type: fact, owner: enemy, position: [42, 4]}
     win_condition:
       all_of:
         - {cash_gte: 400}
-        - {within_ticks: 1350}
+        - {within_ticks: 4500}
     fail_condition:
       any_of:
-        - {after_ticks: 1351}
+        - {after_ticks: 4501}
         - {not: {own_units_gte: 1}}
-    max_turns: 15
+    max_turns: 50
 
   # ── MEDIUM ───────────────────────────────────────────────────────
-  # Distractor target: a `powr` sits BETWEEN the thief and the silo
-  # — closer than the silo, so a greedy "nearest enemy building"
-  # policy infiltrates the powr (no-op: only proc/silo are
-  # stealable) and the thief is wasted. The correct play is to walk
-  # past the powr to the silo at the corridor exit.
+  # Same geometry, but a `powr` distractor north of the wall plus a
+  # third pbox guarding the EAST flank. The west flank is still open
+  # (clear corridor at x=2..3). A greedy "infiltrate nearest enemy
+  # building" picks the powr (a no-op steal — only proc/silo carry
+  # cash, the thief is consumed for nothing) OR routes through the
+  # direct gap (dies). The correct play is the WEST flank around
+  # the wall: move to (2, 18) then infiltrate the silo.
   medium:
     description: >
-      Two enemy buildings: a Power Plant (closer; NOT stealable)
-      and a Silo (one step farther; stealable). Infiltrate the
-      SILO — the Power Plant gives nothing and burns your thief.
-      Win = own cash ≥400 before tick 1800.
+      A power plant (NOT stealable — burns your thief) sits between
+      you and the silo. The direct gap south is covered by two
+      pillboxes; the EAST flank is also defended by a third pillbox.
+      The WEST flank is open. Route the thief around the WEST end of
+      the wall to reach the silo. Win = own cash ≥400 before tick
+      5400.
     starting_cash: 0
     overrides:
+      base_map:
+        generator: arena
+        name: spec-thief-flank-arena-56x28
+        width: 56
+        height: 28
+        cordon: 2
+        title: Thief Flank Arena 56x28
+        obstacles:
+          # West half of wall
+          - {x: 4,  y: 12, w: 24, h: 5}
+          # East half of wall
+          - {x: 29, y: 12, w: 22, h: 5}
       actors:
-        - {type: thf,  owner: agent, position: [16, 10]}
-        - {type: powr, owner: enemy, position: [18, 10]}
-        - {type: silo, owner: enemy, position: [20, 10]}
-        - {type: fact, owner: enemy, position: [35, 4]}
+        - {type: thf,  owner: agent, position: [5, 6]}
+        # Distractor power plant — closer to the thief than the
+        # silo; a greedy "nearest enemy structure" pick infiltrates
+        # the powr and the thief is wasted (no-op steal).
+        - {type: powr, owner: enemy, position: [10, 6]}
+        # Direct-gap overwatch
+        - {type: pbox, owner: enemy, position: [24, 14], stance: 2}
+        - {type: pbox, owner: enemy, position: [32, 14], stance: 2}
+        # East-flank overwatch — covers cells around (50, 14),
+        # range 4 → the east-end clear strip at x=53..55 is JUST
+        # in range (Chebyshev 3..5). Closes the east flank,
+        # forcing the west arc.
+        - {type: pbox, owner: enemy, position: [50, 14], stance: 2}
+        - {type: silo, owner: enemy, position: [28, 22]}
+        - {type: fact, owner: enemy, position: [50, 4]}
     win_condition:
       all_of:
         - {cash_gte: 400}
-        - {within_ticks: 1800}
+        - {within_ticks: 5400}
     fail_condition:
       any_of:
-        - {after_ticks: 1801}
+        - {after_ticks: 5400}
         - {not: {own_units_gte: 1}}
-    max_turns: 20
+    max_turns: 60
 
   # ── HARD ─────────────────────────────────────────────────────────
-  # Two thieves (redundancy) + a stance:2 enemy rifleman one cell
-  # west of the silo. Each infiltrate yields ≤500 cash, so BOTH
-  # thieves must arrive and drain to clear cash_gte:800. The
-  # defender chips the thieves on approach (≈25% hp loss per
-  # transit) but both survive a single pass; if the agent sacrifices
-  # one thief or runs out of units, the run loses on `own_units_gte`.
+  # Two thieves (redundancy) on a larger map. The wall has TWO direct
+  # gaps each covered by an overlapping pbox pair, and the east flank
+  # is closed by a `gun` turret (cannon defender; range 6, damage
+  # 6000). The west flank is open but the route is long enough that a
+  # SINGLE thief barely makes one steal in the budget; both thieves
+  # must take the west arc and BOTH must infiltrate the silos (one
+  # each) to clear the $800 bar. Sacrificing a thief still works
+  # (cash_gte:800 needs two ≤500-cash steals = both arrivals), so
+  # `units_lost_lte` is not enforced — the bar is the cash.
   hard:
     description: >
-      Defended depot: a stance:2 enemy rifleman guards the ore silo at
-      the corridor exit. You have two thieves AND must steal twice
-      — each infiltrate yields ≤500 cash, so both must arrive and
-      drain. Win = own cash ≥800 before tick 2700.
+      Two thieves at the NW corner; two ore silos south of a wall
+      with two direct gaps each defended by two pillboxes. A gun
+      turret closes the EAST flank. The WEST flank is open but
+      long. Route BOTH thieves around the west wall-end and have
+      each infiltrate a different silo. Each steal drains $500
+      (capped); win bar is $800, so BOTH must succeed.
+      Win = own cash ≥800 before tick 7900.
     starting_cash: 0
     overrides:
+      base_map:
+        generator: arena
+        name: spec-thief-flank-arena-64x32
+        width: 64
+        height: 32
+        cordon: 2
+        title: Thief Flank Arena 64x32
+        obstacles:
+          # West-most segment
+          - {x: 4,  y: 14, w: 16, h: 5}
+          # Middle segment (between the two direct gaps)
+          - {x: 21, y: 14, w: 14, h: 5}
+          # East-most segment
+          - {x: 36, y: 14, w: 23, h: 5}
       actors:
-        - {type: thf,  owner: agent, position: [16, 9]}
-        - {type: thf,  owner: agent, position: [16, 11]}
-        - {type: silo, owner: enemy, position: [20, 10]}
-        - {type: e1,   owner: enemy, position: [19, 10], stance: 2}
-        - {type: fact, owner: enemy, position: [35, 4]}
+        - {type: thf,  owner: agent, position: [5, 6]}
+        - {type: thf,  owner: agent, position: [5, 8]}
+        # Two direct gaps. Each gap covered by a pbox pair on the
+        # SOUTH side of the wall.
+        # Gap A at x=20 (between west and middle wall segments)
+        - {type: pbox, owner: enemy, position: [16, 16], stance: 2}
+        - {type: pbox, owner: enemy, position: [24, 16], stance: 2}
+        # Gap B at x=35 (between middle and east wall segments)
+        - {type: pbox, owner: enemy, position: [31, 16], stance: 2}
+        - {type: pbox, owner: enemy, position: [39, 16], stance: 2}
+        # East-flank gun turret (range 6, damage 6000 single-shot).
+        # At (58, 16) it covers Chebyshev 6 around itself → cells
+        # x=52..64, y=10..22; the east-end clear strip at x=60..61
+        # is INSIDE this range. Closes the east flank.
+        - {type: gun,  owner: enemy, position: [58, 16], stance: 2}
+        # Two silos south of the wall. Each thief targets one.
+        - {type: silo, owner: enemy, position: [20, 25]}
+        - {type: silo, owner: enemy, position: [40, 25]}
+        - {type: fact, owner: enemy, position: [58, 4]}
     win_condition:
       all_of:
         - {cash_gte: 800}
-        - {within_ticks: 2700}
+        - {within_ticks: 7900}
     fail_condition:
       any_of:
-        - {after_ticks: 2701}
+        - {after_ticks: 7900}
         - {not: {own_units_gte: 1}}
-    max_turns: 30
+    max_turns: 88

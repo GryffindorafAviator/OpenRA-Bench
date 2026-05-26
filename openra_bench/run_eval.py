@@ -18,9 +18,10 @@ import argparse
 import json
 import re
 import statistics
+import subprocess
 import sys
 import time
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -31,6 +32,93 @@ from .scenarios.loader import PACKS_DIR, compile_level
 from .scenarios.schema import CompiledLevel
 from .scoring import score_episode
 
+# A bare scripted "stall" — observe only. Useful as a 1v1 opponent
+# baseline (the canonical-baseline-side of the LLM-vs-LLM cell) and as
+# a 1v1 escape hatch for the `--provider scripted:stall` /
+# `--opponent scripted:stall` CLI affordance.
+def _stall_agent_fn(_rs, Command):
+    return [Command.observe()]
+
+
+# A bare scripted "rusher" — march every own COMBAT unit toward the
+# opposite corner of the map (agent NW → SE; enemy SE → NW). Tuned
+# for the canonical adversarial-1v1-macro layout but degenerates
+# gracefully on any map (units just charge in the chosen compass
+# direction). Coarse but real: it advances ticks of agency on the
+# engine. The fairness test uses it as the asymmetry probe — a
+# rusher beats stall regardless of which slot it occupies.
+_NON_COMBAT_TYPES = frozenset({"harv", "fact", "proc", "powr",
+                               "tent", "weap", "syrd", "mcv"})
+
+
+def _rusher_agent_fn(side: str):
+    # Each side rushes a generic FAR-CORNER on the opposite half of
+    # the map. Clamped well inside the playable bounds of all three
+    # adversarial-1v1-macro rungs (60x60 / 80x80 / 96x72).
+    target = (55, 55) if side == "agent" else (10, 10)
+
+    def _fn(render_state, Command):
+        cmds = []
+        # Prefer attack-on-sight: if any opposing unit/building is
+        # already in fog-of-war view, slam every combat unit at the
+        # nearest one. Otherwise, keep marching toward the opposite
+        # corner — attack-move so units engage en route.
+        enemy_positions = render_state.get("enemy_positions") or []
+        enemy_buildings = render_state.get("enemy_buildings_seen") or []
+        tx, ty = target
+        for u in render_state.get("units_summary", []) or []:
+            uid = u.get("id")
+            if uid is None:
+                continue
+            if str(u.get("type", "")).lower() in _NON_COMBAT_TYPES:
+                continue
+            # Target the nearest visible enemy actor/building if any.
+            best = None
+            ux, uy = u.get("cell_x", 0), u.get("cell_y", 0)
+            for e in enemy_positions + enemy_buildings:
+                ex, ey = e.get("cell_x", -999), e.get("cell_y", -999)
+                if ex < 0:
+                    continue
+                d2 = (ex - ux) ** 2 + (ey - uy) ** 2
+                if best is None or d2 < best[0]:
+                    best = (d2, ex, ey, e.get("id"))
+            if best is not None and best[3] is not None:
+                cmds.append(Command.attack_unit(str(uid), str(best[3])))
+            else:
+                cmds.append(Command.attack_move(
+                    [str(uid)], target_x=tx, target_y=ty,
+                ))
+        return cmds or [Command.observe()]
+    return _fn
+
+
+# Map a `scripted:<kind>` opponent / provider spec to a side-aware
+# controller factory. Used by `--mode 1v1` to wire stall/rusher
+# without requiring an LLM provider config. Extend by adding entries
+# to this dict; the CLI parses `--provider scripted:stall` /
+# `--opponent scripted:rusher` and looks the kind up here.
+_SCRIPTED_1V1: dict = {
+    "stall": lambda _side: _stall_agent_fn,
+    "rusher": lambda side: _rusher_agent_fn(side),
+}
+
+
+def _is_scripted_spec(spec: str | None) -> bool:
+    return isinstance(spec, str) and spec.startswith("scripted:")
+
+
+def _scripted_factory_for_1v1(spec: str, side: str):
+    """Resolve `scripted:<kind>` (kind in _SCRIPTED_1V1) to a bare
+    agent_fn appropriate for the given side. Raises a clear ValueError
+    for unknown kinds so a typo fails fast at CLI parse time."""
+    kind = spec.split(":", 1)[1].strip().lower()
+    if kind not in _SCRIPTED_1V1:
+        raise ValueError(
+            f"unknown scripted controller {kind!r}; known kinds: "
+            f"{sorted(_SCRIPTED_1V1)}"
+        )
+    return _SCRIPTED_1V1[kind](side)
+
 # agent_factory: (CompiledLevel) -> agent_fn(render_state, Command)->[Command]
 AgentFactory = Callable[[CompiledLevel], Callable]
 
@@ -40,13 +128,11 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
         return lambda _c: scripted_explore_agent
     from .agent import ModelAgent
 
-    from .game_knowledge import (actor_codes, objective_brief,
-                                 scenario_primer)
-    from .prompt_v2 import unit_codex as _codex
-    def _scn_codes(c):
-        from .game_knowledge import _condition_codes
-        return (actor_codes(c.scenario) | _condition_codes(c.win_condition)
-                | _condition_codes(c.fail_condition))
+    from .game_knowledge import (objective_brief, scenario_primer)
+    # The agent's system prompt now defaults to the FULL RA codex +
+    # tech tree (every model sees the same reference). The legacy
+    # scenario-scoped `unit_codex(codes)` filter is no longer wired
+    # in — kept callable for explicit override only.
 
     def factory(compiled: CompiledLevel):
         agent = ModelAgent(
@@ -61,9 +147,12 @@ def _default_agent_factory(provider_cfg) -> AgentFactory:
             ),
             system_extra=scenario_primer(compiled),
             base_map=compiled.scenario.base_map,
-            unit_codex=_codex(_scn_codes(compiled)),
             level=compiled.level,
             fog_mode=getattr(compiled, "fog_mode", "vision"),
+            agent_faction=getattr(
+                getattr(compiled.scenario, "agent", None), "faction", "") or "",
+            enemy_faction=getattr(
+                getattr(compiled.scenario, "enemy", None), "faction", "") or "",
         )
         return agent.agent_fn
 
@@ -99,12 +188,15 @@ def _agg(scores: list) -> dict:
                  if s.outcome == "win" and s.speed > 0]
             ), 4
         ) if any(s.outcome == "win" and s.speed > 0 for s in scores) else 0.0,
+        # NoneType-safe: errored cells can carry `win_turns=None` (the
+        # finalize path used to crash on `None > 0` and torch the whole
+        # eval_stats.json write). Coerce None → 0 in the comparison.
         "win_turns_mean": round(
             statistics.fmean(
                 [s.win_turns for s in scores
-                 if s.outcome == "win" and s.win_turns > 0]
+                 if s.outcome == "win" and (s.win_turns or 0) > 0]
             ), 2
-        ) if any(s.outcome == "win" and s.win_turns > 0 for s in scores) else 0.0,
+        ) if any(s.outcome == "win" and (s.win_turns or 0) > 0 for s in scores) else 0.0,
         "weakest_link_hist": dict(Counter(s.weakest_link for s in scores)),
     }
 
@@ -153,6 +245,210 @@ def _handoff_wrap(agent, cell: str, seed: int, k: int, bank):
     return HandoffController(stall_policy, agent, 0), ""
 
 
+def _git_sha() -> str:
+    """Best-effort short git SHA for the journal header `code_version`
+    field. Returns '' when git is unavailable or this isn't a checkout
+    — the header still serializes, the field is just empty."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _score_path_candidates(playback_root, run_id, safe_model,
+                           cell: str, split: str, seed: int,
+                           repeat: int = 0) -> list[Path]:
+    """Candidate on-disk `score.json` locations for a journaled cell.
+
+    The Playback writer (see `playback.py`) builds dirs under
+    `<playback_root>/<run_id>__<safe_model>/<sanitized-cell:split>__seedN[_repR]/`.
+    We don't replicate the sanitizer's exact rules here — instead we
+    glob for any `score.json` whose parent dir matches the
+    cell+split+seed[+rep] signature, which is what the production
+    sweeps use. Returns ALL matches so the caller can pick the first
+    that exists.
+
+    `repeat`: when 0 (the default), the legacy bare `seed<N>` dir is
+    matched FIRST (back-compat with pre-PR data) and falls back to
+    `seed<N>_rep0` for paranoia. When > 0, ONLY the `_rep<R>` dirs
+    are matched — the strict-resume gate must not conflate reps."""
+    if not playback_root:
+        return []
+    root = Path(playback_root) / f"{run_id}__{safe_model}"
+    if not root.exists():
+        return []
+    # Tolerate any sanitizer that swapped ":" / "/" / "|" for "_".
+    safe_cell = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{cell}:{split}")
+    if int(repeat) > 0:
+        # rep>0 → MUST be the per-rep dir.
+        pattern = f"{safe_cell}*seed{seed}_rep{int(repeat)}*/score.json"
+        return sorted(root.glob(pattern))
+    # rep==0: prefer the legacy bare `seed<N>` layout (so back-compat
+    # data resumes), then fall back to a possible `seed<N>_rep0` dir
+    # if a writer ever emitted one. Glob both and order legacy first.
+    legacy = sorted(root.glob(f"{safe_cell}*seed{seed}/score.json"))
+    rep0 = sorted(root.glob(f"{safe_cell}*seed{seed}_rep0/score.json"))
+    return legacy + rep0
+
+
+def _strict_resume_gate(journal, prior: list[dict],
+                        playback_root, run_id: str,
+                        safe_model: str, *, progress=None):
+    """Verify each journaled cell against its on-disk `score.json`.
+
+    Returns (done_keys, kept_prior, stale_keys). For every prior row:
+      * `score.json` missing → DROP (re-run); log a `_journal_stale`
+        note via progress if a callback is provided.
+      * outcomes disagree → DROP (re-run); log mismatch.
+      * both present and agree → KEEP (normal resume).
+
+    `done_keys` is the set of keys we still consider DONE under the
+    strict gate; the run loop uses it to filter `tasks`.
+    """
+    kept: list[dict] = []
+    stale: list[str] = []
+    done: set[str] = set()
+    for r in prior:
+        key = r.get("_key")
+        if not key:
+            continue
+        cell = r.get("cell", "")
+        split = r.get("split", "public")
+        seed = r.get("seed", 0)
+        repeat = int(r.get("repeat", 0) or 0)
+        outcome = r.get("outcome")
+        # Errors never count as done (mirror the loose-resume path),
+        # so the existing done_keys() filter handles them. Strict
+        # gate only further checks WIN/LOSS/DRAW cells.
+        if outcome == "error":
+            continue
+        cands = _score_path_candidates(
+            playback_root, run_id, safe_model, cell, split, seed,
+            repeat=repeat,
+        )
+        sc_path = next((c for c in cands if c.exists()), None)
+        if sc_path is None:
+            stale.append(f"{key}: missing score.json")
+            continue
+        try:
+            sc = json.loads(sc_path.read_text())
+        except Exception:  # noqa: BLE001 — corrupt → re-run
+            stale.append(f"{key}: corrupt score.json")
+            continue
+        if sc.get("outcome") != outcome:
+            stale.append(
+                f"{key}: journal outcome={outcome!r} disagrees with "
+                f"score.json outcome={sc.get('outcome')!r}"
+            )
+            continue
+        kept.append(r)
+        done.add(key)
+    if stale:
+        sys.stderr.write(
+            f"[strict-resume] dropping {len(stale)} journaled "
+            f"entries (mismatch with on-disk score.json):\n"
+        )
+        for m in stale[:25]:
+            sys.stderr.write(f"  • {m}\n")
+        if len(stale) > 25:
+            sys.stderr.write(f"  • ... and {len(stale) - 25} more\n")
+        sys.stderr.flush()
+    return done, kept, stale
+
+
+def _run_adaptive_pool(tasks: list, run_fn: Callable, record_fn: Callable,
+                       initial_concurrency: int) -> None:
+    """Threadpool runner with rolling-window error-rate adaptation.
+
+    Policy (per the production-eval spec):
+      * Start at `initial_concurrency`.
+      * If error rate > 10% over last 20 cells → halve concurrency
+        (floor 1). One-shot — won't halve again until the window
+        re-fills.
+      * If error rate < 2% over 50 cells → restore to the original
+        starting concurrency (or step up by 25% if already there).
+
+    Implemented as a refilling worker pool: the pool runs at the
+    current `cap`, and a controller thread adjusts cap between
+    completions. Concurrency changes are logged to stderr with the
+    trigger so a long run's log lets you reconstruct the adaptation
+    timeline.
+    """
+    from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
+
+    if not tasks:
+        return
+    n = len(tasks)
+    cap = max(1, initial_concurrency)
+    original = cap
+    window20: deque = deque(maxlen=20)
+    window50: deque = deque(maxlen=50)
+    pending: list = []
+    next_idx = 0
+    halved_at_window_fill: int = -1  # last completed-count where we halved
+
+    def _log(msg: str) -> None:
+        sys.stderr.write(f"[adaptive-concurrency] {msg}\n")
+        sys.stderr.flush()
+
+    with ThreadPoolExecutor(max_workers=max(initial_concurrency, 1)) as ex:
+        # Prime the pool up to the current cap.
+        while next_idx < n and len(pending) < cap:
+            pending.append(ex.submit(run_fn, tasks[next_idx]))
+            next_idx += 1
+
+        completed = 0
+        while pending:
+            done, _not_done = wait(pending, return_when=FIRST_COMPLETED)
+            for fu in done:
+                pending.remove(fu)
+                rec = fu.result()
+                completed += 1
+                err = 1 if rec.get("outcome") == "error" else 0
+                window20.append(err)
+                window50.append(err)
+                record_fn(rec)
+
+                # Adapt: halve on hot error streak (one-shot per fill).
+                if (
+                    len(window20) == 20
+                    and sum(window20) / 20.0 > 0.10
+                    and cap > 1
+                    and completed > halved_at_window_fill
+                ):
+                    new_cap = max(1, cap // 2)
+                    _log(
+                        f"error rate {sum(window20)}/20 > 10% — "
+                        f"halving concurrency {cap} → {new_cap}"
+                    )
+                    cap = new_cap
+                    halved_at_window_fill = completed
+
+                # Adapt: restore on clean 50-cell stretch.
+                if (
+                    len(window50) == 50
+                    and sum(window50) / 50.0 < 0.02
+                    and cap < original
+                ):
+                    new_cap = min(original, max(cap + 1, int(cap * 1.25)))
+                    _log(
+                        f"error rate {sum(window50)}/50 < 2% — "
+                        f"restoring concurrency {cap} → {new_cap}"
+                    )
+                    cap = new_cap
+
+            # Refill the pool up to the current cap.
+            while next_idx < n and len(pending) < cap:
+                pending.append(ex.submit(run_fn, tasks[next_idx]))
+                next_idx += 1
+
+
 def evaluate(
     packs: list[Path],
     levels: list[str],
@@ -177,6 +473,9 @@ def evaluate(
     handoff_bank: str | Path | None = None,
     repeats: int = 1,
     full_playback_root: str | Path | None = None,
+    strict_resume: bool = False,
+    ignore_run_id: bool = False,
+    adaptive_concurrency: bool = False,
 ) -> dict:
     """Run packs×levels×seeds. If `held_out_seeds` is given, those are
     run too and tagged split='held_out'; the report adds
@@ -230,13 +529,9 @@ def evaluate(
             provider_cfg, rate_limiter=limiter, cost_meter=meter
         )
 
-        from .game_knowledge import (actor_codes, objective_brief,
-                                     scenario_primer)
-        from .prompt_v2 import unit_codex as _codex
-        def _scn_codes(c):
-            from .game_knowledge import _condition_codes
-            return (actor_codes(c.scenario) | _condition_codes(c.win_condition)
-                    | _condition_codes(c.fail_condition))
+        from .game_knowledge import (objective_brief, scenario_primer)
+        # Full RA codex + tech tree is the default reference (see
+        # prompt_v2.system_prompt); no per-scenario filter is needed.
 
         def factory(compiled: CompiledLevel):
             return ModelAgent(
@@ -252,9 +547,12 @@ def evaluate(
                 provider=shared,
                 system_extra=scenario_primer(compiled),
                 base_map=compiled.scenario.base_map,
-                unit_codex=_codex(_scn_codes(compiled)),
                 level=compiled.level,
                 fog_mode=getattr(compiled, "fog_mode", "vision"),
+                agent_faction=getattr(
+                    getattr(compiled.scenario, "agent", None), "faction", "") or "",
+                enemy_faction=getattr(
+                    getattr(compiled.scenario, "enemy", None), "faction", "") or "",
             ).agent_fn
 
     # Run/model identity so a single playback root can hold many runs
@@ -340,24 +638,29 @@ def evaluate(
     def _run_one(task: tuple) -> dict:
         compiled, cell, split, seed, rep = task
         pb = None
-        # Only the first repeat writes a Playback — the records (the
-        # lightweight per-rep results) carry the pass^k data; saving N
-        # full per-turn dumps per cell would just bloat disk.
-        if playback_root is not None and rep == 0:
+        # Every rep writes its own Playback under a distinct
+        # seed<N>_rep<R> dir (rep > 0). Pre-PR runs used to gate this
+        # on `rep == 0` to "save disk", which silently OVERWROTE
+        # per-turn transcripts for reps 1..N-1 — the journal kept the
+        # outcomes but the messages.json / turns.jsonl / minimaps for
+        # every non-first rep were lost. We need per-rep transcripts
+        # for inter-rep behavioural-variance analysis on pass^N
+        # stability sweeps, so write them all.
+        if playback_root is not None:
             from .playback import Playback
 
             pb = Playback(
                 Path(playback_root) / f"{run_id}__{_safe_model}",
                 f"{cell}:{split}",
                 seed,
+                repeat=rep,
             )
             pb.run_id, pb.model = run_id, model
-        # Audit-format playback (FullPlayback): one JSONL per cell at the
-        # canonical `<pack>__<level>__seed<N>__<fog>.jsonl` path the
-        # paper-collection script consumes. Same first-repeat gating as
-        # the legacy Playback.
+        # Audit-format playback (FullPlayback): one JSONL per cell at
+        # `<pack>__<level>__seed<N>__<fog>[__rep<R>].jsonl` (rep>0
+        # appended only when needed for pass^N stability sweeps).
         fpb = None
-        if full_playback_root is not None and rep == 0:
+        if full_playback_root is not None:
             from .full_playback import FullPlayback
 
             # Derive (pack_id, level, fog_mode) from the cell. For
@@ -390,6 +693,7 @@ def evaluate(
                 level=_level,
                 seed=seed,
                 fog_mode=_fog,
+                repeat=rep,
             )
         ctrl = factory(compiled)
         if handoff_sweep and ":handoff-" in cell:
@@ -415,7 +719,12 @@ def evaluate(
                         "reasoning": sc.reasoning,
                         "action": sc.action,
                         "weakest_link": sc.weakest_link,
+                        # `objective_progress` is deprecated and equals
+                        # `objective_blocking_ratio`; kept for one
+                        # release of journal back-compat.
                         "objective_progress": res.objective_progress,
+                        "objective_blocking_ratio": res.objective_blocking_ratio,
+                        "leaves_final": res.leaves_final,
                         "reward_vector": res.reward_vector,
                         "notes": sc.notes,
                     },
@@ -428,13 +737,31 @@ def evaluate(
             "split": split,
             "seed": seed,
             "repeat": rep,
+            # Carry the COMPILED fog_mode through so the journal _key
+            # computed by `_persist` matches the one used by the
+            # resume-gate filter (`_cell_fog(compiled)`). Without this
+            # field the persist fallback writes `...|vision`, which
+            # mismatches the filter key `...|<config-fog>` on packs with
+            # a `configs:` block that pin non-vision fog (e.g.
+            # `adversarial-duel:easy` → `structured`). The mismatch
+            # tripped the in-process dedupe with `DuplicateJournalKey`
+            # on resume for those cells.
+            "fog_mode": (
+                getattr(compiled, "fog_mode", None) or "vision"
+            ),
             "outcome": sc.outcome,
             "composite": sc.composite,
             "perception": sc.perception,
             "reasoning": sc.reasoning,
             "action": sc.action,
             "weakest_link": sc.weakest_link,
+            # `objective_progress` is the deprecated alias of
+            # `objective_blocking_ratio`, kept one release for
+            # journal back-compat. New consumers should read
+            # `leaves_final` directly for per-leaf detail.
             "objective_progress": res.objective_progress,
+            "objective_blocking_ratio": res.objective_blocking_ratio,
+            "leaves_final": res.leaves_final,
             "reward_vector": res.reward_vector,
             "turns": res.turns,
             "speed": sc.speed,
@@ -470,18 +797,101 @@ def evaluate(
     jp = journal_path
     if jp is None and playback_root is not None:
         jp = Path(playback_root) / f"_journal__{_safe_model}.jsonl"
-    journal = RunJournal(jp) if jp is not None else None
+    journal = (
+        RunJournal(
+            jp,
+            run_id=run_id,
+            model=model,
+            code_version=_git_sha(),
+            ignore_run_id=ignore_run_id,
+        )
+        if jp is not None
+        else None
+    )
     prior: list[dict] = []
     if journal is not None and resume:
         done = journal.done_keys()
         prior = journal.records()
+
         def _cell_fog(cl):
             """Cell `pack:level:fog` ⇒ fog; otherwise default vision."""
             return getattr(cl, 'fog_mode', None) or 'vision'
-        tasks = [
-            t for t in tasks
-            if episode_key(t[0].meta.id, t[0].level, t[2], t[3], _cell_fog(t[0])) not in done
-        ]
+
+        if strict_resume:
+            # Strict gate: a key counts as DONE only if (a) the journal
+            # has it AND (b) the on-disk score.json exists AND (c) the
+            # outcome agrees. Otherwise re-run the cell. This is the
+            # production-eval guard that catches the v1.0 sweep's 205
+            # journal↔disk mismatches.
+            done, prior, _stale_keys = _strict_resume_gate(
+                journal, prior, playback_root, run_id, _safe_model,
+                progress=progress,
+            )
+        # The resume-gate key must match the one `_persist` writes. For
+        # packs with a `configs:` block the cell name is `<pack>:<config
+        # name>` (e.g. `adversarial-1v1-macro:main`) — NOT `<pack>:<level
+        # name>`. Using compiled.level here would compute `|medium|`
+        # while _persist writes `|main|` from cell.split(":"), tripping
+        # the in-process dedupe on resume. Derive the suffix from the
+        # cell string the same way _persist does so both sides agree.
+        from .scenarios.schema import PERCEPTION_MODES as _PM
+        def _suffix_of(cell: str, compiled) -> str:
+            parts = cell.split(":")
+            if len(parts) >= 3 and parts[-1] in _PM:
+                return parts[1]  # pack:level:fog format
+            if len(parts) >= 2:
+                return parts[1]  # pack:level OR pack:config_name
+            return compiled.level
+        # Pass^N resume: --repeats N generates N tasks per (cell, seed),
+        # each carrying an explicit `rep` index (0, 1, ..., N-1). The
+        # task list contains every (cell, seed, rep) triple. The
+        # resume gate skips a task IFF its specific (cell, rep) slot is
+        # already in the journal; otherwise it keeps it.
+        #
+        # FOOTGUN HISTORY (commit 3ab9b417 → fixed here): The previous
+        # gate counted journal records per cell and kept the first
+        # `repeats - done_count` tasks regardless of which rep slot
+        # they targeted. For a pass@1-done cell with repeats=3, that
+        # logic kept the rep=0 task again, whose journal append then
+        # collided with the existing pass@1 record under the bare-key
+        # encoding (`pack|level|split|seed|fog`) and raised
+        # `DuplicateJournalKey` — silently for 280 episodes over a
+        # 50-minute window. The fix below uses per-slot set membership
+        # so the rep=0 task is skipped when rep=0 is already done.
+        def _base_key(k: str) -> str:
+            return k.split("|rep")[0] if "|rep" in k else k
+        def _rep_of(k: str) -> int:
+            if "|rep" not in k:
+                return 0
+            tail = k.rsplit("|rep", 1)[1]
+            try:
+                return int(tail)
+            except ValueError:
+                return 0
+        done_slots: set[tuple[str, int]] = set()
+        for rec in prior:
+            k = rec.get("_key") or ""
+            if not k:
+                continue
+            # Errored cells aren't really "done" — a provider 500/timeout
+            # left no valid playback. Skip them so resume re-runs them.
+            # Mirrors `RunJournal.done_keys()` which excludes errors.
+            if rec.get("outcome") == "error":
+                continue
+            done_slots.add((_base_key(k), _rep_of(k)))
+        kept: list = []
+        in_run_slots: set[tuple[str, int]] = set()
+        for t in tasks:
+            compiled = t[0]
+            base_k = episode_key(compiled.meta.id, _suffix_of(t[1], compiled),
+                                 t[2], t[3], _cell_fog(compiled))
+            rep = int(t[4]) if len(t) > 4 else 0
+            slot = (base_k, rep)
+            if slot in done_slots or slot in in_run_slots:
+                continue
+            kept.append(t)
+            in_run_slots.add(slot)
+        tasks = kept
 
     def _persist(rec: dict) -> None:
         if journal is None:
@@ -499,7 +909,8 @@ def evaluate(
             pack, level = parts[0], parts[1]
             fog = rec.get("fog_mode") or "vision"
         journal.append(
-            episode_key(pack, level, rec["split"], rec["seed"], fog),
+            episode_key(pack, level, rec["split"], rec["seed"], fog,
+                        repeat=int(rec.get("repeat", 0) or 0)),
             slim,
         )
 
@@ -551,6 +962,8 @@ def evaluate(
                     "action": 0.0,
                     "weakest_link": "n/a",
                     "objective_progress": 0.0,
+                    "objective_blocking_ratio": 0.0,
+                    "leaves_final": [],
                     "reward_vector": {},
                     "turns": 0,
                     "notes": [msg[:500]],
@@ -558,14 +971,18 @@ def evaluate(
                 }
 
         if concurrency > 1 and len(tasks) > 1:
-            from concurrent.futures import ThreadPoolExecutor
+            if adaptive_concurrency:
+                _run_adaptive_pool(
+                    tasks, _safe_run, _record, concurrency,
+                )
+            else:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            with ThreadPoolExecutor(max_workers=concurrency) as ex:
-                futs = {ex.submit(_safe_run, t): t for t in tasks}
-                from concurrent.futures import as_completed
+                with ThreadPoolExecutor(max_workers=concurrency) as ex:
+                    futs = {ex.submit(_safe_run, t): t for t in tasks}
 
-                for fu in as_completed(futs):
-                    _record(fu.result())
+                    for fu in as_completed(futs):
+                        _record(fu.result())
         else:
             for t in tasks:
                 _record(_safe_run(t))
@@ -612,6 +1029,13 @@ def _shim(r: dict):
     sc = r.get("_sc")
     if sc is not None:
         return sc
+    # Prefer the new `objective_blocking_ratio` scalar; fall back to
+    # the deprecated `objective_progress` so a v1.0 journal row still
+    # aggregates correctly. Both hold the same min-of-leaves scalar
+    # post-fix — only the v1.0 rows carry the old (misleading) mean.
+    obj = r.get("objective_blocking_ratio")
+    if obj is None:
+        obj = r.get("objective_progress", 0.0)
     return _ScoreShim(
         composite=r.get("composite", 0.0),
         outcome=r.get("outcome", "draw"),
@@ -619,7 +1043,7 @@ def _shim(r: dict):
         reasoning=r.get("reasoning", 0.0),
         action=r.get("action", 0.0),
         weakest_link=r.get("weakest_link", "n/a"),
-        dimensions={"objective": r.get("objective_progress", 0.0)},
+        dimensions={"objective": obj},
         speed=r.get("speed", 0.0),
         win_turns=r.get("win_turns", r.get("turns", 0)),
     )
@@ -774,6 +1198,462 @@ def _resolve_packs(spec: str | None,
     return sorted(p.glob("*.yaml")) if p.is_dir() else [p]
 
 
+def _build_1v1_controller(spec: str | None, compiled: CompiledLevel,
+                          side: str, *, provider_cfg=None):
+    """Build a Controller (or bare agent_fn) for ONE side of a 1v1
+    match. `spec` may be a `scripted:<kind>` literal (escape hatch
+    for stall/rusher baselines) or None — None falls back to the
+    LLM provider_cfg (if any) via the usual AgentFactory. The
+    returned object is passed straight to `run_1v1`."""
+    if _is_scripted_spec(spec):
+        return _scripted_factory_for_1v1(spec, side)
+    # LLM path: identical to the single-player factory, but the
+    # ModelAgent gets a side-stamped name so traces are
+    # distinguishable.
+    if provider_cfg is None:
+        # No provider and no scripted spec → fall back to the
+        # canonical scripted_explore_agent baseline so the harness
+        # still runs (the CLI smoke / scripted-baseline flow).
+        return scripted_explore_agent
+    from .agent import ModelAgent
+    from .game_knowledge import (objective_brief, scenario_primer)
+    # Full RA codex + tech tree applied by default (every model sees
+    # the same reference); the legacy filtered `unit_codex(codes)`
+    # path is no longer wired in.
+    return ModelAgent(
+        provider_cfg,
+        allowed_tools=compiled.scenario.tools,
+        objective=objective_brief(
+            compiled.scenario.description,
+            compiled.win_condition,
+            compiled.fail_condition,
+            compiled.max_turns,
+            getattr(compiled, "objective_coords", "exact"),
+        ),
+        system_extra=scenario_primer(compiled),
+        base_map=compiled.scenario.base_map,
+        level=compiled.level,
+        fog_mode=getattr(compiled, "fog_mode", "vision"),
+        agent_faction=getattr(
+            getattr(compiled.scenario, "agent", None), "faction", "") or "",
+        enemy_faction=getattr(
+            getattr(compiled.scenario, "enemy", None), "faction", "") or "",
+    ).agent_fn
+
+
+def evaluate_1v1(
+    packs: list[Path],
+    levels: list[str],
+    seeds: list[int],
+    *,
+    provider_cfg=None,
+    agent_spec: str | None = None,
+    opponent_spec: str | None = "scripted:stall",
+    side_swap: bool = False,
+    report_path: str | Path | None = None,
+    run_id: str | None = None,
+    model: str | None = None,
+    playback_root: str | Path | None = None,
+) -> dict:
+    """The 1v1 sibling of `evaluate()` — drives `run_1v1` over
+    `pack:level:seed` cells and emits an episode-record-compatible
+    stats dict. `provider_cfg` runs the agent side; `opponent_spec`
+    is a `scripted:<kind>` or `provider:model` opponent (resolved
+    identically to provider_cfg via the providers module). When
+    `side_swap` is true each match plays TWICE with sides swapped;
+    an "ambivalent" outcome (1 win + 1 loss across the two halves)
+    is the symmetric draw.
+
+    The stats dict has the same top-level shape as `evaluate()`:
+    `run_id`, `model`, `episodes`, `summary` per cell, `overall`,
+    and an `adversarial_1v1` block carrying the per-cell win/loss/
+    draw breakdown so callers can summarise head-to-head results.
+    """
+    from .eval_core import _scenario_to_tmp_yaml
+    from .one_v_one import run_1v1
+
+    # Opponent provider_cfg: a `provider:model` string is parsed via
+    # the same ProviderConfig path the agent uses, so an LLM
+    # opponent and an LLM agent share the wire layer.
+    opp_provider_cfg = None
+    if opponent_spec and not _is_scripted_spec(opponent_spec):
+        from .providers import ProviderConfig
+        prov, _, model_id = opponent_spec.partition(":")
+        opp_provider_cfg = ProviderConfig(
+            provider=prov.strip() or "openrouter",
+            model=(model_id.strip() or "anthropic/claude-3.5-sonnet"),
+        )
+
+    run_id = run_id or time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    model = (
+        model
+        or getattr(provider_cfg, "model", None)
+        or "scripted-baseline"
+    )
+    opponent_label = (
+        opponent_spec
+        if _is_scripted_spec(opponent_spec)
+        else (opponent_spec or "scripted:stall")
+    )
+
+    episodes: list[dict] = []
+    skipped: list[str] = []
+    for pack_path in packs:
+        pack = load_pack(pack_path)
+        if getattr(pack.meta, "status", "active") == "quarantine":
+            skipped.append(f"{pack.meta.id} (quarantine)")
+            continue
+        if pack.meta.capability != "adversarial":
+            skipped.append(
+                f"{pack.meta.id} (capability {pack.meta.capability} != "
+                f"adversarial — only adversarial packs are valid 1v1 cells)"
+            )
+            continue
+        for lv in levels:
+            compiled = compile_level(pack, lv)
+            if not compiled.map_supported:
+                skipped.append(f"{pack.meta.id}:{lv} (map not Rust-loadable)")
+                continue
+            cell = f"{pack.meta.id}:{lv}"
+            tmp = _scenario_to_tmp_yaml(compiled)
+            for seed in seeds:
+                halves = ["normal"] + (["swapped"] if side_swap else [])
+                outcomes_this_seed: list[str] = []
+                for half in halves:
+                    if half == "normal":
+                        agent_ctrl = _build_1v1_controller(
+                            agent_spec, compiled, "agent",
+                            provider_cfg=provider_cfg,
+                        )
+                        enemy_ctrl = _build_1v1_controller(
+                            opponent_spec, compiled, "enemy",
+                            provider_cfg=opp_provider_cfg,
+                        )
+                    else:
+                        # Swap: agent-slot driven by the opponent,
+                        # enemy-slot driven by the agent. Outcome from
+                        # the agent's POV is inverted at the end.
+                        agent_ctrl = _build_1v1_controller(
+                            opponent_spec, compiled, "agent",
+                            provider_cfg=opp_provider_cfg,
+                        )
+                        enemy_ctrl = _build_1v1_controller(
+                            agent_spec, compiled, "enemy",
+                            provider_cfg=provider_cfg,
+                        )
+                    # Per-turn full Playback persistence: both sides
+                    # write turns.jsonl + messages.json (when the
+                    # controller exposes `.history`) + per-turn
+                    # minimap PNGs + manifest.json + score.json into
+                    # sibling `agent_side/` and `enemy_side/` dirs
+                    # under this leaf. An operator tailing the file
+                    # sees the live LLM conversation rather than
+                    # waiting 30-60 min for the episode to finish;
+                    # a mid-episode crash preserves the partial run.
+                    # The bench's Playback UI uses the same on-disk
+                    # shape as the scenarios path, so 1v1 episodes
+                    # replay through the standard viewer.
+                    leaf_root = None
+                    if playback_root:
+                        safe = re.sub(r"[^a-z0-9-]+", "-",
+                                      (model or "agent").lower()).strip("-")
+                        leaf_root = (
+                            Path(playback_root) / f"{run_id}__{safe}"
+                            / f"{cell.replace(':', '_')}_{half}"
+                        )
+                    res = run_1v1(
+                        tmp, agent_ctrl, enemy_ctrl,
+                        seed=seed, max_turns=compiled.max_turns,
+                        playback_root=leaf_root,
+                        cell=cell,
+                        half=half,
+                        run_id=run_id,
+                        agent_model=(
+                            opponent_label if half == "swapped" else model
+                        ),
+                        enemy_model=(
+                            model if half == "swapped" else opponent_label
+                        ),
+                        base_map=compiled.scenario.base_map,
+                        level=lv,
+                    )
+                    # Map raw winner ("agent"|"enemy"|"draw") to the
+                    # AGENT's POV, accounting for the side swap.
+                    if half == "normal":
+                        if res.winner == "agent":
+                            outcome = "win"
+                        elif res.winner == "enemy":
+                            outcome = "loss"
+                        else:
+                            outcome = "draw"
+                    else:
+                        if res.winner == "enemy":
+                            outcome = "win"
+                        elif res.winner == "agent":
+                            outcome = "loss"
+                        else:
+                            outcome = "draw"
+                    outcomes_this_seed.append(outcome)
+                    episodes.append({
+                        "cell": cell,
+                        "capability": "adversarial",
+                        "split": "public",
+                        "seed": seed,
+                        "side_half": half,
+                        "outcome": outcome,
+                        "opponent_outcome": (
+                            "loss" if outcome == "win"
+                            else "win" if outcome == "loss"
+                            else "draw"
+                        ),
+                        "turns": res.turns,
+                        "ticks": res.ticks,
+                        "reason": res.reason,
+                        "agent_name": res.agent_name,
+                        "enemy_name": res.enemy_name,
+                        "opponent_label": opponent_label,
+                        "mode": "1v1",
+                    })
+                # Side-swap ambivalence: one win + one loss across the
+                # two halves is the symmetric DRAW — recorded as a
+                # third synthetic record for the cell so callers can
+                # see the aggregated head-to-head outcome.
+                if side_swap and len(outcomes_this_seed) == 2:
+                    wins = sum(1 for o in outcomes_this_seed if o == "win")
+                    losses = sum(1 for o in outcomes_this_seed if o == "loss")
+                    if wins == 1 and losses == 1:
+                        agg = "draw"
+                    elif wins == 2:
+                        agg = "win"
+                    elif losses == 2:
+                        agg = "loss"
+                    else:
+                        agg = "draw"  # any half drew
+                    episodes.append({
+                        "cell": cell,
+                        "capability": "adversarial",
+                        "split": "public",
+                        "seed": seed,
+                        "side_half": "aggregate",
+                        "outcome": agg,
+                        "turns": 0,
+                        "ticks": 0,
+                        "reason": "side-swap aggregate",
+                        "opponent_label": opponent_label,
+                        "mode": "1v1",
+                    })
+
+    # Per-cell summary + headline.
+    by_cell: dict[str, list[dict]] = {}
+    for ep in episodes:
+        # Side-swap aggregates are the canonical per-seed outcome when
+        # present; otherwise the per-half records each count once.
+        by_cell.setdefault(ep["cell"], []).append(ep)
+    summary: dict[str, dict] = {}
+    for c, eps in by_cell.items():
+        # When side-swap aggregates exist for this cell, they are the
+        # canonical outcomes (each seed yields one aggregate); when
+        # absent, each per-half record counts once.
+        canon = [e for e in eps if e.get("side_half") == "aggregate"] or [
+            e for e in eps if e.get("side_half") != "aggregate"
+        ]
+        n = len(canon)
+        wins = sum(1 for e in canon if e["outcome"] == "win")
+        losses = sum(1 for e in canon if e["outcome"] == "loss")
+        draws = sum(1 for e in canon if e["outcome"] == "draw")
+        summary[c] = {
+            "n": n,
+            "wins": wins, "losses": losses, "draws": draws,
+            "win_rate": round(wins / n, 4) if n else 0.0,
+        }
+
+    all_canon = [
+        e for e in episodes
+        if e.get("side_half") in (None, "aggregate", "normal")
+    ]
+    if side_swap:
+        all_canon = [e for e in episodes if e.get("side_half") == "aggregate"]
+    n_all = len(all_canon)
+    overall = {
+        "n": n_all,
+        "wins": sum(1 for e in all_canon if e["outcome"] == "win"),
+        "losses": sum(1 for e in all_canon if e["outcome"] == "loss"),
+        "draws": sum(1 for e in all_canon if e["outcome"] == "draw"),
+        "win_rate": round(
+            sum(1 for e in all_canon if e["outcome"] == "win") / n_all, 4
+        ) if n_all else 0.0,
+    }
+
+    out = {
+        "run_id": run_id,
+        "model": model,
+        "mode": "1v1",
+        "opponent": opponent_label,
+        "side_swap": bool(side_swap),
+        "episodes": episodes,
+        "summary": summary,
+        "overall": overall,
+        "skipped": skipped,
+        # Headline block — `adversarial_1v1` is the 1v1-specific
+        # roll-up; the existing `adversarial` ladder summary still
+        # picks the same packs up when they're scored via `evaluate`.
+        "adversarial_1v1": {
+            "opponent": opponent_label,
+            "win_rate": overall["win_rate"],
+            "n_matches": n_all,
+            "by_cell": summary,
+        },
+    }
+    if report_path is not None:
+        write_report(out, report_path)
+    return out
+
+
+def _status_summary(out_dir: str | Path) -> dict:
+    """Read a sweep's playback dir (journal + score.json files) and
+    return a status snapshot. Tolerates partial/empty/corrupt journals
+    (the production sweeps Ctrl-C frequently; the closer the snapshot
+    is to crashes the more torn-line-shaped the journal looks).
+
+    The returned dict is what `run_eval status` prints; tests assert
+    on its structure rather than the print-format directly.
+    """
+    out = {
+        "run_dir": str(out_dir),
+        "journals": [],
+        "header": None,
+        "total_journaled": 0,
+        "outcomes": {"win": 0, "loss": 0, "draw": 0, "error": 0},
+        "compose_mean": 0.0,
+        "last_cell": None,
+        "errors": [],
+        "scores_on_disk": 0,
+        "scores_missing": [],
+    }
+    d = Path(out_dir)
+    if not d.exists():
+        out["error"] = f"run dir does not exist: {d}"
+        return out
+
+    # Find every per-model journal (the deterministic path pattern).
+    journals = sorted(d.glob("_journal__*.jsonl"))
+    out["journals"] = [str(j) for j in journals]
+    rows: list[dict] = []
+    header: dict | None = None
+    for j in journals:
+        try:
+            for line in j.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:  # noqa: BLE001 — torn tail tolerated
+                    continue
+                if rec.get("_meta"):
+                    if header is None:
+                        header = rec
+                    continue
+                rows.append(rec)
+        except OSError as e:  # noqa: PERF203
+            out["errors"].append(f"{j.name}: {e}")
+
+    out["header"] = header
+    out["total_journaled"] = len(rows)
+    comps: list[float] = []
+    for r in rows:
+        oc = r.get("outcome", "")
+        if oc in out["outcomes"]:
+            out["outcomes"][oc] += 1
+        if isinstance(r.get("composite"), (int, float)):
+            comps.append(float(r["composite"]))
+    if comps:
+        out["compose_mean"] = round(sum(comps) / len(comps), 4)
+
+    # Most recently appended row (journal is append-only, last row in
+    # the last journal is the chronologically newest entry).
+    if rows:
+        last = rows[-1]
+        out["last_cell"] = {
+            "cell": last.get("cell"),
+            "outcome": last.get("outcome"),
+            "turns": last.get("turns"),
+            "seed": last.get("seed"),
+            "composite": last.get("composite"),
+        }
+
+    # Cross-check score.json presence (only when journal points at the
+    # canonical playback layout — i.e. <run_dir>/<run_id>__<model>/...).
+    if header and header.get("run_id"):
+        run_id = header.get("run_id")
+        # Heuristic: a score.json should exist under a child dir whose
+        # name begins with `<run_id>__`.
+        per_model = sorted(d.glob(f"{run_id}__*"))
+        scored = 0
+        for pm in per_model:
+            scored += len(list(pm.rglob("score.json")))
+        out["scores_on_disk"] = scored
+    return out
+
+
+def _format_status(snap: dict) -> str:
+    lines: list[str] = []
+    lines.append(f"Run dir:     {snap['run_dir']}")
+    h = snap.get("header") or {}
+    if h:
+        lines.append(
+            f"Started:     run_id={h.get('run_id')} "
+            f"model={h.get('model')} code={h.get('code_version') or '-'}"
+        )
+    else:
+        lines.append("Started:     (no _meta header — legacy journal)")
+    tot = snap["total_journaled"]
+    oc = snap["outcomes"]
+    won = oc["win"]
+    lost = oc["loss"]
+    drew = oc["draw"]
+    err = oc["error"]
+    pct = lambda x, n: f"{round(100 * x / n)}%" if n else "0%"  # noqa: E731
+    lines.append(
+        f"Cells:       {tot} journaled "
+        f"({snap['scores_on_disk']} score.json on disk)"
+    )
+    lines.append(
+        f"Outcomes:    win={won} ({pct(won, tot)}) | "
+        f"loss={lost} ({pct(lost, tot)}) | draw={drew} ({pct(drew, tot)}) | "
+        f"error={err}"
+    )
+    lines.append(f"Avg compose: {snap['compose_mean']}")
+    last = snap.get("last_cell")
+    if last:
+        lines.append(
+            f"Last cell:   {last['cell']} "
+            f"({last['outcome']}, turn {last['turns']}, "
+            f"composite {last['composite']})"
+        )
+    if snap.get("errors"):
+        lines.append(f"Errors:      {len(snap['errors'])}")
+        for e in snap["errors"][:5]:
+            lines.append(f"  • {e}")
+    return "\n".join(lines)
+
+
+def _status_main(argv: list[str]) -> int:
+    """Entry for `python -m openra_bench.run_eval status --out <dir>`."""
+    ap = argparse.ArgumentParser(
+        prog="openra_bench.run_eval status",
+        description="Print progress for an in-flight or completed sweep "
+                    "by reading the journal(s) + score.json files on disk.",
+    )
+    ap.add_argument("--out", required=True,
+                    help="playback root dir (the one passed as "
+                    "--playback to the sweep)")
+    a = ap.parse_args(argv)
+    snap = _status_summary(a.out)
+    print(_format_status(snap))
+    return 0
+
+
 def _load_dotenv(path: str | Path = ".env") -> None:
     """Minimal, dependency-free .env loader: populate os.environ from
     `KEY=VALUE` lines (skips comments/blanks; never overrides an
@@ -798,6 +1678,12 @@ def _load_dotenv(path: str | Path = ".env") -> None:
 
 def main(argv: list[str]) -> int:
     _load_dotenv()
+    # Status subcommand: `python -m openra_bench.run_eval status --out <dir>`.
+    # Intentionally a sibling entry point rather than a full
+    # argparse-subparsers split — keeps every existing `run_eval ...`
+    # invocation working unchanged (back-compat).
+    if len(argv) >= 2 and argv[1] == "status":
+        return _status_main(argv[2:])
     ap = argparse.ArgumentParser(description="Run a model over OpenRA-Bench scenario packs")
     ap.add_argument("--packs", help="pack file or dir (default: bundled packs/)")
     ap.add_argument(
@@ -863,6 +1749,23 @@ def main(argv: list[str]) -> int:
                     help="checkpoint journal path (default: under "
                     "<playback>/_journal__<model>.jsonl, deterministic per "
                     "(out_dir, model) so re-launches resume losslessly)")
+    ap.add_argument("--strict-resume", action="store_true",
+                    help="on resume, verify each journaled cell against "
+                    "its on-disk score.json — re-run cells that are "
+                    "missing, corrupt, or where the outcome disagrees. "
+                    "Recommended for any multi-hour production sweep "
+                    "(the v1.0 Qwen 9B sweep had 205/653 journal↔disk "
+                    "mismatches without this).")
+    ap.add_argument("--ignore-run-id", action="store_true",
+                    help="acknowledge a journal whose _meta header "
+                    "run_id differs from the current process — i.e. "
+                    "explicitly merge two sweep runs into one journal. "
+                    "Without this flag a mismatched header aborts.")
+    ap.add_argument("--adaptive-concurrency", action="store_true",
+                    help="monitor the rolling per-cell error rate and "
+                    "halve concurrency when >10% errors over 20 cells, "
+                    "restore when <2% over 50 cells. Smooths through "
+                    "provider rate-limit storms without aborting.")
     ap.add_argument("--max-spend", type=float, default=0.0,
                     help="hard USD cap; the run finalizes when hit")
     ap.add_argument("--qps", type=float, default=0.0,
@@ -914,10 +1817,38 @@ def main(argv: list[str]) -> int:
                     help="sampling temperature for the model "
                     "(overrides ProviderConfig.temperature). Set > 0 "
                     "to make --repeats meaningful.")
+    # --- 1v1 LLM-vs-LLM mode ---
+    # Default is single-player (back-compat). `1v1` routes each
+    # (pack, level, seed) through `run_1v1` against the --opponent.
+    # Only adversarial-capability packs are valid 1v1 cells; non-
+    # adversarial packs are skipped with a reason.
+    ap.add_argument(
+        "--mode", default="single-player",
+        choices=["single-player", "1v1"],
+        help="evaluation mode. `single-player` (default) runs the "
+        "legacy `run_level` path against scripted bots / scenario "
+        "predicates. `1v1` runs each pack:level:seed through "
+        "`run_1v1` against the --opponent.",
+    )
+    ap.add_argument(
+        "--opponent", default="scripted:stall",
+        help="1v1 opponent spec: `scripted:<kind>` (stall, rusher) "
+        "OR `<provider>:<model>` (e.g. openrouter:anthropic/claude-"
+        "3.5-sonnet). Ignored in single-player mode.",
+    )
+    ap.add_argument(
+        "--side-swap", action="store_true",
+        help="1v1 only: play each match twice with sides swapped, "
+        "and emit an aggregate `draw` outcome when one half is won "
+        "and the other lost — the symmetric-arena tie-break.",
+    )
     a = ap.parse_args(argv[1:])
 
     cfg = None
-    if a.provider:
+    # `scripted:<kind>` is a 1v1-mode escape hatch (no ProviderConfig);
+    # it's recognised by `evaluate_1v1` directly so skip the LLM
+    # ProviderConfig path entirely for it.
+    if a.provider and not _is_scripted_spec(a.provider):
         from .providers import ProviderConfig
 
         extra_body: dict = {}
@@ -947,6 +1878,49 @@ def main(argv: list[str]) -> int:
 
     if a.packs and a.family:
         ap.error("--packs and --family are mutually exclusive")
+
+    # ── 1v1 LLM-vs-LLM branch ────────────────────────────────────────
+    # Routes through `evaluate_1v1` which uses `run_1v1` instead of
+    # `run_level`. Single-player paths are NOT touched.
+    if a.mode == "1v1":
+        # The agent side: `--provider scripted:stall` is an escape
+        # hatch for the smoke test; otherwise the usual ProviderConfig
+        # built above drives the agent. The `agent_spec` carries a
+        # `scripted:<kind>` literal through to evaluate_1v1 (its
+        # `agent_spec` arg) so the scripted controller for the
+        # AGENT side is built identically to the one for the
+        # opponent side.
+        agent_cfg = cfg
+        agent_label = a.model
+        agent_spec: str | None = None
+        if _is_scripted_spec(a.provider):
+            agent_cfg = None
+            agent_label = a.provider
+            agent_spec = a.provider
+        stats = evaluate_1v1(
+            _resolve_packs(a.packs, a.family),
+            a.levels.split(","),
+            [int(s) for s in a.seeds.split(",")],
+            provider_cfg=agent_cfg,
+            agent_spec=agent_spec,
+            opponent_spec=a.opponent,
+            side_swap=a.side_swap,
+            report_path=a.out,
+            model=agent_label,
+            playback_root=a.playback,
+        )
+        write_report(stats, a.out)
+        o = stats["overall"]
+        print(f"\nwrote {a.out}")
+        print(
+            f"1v1 overall: n={o.get('n', 0)} win_rate={o.get('win_rate', 0)} "
+            f"wins={o.get('wins', 0)} losses={o.get('losses', 0)} "
+            f"draws={o.get('draws', 0)} opponent={stats['opponent']}"
+        )
+        for s in stats["skipped"]:
+            print(f"  skipped: {s}")
+        return 0
+
     stats = evaluate(
         _resolve_packs(a.packs, a.family),
         a.levels.split(","),
@@ -968,6 +1942,9 @@ def main(argv: list[str]) -> int:
         handoff_bank=a.handoff_bank,
         repeats=a.repeats,
         full_playback_root=a.full_playback,
+        strict_resume=a.strict_resume,
+        ignore_run_id=a.ignore_run_id,
+        adaptive_concurrency=a.adaptive_concurrency,
         progress=lambda d, n, rec, c: print(
             f"[{d}/{n}] {rec['cell']}:{rec['split']}#{rec['seed']} "
             f"{rec['outcome']} comp={rec['composite']} "

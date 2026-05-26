@@ -96,6 +96,22 @@ def _scenario_to_tmp_yaml(compiled: CompiledLevel) -> str:
     # no fog of war — the clear half of the perception ablation grid.
     if getattr(compiled, "reveal_map", False):
         data["reveal_map"] = True
+    # Per-scenario `build_speed_multiplier:` — production-tick scaling.
+    # Default None ⇒ engine default 1.0 ⇒ unchanged for every existing
+    # pack. `adversarial-1v1-macro` declares 4.0 so 1v1 episodes have
+    # ~4× faster production. The engine reads this top-level key in
+    # `oramap.rs::parse_scenario_yaml`; if `compiled.scenario` already
+    # carries the field via `ScenarioDefinition`, it round-trips by
+    # default through `model_dump` above — but the field is on the
+    # CompiledLevel itself too (lifted at compile time), so prefer
+    # that as the source of truth.
+    bsm = getattr(compiled, "build_speed_multiplier", None)
+    if bsm is not None:
+        data["build_speed_multiplier"] = float(bsm)
+    else:
+        # If the scenario model dump leaked it, drop it (None means
+        # engine default — don't emit a bogus key).
+        data.pop("build_speed_multiplier", None)
     # Naval-MVP overlay: forward declared `water_cells:` and
     # `water_rect:` so the Rust engine marks the corresponding
     # terrain cells as ship-passable / ground-impassable. Without
@@ -126,14 +142,94 @@ class EpisodeResult:
     actions_warned: int = 0  # commands the engine rejected/warned on
     trace: list[dict] = field(default_factory=list)
     # Final goal-tracker snapshot (always computed, playback or not).
-    # objective_progress is continuous partial credit toward the
-    # scenario win condition; reward_vector is the normalized
-    # cumulative, scenario-agnostic vector (see goal_tracker).
-    objective_progress: float = 0.0
+    # `objective_blocking_ratio` is the worst-leaf ratio — i.e. the
+    # bottleneck constraint, since an `all_of` win needs every leaf
+    # satisfied (see goal_tracker for why min beats mean). `leaves_final`
+    # carries the per-predicate `{name, target, current, ratio,
+    # satisfied}` snapshot from the final turn — the SOURCE OF TRUTH
+    # for "how close to the win" reporting. `objective_progress` is
+    # kept as a deprecated alias of `objective_blocking_ratio` for
+    # one release so older readers don't crash.
+    objective_progress: float = 0.0  # deprecated alias of objective_blocking_ratio
+    objective_blocking_ratio: float = 0.0
+    leaves_final: list[dict] = field(default_factory=list)
     reward_vector: dict = field(default_factory=dict)
 
 
 _CMD_NAME_RE = __import__("re").compile(r"Command::([A-Z][A-Za-z0-9]*)")
+
+
+def _spawn_point_metadata(compiled: Any, render_state: dict, seed: int) -> dict:
+    """Snapshot the (agent, enemy) spawn point selected for this episode.
+
+    Mirrors the engine's per-owner `spawn_point` filter (see
+    CLAUDE.md "spawn_point filter is PER OWNER"): we infer the
+    selected spawn_idx by intersecting the actors visible in the
+    first turn's render_state with the pack-declared `spawn_point`
+    groups. Returned shape (keys absent when not derivable):
+
+      {
+        "spawn_idx_agent": <int>,
+        "spawn_idx_enemy": <int>,
+        "spawn_point_agent": [x, y],   # representative actor cell
+        "spawn_point_enemy": [x, y],
+        "spawn_seed_basis": seed,
+      }
+
+    Lightweight & defensive — any exception turns into an empty
+    dict; this is metadata, not load-bearing for outcomes."""
+    out: dict = {"spawn_seed_basis": int(seed)}
+    try:
+        from .human_labeling import _actor_field  # local import — small surface
+    except Exception:  # noqa: BLE001
+        return out
+    actors = list(getattr(compiled.scenario, "actors", []) or [])
+
+    def _observed_cells(side: str) -> set[tuple[int, int]]:
+        cells: set[tuple[int, int]] = set()
+        if side == "agent":
+            seqs = [
+                render_state.get("units_summary") or [],
+                render_state.get("own_buildings") or [],
+            ]
+        else:
+            seqs = [
+                render_state.get("enemy_summary") or [],
+                render_state.get("enemy_buildings") or [],
+            ]
+        for seq in seqs:
+            for item in seq:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    cells.add((int(item["cell_x"]), int(item["cell_y"])))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return cells
+
+    for owner_key, side in (("agent", "agent"), ("enemy", "enemy")):
+        observed = _observed_cells(side)
+        counts: dict = {}
+        rep_pos: dict = {}
+        for actor in actors:
+            if str(_actor_field(actor, "owner") or "").lower() != owner_key:
+                continue
+            sp = _actor_field(actor, "spawn_point")
+            if sp is None:
+                continue
+            pos = _actor_field(actor, "position")
+            if not pos or len(pos) < 2:
+                continue
+            cell = (int(pos[0]), int(pos[1]))
+            if cell in observed:
+                counts[sp] = counts.get(sp, 0) + 1
+                rep_pos.setdefault(sp, list(cell))
+        if counts:
+            chosen = max(counts, key=counts.get)
+            out[f"spawn_idx_{owner_key}"] = chosen
+            if chosen in rep_pos:
+                out[f"spawn_point_{owner_key}"] = rep_pos[chosen]
+    return out
 
 
 def _cmd_tool_name(cmd: Any) -> str | None:
@@ -292,6 +388,16 @@ def run_level(
         turns = 0
         issued = warned = 0
         conceded = False
+        # Snapshot the engine-selected spawn point ONCE, from the first
+        # render_state after env.reset(seed=...). Used downstream to
+        # stamp the manifest so per-episode metadata records the
+        # actual spawn corner (hard-tier rotation) for each (seed, rep).
+        try:
+            _spawn_meta = _spawn_point_metadata(
+                compiled, adapter.render_state(), seed
+            )
+        except Exception:  # noqa: BLE001 — metadata only
+            _spawn_meta = {"spawn_seed_basis": int(seed)}
         # Persistent fog history so the SAVED minimap == the image the
         # model actually saw (same vendored _minimap_v2, accumulating).
         _pb_explored: set = set()
@@ -389,6 +495,40 @@ def run_level(
                     interrupt=interrupt,
                     goal=turn_goal(compiled.win_condition, ctx),
                 )
+                # Flush the LLM transcript per-turn so an operator
+                # tailing messages.json sees the live conversation
+                # rather than waiting for episode end. Without this,
+                # a 200-turn 1v1 episode goes silent on disk for
+                # ≥30 min and a mid-episode crash loses the whole
+                # transcript. Cost: one ~100KB write per turn — fine
+                # on SSD, ~20MB total per episode in the worst case.
+                try:
+                    _intro = locals().get("_introspection_per_turn")
+                    if _intro is None:
+                        _intro = introspection_source(controller)
+                        _introspection_per_turn = _intro  # noqa: F841
+                    _hist = getattr(_intro, "history", None)
+                    if isinstance(_hist, list):
+                        playback.write_messages(_hist)
+                    # Live rate metrics — same shape as 1v1's progress.json
+                    import time as _time, json as _json
+                    _ep_t0 = locals().get("_ep_t0_per_turn")
+                    if _ep_t0 is None:
+                        _ep_t0 = _time.monotonic()
+                        _ep_t0_per_turn = _ep_t0  # noqa: F841
+                    _elapsed = _time.monotonic() - _ep_t0
+                    _tps = (turns / _elapsed) if _elapsed > 0 else 0.0
+                    _eta = ((compiled.max_turns - turns) / _tps) if _tps > 0 else 0.0
+                    (playback.dir / "progress.json").write_text(_json.dumps({
+                        "turn": turns,
+                        "max_turns": compiled.max_turns,
+                        "elapsed_s": round(_elapsed, 1),
+                        "turns_per_second": round(_tps, 3),
+                        "sec_per_turn": round(1.0 / _tps, 2) if _tps > 0 else None,
+                        "eta_s": round(_eta, 1),
+                    }))
+                except Exception:  # noqa: BLE001 — playback never breaks a run
+                    pass
             if full_playback is not None:
                 # Mirror the same PNG (when the legacy playback rendered
                 # one). Otherwise render on-demand for the audit format.
@@ -490,6 +630,13 @@ def run_level(
                 [f"(episode end: {('loss' if conceded else outcome)})"],
                 adapter.signals, _fpng, interrupt=None, goal=final_goal,
             )
+        # `final_goal` always exposes the new `objective_blocking_ratio`
+        # key (and the deprecated `objective_progress` alias). Read the
+        # new key first; fall back for paranoia in case a hand-built
+        # dict is ever injected here.
+        _blk = final_goal.get(
+            "objective_blocking_ratio", final_goal.get("objective_progress", 0.0)
+        )
         result = EpisodeResult(
             scenario=f"{compiled.pack_id}:{compiled.level}",
             seed=seed,
@@ -499,7 +646,9 @@ def run_level(
             actions_issued=issued,
             actions_warned=warned,
             trace=trace,
-            objective_progress=final_goal["objective_progress"],
+            objective_progress=_blk,
+            objective_blocking_ratio=_blk,
+            leaves_final=list(final_goal.get("leaves") or []),
             reward_vector=final_goal["reward_vector"],
         )
         if playback is not None:
@@ -510,56 +659,70 @@ def run_level(
             hist = getattr(agent_obj, "history", None)
             if isinstance(hist, list):
                 playback.write_messages(hist)
-            playback.finalize(
-                {
+            _mf = {
+                "scenario": result.scenario,
+                "pack_id": compiled.pack_id,
+                "level": compiled.level,
+                "capability": compiled.meta.capability,
+                "run_id": getattr(playback, "run_id", None),
+                "model": getattr(playback, "model", None),
+                "seed": seed,
+                "repeat": int(getattr(playback, "repeat", 0) or 0),
+                "outcome": outcome,
+                "turns": turns,
+                "max_turns": compiled.max_turns,
+                "actions_issued": issued,
+                "actions_warned": warned,
+                "agent_stats": getattr(agent_obj, "stats", None),
+                "objective_progress": result.objective_progress,
+                "objective_blocking_ratio": result.objective_blocking_ratio,
+                "leaves_final": result.leaves_final,
+                "reward_vector": result.reward_vector,
+                "signals": {
+                    "economy_value": adapter.signals.cash
+                    + adapter.signals.resources,
+                    "explored_percent": round(
+                        adapter.signals.explored_percent, 2
+                    ),
+                    "units_killed": adapter.signals.units_killed,
+                    "units_lost": adapter.signals.units_lost,
+                },
+            }
+            # Per-episode spawn-point metadata — see _spawn_point_metadata
+            # docstring. Lifted directly into the manifest so the viewer
+            # / inter-rep analysis can attribute outcomes to the
+            # selected spawn corner without re-running env.reset.
+            if isinstance(_spawn_meta, dict):
+                _mf.update(_spawn_meta)
+            playback.finalize(_mf)
+        if full_playback is not None:
+            try:
+                _fp_extra = {
                     "scenario": result.scenario,
                     "pack_id": compiled.pack_id,
                     "level": compiled.level,
                     "capability": compiled.meta.capability,
-                    "run_id": getattr(playback, "run_id", None),
-                    "model": getattr(playback, "model", None),
                     "seed": seed,
+                    "repeat": int(getattr(full_playback, "repeat", 0) or 0),
                     "outcome": outcome,
                     "turns": turns,
                     "max_turns": compiled.max_turns,
                     "actions_issued": issued,
                     "actions_warned": warned,
-                    "agent_stats": getattr(agent_obj, "stats", None),
+                    "agent_stats": getattr(
+                        introspection_source(controller), "stats", None
+                    ),
                     "objective_progress": result.objective_progress,
+                    "objective_blocking_ratio": result.objective_blocking_ratio,
+                    "leaves_final": result.leaves_final,
                     "reward_vector": result.reward_vector,
-                    "signals": {
-                        "economy_value": adapter.signals.cash
-                        + adapter.signals.resources,
-                        "explored_percent": round(
-                            adapter.signals.explored_percent, 2
-                        ),
-                        "units_killed": adapter.signals.units_killed,
-                        "units_lost": adapter.signals.units_lost,
-                    },
                 }
-            )
-        if full_playback is not None:
-            try:
+                if isinstance(_spawn_meta, dict):
+                    _fp_extra.update(_spawn_meta)
                 full_playback.finalize(
                     outcome=outcome,
                     final_obs=final_rs,
-                    manifest_extra={
-                        "scenario": result.scenario,
-                        "pack_id": compiled.pack_id,
-                        "level": compiled.level,
-                        "capability": compiled.meta.capability,
-                        "seed": seed,
-                        "outcome": outcome,
-                        "turns": turns,
-                        "max_turns": compiled.max_turns,
-                        "actions_issued": issued,
-                        "actions_warned": warned,
-                        "agent_stats": getattr(
-                            introspection_source(controller), "stats", None
-                        ),
-                        "objective_progress": result.objective_progress,
-                        "reward_vector": result.reward_vector,
-                    },
+                    manifest_extra=_fp_extra,
                 )
             except Exception:  # noqa: BLE001 — never break a run on I/O
                 pass

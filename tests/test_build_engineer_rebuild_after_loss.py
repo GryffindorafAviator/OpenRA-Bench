@@ -1,30 +1,43 @@
 """No-cheat + solvency proof for `build-engineer-rebuild-after-loss`
-(Wave-8 REASONING: PlanBench replanning under exogenous loss /
-disaster recovery / SC2 rebuild-after-trade anchor).
+(Wave-8 REASONING: power-grid continuity through an in-world enemy
+strike on a forward base — PlanBench replanning / disaster recovery /
+two-site business continuity anchor).
 
-The pack tests the BUILD-ENGINEER replan: the agent inherits a complete
-production base (fact + proc + powr + weap + harv) but the pre-placed
-Power Plant (`powr`) starts at LOW HEALTH and a pre-placed enemy strike
-force (1× 4tnk on easy, 2× on medium/hard) destroys it on tick 0..90.
-The agent must (1) detect the loss, (2) `build('powr')` with the
-reserve cash, (3) `place_building` it adjacent to the surviving `fact`.
+REDESIGNED (v2): the previous version used `scheduled_events:
+destroy_actors` + a `then:[lost powr, rebuilt powr]` sequence latch.
+That version's failure mode was predicate-gated (an externally
+scripted destruction event the model never sees in-world). The
+redesigned pack places loss modes IN-WORLD per the user's design
+intent and audits/EDIT_PRINCIPLES.md §9.5 (no-solution-leak):
 
-The happened-before `then:[A,B]` composite enforces the
-destruction-then-rebuild semantics: clause A is `not building_count_gte:
-{powr,1}` (a "powr currently destroyed" frame) — this LATCHES on the
-opening salvo. Clause B is `building_count_gte:{powr,1}` (a "powr
-currently alive" frame) — this LATCHES on the rebuild landing.
-`has_building` cannot be used here (CLAUDE.md footgun: the accumulating
-`own_building_types` set never toggles back to false after destruction).
+Two bases:
+  - HOME base (west, safe): fact + harv + small garrison, NO powr.
+  - FORWARD base (east, doomed): fact + powr + proc, with a
+    pre-placed enemy 4tnk strike force adjacent.
+
+The strike force destroys the forward buildings inside the first
+few turns of in-world simulation; it also lingers to destroy any
+rebuild placed at the forward base. It is too few / too slow to
+reach the home base before the deadline.
+
+State-based win: `building_count_gte:{powr,1}` checked AFTER a
+gating tick (`after_ticks:800` — long enough for the strike to
+have landed). At least one Power Plant alive ANYWHERE on the map
+at the gating tick → WIN. Reactive (rebuild at home after loss)
+and preemptive (build redundancy at home turn 1) both satisfy
+this naturally.
 
 For every level + every hard seed (1-4):
-  * the INTENDED `build('powr') + place_building` chain WINS;
-  * STALL (only `observe`) LOSES — never rebuilds → then-clause B
-    never latches → reachable timeout LOSS;
-  * WRONG-SPEND (only `build('e1')`, spends the reserve on infantry)
-    LOSES — never rebuilds → LOSS on the deadline.
+  * INTENDED-REACTIVE (rebuild at home after loss) WINS;
+  * INTENDED-PREEMPTIVE (build redundancy at home immediately) WINS;
+  * STALL (only `observe`) LOSES — forward powr dies in-world, no
+    rebuild, live count 0 at the gating tick → loss via deadline
+    or via the home fact eventually falling to stragglers;
+  * FORWARD-ONLY rebuild LOSES — the lingering strike force
+    destroys the rebuilt powr in place; live count 0 at the
+    gating tick → loss.
 
-The 2 lazy plays + 1 intended × 3 levels × 4 seeds gives the full
+The 2 lazy plays + 2 intended × 3 levels × 4 seeds gives the full
 no-defect / no-cheat coverage demanded by CLAUDE.md.
 """
 
@@ -48,42 +61,88 @@ SEEDS = (1, 2, 3, 4)
 
 
 def _stall(rs, Command):
-    """Idle: never builds anything → then-clause B (rebuild) never
-    latches → LOSS on the deadline."""
+    """Idle: never builds anything → forward powr dies in-world, no
+    replacement → live powr count is 0 at the gating tick → LOSS via
+    the deadline (or earlier via the home fact eventually falling to
+    enemy stragglers that walk west)."""
     return [Command.observe()]
 
 
-def _wrong_spend(rs, Command):
-    """Brute army-spam: only `build('e1')`, draining the indivisible
-    reserve on infantry. The powr is never rebuilt → then-clause B
-    never latches → LOSS on the deadline. This is the canonical
-    'spent the reserve on the wrong thing' failure mode the scenario
-    is designed to catch."""
-    return [Command.build("e1")]
-
-
-def _intended(rs, Command):
-    """Build-engineer rebuild: notice the low / dropped powr count,
-    queue `build('powr')` (cost 300), place it adjacent to the
-    surviving fact on the safe (west) side. WINS every level × every
-    seed before the deadline."""
+def _forward_only(rs, Command):
+    """Rebuild the powr AT the forward base — wrong choice. The
+    lingering 4tnk strike force destroys the rebuilt powr the moment
+    it lands (the forward base footprint is in their kill envelope).
+    Live powr count never recovers → LOSS."""
     bldgs = rs.get("own_buildings", []) or []
-    own_counts: dict[str, int] = {}
-    for b in bldgs:
-        own_counts[b["type"]] = own_counts.get(b["type"], 0) + 1
-    fact_b = next((b for b in bldgs if b["type"] == "fact"), None)
-    if fact_b is None:
+    facts = [b for b in bldgs if b["type"] == "fact"]
+    if not facts:
         return [Command.observe()]
-    fx, fy = fact_b["cell_x"], fact_b["cell_y"]
+    # FORWARD = east-most fact (highest cell_x).
+    fwd = max(facts, key=lambda f: f["cell_x"])
     prod = rs.get("production", []) or []
-    if own_counts.get("powr", 0) < 1:
-        cmds = []
-        if "powr" not in prod:
-            cmds.append(Command.build("powr"))
-        # Place on the WEST side of the fact (out of the east strike lane).
-        cmds.append(Command.place_building("powr", fx - 2, fy))
-        return cmds
-    return [Command.observe()]
+    cmds = []
+    if "powr" not in prod:
+        cmds.append(Command.build("powr"))
+    cmds.append(Command.place_building("powr", fwd["cell_x"] + 2, fwd["cell_y"]))
+    return cmds
+
+
+def _intended_reactive(rs, Command):
+    """REACTIVE rebuild at the safe HOME base after observing the
+    forward powr loss. WINS every level × every seed: the home base
+    is geographically out of the strike force's reach inside the
+    deadline, so a powr placed there survives to the gating tick."""
+    bldgs = rs.get("own_buildings", []) or []
+    facts = [b for b in bldgs if b["type"] == "fact"]
+    if not facts:
+        return [Command.observe()]
+    # HOME = west-most fact (lowest cell_x).
+    home = min(facts, key=lambda f: f["cell_x"])
+    powrs = [b for b in bldgs if b["type"] == "powr"]
+    # Wait until the forward powr is gone, then rebuild at home.
+    if powrs:
+        return [Command.observe()]
+    prod = rs.get("production", []) or []
+    cmds = []
+    if "powr" not in prod:
+        cmds.append(Command.build("powr"))
+    # Place on the WEST side of the home fact, out of any enemy reach.
+    cmds.append(Command.place_building("powr", home["cell_x"] - 2, home["cell_y"]))
+    return cmds
+
+
+class _PreemptState:
+    """Per-episode one-shot latch — the preemptive policy issues the
+    redundant build on the FIRST decision turn, before the strike
+    has landed."""
+
+    queued_build: bool = False
+
+
+def _intended_preemptive(rs, Command):
+    """PREEMPTIVE redundancy at the HOME base on turn 1 — the
+    rational operator who sees the doomed forward position and
+    insures against it immediately. The new home powr lands well
+    before the strike completes; even after the forward powr
+    falls, the home powr keeps live count ≥ 1 → WIN."""
+    bldgs = rs.get("own_buildings", []) or []
+    facts = [b for b in bldgs if b["type"] == "fact"]
+    if not facts:
+        return [Command.observe()]
+    home = min(facts, key=lambda f: f["cell_x"])
+    prod = rs.get("production", []) or []
+    cmds = []
+    if not _PreemptState.queued_build and "powr" not in prod:
+        cmds.append(Command.build("powr"))
+        _PreemptState.queued_build = True
+    # Always (re)issue the place order until the rebuild has landed —
+    # idempotent against an in-flight production queue.
+    cmds.append(Command.place_building("powr", home["cell_x"] - 2, home["cell_y"]))
+    return cmds or [Command.observe()]
+
+
+def _reset_preempt():
+    _PreemptState.queued_build = False
 
 
 # ───────────────────────── helpers ────────────────────────────────────────
@@ -91,7 +150,7 @@ def _intended(rs, Command):
 
 def _run(level, policy, seed=1):
     c = compile_level(load_pack(PACK), level)
-    assert c.map_supported, "rush-hour-arena must compile"
+    assert c.map_supported
     return c, run_level(c, policy, seed=seed)
 
 
@@ -161,55 +220,157 @@ def test_every_level_has_a_reachable_timeout_fail(level):
 
 
 @pytest.mark.parametrize("level", LEVELS)
-def test_win_uses_then_destroy_then_rebuild_for_powr(level):
-    """Structural: the win clause uses a `then:[A,B]` composite where
-    clause A is `not building_count_gte:{powr,1}` (powr currently
-    destroyed) and clause B is `building_count_gte:{powr,1}` (powr
-    currently alive). This is the destruction-then-rebuild idiom.
-    Using `has_building` here would NOT work (CLAUDE.md footgun: the
-    accumulating set never toggles back to false after destruction)."""
+def test_win_is_state_based_powr_alive_after_strike_window(level):
+    """Structural: the redesigned win predicate is state-based — at
+    the gating tick (`after_ticks:N` for some N well past the
+    in-world strike completion) the agent must own at least one
+    Power Plant ANYWHERE on the map AND keep a Construction Yard
+    alive AND finish before the deadline. No `then:` latch — the
+    strike is in-world, not predicate-gated; the agent's task is
+    geographic (place the rebuild where the strike force cannot
+    reach) not temporal (sequence loss-then-rebuild)."""
     c = compile_level(load_pack(PACK), level)
     win = c.win_condition.model_dump()
     all_of = win.get("all_of", [])
-    then_node = next((x["then"] for x in all_of if "then" in x), None)
-    assert then_node is not None, f"{level}: win must include a `then` composite"
-    clauses = then_node.get("clauses", [])
-    assert len(clauses) == 2, (
-        f"{level}: then must have 2 clauses (destruction, rebuild)"
-    )
-    # Clause A: not building_count_gte: powr ≥ 1
-    a = clauses[0]
-    assert "not" in a, f"{level}: clause A must be `not`: {a}"
-    inner = a["not"]
-    bc = inner.get("building_count_gte") or {}
-    assert bc.get("type") == "powr" and int(bc.get("n", 0)) >= 1, (
-        f"{level}: clause A must be `not building_count_gte powr≥1`: {a}"
-    )
-    # Clause B: building_count_gte: powr ≥ 1
-    b = clauses[1]
-    bc2 = b.get("building_count_gte") or {}
-    assert bc2.get("type") == "powr" and int(bc2.get("n", 0)) >= 1, (
-        f"{level}: clause B must be `building_count_gte powr≥1`: {b}"
-    )
-    # And an outer `building_count_gte` for proc must keep production
-    # gated (per the pack spec).
-    proc_clause = next(
+    # Power continuity clause — anywhere on the map.
+    powr_clause = next(
         (x["building_count_gte"] for x in all_of
          if "building_count_gte" in x
-         and (x["building_count_gte"] or {}).get("type") == "proc"),
+         and (x["building_count_gte"] or {}).get("type") == "powr"),
         None,
     )
-    assert proc_clause is not None and int(proc_clause.get("n", 0)) >= 1, (
-        f"{level}: win must require building_count_gte proc≥1"
+    assert powr_clause is not None and int(powr_clause.get("n", 0)) >= 1, (
+        f"{level}: win must require building_count_gte powr≥1"
     )
+    # Fact survival clause.
+    fact_clause = next(
+        (x["building_count_gte"] for x in all_of
+         if "building_count_gte" in x
+         and (x["building_count_gte"] or {}).get("type") == "fact"),
+        None,
+    )
+    assert fact_clause is not None and int(fact_clause.get("n", 0)) >= 1, (
+        f"{level}: win must require building_count_gte fact≥1"
+    )
+    # End-state gate: an `after_ticks` clause that delays the win
+    # check until the in-world strike has had time to land.
+    after_gate = next(
+        (int(x["after_ticks"]) for x in all_of if "after_ticks" in x), None
+    )
+    assert after_gate is not None and after_gate >= 200, (
+        f"{level}: win must include an `after_ticks` end-state gate "
+        f"(≥200 ticks) so the powr check fires AFTER the in-world "
+        f"forward strike has had time to land; got {after_gate}"
+    )
+    # And no legacy `then:` latch (the v1 footgun).
+    def has_then(node) -> bool:
+        if isinstance(node, dict):
+            if "then" in node:
+                return True
+            return any(has_then(v) for v in node.values())
+        if isinstance(node, list):
+            return any(has_then(x) for x in node)
+        return False
+    assert not has_then(win), (
+        f"{level}: win must not include a `then:` happened-before "
+        f"latch — the redesigned predicate is state-based, not "
+        f"sequence-based; got {win}"
+    )
+
+
+@pytest.mark.parametrize("level", LEVELS)
+def test_pack_has_two_bases_geographically_separated(level):
+    """The redesign premise: each tier must pre-place agent facts at
+    TWO well-separated x-coords — a HOME base (west, safe) and a
+    FORWARD base (east, doomed). The strike force destroys the
+    forward base by geometry; the home base is the safe rebuild
+    site. A pack with both facts at the same x has collapsed the
+    two-base template and is defective."""
+    c = compile_level(load_pack(PACK), level)
+    agent_facts = [
+        a for a in c.scenario.actors
+        if a.owner == "agent" and a.type == "fact"
+    ]
+    # On hard the duplicate spawn_point groups can double the count;
+    # collapse by spawn_point first.
+    by_spawn: dict[int | None, list] = {}
+    for a in agent_facts:
+        by_spawn.setdefault(a.spawn_point, []).append(a)
+    # Each spawn group should have at least 2 facts (home + forward).
+    for sp, group in by_spawn.items():
+        assert len(group) >= 2, (
+            f"{level}: spawn group {sp} has only {len(group)} agent "
+            f"fact(s); the two-base template requires home + forward"
+        )
+        xs = sorted(a.position[0] for a in group)
+        assert xs[-1] - xs[0] >= 20, (
+            f"{level}: spawn group {sp} facts at xs {xs} are too "
+            f"close — home and forward must be ≥20 cells apart so "
+            f"the forward strike geometry doesn't reach home"
+        )
+
+
+@pytest.mark.parametrize("level", LEVELS)
+def test_pre_placed_strike_force_present(level):
+    """Each tier must pre-place ≥2 enemy `4tnk` at stance:3
+    (AttackAnything) so the forward strike fires on contact at tick
+    0 and lands the in-world forward-base demolition before the
+    agent's first few decision turns."""
+    c = compile_level(load_pack(PACK), level)
+    strikers = [
+        a for a in c.scenario.actors
+        if a.owner == "enemy" and a.type == "4tnk" and a.stance == 3
+    ]
+    assert len(strikers) >= 2, (
+        f"{level}: must pre-place ≥2 enemy `4tnk` at stance:3 to "
+        f"land the in-world forward-base demolition; got {len(strikers)}"
+    )
+
+
+@pytest.mark.parametrize("level", LEVELS)
+def test_forward_base_carries_a_powr(level):
+    """The forward (east) base must pre-place a powr so the in-world
+    loss event is visible to the agent (the powr count drops from
+    ≥1 to 0 as the strike force chews through the forward base)."""
+    c = compile_level(load_pack(PACK), level)
+    agent_powrs = [
+        a for a in c.scenario.actors
+        if a.owner == "agent" and a.type == "powr"
+    ]
+    assert agent_powrs, (
+        f"{level}: must pre-place ≥1 agent `powr` (the in-world "
+        f"loss event needs a powr to lose); got 0"
+    )
+
+
+@pytest.mark.parametrize("level", LEVELS)
+def test_no_scheduled_destroy_actors(level):
+    """The redesign explicitly drops `scheduled_events: destroy_actors`
+    — failure modes are in-game (enemy strike), not predicate-gated.
+    A `scheduled_events: spawn_actors` reinforcement wave would be
+    OK in principle (the model sees the new units arrive); but a
+    `destroy_actors` block silently teleports asset deletion and
+    breaks the design contract."""
+    c = compile_level(load_pack(PACK), level)
+    events = getattr(c.scenario, "scheduled_events", None) or []
+    for ev in events:
+        kind = getattr(ev, "kind", None) or (
+            ev.get("kind") if isinstance(ev, dict) else None
+        )
+        assert kind != "destroy_actors", (
+            f"{level}: scheduled_events must not include "
+            f"`destroy_actors` (the redesign uses in-game enemy "
+            f"strike for the loss event); got {ev}"
+        )
 
 
 def test_hard_has_two_seed_driven_spawn_groups():
     """Hard tier contract (CLAUDE.md + tests/test_hard_tier.py): ≥2
-    distinct agent spawn_point groups so the engine round-robins start
-    by seed. NORTH y≈14..22 vs SOUTH y≈22..30; the full base (fact +
-    proc + powr + weap + harv + defender) is duplicated across both
-    groups per CLAUDE.md `spawn_point` filter rules."""
+    distinct agent spawn_point groups so the engine round-robins
+    start by seed. NORTH y≈14 vs SOUTH y≈26; the full base (home
+    fact + harv + garrison + forward fact + powr + proc) is
+    duplicated across both groups per CLAUDE.md `spawn_point`
+    filter rules."""
     c = compile_level(load_pack(PACK), "hard")
     sps = {
         (a.spawn_point if a.spawn_point is not None else 0)
@@ -219,61 +380,43 @@ def test_hard_has_two_seed_driven_spawn_groups():
     assert len(sps) >= 2, f"hard needs ≥2 spawn groups, got {sps}"
 
 
-@pytest.mark.parametrize("level", LEVELS)
-def test_powr_is_pre_placed_at_low_hp(level):
-    """The exogenous-loss premise: each tier must pre-place a `powr`
-    actor at LOW HP so the adjacent stance:3 4tnk(s) destroy it in
-    the opening turn. ActorPlacement `health` is a percentage 1-100
-    (openra_rl_training.scenario line 196)."""
-    c = compile_level(load_pack(PACK), level)
-    low_hp_powrs = [
-        a for a in c.scenario.actors
-        if a.owner == "agent" and a.type == "powr" and a.health <= 30
-    ]
-    assert low_hp_powrs, (
-        f"{level}: must pre-place at least one low-HP (≤30%) agent "
-        f"`powr` so the strike force can destroy it; got "
-        f"{[(a.type, a.health) for a in c.scenario.actors if a.owner=='agent']}"
-    )
-
-
-@pytest.mark.parametrize("level", LEVELS)
-def test_pre_placed_strike_force_present(level):
-    """Each tier must pre-place at least one enemy `4tnk` at stance:3
-    (AttackAnything) so it fires on contact at tick 0 and lands the
-    powr kill before the agent's first decision turn."""
-    c = compile_level(load_pack(PACK), level)
-    strikers = [
-        a for a in c.scenario.actors
-        if a.owner == "enemy" and a.type == "4tnk" and a.stance == 3
-    ]
-    assert strikers, (
-        f"{level}: must pre-place ≥1 enemy `4tnk` at stance:3 to "
-        f"land the opening powr kill"
-    )
-
-
-# ───────────────────────── intended WIN ───────────────────────────────────
+# ───────────────────────── intended WINs ──────────────────────────────────
 
 
 @pytest.mark.parametrize("level", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
-def test_intended_rebuild_wins(level, seed):
-    """The intended capability — detect-loss + build('powr') +
-    place_building adjacent to the surviving fact on the safe west
-    side — WINS every level × every hard seed well inside the
-    deadline."""
-    c, r = _run(level, _intended, seed=seed)
+def test_intended_reactive_rebuild_wins(level, seed):
+    """REACTIVE path: wait for the in-world forward powr loss,
+    `build('powr')` + `place_building` at the safe HOME base on the
+    west side. WINS every level × every hard seed: the home base is
+    geographically out of the strike force's reach inside the
+    deadline, so the rebuilt powr survives to the gating tick."""
+    c, r = _run(level, _intended_reactive, seed=seed)
     assert r.outcome == "win", (
-        f"{level} seed{seed}: intended rebuild should WIN, got "
+        f"{level} seed{seed}: intended reactive rebuild should WIN, got "
         f"{r.outcome}; types={r.signals.own_building_types}, "
         f"cash={r.signals.cash}, tick={r.signals.game_tick}"
     )
-    # Sanity: the rebuilt powr must show up in the accumulating set
-    # (it was built during the episode, regardless of subsequent loss).
     types = set(r.signals.own_building_types)
     assert "powr" in types, types
-    assert "proc" in types, types
+
+
+@pytest.mark.parametrize("level", LEVELS)
+@pytest.mark.parametrize("seed", SEEDS)
+def test_intended_preemptive_redundancy_wins(level, seed):
+    """PREEMPTIVE path: `build('powr') + place_building` at the HOME
+    base on the FIRST decision turn — the rational operator who sees
+    the doomed forward position and insures against it immediately.
+    WINS every level × every hard seed."""
+    _reset_preempt()
+    c, r = _run(level, _intended_preemptive, seed=seed)
+    assert r.outcome == "win", (
+        f"{level} seed{seed}: intended preemptive redundancy should WIN, "
+        f"got {r.outcome}; types={r.signals.own_building_types}, "
+        f"cash={r.signals.cash}, tick={r.signals.game_tick}"
+    )
+    types = set(r.signals.own_building_types)
+    assert "powr" in types, types
 
 
 # ───────────────────────── no-cheat: lazy plays LOSE ──────────────────────
@@ -283,8 +426,9 @@ def test_intended_rebuild_wins(level, seed):
 @pytest.mark.parametrize("seed", SEEDS)
 def test_stall_loses(level, seed):
     """Stall must LOSE every level × every seed — never builds
-    anything, so the rebuild clause of the `then` latch never closes
-    → reachable timeout LOSS via after_ticks (never a draw)."""
+    anything, so when the in-world strike destroys the forward powr
+    the live count drops to 0 and never recovers → LOSS at the
+    deadline (or earlier when stragglers reach the home fact)."""
     c, r = _run(level, _stall, seed=seed)
     assert r.outcome == "loss", (
         f"{level} seed{seed} stall must LOSE; got {r.outcome} "
@@ -294,16 +438,18 @@ def test_stall_loses(level, seed):
 
 @pytest.mark.parametrize("level", LEVELS)
 @pytest.mark.parametrize("seed", SEEDS)
-def test_wrong_spend_loses(level, seed):
-    """Wrong-spend (brute `build('e1')`, never powr) must LOSE every
-    level × every seed — the reserve is drained on infantry, the powr
-    is never rebuilt, the then-clause B never latches → LOSS on the
-    deadline. This is the canonical 'spent the reserve on the wrong
-    thing' failure mode."""
-    c, r = _run(level, _wrong_spend, seed=seed)
+def test_forward_only_rebuild_loses(level, seed):
+    """FORWARD-ONLY rebuild must LOSE every level × every seed — the
+    lingering 4tnk strike force destroys the rebuilt powr the moment
+    it lands at the forward base (the forward footprint is in their
+    kill envelope). Live powr count never recovers → LOSS. This is
+    the canonical 'rebuilt where the threat still is' failure mode
+    the two-base redesign is meant to teach."""
+    c, r = _run(level, _forward_only, seed=seed)
     assert r.outcome == "loss", (
-        f"{level} seed{seed} wrong-spend must LOSE; got {r.outcome} "
-        f"(types={r.signals.own_building_types}, tick={r.signals.game_tick})"
+        f"{level} seed{seed} forward-only rebuild must LOSE; got "
+        f"{r.outcome} (types={r.signals.own_building_types}, "
+        f"tick={r.signals.game_tick})"
     )
 
 
@@ -311,11 +457,11 @@ def test_wrong_spend_loses(level, seed):
 
 
 def test_hard_seed_round_robin_produces_distinct_starts():
-    """Seeds 1-4 must round-robin between the two declared spawn_point
-    groups (NORTH y=14..22 / SOUTH y=22..30) so a memorised opening
-    cannot generalise. The base buildings are duplicated across both
-    spawn groups per CLAUDE.md spawn_point filter rules, so the
-    units_summary cell coords flip per spawn."""
+    """Seeds 1-4 must round-robin between the two declared
+    spawn_point groups (NORTH y=14 / SOUTH y=26) so a memorised
+    opening cannot generalise. The base buildings are duplicated
+    across both spawn groups per CLAUDE.md spawn_point filter rules,
+    so the units_summary cell coords flip per spawn."""
     from pathlib import Path
 
     from openra_bench.eval_core import RustEnvPool, _scenario_to_tmp_yaml
@@ -351,8 +497,8 @@ def test_hard_seed_round_robin_produces_distinct_starts():
 def test_outcomes_are_deterministic_per_seed():
     """Same seed, same pack, same policy → identical outcome."""
     c = compile_level(load_pack(PACK), "medium")
-    a = run_level(c, _intended, seed=2)
-    b = run_level(c, _intended, seed=2)
+    a = run_level(c, _intended_reactive, seed=2)
+    b = run_level(c, _intended_reactive, seed=2)
     assert (a.outcome, a.turns) == (b.outcome, b.turns), (
         f"determinism: {(a.outcome, a.turns)} vs {(b.outcome, b.turns)}"
     )

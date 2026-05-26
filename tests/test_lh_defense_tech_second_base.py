@@ -78,37 +78,50 @@ def test_every_level_has_fail_condition():
         assert c.fail_condition is not None, f"{lvl} missing fail_condition"
 
 
-def test_then_composite_used_in_win():
-    """Confirms the secure-expand-with-tech chain wired through to the
-    compiled win condition (the whole point of the pack)."""
-    expected_first = {"easy": 2, "medium": 3, "hard": 3}
+def test_state_based_win_predicate():
+    """v1.0 sweep audit (F8 long-horizon): the win is now STATE-BASED
+    `all_of:` — pbox≥N + weap + 2nd-fact-in-region (+ proc≥2 on hard)
+    + base-alive + within_ticks. The strict `then:` has been removed;
+    the patrol-pressure + clock budget still force the secure-expand
+    tempo (stall loses to the patrol; pure-expand loses base #1)."""
+    pbox_n = {"easy": 2, "medium": 3, "hard": 3}
     for lvl in LEVELS:
         c = compile_level(load_pack(PACK_PATH), lvl)
         win = c.win_condition.model_dump(exclude_none=True)
         ao = win.get("all_of") or []
-        assert any("then" in clause for clause in ao), (
-            f"{lvl} win has no then-composite: {win}"
+        assert not any("then" in clause for clause in ao), (
+            f"{lvl} should be state-based, found `then:` in {win}"
         )
-        then_clause = next(cl["then"] for cl in ao if "then" in cl)
-        clauses = then_clause["clauses"]
-        # PHASE 1: pbox count
-        assert "building_count_gte" in clauses[0]
-        assert clauses[0]["building_count_gte"]["type"] == "pbox"
-        assert clauses[0]["building_count_gte"]["n"] == expected_first[lvl]
-        # PHASE 2: weap
-        assert "has_building" in clauses[1] and clauses[1]["has_building"] == "weap"
-        # PHASE 3: building_in_region around (130,30) for fact
-        assert "building_in_region" in clauses[2]
-        br = clauses[2]["building_in_region"]
-        assert br["x"] == 130 and br["y"] == 30 and br["type"] == "fact"
-        # Hard has a 4th phase: ≥2 proc
+        # Required state clauses present.
+        bc = [
+            cl["building_count_gte"]
+            for cl in ao if "building_count_gte" in cl
+        ]
+        pbox_clause = next(
+            (b for b in bc if b.get("type") == "pbox"), None
+        )
+        assert pbox_clause is not None and pbox_clause["n"] == pbox_n[lvl], (
+            f"{lvl} missing pbox state clause with n={pbox_n[lvl]}: {win}"
+        )
+        # weap as has_building OR fact-alive as has_building — either way
+        # there must be at least 2 has_building clauses (weap + fact-base).
+        hb = [cl["has_building"] for cl in ao if "has_building" in cl]
+        assert "weap" in hb, f"{lvl} missing has_building:weap clause"
+        assert "fact" in hb, f"{lvl} missing has_building:fact (base alive)"
+        # 2nd-base region clause.
+        br = next(
+            (cl["building_in_region"] for cl in ao
+             if "building_in_region" in cl), None
+        )
+        assert br is not None and br["x"] == 130 and br["y"] == 30
+        # Hard adds proc≥2.
         if lvl == "hard":
-            assert len(clauses) == 4
-            assert "building_count_gte" in clauses[3]
-            assert clauses[3]["building_count_gte"]["type"] == "proc"
-            assert clauses[3]["building_count_gte"]["n"] == 2
-        else:
-            assert len(clauses) == 3
+            proc_clause = next(
+                (b for b in bc if b.get("type") == "proc"), None
+            )
+            assert proc_clause is not None and proc_clause["n"] == 2, (
+                f"hard missing proc≥2 state clause: {win}"
+            )
 
 
 def test_tick_budget_aligned_with_max_turns():
@@ -480,8 +493,7 @@ def test_intended_secure_expand_with_tech_wins(level, seed):
         f"intended secure-expand-with-tech must WIN on {level} s={seed}; "
         f"got {res.outcome} turns={res.turns} "
         f"own_buildings={own_b} cash={res.signals.cash} "
-        f"units_lost={res.signals.units_lost} "
-        f"then_progress={getattr(res.signals, 'then_progress', {})}"
+        f"units_lost={res.signals.units_lost}"
     )
 
 
@@ -513,8 +525,7 @@ def test_pure_expand_skip_defence_loses(level, seed):
     own_b = res.signals.own_building_types
     assert res.outcome == "loss", (
         f"pure-expand-skip-defence must LOSE on {level} s={seed}; got "
-        f"{res.outcome} own_buildings={own_b} "
-        f"then_progress={getattr(res.signals, 'then_progress', {})}"
+        f"{res.outcome} own_buildings={own_b}"
     )
 
 
@@ -534,8 +545,7 @@ def test_pure_defence_no_expand_loses(level, seed):
     own_b = res.signals.own_building_types
     assert res.outcome == "loss", (
         f"pure-defence-no-expand must LOSE on {level} s={seed}; got "
-        f"{res.outcome} own_buildings={own_b} "
-        f"then_progress={getattr(res.signals, 'then_progress', {})}"
+        f"{res.outcome} own_buildings={own_b}"
     )
 
 

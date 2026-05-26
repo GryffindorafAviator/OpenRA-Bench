@@ -237,13 +237,29 @@ class CompiledLevel(BaseModel):
     # `_scenario_to_tmp_yaml`.
     water_cells: list[list[int]] = Field(default_factory=list)
     water_rect: list[int] | None = None
+    # Pack-wide no-fog flag, lifted from `ScenarioPack.reveal_map` at
+    # compile time. The property below OR's this with the
+    # `fog_mode`-derived value so both paths produce the same engine
+    # effect (`reveal_map: true` in `_scenario_to_tmp_yaml`).
+    pack_reveal_map: bool = False
+    # Per-scenario production-tick multiplier (default None ⇒ engine
+    # default 1.0 ⇒ unchanged behaviour). Lifted from the pack's
+    # `base.build_speed_multiplier` at compile time; the
+    # `_scenario_to_tmp_yaml` emitter passes it through to the engine
+    # YAML as a top-level key. The single contributor of this field is
+    # `adversarial-1v1-macro` (4.0× ⇒ snappier 1v1 episodes); every
+    # other pack stays on 1.0 by leaving this None.
+    build_speed_multiplier: float | None = None
 
     @property
     def reveal_map(self) -> bool:
-        """No-fog cell? The `-clear` perception modes disable fog of
-        war — `_scenario_to_tmp_yaml` emits `reveal_map: true` so the
-        engine reveals the whole map to the agent."""
-        return self.fog_mode.endswith("-clear")
+        """No-fog cell? True if either (a) the pack declares
+        top-level `reveal_map: true` (e.g. close-range duel packs
+        where scouting is not the advertised capability), or (b) the
+        fog_mode is a `-clear` perception-ablation cell.
+        `_scenario_to_tmp_yaml` emits `reveal_map: true` to the engine
+        when this returns true."""
+        return self.pack_reveal_map or self.fog_mode.endswith("-clear")
 
     @property
     def obs_channel(self) -> str:
@@ -291,6 +307,15 @@ class ScenarioPack(BaseModel):
     water_cells: list[list[int]] = Field(default_factory=list)
     water_rect: list[int] | None = None
     scheduled_events: list[dict[str, Any]] = Field(default_factory=list)
+    # Pack-wide no-fog flag. When true the engine reveals the whole
+    # map to the agent regardless of `fog_mode` — used by packs whose
+    # advertised capability is NOT scouting (e.g. close-range duels)
+    # so a contributor doesn't have to declare a separate `-clear`
+    # config. Engine wiring: `oramap.rs::ScenarioDef.reveal_map`,
+    # plumbed by `eval_core.py::_scenario_to_tmp_yaml`. The
+    # CompiledLevel `.reveal_map` property OR's this with the
+    # `fog_mode`-derived value so both paths produce the same effect.
+    reveal_map: bool = False
     levels: dict[LevelName, Level]
     # Optional named configurations. When present, the eval runs ONE
     # cell per config (pack:config_name) instead of the 3 raw levels —
@@ -342,6 +367,15 @@ class ScenarioPack(BaseModel):
         water_rect = merged.get("water_rect")
         if water_rect is None:
             water_rect = self.water_rect
+        # Lift `build_speed_multiplier` (default None ⇒ engine 1.0).
+        # The merged `base` may carry it directly, or the
+        # ScenarioDefinition validator will surface it via the
+        # `scenario` object. Read both for robustness.
+        build_speed_multiplier = (
+            merged.get("build_speed_multiplier")
+            if "build_speed_multiplier" in merged
+            else getattr(scenario, "build_speed_multiplier", None)
+        )
         return CompiledLevel(
             pack_id=self.meta.id,
             level=level,
@@ -360,6 +394,8 @@ class ScenarioPack(BaseModel):
             ore_patches=ore_patches,
             water_cells=water_cells,
             water_rect=list(water_rect) if water_rect is not None else None,
+            pack_reveal_map=self.reveal_map,
+            build_speed_multiplier=build_speed_multiplier,
         )
 
     def config_names(self) -> list[str]:

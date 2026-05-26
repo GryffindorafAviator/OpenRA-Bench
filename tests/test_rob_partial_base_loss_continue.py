@@ -1,46 +1,42 @@
-"""rob-partial-base-loss-continue — REASONING capability validation.
+"""rob-partial-base-loss-continue — REASONING capability validation
+(two-base strategic-retreat template, task #81).
 
-Graceful degradation / incident triage. A mid-episode
-`scheduled_events: destroy_actors` hook razes a NON-CRITICAL slice of
-the agent's base — an outer pillbox and one of two harvesters — at
-tick ~1200, while the war-critical core (fact + proc + powr + weap +
-fix) is untouched. The intended policy TRIAGES the loss: it
-recognises the razed assets are not on the win path and PRESSES ON
-with the core objective — field the heavy-armour establishment UP to
-the required strength (the agent starts BELOW the quota, so building
-the missing tank(s) is a mandatory verb) and clear the eastern e1
-garrison defending the enemy construction yard — rather than
-panic-rebuilding the lost non-essentials.
+Continue operating after partial base loss. The agent starts with TWO
+bases: a FORWARD outpost (doomed: a series of scheduled `destroy_actors`
+pulses razes everything agent-owned inside the forward region every
+~900-1200 ticks) and a HOME base (safe: the destroy region never
+reaches it). HOME is seeded with fact + powr only — the agent must
+RECONSTITUTE the production chain (proc + weap) at HOME to continue
+operating.
 
-Recalibrated (2026-05) after the engine movement fixes — the earlier
-design leaned on an opening light-tank strike to shave one 2tnk off
-the column, but bench-wide combat rebalancing made that casualty
-unreliable (the medium-tank column now out-trades light tanks without
-loss). The discriminator is now DETERMINISTIC and combat-RNG-free:
-the agent's starting column is BELOW the establishment quota N, so
-fielding the N-th tank is a build verb that does not depend on a
-casualty. The quota is 5 (easy/medium, one build) and 6 (hard, two
-builds).
+The win predicate is STATE-BASED at the deadline:
+  - building_in_region:{HOME, type: proc, count: 1}  AND
+  - building_in_region:{HOME, type: weap, count: 1}  AND
+  - has_building: fact                               AND
+  - within_ticks: 5400
+
+Both `preemptive redundancy` (build at HOME BEFORE the first pulse,
+while the forward base is still alive) and `reactive rebuild` (build
+at HOME AFTER the first pulse) satisfy the predicate equally.
 
 Bar (CLAUDE.md "no defect, no cheat"):
-   - stall (only `observe`) LOSES every tier / every hard seed (no
-     attack, no kills -> kill bar unmet -> after_ticks 5401 fires ->
-     timeout LOSS).
-   - no_rebuild (attack_move east but never build) LOSES every tier:
-     the column clears the garrison so kills >= 5, but the starting
-     column is below the establishment quota and a policy that never
-     builds a 2tnk can never reach `unit_type_count_gte:{type: 2tnk,
-     n: N}` -> timeout LOSS even with kills >= 5.
-   - rebuild_nonessentials (after the destroy event, panic-build pbox
-     + harv to restore the razed slice) LOSES every tier: the build
-     orders and decision turns are spent on assets NOT in the win
-     predicate, the establishment is never brought to N, the
-     type-count clause busts -> timeout LOSS.
-   - intended press-on (build the 2tnk establishment up to N +
-     attack_move east) WINS every tier / every seed.
-   - hard tier defines >=2 agent spawn_point groups (NORTH-flank
-     scout vs SOUTH-flank scout) so a memorised opening cannot
-     generalise; the destroy event fires on every seed.
+   - stall (only `observe`) LOSES every tier/seed: the FORWARD proc +
+     weap are razed by the first pulse, the HOME base never had them,
+     both region clauses never latch -> timeout LOSS.
+   - build-at-forward (rebuild proc + weap inside the FORWARD region
+     after every pulse) LOSES every tier/seed: the next destroy pulse
+     razes the replacements; the agent burns cash and decision turns
+     on assets that don't survive -> region clauses still busted ->
+     timeout LOSS. This is the canonical strategic-retreat failure
+     the scenario is designed to catch.
+   - build-at-home (queue proc + weap and place each inside the HOME
+     region after the first pulse) WINS every tier/seed.
+   - do-both (preemptive redundancy: build proc + weap at HOME BEFORE
+     the first pulse) WINS every tier/seed — same WIN as the reactive
+     path.
+   - hard tier defines >=2 agent spawn_point groups (NORTH-flank scout
+     vs SOUTH-flank scout) so a memorised opening cannot generalise;
+     the destroy pulses fire on every seed.
 """
 
 from __future__ import annotations
@@ -59,76 +55,146 @@ from openra_bench.scenarios.win_conditions import WinContext, evaluate
 
 PACK = PACKS_DIR / "rob-partial-base-loss-continue.yaml"
 
-# The establishment quota (`unit_type_count_gte: {type: 2tnk, n: N}`)
-# per tier. The agent starts a 4-tank column on every tier, so the
-# quota is the number of mandatory 2tnk builds + 4.
-_QUOTA = {"easy": 5, "medium": 5, "hard": 6}
+# Region centres / radius shared across all tiers.
+HOME_X, HOME_Y, HOME_R = 100, 18, 10
+FORWARD_X, FORWARD_Y, FORWARD_R = 20, 18, 10
 
 
 # ── policies ────────────────────────────────────────────────────────
 
 
-def _tanks(rs):
-    return [
-        u
-        for u in (rs.get("units_summary") or [])
-        if str(u.get("type", "")).lower() == "2tnk"
-    ]
+def _own_buildings(rs):
+    return rs.get("own_buildings") or rs.get("buildings_summary") or []
+
+
+def _has_building_in_region(rs, btype, cx, cy, r):
+    for b in _own_buildings(rs):
+        if str(b.get("type", "")).lower() != btype:
+            continue
+        x = int(b.get("cell_x", b.get("x", 0)))
+        y = int(b.get("cell_y", b.get("y", 0)))
+        if (x - cx) ** 2 + (y - cy) ** 2 <= r * r:
+            return True
+    return False
 
 
 def _stall(rs, Command):
-    """Pure observe — no orders -> no kills -> kill bar unmet ->
-    after_ticks 5401 fires -> timeout LOSS."""
+    """Pure observe — no proc or weap is ever built. The FORWARD pair
+    is razed by the first destroy pulse; both region clauses stay
+    busted -> timeout LOSS."""
     return [Command.observe()]
 
 
-def _no_rebuild(rs, Command):
-    """Attack-move east WITHOUT ever issuing build. The column clears
-    the garrison so kills >= 5, BUT the starting column (4 2tnk) is
-    below the establishment quota N and a policy that never builds a
-    2tnk can never satisfy `unit_type_count_gte: {type: 2tnk, n: N}`
-    -> timeout LOSS even though kills >= 5."""
-    ids = [str(u["id"]) for u in _tanks(rs)]
-    return [Command.attack_move(ids, 80, 20)] if ids else [Command.observe()]
+def _make_build_at_forward():
+    """Rebuild proc + weap inside the FORWARD region after every pulse.
+    The next destroy pulse razes the replacements; the agent never
+    satisfies the HOME region clauses -> timeout LOSS. This is the
+    strategic-retreat failure the scenario is built to catch — fighting
+    the attacker at the doomed site instead of retreating to safety."""
+    s = {"queued_proc": False, "queued_weap": False, "placed_proc": False,
+         "placed_weap": False, "last_proc_seen": False,
+         "last_weap_seen": False, "turn": 0}
 
-
-def _rebuild_nonessentials(rs, Command):
-    """Panic-rebuild the razed pbox + harv (the non-critical slice the
-    destroy event removed). The build orders and decision turns are
-    spent on assets NOT in the win predicate; the 2tnk establishment
-    is never brought to the quota, so the type-count clause busts ->
-    timeout LOSS. This is the canonical triage failure the
-    graceful-degradation scenario is designed to catch."""
-    cmds = [
-        Command.build("pbox"),
-        Command.build("harv"),
-        Command.place_building("pbox", 12, 30),
-        Command.place_building("harv", 10, 30),
-    ]
-    ids = [str(u["id"]) for u in _tanks(rs)]
-    if ids:
-        cmds.append(Command.attack_move(ids, 80, 20))
-    return cmds
-
-
-def _make_intended(quota):
-    """Triage the loss: IGNORE the razed non-essentials. Build the
-    2tnk establishment UP to the quota, and always attack_move the
-    live 2tnk column toward the eastern garrison at (80,20). The
-    garrison falls; type-count + kill + fact-intact bars all pass
-    -> WIN."""
-
-    def _intended(rs, Command):
-        t = _tanks(rs)
+    def policy(rs, Command):
+        s["turn"] += 1
         cmds = []
-        if len(t) < quota:
-            cmds.append(Command.build("2tnk"))
-        ids = [str(u["id"]) for u in t]
-        if ids:
-            cmds.append(Command.attack_move(ids, 80, 20))
+        has_proc_fwd = _has_building_in_region(
+            rs, "proc", FORWARD_X, FORWARD_Y, FORWARD_R
+        )
+        has_weap_fwd = _has_building_in_region(
+            rs, "weap", FORWARD_X, FORWARD_Y, FORWARD_R
+        )
+        # Re-trigger queue + place every time the forward copy dies
+        # (was previously alive but now isn't).
+        if s["last_proc_seen"] and not has_proc_fwd:
+            s["queued_proc"] = False
+            s["placed_proc"] = False
+        if s["last_weap_seen"] and not has_weap_fwd:
+            s["queued_weap"] = False
+            s["placed_weap"] = False
+        s["last_proc_seen"] = has_proc_fwd
+        s["last_weap_seen"] = has_weap_fwd
+
+        if not has_proc_fwd and not s["queued_proc"]:
+            cmds.append(Command.build("proc"))
+            s["queued_proc"] = True
+        if not has_weap_fwd and not s["queued_weap"]:
+            cmds.append(Command.build("weap"))
+            s["queued_weap"] = True
+        # Place a few turns after queueing — the shared Building queue
+        # serialises items so placement attempts before the item is
+        # ready are no-ops, harmless.
+        if s["queued_proc"] and not s["placed_proc"]:
+            cmds.append(Command.place_building("proc", 18, 20))
+            s["placed_proc"] = True
+        if s["queued_weap"] and not s["placed_weap"] and s["turn"] > 12:
+            cmds.append(Command.place_building("weap", 22, 20))
+            s["placed_weap"] = True
         return cmds or [Command.observe()]
 
-    return _intended
+    return policy
+
+
+def _make_build_at_home():
+    """Reactive rebuild at HOME. Queue proc + weap and place each
+    inside the HOME region. Pulses never reach HOME -> both region
+    clauses latch -> WIN."""
+    s = {"queued_proc": False, "queued_weap": False,
+         "placed_proc": False, "placed_weap": False, "turn": 0}
+
+    def policy(rs, Command):
+        s["turn"] += 1
+        cmds = []
+        if not s["queued_proc"]:
+            cmds.append(Command.build("proc"))
+            s["queued_proc"] = True
+        # Place proc when it's likely ready (proc cost 1400 -> 840
+        # ticks ~= turn 10).
+        if s["queued_proc"] and not s["placed_proc"] and s["turn"] >= 11:
+            cmds.append(Command.place_building("proc", HOME_X, HOME_Y - 2))
+            s["placed_proc"] = True
+        # Queue weap after proc lands so the shared Building queue
+        # serialises them deterministically.
+        if s["placed_proc"] and not s["queued_weap"]:
+            cmds.append(Command.build("weap"))
+            s["queued_weap"] = True
+        # weap cost 2000 -> 1200 ticks ~= 14 turns after queue.
+        if s["queued_weap"] and not s["placed_weap"] and s["turn"] >= 26:
+            cmds.append(Command.place_building("weap", HOME_X + 2, HOME_Y))
+            s["placed_weap"] = True
+        return cmds or [Command.observe()]
+
+    return policy
+
+
+def _make_do_both():
+    """Preemptive redundancy: queue + place proc and weap at HOME
+    BEFORE the first destroy pulse (tick 600 = ~turn 7) so the
+    redundancy is already in place when the forward outpost falls.
+    Same WIN as the reactive path — the predicate credits both."""
+    s = {"queued_proc": False, "queued_weap": False,
+         "placed_proc": False, "placed_weap": False, "turn": 0}
+
+    def policy(rs, Command):
+        s["turn"] += 1
+        cmds = []
+        # Queue both on turn 1 — the shared Building queue serialises
+        # them but both are committed from t=0.
+        if not s["queued_proc"]:
+            cmds.append(Command.build("proc"))
+            s["queued_proc"] = True
+        if s["queued_proc"] and not s["queued_weap"]:
+            cmds.append(Command.build("weap"))
+            s["queued_weap"] = True
+        if s["queued_proc"] and not s["placed_proc"] and s["turn"] >= 11:
+            cmds.append(Command.place_building("proc", HOME_X, HOME_Y - 2))
+            s["placed_proc"] = True
+        if s["placed_proc"] and not s["placed_weap"] and s["turn"] >= 25:
+            cmds.append(Command.place_building("weap", HOME_X + 2, HOME_Y))
+            s["placed_weap"] = True
+        return cmds or [Command.observe()]
+
+    return policy
 
 
 # ── helpers ─────────────────────────────────────────────────────────
@@ -149,18 +215,15 @@ def test_pack_loads_and_meta_active():
     assert pack.meta.capability == "reasoning"
     assert pack.meta.real_world_meaning
     assert pack.meta.robotics_analogue
-    anchors = pack.meta.benchmark_anchor
-    joined = " ".join(anchors).lower()
-    assert "graceful degradation" in joined
-    assert "incident triage" in joined
-    assert "critical-vs-noncritical" in joined or "critical" in joined
+    anchors = " ".join(pack.meta.benchmark_anchor).lower()
+    assert "graceful degradation" in anchors
+    assert "two-base" in anchors or "strategic retreat" in anchors
 
 
 def test_uses_turtle_bot():
-    """The pack declares the Wave-2 `turtle` bot — the holding-in-place
-    idiom keeps the eastern garrison at x=80 and isolates the loss
-    event to the scripted `destroy_actors` hook (a roaming enemy would
-    confound the triage discrimination)."""
+    """The pack declares the Wave-2 `turtle` bot — there must be no
+    roaming offence that could confound the destroy-pulse
+    discrimination. The only threat is the scripted pulses."""
     pack = load_pack(PACK)
     enemy = pack.base.get("enemy") if isinstance(pack.base, dict) else None
     assert enemy is not None
@@ -168,77 +231,178 @@ def test_uses_turtle_bot():
     assert bot == "turtle", f"expected turtle bot, got {bot!r}"
 
 
-def test_every_tier_has_a_destroy_actors_event():
-    """The load-bearing graceful-degradation mechanism: every tier
-    must declare a `scheduled_events: destroy_actors` hook so a
-    non-critical slice of the base is razed mid-episode."""
+def test_every_tier_has_repeated_destroy_pulses():
+    """The load-bearing strategic-retreat mechanism: every tier must
+    declare a SERIES of destroy_actors pulses (>=2) targeting the
+    forward region. A single pulse would let a forward-rebuild policy
+    win after it lands; the series is what makes the doomed site
+    genuinely doomed."""
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(load_pack(PACK), lvl)
-        evs = c.scheduled_events
+        evs = c.scheduled_events or []
         assert evs, f"{lvl}: must declare scheduled_events"
-        kinds = {e.get("type") for e in evs}
-        assert "destroy_actors" in kinds, (
-            f"{lvl}: must declare a destroy_actors event; got {kinds}"
+        destroy = [e for e in evs if e.get("type") == "destroy_actors"]
+        assert len(destroy) >= 2, (
+            f"{lvl}: must declare >=2 destroy_actors pulses (the doomed-"
+            f"forward template requires rebuilds also die); got "
+            f"{len(destroy)}"
         )
-        # The destroy event must fire mid-episode (after the agent's
-        # first decision turns) so the loss is observed and the triage
-        # decision is live.
-        for e in evs:
-            if e.get("type") == "destroy_actors":
-                assert 90 < int(e["tick"]) < 5400, (
-                    f"{lvl}: destroy tick {e['tick']} must be mid-episode"
-                )
-                assert e["filter"]["owner"] == "agent"
-                assert "region" in e["filter"], (
-                    f"{lvl}: destroy filter must use a region to isolate "
-                    "the blast to the south outpost"
+        for e in destroy:
+            assert 90 < int(e["tick"]) < 5400, (
+                f"{lvl}: destroy tick {e['tick']} must be mid-episode"
+            )
+            f = e["filter"]
+            assert f["owner"] == "agent"
+            region = f["region"]
+            assert region["x"] == FORWARD_X and region["y"] == FORWARD_Y, (
+                f"{lvl}: destroy region must be centred on FORWARD "
+                f"(20,18); got ({region['x']},{region['y']})"
+            )
+
+
+def test_home_region_is_safe_from_destroy_pulses():
+    """The HOME region (centred on (100,18), radius 10) must lie
+    entirely outside every destroy radius — otherwise the
+    strategic-retreat path is unsafe and the template breaks. Distance
+    between centres ~80, with both radii 10, gives ~60 cells of clear
+    separation per pulse."""
+    for lvl in ("easy", "medium", "hard"):
+        c = compile_level(load_pack(PACK), lvl)
+        for e in (c.scheduled_events or []):
+            if e.get("type") != "destroy_actors":
+                continue
+            r = e["filter"]["region"]
+            dx = abs(r["x"] - HOME_X)
+            dy = abs(r["y"] - HOME_Y)
+            # Conservative gap: pulse radius + HOME radius < centre dist
+            gap = (dx * dx + dy * dy) ** 0.5
+            need = int(r["radius"]) + HOME_R
+            assert gap > need, (
+                f"{lvl}: destroy region ({r['x']},{r['y']},r={r['radius']}) "
+                f"can clip HOME (r={HOME_R} around ({HOME_X},{HOME_Y})); "
+                f"distance {gap:.1f} <= radii sum {need}"
+            )
+
+
+def test_win_predicate_is_state_based_at_home():
+    """The win predicate must require BOTH a proc AND a weap inside
+    the HOME region (the strategic-retreat template — state-based at
+    deadline). A predicate that only required one of them would
+    trivialise the build budget."""
+    pack = load_pack(PACK)
+    for lvl in ("easy", "medium", "hard"):
+        clauses = pack.levels[lvl].win_condition.model_dump()["all_of"]
+        regions = [c.get("building_in_region") for c in clauses
+                   if "building_in_region" in c]
+        types = {(r.get("type"),) for r in regions
+                 if int(r.get("x", 0)) == HOME_X
+                 and int(r.get("y", 0)) == HOME_Y}
+        assert ("proc",) in types, (
+            f"{lvl}: win must require a proc inside the HOME region; "
+            f"got {types}"
+        )
+        assert ("weap",) in types, (
+            f"{lvl}: win must require a weap inside the HOME region; "
+            f"got {types}"
+        )
+
+
+def test_home_base_seeds_lack_proc_and_weap():
+    """HOME must be seeded with fact + powr ONLY — no proc and no weap.
+    Otherwise stall would WIN trivially (the home proc/weap satisfy
+    the predicate without any build verb)."""
+    for lvl in ("easy", "medium", "hard"):
+        c = compile_level(load_pack(PACK), lvl)
+        # Per-tier check uses the first spawn group (hard tier
+        # duplicates the home base across both groups, identical
+        # cells).
+        spawns_seen = set()
+        for a in c.scenario.actors:
+            if a.owner != "agent":
+                continue
+            sp = a.spawn_point if a.spawn_point is not None else 0
+            if sp not in spawns_seen:
+                spawns_seen.add(sp)
+            if sp != next(iter(spawns_seen)):
+                continue
+            # Is this actor inside the HOME region?
+            x, y = int(a.position[0]), int(a.position[1])
+            if (x - HOME_X) ** 2 + (y - HOME_Y) ** 2 <= HOME_R ** 2:
+                assert a.type.lower() not in ("proc", "weap"), (
+                    f"{lvl}: HOME region must NOT be pre-seeded with "
+                    f"{a.type} (stall would WIN trivially); "
+                    f"found at ({x},{y})"
                 )
 
 
-def test_destroy_event_razes_only_the_south_outpost():
-    """Engine-driven: the destroy event at tick ~1200 removes the
-    outer pbox(es) + south harvester but leaves the 5-building core
-    (fact + proc + powr + weap + fix) and the north harvester
-    intact — the loss must be NON-critical."""
+def test_forward_base_is_seeded_with_full_chain():
+    """FORWARD outpost must start with proc + weap + fact + powr so
+    a stall policy briefly has them — the partial-loss event is
+    OBSERVED in-game (pre-pulse the chain exists; post-pulse it
+    doesn't). Without this, the 'continue after partial loss' framing
+    collapses to a flat economy task."""
+    for lvl in ("easy", "medium", "hard"):
+        c = compile_level(load_pack(PACK), lvl)
+        spawns_seen = set()
+        fwd_types = set()
+        for a in c.scenario.actors:
+            if a.owner != "agent":
+                continue
+            sp = a.spawn_point if a.spawn_point is not None else 0
+            if sp not in spawns_seen:
+                spawns_seen.add(sp)
+            if sp != next(iter(spawns_seen)):
+                continue
+            x, y = int(a.position[0]), int(a.position[1])
+            if (x - FORWARD_X) ** 2 + (y - FORWARD_Y) ** 2 <= FORWARD_R ** 2:
+                fwd_types.add(a.type.lower())
+        for required in ("fact", "proc", "powr", "weap"):
+            assert required in fwd_types, (
+                f"{lvl}: FORWARD must be seeded with {required}; got "
+                f"{sorted(fwd_types)}"
+            )
+
+
+def test_destroy_event_razes_forward_outpost():
+    """Engine-driven: after the first pulse fires the FORWARD proc +
+    weap are gone, while the HOME fact + powr are intact."""
     for lvl in ("easy", "medium", "hard"):
         c = compile_level(load_pack(PACK), lvl)
         snaps = []
 
         def _probe(rs, Command, _snaps=snaps):
-            bs = rs.get("buildings_summary") or rs.get("own_buildings") or []
-            btypes = sorted(str(b.get("type", "")).lower() for b in bs)
-            nharv = sum(
-                1
-                for u in (rs.get("units_summary") or [])
-                if str(u.get("type", "")).lower() == "harv"
+            bs = _own_buildings(rs)
+            tick = rs.get("game_tick")
+            fwd_proc = _has_building_in_region(
+                rs, "proc", FORWARD_X, FORWARD_Y, FORWARD_R
             )
-            _snaps.append((rs.get("game_tick"), btypes, nharv))
+            fwd_weap = _has_building_in_region(
+                rs, "weap", FORWARD_X, FORWARD_Y, FORWARD_R
+            )
+            home_fact = _has_building_in_region(
+                rs, "fact", HOME_X, HOME_Y, HOME_R
+            )
+            home_powr = _has_building_in_region(
+                rs, "powr", HOME_X, HOME_Y, HOME_R
+            )
+            _snaps.append((tick, fwd_proc, fwd_weap, home_fact, home_powr))
             return [Command.observe()]
 
         run_level(c, _probe, seed=1)
-        pre = next(
-            (s for s in snaps if isinstance(s[0], int) and s[0] < 1100),
-            snaps[0],
+        pre = next((s for s in snaps if isinstance(s[0], int) and s[0] < 500),
+                   snaps[0])
+        post = next((s for s in snaps if isinstance(s[0], int) and s[0] > 800),
+                    snaps[-1])
+        assert pre[1] and pre[2], (
+            f"{lvl}: FORWARD proc + weap must be alive PRE-pulse; "
+            f"snap={pre}"
         )
-        post = next(
-            (s for s in snaps if isinstance(s[0], int) and s[0] > 1300),
-            snaps[-1],
+        assert not post[1] and not post[2], (
+            f"{lvl}: FORWARD proc + weap must be RAZED post-pulse; "
+            f"snap={post}"
         )
-        core = {"fact", "proc", "powr", "weap", "fix"}
-        post_set = set(post[1])
-        assert core <= post_set, (
-            f"{lvl}: core base must survive the destroy event; "
-            f"post-destroy buildings = {post[1]}"
-        )
-        assert "pbox" not in post_set, (
-            f"{lvl}: the outer pbox(es) must be razed; post = {post[1]}"
-        )
-        assert post[2] < pre[2], (
-            f"{lvl}: one harvester must be razed (pre {pre[2]} -> "
-            f"post {post[2]})"
-        )
-        assert post[2] >= 1, (
-            f"{lvl}: the surviving harvester must remain (post {post[2]})"
+        assert post[3] and post[4], (
+            f"{lvl}: HOME fact + powr must SURVIVE; snap={post}"
         )
 
 
@@ -270,11 +434,10 @@ def test_all_tiers_have_reachable_deadlines():
 
 def test_hard_has_two_seed_driven_spawn_groups():
     """Hard tier: >=2 distinct agent spawn_point groups so the engine
-    round-robins start by seed. The core base + 2tnk column + south
-    outpost are SHARED across both groups at identical cells so the
-    strike and destroy geometry is symmetric, but the
-    spawn-distinguishing scout (NORTH (18,12) vs SOUTH (18,32))
-    reveals which seed the engine picked."""
+    round-robins start by seed. The FORWARD + HOME bases are SHARED
+    across both groups at identical cells so the destroy geometry is
+    symmetric, but the spawn-distinguishing scout (NORTH (50,10) vs
+    SOUTH (50,30)) reveals which seed the engine picked."""
     c = compile_level(load_pack(PACK), "hard")
     sp = {
         (a.spawn_point if a.spawn_point is not None else 0)
@@ -294,7 +457,7 @@ def test_fail_condition_present_on_every_tier():
 
 
 def test_tools_match_spec():
-    """The advertised toolset is exactly the press-on kit: observe +
+    """The advertised toolset is the build + control kit: observe +
     build + place_building + move_units + attack_unit + attack_move +
     stop."""
     pack = load_pack(PACK)
@@ -309,13 +472,13 @@ def test_tools_match_spec():
 # ── predicate-level (no engine) ─────────────────────────────────────
 
 
-def _ctx(*, units=(), tick=1000, kills=0, lost=0, own_buildings=()):
+def _ctx(*, tick=1000, own_buildings=()):
     import types
 
     sig = types.SimpleNamespace(
         game_tick=tick,
-        units_killed=kills,
-        units_lost=lost,
+        units_killed=0,
+        units_lost=0,
         cash=0,
         resources=0,
         own_buildings=list(own_buildings),
@@ -325,55 +488,39 @@ def _ctx(*, units=(), tick=1000, kills=0, lost=0, own_buildings=()):
     )
     return WinContext(
         signals=sig,
-        render_state={"units_summary": list(units)},
+        render_state={},
     )
 
 
-def test_predicates_enforce_capability():
-    """Win requires (>=N 2tnk AND >=5 kills AND fact alive) AND
-    in-time; fail fires on timeout OR all-units-dead OR fact
-    destroyed. N is the per-tier establishment quota (5 for medium)."""
+def test_predicates_enforce_two_base_template():
+    """Win requires proc-in-HOME AND weap-in-HOME AND has_building:fact
+    AND within_ticks; fail fires on timeout OR no fact."""
     c = compile_level(load_pack(PACK), "medium")
-    quota = _QUOTA["medium"]
-
-    def _tk(n):
-        return [
-            {"cell_x": 22, "cell_y": 18 + 2 * i, "type": "2tnk"}
-            for i in range(n)
-        ]
-
-    fact = [("fact", 8, 18)]
-
-    # Intended: N 2tnk, 5 kills, fact alive, in time -> WIN
+    # HOME-region proc + weap + fact alive, in time -> WIN.
+    home_full = [
+        ("proc", HOME_X, HOME_Y - 2),
+        ("weap", HOME_X + 2, HOME_Y),
+        ("fact", HOME_X, HOME_Y),
+    ]
+    assert evaluate(c.win_condition, _ctx(tick=4000, own_buildings=home_full))
+    # FORWARD-region proc + weap (NOT home) + fact -> not a win.
+    fwd_only = [
+        ("proc", FORWARD_X, FORWARD_Y),
+        ("weap", FORWARD_X + 2, FORWARD_Y),
+        ("fact", HOME_X, HOME_Y),
+    ]
+    assert not evaluate(c.win_condition, _ctx(tick=4000, own_buildings=fwd_only))
+    # Only proc-in-HOME, no weap -> not a win.
+    half = [
+        ("proc", HOME_X, HOME_Y - 2),
+        ("fact", HOME_X, HOME_Y),
+    ]
+    assert not evaluate(c.win_condition, _ctx(tick=4000, own_buildings=half))
+    # No fact -> fail.
+    assert evaluate(c.fail_condition, _ctx(tick=4000, own_buildings=[]))
+    # Timeout -> fail.
     assert evaluate(
-        c.win_condition,
-        _ctx(units=_tk(quota), tick=2000, kills=5, own_buildings=fact),
-    )
-    # Only N-1 2tnk (the starting column, never built the missing
-    # tank) -> not a win
-    assert not evaluate(
-        c.win_condition,
-        _ctx(units=_tk(quota - 1), tick=2000, kills=5, own_buildings=fact),
-    )
-    # Only 4 kills (didn't clear the garrison) -> not a win
-    assert not evaluate(
-        c.win_condition,
-        _ctx(units=_tk(quota), tick=2000, kills=4, own_buildings=fact),
-    )
-    # All units dead -> real fail
-    assert evaluate(
-        c.fail_condition,
-        _ctx(units=[], tick=2000, kills=5, own_buildings=fact),
-    )
-    # Timeout -> fail
-    assert evaluate(
-        c.fail_condition,
-        _ctx(units=_tk(quota), tick=5402, kills=0, own_buildings=fact),
-    )
-    # Construction yard destroyed -> fail
-    assert evaluate(
-        c.fail_condition,
-        _ctx(units=_tk(quota), tick=2000, kills=5, own_buildings=[]),
+        c.fail_condition, _ctx(tick=5402, own_buildings=home_full)
     )
 
 
@@ -383,66 +530,60 @@ def test_predicates_enforce_capability():
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_stall_loses_every_tier_and_seed(level, seed):
-    """No orders -> no kills -> kill bar unmet -> timeout LOSS."""
+    """No build orders -> proc + weap razed at FORWARD by the first
+    pulse, never built at HOME -> region clauses busted -> timeout
+    LOSS."""
     _, r = _run(level, _stall, seed=seed)
     assert r.outcome == "loss", (
-        f"{level}/seed{seed}: stall must LOSE; got {r.outcome} "
-        f"kills={r.signals.units_killed} turns={r.turns}"
+        f"{level}/seed{seed}: stall must LOSE; got {r.outcome} turns={r.turns}"
     )
 
 
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
-def test_no_rebuild_loses(level, seed):
-    """Assault-without-build: the column clears the garrison so kills
-    >= 5, but the starting 4-tank column is below the establishment
-    quota and the type-count clause is never satisfied because no
-    2tnk is ever built -> timeout LOSS."""
-    _, r = _run(level, _no_rebuild, seed=seed)
+def test_build_at_forward_loses(level, seed):
+    """Rebuild proc + weap inside the FORWARD region after every
+    pulse: the next pulse razes the replacements; region clauses at
+    HOME never latch -> timeout LOSS. This is the canonical
+    strategic-retreat failure the scenario is designed to catch."""
+    _, r = _run(level, _make_build_at_forward(), seed=seed)
     assert r.outcome == "loss", (
-        f"{level}/seed{seed}: no-rebuild must LOSE (establishment "
-        f"quota never reached); got {r.outcome} "
-        f"kills={r.signals.units_killed}"
+        f"{level}/seed{seed}: build-at-forward must LOSE; got "
+        f"{r.outcome} turns={r.turns}"
     )
 
 
 @pytest.mark.parametrize("level", ["easy", "medium", "hard"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
-def test_rebuild_nonessentials_loses(level, seed):
-    """Panic-rebuild the razed pbox + harv: the build orders and
-    decision turns are spent on assets NOT in the win predicate, the
-    establishment is never brought to the quota and the type-count
-    clause busts -> timeout LOSS. This is the graceful-degradation
-    anti-pattern the scenario is designed to catch — restoring the
-    cosmetic loss instead of fielding the war-critical tanks."""
-    _, r = _run(level, _rebuild_nonessentials, seed=seed)
-    assert r.outcome == "loss", (
-        f"{level}/seed{seed}: rebuild-the-non-essentials must LOSE "
-        f"(establishment quota never reached); got {r.outcome} "
-        f"kills={r.signals.units_killed}"
-    )
-
-
-@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
-@pytest.mark.parametrize("seed", [1, 2, 3, 4])
-def test_intended_press_on_wins(level, seed):
-    """The intended capability — triage the non-critical loss, press
-    on with the core objective (build the 2tnk establishment up to the
-    quota + attack_move east) — WINS every tier and every hard seed
-    well inside the tick budget."""
-    _, r = _run(level, _make_intended(_QUOTA[level]), seed=seed)
+def test_build_at_home_wins(level, seed):
+    """Reactive rebuild at HOME — queue proc + weap and place each
+    inside the HOME region. Pulses never reach HOME, both region
+    clauses latch -> WIN."""
+    _, r = _run(level, _make_build_at_home(), seed=seed)
     assert r.outcome == "win", (
-        f"{level}/seed{seed}: intended press-on should WIN; got "
-        f"{r.outcome} kills={r.signals.units_killed} turns={r.turns}"
+        f"{level}/seed{seed}: build-at-home must WIN; got "
+        f"{r.outcome} turns={r.turns}"
+    )
+
+
+@pytest.mark.parametrize("level", ["easy", "medium", "hard"])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_do_both_wins(level, seed):
+    """Preemptive redundancy — build proc + weap at HOME BEFORE the
+    first pulse. The HOME copies survive every pulse; same WIN as
+    the reactive path (the predicate credits both)."""
+    _, r = _run(level, _make_do_both(), seed=seed)
+    assert r.outcome == "win", (
+        f"{level}/seed{seed}: do-both (preemptive) must WIN; got "
+        f"{r.outcome} turns={r.turns}"
     )
 
 
 def test_outcomes_are_deterministic_per_seed():
     """Same seed, same policy -> identical outcome."""
     c = compile_level(load_pack(PACK), "medium")
-    pol = _make_intended(_QUOTA["medium"])
+    pol = _make_build_at_home()
     a = run_level(c, pol, seed=2)
+    pol = _make_build_at_home()
     b = run_level(c, pol, seed=2)
-    assert (a.outcome, a.turns, a.signals.units_killed) == (
-        b.outcome, b.turns, b.signals.units_killed
-    )
+    assert (a.outcome, a.turns) == (b.outcome, b.turns)

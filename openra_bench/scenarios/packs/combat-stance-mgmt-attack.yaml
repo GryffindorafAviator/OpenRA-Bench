@@ -145,21 +145,37 @@ base:
     # A rusher would bring the fight to the agents, which lets
     # stance:1 fire back via the return-fire path and breaks the
     # stance:3 hunt discriminator.
-  # Combat-only toolset (NO build / NO harvest). `set_stance` is the
-  # load-bearing verb. `attack_unit`/`attack_move`/`move_units` are
-  # also available; a brute "attack_move east on turn 1" can win
-  # too — that's fine, the bar only requires the intended policy
-  # (set_stance(3)) to win cleanly; stall must lose.
+  # Stance-only toolset (NO direct move/attack verbs). `set_stance`
+  # is the SOLE load-bearing verb — without `attack_unit` /
+  # `attack_move` / `move_units` the agent cannot hand-pilot the
+  # formation through the scatter; only flipping to stance:3
+  # AttackAnything licenses the engine's hunt path.
+  #
+  # F1 cheat-WIN audit fix (2026-05-25): the previous toolset
+  # included `move_units` + `attack_unit` + `attack_move`, so a
+  # brute "attack_unit on each scattered enemy in turn" cleared the
+  # kill bar without ever calling `set_stance` — the verb-under-
+  # test was cosmetic. Dropping those verbs forces every winning
+  # play to escalate the stance, which is the advertised capability.
+  # `stop` retained so the model can cancel a pursuit if needed
+  # (defensive de-escalation), but `stop` alone cannot generate kills.
   tools:
     - observe
-    - move_units
-    - attack_unit
-    - attack_move
     - stop
     - set_stance
   planning: true
   termination:
     max_ticks: 6000
+    # The unarmed enemy `fact` marker at (120,20) can be killed
+    # (`fact` is MustBeDestroyed). A stance:3 hunter that finishes
+    # the scatter and continues drifting east will eventually engage
+    # the marker; without this flag the engine auto-`done`s on
+    # all-enemies-eliminated before the win/fail evaluator runs
+    # ⇒ DRAW. Disabling enemy_units_killed termination keeps the
+    # episode alive past full enemy wipe so the win predicate
+    # decides the outcome (CLAUDE.md DRAW-via-killable-marker
+    # defect class, qwen 9B v1.0 sweep audit).
+    enemy_units_killed: false
   actors: []
 
 levels:

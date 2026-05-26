@@ -41,7 +41,7 @@ LEVELS = ("easy", "medium", "hard")
 SEEDS = (1, 2, 3, 4)
 
 # Per-level (M, K) — kept in lock-step with the YAML.
-_M = {"easy": 3500, "medium": 3000, "hard": 3000}
+_M = {"easy": 3500, "medium": 3000, "hard": 2700}
 _K = {"easy": 2, "medium": 3, "hard": 3}
 # Mid-east kill cluster centre (well separated from the sentinel facts).
 # Targets the cluster directly so the assault stops on contact rather
@@ -102,6 +102,24 @@ def _intended_policy(level: str):
     stance_set: set = set()
     attacked: set = set()
     cap_hit = {"v": False}
+    stood_down: set = set()
+    # Count enemy soldiers visible at the kill cluster — once we've
+    # killed K of the initial 3/4/5, stand the strike force down so
+    # it doesn't auto-hunt toward the sentinel facts and trip the
+    # enemy_buildings_destroyed_gte fail clause.
+    initial_cluster = {"easy": 3, "medium": 4, "hard": 5}[level]
+    K = _K[level]
+    max_seen = {"v": 0}
+
+    def _enemy_units_near(obs, cx, cy, r=6):
+        cnt = 0
+        for e in obs.get("enemy_summary", []) or []:
+            if e.get("is_building"):
+                continue
+            if (abs(e.get("cell_x", -99) - cx) <= r
+                    and abs(e.get("cell_y", -99) - cy) <= r):
+                cnt += 1
+        return cnt
 
     def pol(obs, Cmd):
         units = obs.get("units_summary", []) or []
@@ -119,9 +137,6 @@ def _intended_policy(level: str):
             cmds.append(h)
 
         def build_stage(name, cost, dx, dy):
-            """Queue `name` (when cash allows) and place it every turn
-            it sits ready in the production queue. Returns True while
-            this stage is still unfinished."""
             if name in blds:
                 return False
             if name in prod:
@@ -137,10 +152,7 @@ def _intended_policy(level: str):
         # STAGE 2 — intake.
         if build_stage("proc", 1400, 2, 4):
             return cmds or [Cmd.observe()]
-        # STAGE 3 — capital reserve (wait for harvest income). Once
-        # the M reserve is observed at least once, the `then:` latch
-        # has credited stage 3 and we proceed regardless of subsequent
-        # spend-down (spending on weap drops the live ev back below M).
+        # STAGE 3 — capital reserve (wait for harvest income).
         if ev >= M:
             cap_hit["v"] = True
         if not cap_hit["v"]:
@@ -149,7 +161,19 @@ def _intended_policy(level: str):
         if build_stage("weap", 2000, 6, 4):
             return cmds or [Cmd.observe()]
         # STAGE 5 — terminal action: hunt the mid-east kill cluster.
+        # When the cluster has been thinned past (initial - K), STAND
+        # the strike force DOWN (flip to stance:0 + explicit stop) so
+        # the auto-hunter does not drift toward the sentinel facts —
+        # F8 state-based conversion exposes a latent hazard the strict
+        # `then:` previously masked (kill stage couldn't latch until
+        # all 4 build stages had, which gave the strike force less
+        # episode time to wander).
         strike = [u for u in units if u.get("type") == "2tnk"]
+        # First: queue the stance + attack_move. Only consider stand-
+        # down AFTER we've engaged at least one strike unit AND the
+        # cluster is now visible-and-thinned (initial fog hides the
+        # cluster — we only trust the count once we've put tanks
+        # within sight range).
         new = [u["id"] for u in strike if u["id"] not in stance_set]
         if new:
             cmds.append(Cmd.set_stance(new, 3))
@@ -158,6 +182,26 @@ def _intended_policy(level: str):
         if fresh:
             cmds.append(Cmd.attack_move(fresh, tx, ty))
             attacked.update(fresh)
+        # Stand-down logic: must FIRST observe at least K cluster
+        # units (max_seen ≥ K, proving LOS on enough kills) before
+        # trusting a "now empty" count. Otherwise fog masquerades as
+        # "all killed" and we stop the tanks before they engage.
+        # Once we've seen K enemies in-cluster, the moment that count
+        # drops to 0 means K kills have landed → stand down before
+        # the strike force auto-hunts toward the sentinels.
+        cluster_now = _enemy_units_near(obs, tx, ty)
+        if cluster_now > max_seen["v"]:
+            max_seen["v"] = cluster_now
+        kills_estimated_done = (
+            max_seen["v"] >= K
+            and cluster_now == 0
+        )
+        if kills_estimated_done:
+            new_stand = [u["id"] for u in strike if u["id"] not in stood_down]
+            if new_stand:
+                cmds.append(Cmd.set_stance(new_stand, 0))
+                cmds.append(Cmd.stop(new_stand))
+                stood_down.update(new_stand)
         return cmds or [Cmd.observe()]
 
     return pol
@@ -272,28 +316,39 @@ def test_meta_benchmark_anchor_set():
     assert any("project management" in a.lower() for a in anchors), anchors
 
 
-def test_then_chain_is_five_stages():
-    """The headline mechanic: every level's win is a 5-clause
-    `then:` chain in the exact powr → proc → M → weap → kills order."""
-    expected = [
-        "has_building",
+def test_state_based_five_stages_present():
+    """v1.0 sweep audit (F8 long-horizon): the win is now a STATE-BASED
+    `all_of:` of the five end-state checks (powr + proc + M + weap +
+    K kills) plus within_ticks. The strict `then:` has been removed —
+    the natural engine prereq chain (powr→proc→weap) plus the
+    capital-reserve gate (proc must exist for income) still drive the
+    same execution order. Confirms every clause is present and no
+    `then:` survives."""
+    required_keys = {
         "has_building",
         "economy_value_gte",
-        "has_building",
         "units_killed_gte",
-    ]
+        "within_ticks",
+    }
     for lvl in LEVELS:
         c = compile_level(load_pack(PACK), lvl)
         win = c.win_condition.model_dump(exclude_none=True)
         inner = win.get("all_of") or []
-        thens = [cl for cl in inner if "then" in cl]
-        assert thens, f"{lvl} win missing then-chain: {win}"
-        clauses = (thens[0]["then"] or {}).get("clauses") or []
-        assert len(clauses) == 5, (
-            f"{lvl} chain must have 5 stages; got {len(clauses)}"
+        assert not any("then" in cl for cl in inner), (
+            f"{lvl} should be state-based, found `then:` in {win}"
         )
-        keys = [next(iter(cl.keys())) for cl in clauses]
-        assert keys == expected, f"{lvl} stage order wrong: {keys}"
+        keys_present = set()
+        for cl in inner:
+            keys_present.update(cl.keys())
+        missing = required_keys - keys_present
+        assert not missing, f"{lvl} missing keys {missing} in {win}"
+        # has_building appears 3 times (powr, proc, weap).
+        hb = [cl for cl in inner if "has_building" in cl]
+        assert len(hb) == 3, f"{lvl} expected 3 has_building clauses, got {hb}"
+        types = sorted(cl["has_building"] for cl in hb)
+        assert types == ["powr", "proc", "weap"], (
+            f"{lvl} has_building types {types} != [powr, proc, weap]"
+        )
 
 
 def test_every_level_has_fail_condition():
@@ -376,14 +431,12 @@ def test_tick_budget_aligned_with_max_turns():
 @pytest.mark.parametrize("level", LEVELS)
 def test_intended_progression_wins(level, seed):
     """The intended ordered progression must WIN on every
-    (level, seed) and complete all five stages."""
+    (level, seed) and reach all five end states inside the budget."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _intended_policy(level), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "win", (
         f"intended progression must WIN on {level} s={seed}; "
-        f"got {res.outcome} (then_progress={tp}, "
-        f"kills={res.signals.units_killed}, "
+        f"got {res.outcome} (kills={res.signals.units_killed}, "
         f"buildings={res.signals.own_building_types})"
     )
     assert res.signals.enemy_buildings_destroyed == 0, (
@@ -407,30 +460,26 @@ def test_stall_loses(level, seed):
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", LEVELS)
 def test_skip_powr_loses(level, seed):
-    """Skipping STAGE 1 (build proc directly) must LOSE — the engine
-    refuses proc without power, so the chain never leaves stage 0."""
+    """Skipping powr (build proc directly) must LOSE — the engine
+    refuses proc without power, so the has_building:powr state never
+    satisfies and the chain of state checks cannot complete."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _skip_powr_policy(level), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "loss", (
-        f"skip-powr must LOSE on {level} s={seed}; "
-        f"got {res.outcome} then_progress={tp}"
+        f"skip-powr must LOSE on {level} s={seed}; got {res.outcome}"
     )
 
 
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("level", LEVELS)
 def test_build_no_attack_loses(level, seed):
-    """Building the full economy but never engaging must LOSE —
-    STAGE 5 (units_killed_gte:K) never latches; the chain stalls
-    at stage 4."""
+    """Building the full economy but never engaging must LOSE — the
+    units_killed_gte:K state check never satisfies; the clock expires."""
     c = compile_level(load_pack(PACK), level)
     res = run_level(c, _build_no_attack_policy(level), seed=seed)
-    tp = getattr(res.signals, "then_progress", {}) or {}
     assert res.outcome == "loss", (
         f"build-no-attack must LOSE on {level} s={seed}; "
-        f"got {res.outcome} then_progress={tp} "
-        f"kills={res.signals.units_killed}"
+        f"got {res.outcome} kills={res.signals.units_killed}"
     )
 
 

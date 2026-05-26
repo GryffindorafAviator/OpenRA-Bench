@@ -27,12 +27,34 @@ from openra_bench.resilience import (
 
 
 def test_retry_policy_delay_exponential_capped_and_retry_after():
-    p = RetryPolicy(base=1.0, cap=30.0, max_attempts=6)
+    # Disable jitter to assert the deterministic exponential backoff curve.
+    p = RetryPolicy(base=1.0, cap=30.0, max_attempts=6, jitter=0.0)
     assert [p.delay(a) for a in (1, 2, 3, 4, 10)] == [1.0, 2.0, 4.0, 8.0, 30.0]
     # server Retry-After wins when larger; still capped
     assert p.delay(1, retry_after=5.0) == 5.0
     assert p.delay(1, retry_after=999) == 30.0
     assert p.is_transient_status(429) and not p.is_transient_status(400)
+
+
+def test_retry_policy_jitter_spreads_concurrent_retries():
+    """Regression: under high concurrency N workers hitting 429 at the
+    same instant must NOT all back off by an identical interval (the
+    pre-fix bug — `jitter` field existed but was `* 0`'d in `delay()`,
+    producing a thundering-herd pattern on every retry attempt). With
+    jitter active, the delay for a fixed attempt is sampled uniformly
+    from a ±10% window around the deterministic backoff, so a fleet of
+    20 workers fans out instead of stampeding."""
+    import random as _r
+    rng = _r.Random(42)
+    p = RetryPolicy(base=4.0, cap=30.0, jitter=0.1)
+    # Sample 200 retries at attempt=2 (deterministic backoff=8.0)
+    samples = [p.delay(2, _rng=rng) for _ in range(200)]
+    # All in the ±10% window
+    assert all(7.19 < s < 8.81 for s in samples), \
+        f"samples outside ±10%: min={min(samples)} max={max(samples)}"
+    # Spread is non-trivial (at least 50 distinct values out of 200)
+    assert len(set(samples)) > 50, \
+        f"jitter not active — only {len(set(samples))} unique delays"
 
 
 def test_retry_call_succeeds_after_transient_then_stops_on_fatal():
@@ -115,6 +137,35 @@ def test_journal_roundtrip_and_torn_line(tmp_path):
     assert len(j.records()) == 2  # torn tail tolerated
 
 
+def test_journal_error_row_allows_retry_append(tmp_path):
+    """Regression: an errored row in the journal must NOT prevent a retry
+    from being appended. Pre-fix the in-memory `_seen_keys` was seeded
+    from EVERY prior row including errors, so when the resume gate
+    correctly retried an errored cell the second append raised
+    `DuplicateJournalKey` and crashed the launcher. Mirror `done_keys()`:
+    error rows are excluded from the dedupe set so retries succeed."""
+    jp = tmp_path / "j.jsonl"
+    j = RunJournal(jp)
+    k = episode_key("scout-jeep", "easy", "public", 1, "vision", repeat=1)
+    # First attempt: provider 500 ⇒ recorded as error.
+    j.append(k, {"cell": "scout-jeep:easy", "outcome": "error",
+                 "notes": ["FatalProviderError: 500"]})
+    # Re-open the journal as a fresh process would (resume-from-crash).
+    j2 = RunJournal(jp)
+    # done_keys excludes errors — confirms retry is intended.
+    assert k not in j2.done_keys()
+    # The retry's append MUST succeed, not raise DuplicateJournalKey.
+    j2.append(k, {"cell": "scout-jeep:easy", "outcome": "win",
+                  "composite": 0.85})
+    # Both rows persist; done_keys returns the key once (the success).
+    assert k in j2.done_keys()
+    # Records returns both rows (caller dedups by `_key` keeping latest).
+    rows = [r for r in j2.records() if r.get("_key") == k]
+    assert len(rows) == 2
+    assert rows[0]["outcome"] == "error"
+    assert rows[1]["outcome"] == "win"
+
+
 # ── bounded chat history ───────────────────────────────────────────────────
 
 
@@ -159,13 +210,23 @@ def test_evaluate_journal_resume_is_lossless(tmp_path):
     jp = tmp_path / "j.jsonl"
     a = evaluate([PACK], ["easy"], [1, 2], journal_path=jp)
     assert a["overall"]["n"] == 2 and a["resumed"] == 0
-    n_lines = len(jp.read_text().splitlines())
-    assert n_lines == 2
+    # Two data rows; a `_meta` header line may also be present (v11
+    # production-eval hardening). Count by filtering data rows.
+    rows = [
+        ln for ln in jp.read_text().splitlines()
+        if ln.strip() and not json.loads(ln).get("_meta")
+    ]
+    assert len(rows) == 2
 
     # resume: both episodes already journaled → 0 new, same aggregate
-    b = evaluate([PACK], ["easy"], [1, 2], journal_path=jp, resume=True)
+    b = evaluate([PACK], ["easy"], [1, 2], journal_path=jp, resume=True,
+                 ignore_run_id=True)
     assert b["resumed"] == 2 and b["overall"]["n"] == 2
-    assert len(jp.read_text().splitlines()) == 2  # nothing re-appended
+    rows2 = [
+        ln for ln in jp.read_text().splitlines()
+        if ln.strip() and not json.loads(ln).get("_meta")
+    ]
+    assert len(rows2) == 2  # nothing re-appended
     assert "cost" in b and "truncated" in b
 
 
@@ -218,4 +279,9 @@ def test_evaluate_continues_past_a_failing_episode(tmp_path):
     assert all(e["outcome"] == "error" for e in eps)   # recorded, not raised
     assert "overall" in out                            # report still produced
     # journal captured them so --resume won't re-run the errored ones
-    assert len((tmp_path / "j.jsonl").read_text().splitlines()) == 2
+    # (count data rows only; v11 hardening prepends a `_meta` header)
+    rows = [
+        ln for ln in (tmp_path / "j.jsonl").read_text().splitlines()
+        if ln.strip() and not json.loads(ln).get("_meta")
+    ]
+    assert len(rows) == 2

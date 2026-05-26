@@ -239,7 +239,10 @@ def render_map_thumbnail(pack, out_path: Path) -> bool:
         adapter = RustObsAdapter(cl.scenario)
         rs = adapter.render_state(obs)
         env.close()
-        img = render_tactical_minimap(rs, scale=3, grid=True, legend=False)
+        img = render_tactical_minimap(
+            rs, scale=3, grid=True, legend=False,
+            base_map=cl.scenario.base_map or "",
+        )
         if img:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             img.save(str(out_path))
@@ -264,7 +267,10 @@ def render_map_thumbnail(pack, out_path: Path) -> bool:
             "units_summary": actors[:10],
             "enemy_summary": [],
         }
-        img = render_tactical_minimap(rs, scale=3, grid=True, legend=False)
+        img = render_tactical_minimap(
+            rs, scale=3, grid=True, legend=False,
+            base_map=cl.scenario.base_map or "",
+        )
         if img:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             img.save(str(out_path))

@@ -1394,19 +1394,23 @@ UPGRADED = [
     # the two spawn-matched NEAR clauses — a memorised "always route
     # to (16,14)" policy loses on the SOUTH seeds.
     "econ-far-patch-vs-near-patch",
-    # Wave-11 REASONING pack — disaster recovery after a mid-episode
-    # exogenous loss (PlanBench replanning under exogenous failure /
-    # disaster recovery / SC2 comeback anchor). A `scheduled_events`
-    # destroy_actors event at tick 1500 wipes the agent's Ore Refinery
-    # (and the forward tanks caught in the blast region); the agent
-    # must rebuild the refinery AND still clear the eastern garrison
-    # within the original deadline. Hard tier defines two agent
-    # spawn_point groups (NORTH base y=12 / SOUTH base y=28) round-
-    # robined by seed; the full base + column is duplicated across
-    # both spawns and the destroy_actors region is declared at both
-    # latitudes (scheduled_events do not honour spawn_point, so both
-    # fire — the dormant-latitude one matches nothing), so a memorised
-    # rebuild cell cannot generalise.
+    # Wave-11 / Wave-13 REASONING pack — two-base strategic-retreat
+    # template (task #81 redesign). The agent starts with a FORWARD
+    # base (fact + proc + powr + harv + 2 defenders) at mid-map and
+    # a HOME base (parked MCV + powr + lone garrison) at the deep-
+    # west safe zone. An in-world `rusher` band closes from the east
+    # plus `scheduled_events: spawn_actors` reinforcement waves keep
+    # the forward region hostile through the run (so a forward
+    # rebuild is also razed). Win is state-based: a `fact` AND a
+    # `proc` alive inside the HOME-radius disc at the deadline.
+    # Hard tier defines two agent spawn_point groups (NORTH y=14 /
+    # SOUTH y=26) round-robined by seed; the full HOME + FORWARD
+    # bases are duplicated across both spawns and the rush bands +
+    # reinforcement waves are declared at both latitudes
+    # (scheduled_events do not honour spawn_point, so both fire —
+    # the dormant-latitude one wanders into empty space). The win
+    # clause is an `any_of` over the two candidate HOME discs so a
+    # memorised mid-map rebuild satisfies NEITHER latitude.
     "lh-recovery-after-mid-game-loss",
     # Wave-11 reasoning pack — schedule compression: a tick-1000
     # `shorten_deadline` scheduled event pulls the deadline forward
@@ -1509,6 +1513,15 @@ UPGRADED = [
     "combat-heli-flank",  # hard: 2 agent spawn_point groups (north/south heli staging)
     "econ-harvester-defense-raid",  # hard: 2 agent spawn_point groups (north/south base)
     "econ-mine-and-grow",  # hard: 2 agent spawn_point groups (north/south base)
+    # The canonical LLM-vs-LLM 1v1 macro pack. 2026-05-25 update:
+    # carries TWO fully-symmetric spawn_point variants (V0: agent NW
+    # ↔ enemy SE; V1: agent NE ↔ enemy SW), both at the original
+    # ≈128.8-cell diagonal separation. The agent stays in the NORTH
+    # lobe and the enemy in the SOUTH lobe at the SAME variant — the
+    # symmetric-arena fairness contract is preserved (only the
+    # horizontal corner flips per seed). Ablation diversity without
+    # introducing per-seed bias.
+    "adversarial-1v1-macro",  # hard: 2 fully-symmetric spawn_point variants
 ]
 
 # Consciously NOT spawn-varied, with the reason (keeps the curation
@@ -1603,14 +1616,17 @@ NOT_APPLICABLE = {
     "and three cover clusters that force the spy onto a single safe "
     "corridor; controlled variable is the cover-vs-defender threading "
     "decision. Spawn variation would dilute the corridor-reading signal.",
-    "spec-thief-steal-cash": "hard adds a stance:2 defender at the silo "
-    "AND requires TWO thief steals (cash bar 800 vs 400); controlled "
-    "variable is the redundancy + survival-under-fire discipline on a "
-    "fixed corridor map.",
-    "spec-tanya-c4-strike": "hard adds two stance:2 e1 defenders "
-    "covering the proc; controlled variable is the survive-the-trade "
-    "decision (Tanya's HP absorbs the trade) on a fixed geometry. Spawn "
-    "variation would dilute the commit-direct-strike signal.",
+    "spec-thief-steal-cash": "hard adds a second direct gap, a gun-turret "
+    "east flank closure, AND requires TWO thief steals (cash bar 800 vs "
+    "400); controlled variable is the simultaneous routing-under-threat "
+    "for two thieves on a fixed flank-arena map. Spawn rotation would "
+    "dilute the wall-end vs pbox-overwatch reading signal.",
+    "spec-tanya-c4-strike": "hard uses the rear-ambush idiom (four "
+    "stance:2 e1 riflemen ~5 cells behind Tanya) on a fixed geometry; "
+    "Tanya must commit to the c4_detonate walk-up to escape the kill "
+    "zone, while attack_unit stand-and-fire dies before the proc falls. "
+    "Spawn variation would dilute the load-bearing commit-or-die "
+    "signal.",
     "spec-engineer-capture": "hard introduces two staggered water-"
     "obstacle clusters that force a serpentine route + a stance:2 "
     "south-of-proc defender + redundant 2nd engineer; the controlled "

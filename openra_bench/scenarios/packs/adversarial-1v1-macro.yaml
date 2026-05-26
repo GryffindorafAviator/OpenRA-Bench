@@ -1,0 +1,490 @@
+# ADVERSARIAL-1V1-MACRO — the canonical LLM-vs-LLM full-macro 1v1 pack.
+#
+# Single canonical 64×48 bridges-naval map. NOT a difficulty ladder —
+# this pack is a shared arena where two real-time decision agents
+# compete head-to-head. One map, one good macro problem.
+#
+# Map shrunk from 128×96 → 64×48 (2026-05-25) to halve per-episode
+# wall-clock (~80-120 min → ~20-30 min at 200 turns) while preserving
+# the mirrored full-macro contract: identical roster on both sides,
+# fog-of-war exploration, naval-optional bridges arena, contested
+# centre patch on the central bridge. Every coord (map, channel,
+# bridges, ore patches, water bands, actor positions) was scaled by
+# 1/2 about the map centre (now (32, 28)). Two spawn_point variants
+# (V0: NW↔SE, V1: NE↔SW) preserved verbatim with halved coords.
+#
+# Per-bench schema (`openra_bench/scenarios/schema.py`) `levels:` must
+# carry all three of {easy, medium, hard}; we therefore declare all
+# three keys but they ALL point at the SAME compiled scenario (same
+# `base_map`, same actors, same ore patches, same water bands, same
+# `max_turns`). The pack's `configs:` block exposes ONE runnable
+# cell (`main`, pinned to `medium`) so a default 1v1 eval produces
+# one episode per seed, not three identical ones.
+#
+# This is the FIRST pack designed end-to-end for the bench's
+# `step_1v1` two-player command channel (engine: `openra-train/src/
+# env.rs:step_1v1`, harness: `openra_bench/one_v_one.py::run_1v1`).
+# Both sides are driven by Controllers (LLM / human / scripted) and
+# see their OWN fog-of-war observation; the winner is decided from
+# the FINAL boards by `run_1v1` (base elimination, then economy
+# tie-break), not by a per-side win predicate.
+#
+# Hard constraints (binding for every authored 1v1 cell):
+#
+# 1. NO `reveal_map`. Both sides explore through fog. The whole
+#    point is asymmetric information — mirrored bases sit outside
+#    each other's starting sight (vehicle vision ~6c, base
+#    separation chosen so no opponent actor is observable at t=0).
+#
+# 2. Mirrored symmetric layout. Identical starting roster on both
+#    sides (`fact`, `proc`, `powr`, `weap`, `tent`, `harv`, `1tnk`,
+#    `e1`), identical `starting_cash: 2000`, identical factions
+#    (`allies` both — faction-asymmetry is a separate axis), default
+#    stances (omitted ⇒ engine default `stance:2` Defend).
+#
+# 3. Three ore patches per side, mirrored about the map centre
+#    (32, 28):
+#       • near-base safe patch (small, immediate)
+#       • mid-distance expansion patch (medium, requires a 2nd proc
+#         or a long harvester commute)
+#       • contested centre patch (large, sits across the bridges so
+#         both sides must cross the water to control it)
+#
+# 4. Naval lane is OPTIONAL. Each side has a `syrd` shipyard on a
+#    small shore-water L-band; ships expand the action set but a
+#    land-only macro game still works through the bridges.
+#
+# 5. No load-bearing per-side win/fail predicates. The schema
+#    requires `win_condition` so we declare a symmetric pair
+#    (`not has_building: fact`) — they describe the same condition
+#    the harness already checks (base alive ⇒ side still in the
+#    game) and serve only as a "this scenario is well-formed" stub.
+#    Outcome decision lives in `run_1v1`.
+#
+# 6. `max_turns: 200` — reachable max tick ≈ 93 + 90·199 = 17 993,
+#    well clear of the comfortable macro horizon (economy → tech →
+#    army → engagement). Budget unchanged from the 128×96 layout;
+#    the smaller map shortens wall-clock by shortening engagement
+#    travel, not by truncating the decision horizon.
+#
+# 7. `capability: adversarial` so `pairwise.py` / `adversarial.py`
+#    ladder rating treats this pack as a head-to-head rung.
+#
+# Hard-tier curation: the pack carries TWO fully-symmetric
+# spawn_point variants for ablation diversity, so seeds 1-4 vary
+# OPENING GEOMETRY (not just engine RNG):
+#   • spawn_point 0 — agent NW corner (6, 5) ↔ enemy SE (58, 43)
+#     [original mirrored layout]
+#   • spawn_point 1 — agent NE corner (58, 5) ↔ enemy SW (6, 43)
+#     [horizontal-flip of V0]
+# Both variants preserve the mirrored-symmetric contract: agent stays
+# in the NORTH lobe (y<24) and enemy in the SOUTH lobe (y>24) at the
+# SAME variant — neither side crosses the water at t=0 — and the
+# enemy fact is the exact rotational mirror of the agent fact about
+# the map centre (32, 28).
+#
+# Ore patches stay GLOBAL (top-level `ore_patches:` do not honour
+# spawn_point per CLAUDE.md), so the patch list has 9 entries: 4
+# near-base + 4 mid-expansion (one of each in every quadrant) plus
+# the contested centre — every variant places both sides next to a
+# safe patch. Same for `water_cells:` — both shore bands at NW+SE
+# AND at NE+SW so each variant's syrds have water to launch into.
+#
+# Engine API the pack relies on:
+#   • `step_1v1(agent_cmds, enemy_cmds) -> (a_obs, e_obs, done, info)`
+#   • `enemy_observation()` for the t=0 enemy snapshot
+#   • `bot_type:''` on both `agent` and `enemy` so NO scripted
+#     engine bot co-drives either side — the Controller is the only
+#     hand on the wheel.
+
+meta:
+  id: adversarial-1v1-macro
+  title: '1v1 Macro — Mirrored Full-Game Adversarial Match'
+  capability: adversarial
+  real_world_meaning: >
+    A symmetric full-macro head-to-head match against another
+    real-time decision agent. Both commanders start with the same
+    base (Construction Yard, Refinery, Power Plant, War Factory,
+    Barracks, one Ore Truck, two starter combat units, one
+    Shipyard on a small shore water band) and the same $2000 in
+    the bank. A safe ore patch sits next to each base; a mid-
+    distance expansion patch sits ~13 cells out; a rich contested
+    patch sits in the middle of the map, straddling the river that
+    splits the arena. The decision is the full RTS macro stack —
+    when to expand for income, when to tech, when to attack, when
+    to scout — against an opponent making the same choices on the
+    same clock. Asymmetric information: neither side can see the
+    other's base at t=0; everything is learned by scouting through
+    the fog.
+  robotics_analogue: >
+    Two-agent symmetric strategic interaction under partial
+    observability — each agent owns identical resources and
+    capabilities, sees only its own local observation, and must
+    plan over multi-stage commitments (capacity-build, fielding,
+    engagement) while inferring the other agent's plan from
+    sparse evidence (units sighted, structures lost). This is the
+    cleanest abstraction the bench owns for two-LLM strategic
+    play.
+  benchmark_anchor:
+    - "SC2 1v1 macro ladder"
+    - "MicroRTS 1v1 head-to-head"
+    - "multi-agent reinforcement learning, symmetric two-agent game"
+    - "head-to-head LLM Elo / pairwise ranking"
+  author: openra-bench
+
+# Pack-level base_map is the logical id of the canonical arena
+# materialised by `openra_bench.mapgen.materialize` at compile time
+# (same idiom as econ-second-base-race). The .oramap is content-
+# addressed into `data/maps/`.
+base_map:
+  generator: bridges-arena
+  name: adversarial-1v1-macro-arena
+  width: 64
+  height: 56
+  cordon: 2
+  axis: horizontal
+  channel_y: 24
+  channel_width: 8
+  # Three evenly-spaced 3-cell bridges across the channel. The
+  # playable interior runs x in [2, 62); bridges placed symmetric
+  # about x=32 (centre) at quartile-like offsets.
+  bridges:
+    - {pos: 16, width: 3}
+    - {pos: 32, width: 3}
+    - {pos: 48, width: 3}
+  title: 'Adversarial 1v1 Macro Bridges Arena 64x48'
+
+starting_cash: 2000
+
+# Three ore patches per side + contested centre patch — pack-level
+# so every (identical) level inherits them. Engine clamp footgun
+# (resource.rs `seed_ore_patch`): per-cell density is
+# `clamp(ceil(amount / passable_cells), 1, 12)`. The patches below
+# size their `amount` so the disc fills to the per-cell cap on
+# passable land.
+ore_patches:
+  # Ore patches are TOP-LEVEL and DO NOT honour spawn_point (CLAUDE.md
+  # ore_patches footgun), so each quadrant carries a mirrored near-
+  # base + mid-expansion patch. spawn_point 0 (agent NW / enemy SE)
+  # uses the NW + SE quadrants; spawn_point 1 (agent NE / enemy SW)
+  # uses the NE + SW quadrants — every variant has both sides next
+  # to safe ore at t=0.
+  # ── North-WEST quadrant — spawn_point 0 agent / spawn_point 1 enemy ──
+  # Safe near-base patch — visible from the home shroud at game
+  # start, supports the opening econ.
+  - {x: 8, y: 7, amount: 6000, radius: 2}
+  # Mid-distance expansion patch — ~13 cells from the base,
+  # requires either a 2nd proc near the patch or a long harvester
+  # commute. Sits in the north lobe, well above the channel.
+  - {x: 18, y: 14, amount: 9000, radius: 3}
+  # ── South-EAST quadrant — spawn_point 0 enemy / spawn_point 1 agent ──
+  # (mirror of NW about (32, 28))
+  - {x: 56, y: 49, amount: 6000, radius: 2}
+  - {x: 46, y: 42, amount: 9000, radius: 3}
+  # ── North-EAST quadrant — spawn_point 1 agent / spawn_point 0 enemy ──
+  # (V1 ablation: horizontal flip of the NW quadrant)
+  - {x: 56, y: 7, amount: 6000, radius: 2}
+  - {x: 46, y: 14, amount: 9000, radius: 3}
+  # ── South-WEST quadrant — spawn_point 1 enemy / spawn_point 0 agent ──
+  # (mirror of NE about (32, 28))
+  - {x: 8, y: 49, amount: 6000, radius: 2}
+  - {x: 18, y: 42, amount: 9000, radius: 3}
+  # ── Contested centre ─────────────────────────────────────────
+  # Sits ON the central bridge (x=32) at the water line (y=24).
+  # The disc (r=4) covers cells y in [20, 28]; the engine clips
+  # ore to passable land, so water cells in the channel are
+  # skipped and the disc seeds equal land on both sides of the
+  # river. The middle bridge gap (x=32..34) is also passable
+  # land, so the patch straddles the crossing — controlling it
+  # means controlling the central river crossing.
+  - {x: 32, y: 28, amount: 14000, radius: 4}
+
+# Naval shore-water L-bands — one per side, mirrored about the
+# channel midline. Each band is a 3-cell-wide vertical strip
+# adjacent to the corresponding shipyard so ships have water to
+# launch into. Bands sit ENTIRELY inside the lobe (above / below
+# the central channel) so the channel itself remains the central
+# land-engagement axis.
+water_cells:
+  # ── Agent (north-west lobe) shore band — west wall, x in 1..3,
+  #    y in 7..11. The agent's `syrd` (2, 6) sits just above
+  #    the band; ships launch southward into the band. ────
+  - [1, 7]
+  - [2, 7]
+  - [3, 7]
+  - [1, 8]
+  - [2, 8]
+  - [3, 8]
+  - [1, 9]
+  - [2, 9]
+  - [3, 9]
+  - [1, 10]
+  - [2, 10]
+  - [3, 10]
+  - [1, 11]
+  - [2, 11]
+  - [3, 11]
+  # ── Enemy (south-east lobe) shore band — east wall, mirrored. ────
+  # Mirror of (x, y) about (32, 28) is (64-x, 56-y).
+  # So x in 61..63, y in 37..41.
+  - [61, 45]
+  - [62, 45]
+  - [63, 45]
+  - [61, 46]
+  - [62, 46]
+  - [63, 46]
+  - [61, 47]
+  - [62, 47]
+  - [63, 47]
+  - [61, 48]
+  - [62, 48]
+  - [63, 48]
+  - [61, 49]
+  - [62, 49]
+  - [63, 49]
+  # ── spawn_point 1 agent (NE lobe) shore band — east wall, x in
+  #    61..63, y in 7..11. The agent's V1 `syrd` (62, 6) sits
+  #    just above the band; ships launch southward. ────
+  - [61, 7]
+  - [62, 7]
+  - [63, 7]
+  - [61, 8]
+  - [62, 8]
+  - [63, 8]
+  - [61, 9]
+  - [62, 9]
+  - [63, 9]
+  - [61, 10]
+  - [62, 10]
+  - [63, 10]
+  - [61, 11]
+  - [62, 11]
+  - [63, 11]
+  # ── spawn_point 1 enemy (SW lobe) shore band — west wall,
+  #    mirror of the NE band about (32, 28): x in 1..3,
+  #    y in 37..41. ────
+  - [1, 45]
+  - [2, 45]
+  - [3, 45]
+  - [1, 46]
+  - [2, 46]
+  - [3, 46]
+  - [1, 47]
+  - [2, 47]
+  - [3, 47]
+  - [1, 48]
+  - [2, 48]
+  - [3, 48]
+  - [1, 49]
+  - [2, 49]
+  - [3, 49]
+
+base:
+  # Per-player cash plumbing (CLAUDE.md: per-player starting cash is
+  # plumbed end-to-end and overrides the top-level when set). Setting
+  # `cash: 2000` on BOTH sides is the explicit symmetric budget — no
+  # `bot_type:''` ambiguity, no fallback path.
+  agent: {faction: allies, cash: 2000, bot_type: ''}
+  enemy: {faction: allies, cash: 2000, bot_type: ''}
+  # Per-scenario production-speed multiplier (engine default 1.0).
+  # 4× makes 1v1 episodes feel snappier without changing `max_turns`:
+  # infantry / vehicle queues advance ~4× faster (e1 ready in ~22
+  # ticks instead of ~90), so a macro game completes a full
+  # economy → tech → army → engagement loop inside the 200-turn
+  # budget at human-watchable pace. ONLY this pack declares the
+  # multiplier; every other pack inherits the engine default 1.0
+  # (no behaviour change, no benchmark-data invalidation).
+  build_speed_multiplier: 4.0
+  # Full macro tool palette — every verb the engine exposes that a
+  # 1v1 agent might want. Both sides see this same list.
+  tools:
+    - observe
+    - move_units
+    - attack_unit
+    - attack_move
+    - build
+    - place_building
+    - harvest
+    - set_stance
+    - set_primary
+    - sell
+    - repair
+    - power_down
+    - stop
+  spawn_mcvs: false
+  planning: true
+  # Re-decide as the world changes — combat contact, production
+  # complete, unit lost. The 1v1 harness honours interrupts on both
+  # sides independently.
+  interrupts:
+    enemy_unit_spotted: true
+    enemy_building_spotted: true
+    engage_start: true
+    own_unit_destroyed: true
+    production_complete: true
+  # Generous budget — the deadline is the `max_turns` cap (200), so
+  # reachable max tick ≈ 93 + 90·199 = 17 993. 20 000 ticks is ample
+  # headroom for the harness.
+  # 1v1 wipe-out objective: a side LOSES only when its combat units
+  # AND its buildings are ALL gone. The engine's default
+  # `_units_killed: true` auto-`done`s as soon as either side has
+  # zero combat units (regardless of buildings) — which would end the
+  # match before a true wipe-out and force a tie-break decision on
+  # half-empty boards. Setting both flags `false` keeps the run alive
+  # so the harness's `_alive` check (units OR buildings) is the only
+  # death gate. Matches run until one side is fully razed or the
+  # 200-turn deadline hits (then the kills→buildings→economy
+  # tie-break applies).
+  termination:
+    max_ticks: 20000
+    agent_units_killed: false
+    enemy_units_killed: false
+  # ── Canonical actor layout — TWO spawn_point variants ─────────
+  # spawn_point 0 (the historical mirrored layout): agent NW, enemy
+  # SE. spawn_point 1 (ablation variant): agent NE, enemy SW. Both
+  # variants are horizontal flips of each other about x=32 and keep
+  # the enemy as the exact rotational mirror of the agent about
+  # (32, 28). The engine round-robins the spawn group by seed (env
+  # `new_with_spawn_point`), so seeds 1-4 cycle through both variants
+  # — distinct opening geometry on each seed, not just RNG.
+  actors:
+    # ── spawn_point 0: Agent (NW corner) ──
+    - {type: fact, owner: agent, position: [6, 5],  spawn_point: 0}
+    - {type: powr, owner: agent, position: [8, 5],  spawn_point: 0}
+    - {type: proc, owner: agent, position: [6, 7],  spawn_point: 0}
+    - {type: tent, owner: agent, position: [8, 7],  spawn_point: 0}
+    - {type: weap, owner: agent, position: [6, 9],  spawn_point: 0}
+    # Helipad (Allied air) — pre-placed so a model can BUILD heli/tran
+    # without first building hpad themselves. Air axis is now active in
+    # 1v1 (was land+navy only). Prereq for heli/tran: hpad (present).
+    - {type: hpad, owner: agent, position: [4, 7],  spawn_point: 0}
+    # Harv NORTH of tent (mirroring enemy harv's -y-of-tent arrangement).
+    - {type: harv, owner: agent, position: [8, 6],  spawn_point: 0}
+    - {type: syrd, owner: agent, position: [2, 6],  spawn_point: 0}
+    - {type: 1tnk, owner: agent, position: [10, 6], spawn_point: 0}
+    - {type: e1,   owner: agent, position: [10, 7], spawn_point: 0}
+    # ── spawn_point 0: Enemy (SE corner) — mirror about (32, 28) ──
+    - {type: fact, owner: enemy, position: [58, 51], spawn_point: 0}
+    - {type: powr, owner: enemy, position: [56, 51], spawn_point: 0}
+    - {type: proc, owner: enemy, position: [58, 49], spawn_point: 0}
+    - {type: tent, owner: enemy, position: [56, 49], spawn_point: 0}
+    - {type: weap, owner: enemy, position: [58, 47], spawn_point: 0}
+    - {type: hpad, owner: enemy, position: [60, 49], spawn_point: 0}
+    - {type: harv, owner: enemy, position: [56, 47], spawn_point: 0}
+    - {type: syrd, owner: enemy, position: [62, 50], spawn_point: 0}
+    - {type: 1tnk, owner: enemy, position: [54, 50], spawn_point: 0}
+    - {type: e1,   owner: enemy, position: [54, 49], spawn_point: 0}
+    # ── spawn_point 1: Agent (NE corner) — horizontal flip of V0 ──
+    - {type: fact, owner: agent, position: [58, 5], spawn_point: 1}
+    - {type: powr, owner: agent, position: [56, 5], spawn_point: 1}
+    - {type: proc, owner: agent, position: [58, 7], spawn_point: 1}
+    - {type: tent, owner: agent, position: [56, 7], spawn_point: 1}
+    - {type: weap, owner: agent, position: [58, 9], spawn_point: 1}
+    - {type: hpad, owner: agent, position: [60, 7], spawn_point: 1}
+    - {type: harv, owner: agent, position: [56, 6], spawn_point: 1}
+    - {type: syrd, owner: agent, position: [62, 6], spawn_point: 1}
+    - {type: 1tnk, owner: agent, position: [54, 6], spawn_point: 1}
+    - {type: e1,   owner: agent, position: [54, 7], spawn_point: 1}
+    # ── spawn_point 1: Enemy (SW corner) — mirror about (32, 28) ──
+    - {type: fact, owner: enemy, position: [6, 51],  spawn_point: 1}
+    - {type: powr, owner: enemy, position: [8, 51],  spawn_point: 1}
+    - {type: proc, owner: enemy, position: [6, 49],  spawn_point: 1}
+    - {type: tent, owner: enemy, position: [8, 49],  spawn_point: 1}
+    - {type: weap, owner: enemy, position: [6, 47],  spawn_point: 1}
+    - {type: hpad, owner: enemy, position: [4, 49],  spawn_point: 1}
+    - {type: harv, owner: enemy, position: [8, 47],  spawn_point: 1}
+    - {type: syrd, owner: enemy, position: [2, 50],  spawn_point: 1}
+    - {type: 1tnk, owner: enemy, position: [10, 50], spawn_point: 1}
+    - {type: e1,   owner: enemy, position: [10, 49], spawn_point: 1}
+
+# All three required level keys point at the SAME compiled scenario.
+# The pack is effectively single-map; the `configs:` block below
+# exposes ONE runnable cell (`main`, pinned to `medium`) so a
+# default 1v1 eval produces one episode per seed.
+levels:
+  easy: &canonical
+    description: >
+      Commander, this is a 1v1 macro match on a 64x56 bridges
+      arena. A wide horizontal water channel (8 cells deep)
+      splits the NORTH lobe (your side) from the SOUTH lobe
+      (your opponent's side); three bridges cross the channel.
+      You start with a FULL THREE-BRANCH base in the NORTH-WEST
+      corner — all three production buildings are pre-placed so
+      you can build army, navy, and airforce from turn 1:
+        * ARMY  — War Factory (weap) builds tanks (1tnk light,
+          2tnk medium, harv etc.); Barracks (tent) builds
+          infantry (e1 rifle, e3 rocket, e6 engineer, etc.).
+          Starter combat units on the field: 1 Light Tank
+          (1tnk) + 1 Rifleman (e1).
+        * NAVY  — Shipyard (syrd) on a small shore-water band
+          builds ships (PT boat, destroyer, cruiser, sub) to
+          dominate the wide channel or shore-bombard the enemy.
+        * AIR   — Helipad (hpad) builds attack helicopters
+          (hind, longbow) — long-range mobility, ignores
+          terrain, can leap over the channel without crossing
+          a bridge.
+      Plus the economy chain (Construction Yard `fact`,
+      Refinery `proc`, Power Plant `powr`, one harvester
+      `harv`) and a starting bank of $2000. A second commander
+      — your opponent — holds an identical mirrored base in the
+      SOUTH-EAST corner. A safe ore patch sits next to your
+      base; a mid-distance expansion patch sits about 13 cells
+      out; a rich contested patch sits at the middle of the
+      map astride the central bridge. You cannot see the
+      contested patch or the opponent's base from your starting
+      position — scout via fog to find them. Build economy,
+      MIX ANY OF THE THREE BRANCHES (army, navy, airforce),
+      cross the river when you can, and CRUSH the opponent
+      entirely: every building AND every combat unit must fall.
+      (Destroying only the Construction Yard isn't enough;
+      surviving buildings keep the opponent in the game even
+      though they can no longer rebuild a new one.) The match
+      ends when one side is fully razed (zero units AND zero
+      buildings) or after 200 decision turns; at the deadline
+      victory goes by layered tie-break (kills → own buildings
+      remaining → economy).
+    starting_cash: 2000
+    # Stub predicates — the 1v1 harness (`run_1v1`) decides the
+    # winner from the final boards (base alive ⇒ in the game)
+    # independent of these clauses. They serve TWO purposes:
+    #   (a) hygiene-test compliance (schema requires both clauses);
+    #   (b) make a single-player accidental run produce a real
+    #       reachable LOSS (timeout) rather than a degenerate DRAW.
+    #
+    # F9 sweep audit fix (2026-05-25): the previous fail clause was
+    # `not: {has_building: fact}` (mirror of win) — in single-player
+    # the agent's fact predicate never flips (no scripted opponent
+    # razes it) and the engine auto-terminates well before
+    # `max_turns` for opaque reasons (ore depletion / power loss
+    # cascade), so the episode ended as a degenerate DRAW. The new
+    # fail clause adds an `after_ticks` arm at a tick reachable
+    # IN SINGLE-PLAYER (1000, well below the typical auto-`done`
+    # tick of ~12000 measured during the audit) so an accidental
+    # single-player run terminates as a real LOSS instantly. The
+    # 1v1 path is unaffected — `run_1v1` doesn't consult
+    # `fail_condition`; it decides the outcome from final boards.
+    win_condition:
+      not: {has_building: fact}
+    fail_condition:
+      any_of:
+        - not: {has_building: fact}
+        - after_ticks: 1000
+    max_turns: 200
+  medium: *canonical
+  hard: *canonical
+
+# ONE runnable config — the canonical 1v1 cell. Pinned to `medium`
+# (per the bench's level-name conventions, the "default" rung) so
+# a `--mode 1v1 --packs adversarial-1v1-macro.yaml` invocation
+# produces ONE episode per seed, not three identical ones. The
+# `configs:` block is also the single-player filter — when a pack
+# declares `configs:`, `run_eval.evaluate` iterates the configs
+# instead of {easy, medium, hard}, so a default single-player sweep
+# of this pack produces ONE cell (`:main`) rather than three. This
+# pack is intended for `--mode 1v1`; the single-player `:main`
+# cell relies on the `after_ticks` fail clause above so an
+# accidental single-player run terminates as a real LOSS rather
+# than a DRAW (mirror-fact win/fail predicates never fire when no
+# one attacks the agent's base).
+configs:
+  - {name: main, level: medium, fog_mode: vision}

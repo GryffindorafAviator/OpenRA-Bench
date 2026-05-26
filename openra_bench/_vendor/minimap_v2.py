@@ -41,12 +41,32 @@ OUTLINE_COLOR = (255, 255, 255, 230)
 # Per-unit-type styling. shape ∈ {"circle", "square", "triangle", "diamond", "pentagon", "x"}.
 # Color is the fill (RGBA). Own units use cyan family; enemies use red family.
 UNIT_STYLE_OWN: dict[str, tuple[str, tuple[int, int, int, int]]] = {
+    # tanks
     "2tnk": ("square",   (40, 200, 230, 255)),     # medium tank — solid square cyan
     "1tnk": ("square",   (90, 230, 255, 255)),     # light tank — paler square
+    "3tnk": ("square",   (20, 160, 200, 255)),     # heavy tank — darker square
+    "4tnk": ("square",   (10, 120, 170, 255)),     # mammoth — even darker square
+    # economy: tridown so the harv is immediately distinguishable by
+    # SHAPE. Hue stays in the OWN cyan family — gold is reserved for
+    # ore-patch tiles so own/enemy harv don't collide on colour.
+    "harv": ("tridown",  (100, 220, 220, 255)),    # own harvester — cyan-teal tridown
+    # support / scout
     "jeep": ("triangle", (180, 240, 255, 255)),    # scout — triangle
-    "dog":  ("x",        (255, 230, 100, 255)),    # dog — yellow X (anti-spy)
-    "e1":   ("circle",   (90, 200, 255, 255)),     # rifle infantry — small circle
     "apc":  ("pentagon", (0, 160, 200, 255)),      # APC — pentagon, deeper cyan
+    "arty": ("diamond",  (160, 220, 250, 255)),    # arty — diamond (cyan-blue)
+    "mnly": ("diamond",  (180, 200, 220, 255)),    # mine layer
+    # infantry — all cyan family (own-side contract)
+    "e1":   ("circle",   (90, 200, 255, 255)),     # rifle
+    "e2":   ("circle",   (60, 150, 200, 255)),     # grenadier
+    "e3":   ("circle",   (130, 240, 255, 255)),    # rocket
+    "e4":   ("circle",   (180, 220, 240, 255)),    # flamer
+    "e6":   ("circle",   (160, 220, 200, 255)),    # engineer
+    "spy":  ("x",        (200, 220, 255, 255)),    # spy
+    "tanya":("x",        (220, 240, 255, 255)),    # tanya
+    "thf":  ("x",        (180, 200, 220, 255)),    # thief
+    "dog":  ("x",        (220, 240, 200, 255)),    # dog
+    "medi": ("circle",   (220, 240, 240, 255)),    # medic
+    "mech": ("circle",   (160, 220, 240, 255)),    # mechanic
     # fallback
     "?":    ("circle",   (0, 220, 255, 255)),
 }
@@ -54,11 +74,59 @@ UNIT_STYLE_OWN: dict[str, tuple[str, tuple[int, int, int, int]]] = {
 UNIT_STYLE_ENEMY: dict[str, tuple[str, tuple[int, int, int, int]]] = {
     "2tnk": ("square",   (255, 60, 60, 255)),
     "1tnk": ("square",   (255, 110, 110, 255)),
+    "3tnk": ("square",   (200, 30, 30, 255)),
+    "4tnk": ("square",   (160, 20, 20, 255)),
+    # Enemy harvester — RED tridown (not gold). Both sides keep the
+    # side-colour contract: own=cyan, enemy=red. Harvester-ness is
+    # signalled by SHAPE; side is signalled by COLOUR.
+    "harv": ("tridown",  (255, 110, 110, 255)),    # enemy harv — red tridown
     "jeep": ("triangle", (255, 160, 160, 255)),
-    "dog":  ("x",        (255, 180, 60, 255)),
-    "e1":   ("circle",   (255, 80, 80, 255)),
     "apc":  ("pentagon", (200, 30, 30, 255)),
+    "arty": ("diamond",  (255, 120, 100, 255)),
+    "mnly": ("diamond",  (140, 80, 80, 255)),
+    "e1":   ("circle",   (255, 80, 80, 255)),
+    "e2":   ("circle",   (220, 50, 50, 255)),
+    "e3":   ("circle",   (255, 130, 130, 255)),
+    "e4":   ("circle",   (240, 100, 100, 255)),
+    "e6":   ("circle",   (200, 80, 100, 255)),
+    "spy":  ("x",        (255, 100, 100, 255)),
+    "tanya":("x",        (255, 60, 60, 255)),
+    "thf":  ("x",        (220, 140, 140, 255)),
+    "dog":  ("x",        (255, 160, 100, 255)),
     "?":    ("circle",   (255, 60, 60, 255)),
+}
+
+# Own buildings — cyan family (mirrors UNIT_STYLE_OWN's hue) so the model
+# can tell them apart from enemy buildings (warm reds/yellows) at a
+# glance. All use `filled_square` for the structure-vs-unit distinction.
+BUILDING_STYLE_OWN: dict[str, tuple[str, tuple[int, int, int, int]]] = {
+    # production / key targets
+    "fact": ("filled_square", (90, 230, 255, 255)),  # construction yard — bright cyan
+    "proc": ("filled_square", (60, 200, 200, 255)),  # refinery — cyan-teal (NOT gold)
+    "weap": ("filled_square", (40, 200, 230, 255)),  # war factory — solid cyan
+    "tent": ("filled_square", (130, 220, 240, 255)), # barracks (allies) — lighter cyan
+    "barr": ("filled_square", (130, 220, 240, 255)), # barracks (soviet)
+    "hpad": ("filled_square", (160, 220, 230, 255)),
+    "afld": ("filled_square", (160, 220, 230, 255)),
+    "spen": ("filled_square", (100, 180, 220, 255)),
+    "syrd": ("filled_square", (100, 180, 220, 255)),
+    "atek": ("filled_square", (200, 240, 255, 255)),
+    "stek": ("filled_square", (200, 240, 255, 255)),
+    # scenery / power
+    "powr": ("filled_square", (140, 200, 220, 255)),
+    "apwr": ("filled_square", (120, 180, 200, 255)),
+    "silo": ("filled_square", (180, 200, 200, 255)),
+    "fix":  ("filled_square", (160, 200, 220, 255)),
+    "dome": ("filled_square", (200, 230, 240, 255)),
+    # defenses (own side — cyan-tinted)
+    "gun":  ("filled_square", (100, 180, 230, 255)),
+    "pbox": ("filled_square", (90, 170, 220, 255)),
+    "hbox": ("filled_square", (90, 170, 220, 255)),
+    "ftur": ("filled_square", (90, 170, 220, 255)),
+    "agun": ("filled_square", (110, 190, 240, 255)),
+    "sam":  ("filled_square", (110, 190, 240, 255)),
+    "tsla": ("filled_square", (180, 130, 240, 255)),
+    "?":    ("filled_square", (90, 200, 230, 255)),
 }
 
 # Static enemy buildings get a distinct shape (filled square outline) and
@@ -73,14 +141,34 @@ BUILDING_STYLE_ENEMY: dict[str, tuple[str, tuple[int, int, int, int]]] = {
     "ftur": ("filled_square", (255, 90, 0, 255)),
     "agun": ("filled_square", (255, 130, 0, 255)),
     "sam":  ("filled_square", (255, 130, 0, 255)),
-    # production / key targets (must-be-destroyed)
-    "fact": ("filled_square", (255, 220, 60, 255)),  # construction yard — yellow
-    "proc": ("filled_square", (255, 220, 60, 255)),  # refinery — yellow
+    # production / key targets (must-be-destroyed) — all red family,
+    # NEVER gold (gold is reserved for ore tiles only). Refinery (proc)
+    # used to render yellow, identical to own gold proc — broke the
+    # side-colour contract.
+    "fact": ("filled_square", (255, 80, 80, 255)),   # construction yard — bright red
+    "proc": ("filled_square", (200, 50, 50, 255)),   # refinery — dark red
+    "weap": ("filled_square", (220, 60, 60, 255)),   # war factory
+    "tent": ("filled_square", (255, 120, 100, 255)), # barracks
+    "barr": ("filled_square", (255, 120, 100, 255)),
     # scenery
     "powr": ("filled_square", (160, 160, 160, 255)),
-    "barr": ("filled_square", (160, 160, 160, 255)),
+    "apwr": ("filled_square", (140, 140, 140, 255)),
+    "silo": ("filled_square", (180, 180, 180, 255)),
     "?":    ("filled_square", (255, 100, 100, 255)),
 }
+
+# Ore / resource cells — painted as a TERRAIN-STYLE TILE FILL (the
+# whole cell goes gold) rather than as a small dot. Reads as map
+# content (alongside water/grass) instead of as an actor — which is
+# the operator's mental model: ore is part of the world, not a unit
+# you click. Pre-fix this surfaced as a small filled circle that the
+# model could easily mistake for a unit marker.
+#
+# RESOURCE_COLOR  — the legend-swatch + actor-style debug colour (RGBA).
+# RESOURCE_TERRAIN_RGB — the per-tile fill applied at terrain-composite
+# time (RGB only; brightness is multiplied separately for fog gating).
+RESOURCE_COLOR = (220, 175, 50, 255)        # legend swatch — warm gold
+RESOURCE_TERRAIN_RGB = (200, 160, 50)       # cell-tile gold fill
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -162,6 +250,14 @@ def _draw_unit_marker(
     elif shape == "x":
         draw.line([(cx_px - r, cy_px - r), (cx_px + r, cy_px + r)], fill=fill, width=2)
         draw.line([(cx_px + r, cy_px - r), (cx_px - r, cy_px + r)], fill=fill, width=2)
+    elif shape == "tridown":
+        # Inverted triangle — apex down. Used for harvesters so they are
+        # IMMEDIATELY distinguishable from tanks (square) and jeeps
+        # (apex-up triangle) on the model's vision channel.
+        draw.polygon(
+            [(cx_px - r, cy_px - r), (cx_px + r, cy_px - r), (cx_px, cy_px + r)],
+            fill=fill, outline=OUTLINE_COLOR,
+        )
     else:  # circle (default)
         draw.ellipse(
             [(cx_px - r, cy_px - r), (cx_px + r, cy_px + r)],
@@ -241,6 +337,19 @@ def render(
         ey = int(eb.get("cell_y", 0))
         enemy_building_dots.append((ex, ey, str(eb.get("id", "?"))))
 
+    # Own buildings: mirror of enemy_buildings_summary so the model can
+    # tell their own base apart from mobile units (filled square with a
+    # cyan-family tint). Without this layer, own buildings are either
+    # absent from the image (pre-57a9440e) or merged into unit_positions
+    # and drawn as a single small unit dot — both bad for spatial
+    # reasoning when the base footprint matters (e.g. "is the proc near
+    # the ore?").
+    own_building_dots: list[tuple[int, int, str]] = []
+    for ob in obs.get("own_buildings_summary") or []:
+        ox = int(ob.get("cell_x", 0))
+        oy = int(ob.get("cell_y", 0))
+        own_building_dots.append((ox, oy, str(ob.get("id", "?"))))
+
     # ---- Compute visible + explored masks at cell resolution ----
     visible = _compute_visible_mask(own_cells, map_width, map_height, sight_radius)
     # Prefer the engine's per-tick `explored_cells` (ground truth — captures
@@ -263,6 +372,32 @@ def render(
     for (x, y) in explored_history:
         if 0 <= x < map_width and 0 <= y < map_height:
             explored[y, x] = True
+
+    # ---- Inject ore-patch tint into the TERRAIN layer ----
+    # Ore is a property of the WORLD, not an actor — so we paint ore
+    # cells at the terrain composite stage and let the same brightness
+    # multiply gate them through the three-tier fog. Units (drawn
+    # later) overlay on top exactly as they do over grass / water.
+    # Gated by `explored_history` (cumulative) so ore the agent has
+    # never seen stays hidden in the dark band.
+    #
+    # Capture the set of ore cells so the legend grass-swatch sampler
+    # downstream can avoid landing on an ore tile (which used to make
+    # the legend label gold cells as "grass" when the centre patch sat
+    # at the playable midpoint — the 1v1-macro centre patch case).
+    ore_rgb = np.asarray(RESOURCE_TERRAIN_RGB, dtype=np.float32) / 255.0
+    ore_set: set[tuple[int, int]] = set()
+    for rc in obs.get("resource_cells") or []:
+        if not isinstance(rc, dict):
+            continue
+        rx = int(rc.get("cell_x", -1))
+        ry = int(rc.get("cell_y", -1))
+        if not (0 <= rx < map_width and 0 <= ry < map_height):
+            continue
+        ore_set.add((rx, ry))
+        if (rx, ry) not in explored_history:
+            continue
+        terrain[ry, rx] = ore_rgb
 
     # ---- Apply 3-tier brightness ----
     brightness = np.full((map_height, map_width), DARK, dtype=np.float32)
@@ -437,6 +572,13 @@ def render(
                 py = int(cy_px_center + off[1])
                 _draw_unit_marker(draw, px, py, base_r, shape, fill)
 
+    # NOTE: ore cells are painted into the TERRAIN composite above
+    # (search for `RESOURCE_TERRAIN_RGB`), not drawn here. That way
+    # units overlay on ore exactly as they do on grass — a harvester
+    # sitting on its patch shows the harv marker on a gold tile, not
+    # buried under a gold dot. Side-colour contract preserved: ore is
+    # terrain (gold), own actors are cyan, enemy actors are red.
+
     # Static structures first (largest), then mobile enemies, then own
     # units on top. Building type is taken from enemy_buildings_summary
     # entries (kept by the engine in a separate `type` field).
@@ -444,7 +586,12 @@ def render(
         str(eb.get("id", "?")): eb.get("type", "?")
         for eb in (obs.get("enemy_buildings_summary") or [])
     }
+    own_building_types = {
+        str(ob.get("id", "?")): ob.get("type", "?")
+        for ob in (obs.get("own_buildings_summary") or [])
+    }
     _draw_group(enemy_building_dots, enemy_building_types, BUILDING_STYLE_ENEMY)
+    _draw_group(own_building_dots, own_building_types, BUILDING_STYLE_OWN)
     _draw_group(enemy_dots, enemy_unit_types, UNIT_STYLE_ENEMY)
     _draw_group(own_dots, own_unit_types, UNIT_STYLE_OWN)
 
@@ -461,10 +608,41 @@ def render(
         # the whole canvas), these swatches still match the in-image
         # terrain colors because they're drawn pre-theming with the same
         # source pixels.
+        #
+        # Footgun fixed (2026-05-25): the grass sampler used to read
+        # `terrain[centre]` UNCONDITIONALLY. After the ore-tile injection
+        # block (above) overwrote ore cells with gold, the legend
+        # sampler at the playable midpoint landed on the 1v1-macro
+        # CENTRE ORE PATCH — so the swatch showed gold labelled
+        # "grass". Skip ore-tinted cells via a spiral search outward
+        # from the centre, fall back to the original cell if nothing
+        # non-ore can be found within the playable rect.
         terrain_x = lx + 290
         bx_, by_, bw_, bh_ = bounds
-        # Grass: center of playable area (typical interior cell)
-        grass_cx, grass_cy = bx_ + bw_ // 2, by_ + bh_ // 2
+        cx0 = bx_ + bw_ // 2
+        cy0 = by_ + bh_ // 2
+
+        def _is_grass_candidate(cx: int, cy: int) -> bool:
+            if not (bx_ <= cx < bx_ + bw_ and by_ <= cy < by_ + bh_):
+                return False
+            return (cx, cy) not in ore_set
+
+        grass_cx, grass_cy = cx0, cy0
+        if not _is_grass_candidate(cx0, cy0):
+            # outward ring search — bounded to half-playable to keep this O(1)
+            found = False
+            max_r = max(bw_, bh_) // 2
+            for r in range(1, max_r + 1):
+                for dy in range(-r, r + 1):
+                    for dx in range(-r, r + 1):
+                        if abs(dx) != r and abs(dy) != r:
+                            continue  # ring boundary only
+                        if _is_grass_candidate(cx0 + dx, cy0 + dy):
+                            grass_cx, grass_cy = cx0 + dx, cy0 + dy
+                            found = True
+                            break
+                    if found: break
+                if found: break
         grass_color = tuple(int(c) for c in terrain[grass_cy, grass_cx] * 255) + (255,)
         # Water: a corner just inside the impassable border (rush-hour
         # has water at y=0..2 and y=37..39)
@@ -499,7 +677,15 @@ def render(
             x = margin_x
             if prefix:
                 draw.text((x, y_offset), prefix, fill=(180, 180, 180, 230), font=legend_font)
-                x += 32
+                # Measure the actual text width (Pillow textlength) +
+                # padding so a longer prefix like "enemy:" doesn't
+                # overlap the first marker. Falls back to a safe
+                # constant on PIL versions without `textlength`.
+                try:
+                    pw = int(draw.textlength(prefix, font=legend_font))
+                except (AttributeError, TypeError):
+                    pw = len(prefix) * 7  # ~7px per char at size 11
+                x += pw + 8  # 8px gap between prefix and first marker
             for label, shape, fill in items:
                 _draw_unit_marker(draw, x, y_offset + 7, 5, shape, fill)
                 draw.text((x + 8, y_offset), label,
@@ -510,14 +696,20 @@ def render(
 
         own_types_in_frame = sorted({own_unit_types.get(uid, "?")
                                      for _, _, uid in own_dots} - {"?"})
+        own_bld_types_in_frame = sorted({own_building_types.get(uid, "?")
+                                         for _, _, uid in own_building_dots} - {"?"})
         enemy_unit_types_in_frame = sorted({enemy_unit_types.get(uid, "?")
                                             for _, _, uid in enemy_dots} - {"?"})
         enemy_bld_types_in_frame = sorted({enemy_building_types.get(uid, "?")
                                            for _, _, uid in enemy_building_dots} - {"?"})
 
-        if own_types_in_frame:
+        # Own row: units first, then buildings (filled squares) so the
+        # model can see the two visual languages side by side.
+        if own_types_in_frame or own_bld_types_in_frame:
             row_items = [(t, *UNIT_STYLE_OWN.get(t, UNIT_STYLE_OWN["?"]))
                          for t in own_types_in_frame]
+            for t in own_bld_types_in_frame:
+                row_items.append((t, *BUILDING_STYLE_OWN.get(t, BUILDING_STYLE_OWN["?"])))
             _emit_row(row_items, ly + 16, prefix="own:")
 
         # Enemies + buildings on the same line if they fit; else wrap.
@@ -528,6 +720,20 @@ def render(
             enemy_row_items.append((t, *BUILDING_STYLE_ENEMY.get(t, BUILDING_STYLE_ENEMY["?"])))
         if enemy_row_items:
             _emit_row(enemy_row_items, ly + 32, prefix="enemy:")
+
+        # Ore swatch — appended to the terrain row so the model has a
+        # decoded reference colour for the gold dots scattered across
+        # the map. Placed on the terrain row (row 1) to keep the legend
+        # compact when no ore is visible (`resource_cells` empty); the
+        # swatch is drawn unconditionally because the model needs to
+        # know the colour ahead of first ore reveal.
+        ore_x = lx + 290 + (12 + 38) * 2  # past grass + water swatches
+        draw.ellipse(
+            [(ore_x, ly + 2), (ore_x + 10, ly + 12)],
+            fill=RESOURCE_COLOR, outline=(60, 50, 20, 255), width=1,
+        )
+        draw.text((ore_x + 14, ly), "ore",
+                  fill=(220, 220, 220, 230), font=legend_font)
 
     # ---- Encode PNG ----
     buf = io.BytesIO()

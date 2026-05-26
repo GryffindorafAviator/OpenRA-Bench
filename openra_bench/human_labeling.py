@@ -403,6 +403,8 @@ class HumanAction:
     * ``attack`` — `units` + either `target_id` (an enemy actor) or a
       `target` cell (falls back to `attack_move`).
     * ``guard`` — `units` + `target_id` (ally to escort).
+    * ``capture_actor`` / ``c4_detonate`` / ``infiltrate`` —
+      `units` + `target_id` (enemy building/special target).
     * ``stop`` / ``deploy`` / ``sell`` / ``repair`` / ``power_down`` /
       ``set_primary`` / ``unload`` / ``patrol`` — `units` only.
     * ``set_stance`` — `units` + `stance` (0–3).
@@ -455,6 +457,16 @@ class HumanAction:
                 return None
             return {
                 "name": "guard",
+                "arguments": {
+                    "unit_ids": list(self.units),
+                    "target_id": str(self.target_id),
+                },
+            }
+        if m in ("capture_actor", "c4_detonate", "infiltrate"):
+            if not self.units or self.target_id is None:
+                return None
+            return {
+                "name": m,
                 "arguments": {
                     "unit_ids": list(self.units),
                     "target_id": str(self.target_id),
@@ -891,8 +903,13 @@ class InteractiveSession:
 
             from .minimap import render_tactical_minimap
 
+            # Pass `base_map` so the renderer paints the water/wall
+            # underlay (visible from t=0, regardless of fog) — saved
+            # human frames match the Play-tab image the labeler
+            # clicked on.
             img = render_tactical_minimap(
                 rs, scale=5, grid=True, legend=True,
+                base_map=self.compiled.scenario.base_map or "",
             )
             if img is not None:
                 buf = io.BytesIO()
@@ -991,9 +1008,17 @@ class InteractiveSession:
             "actions_issued": self._issued,
             "actions_warned": 0,
             "agent_stats": {"turns": self.turn},
+            # Deprecated alias + new blocking-ratio scalar + the
+            # per-leaf snapshot. See goal_tracker for the rationale.
             "objective_progress": final_goal.get(
-                "objective_progress", 0.0
+                "objective_blocking_ratio",
+                final_goal.get("objective_progress", 0.0),
             ),
+            "objective_blocking_ratio": final_goal.get(
+                "objective_blocking_ratio",
+                final_goal.get("objective_progress", 0.0),
+            ),
+            "leaves_final": list(final_goal.get("leaves") or []),
             "reward_vector": final_goal.get("reward_vector", {}),
             "signals": {
                 "economy_value": sig.cash + sig.resources,
