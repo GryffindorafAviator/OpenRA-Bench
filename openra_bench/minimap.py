@@ -345,18 +345,47 @@ def _minimap_font(size: int):
 # Distinct SHAPE per unit TYPE — so e.g. 1tnk and 2tnk are visually
 # different on the minimap, not both "a vehicle". Types not listed fall
 # back by category (infantry→circle, harvester→tridown, else→square).
-_TYPE_SHAPE = {
-    "e1": "circle", "e2": "circle", "e3": "circle", "e4": "circle",
-    "e6": "circle", "e7": "circle", "medi": "circle", "mech": "circle",
-    "spy": "circle", "thf": "circle", "dog": "circle", "engineer": "circle",
-    "tanya": "circle",
-    "1tnk": "square", "2tnk": "diamond", "3tnk": "hexagon",
-    "4tnk": "triangle", "harv": "tridown",
-    "jeep": "pentagon", "apc": "pentagon", "mcv": "pentagon",
-    "arty": "star", "v2rl": "star", "ftrk": "star",
+_TYPE_ICON: dict[str, tuple[str, str | None]] = {
+    # infantry / specialists
+    "e1": ("circle", None),
+    "e2": ("diamond", "cross"),
+    "e3": ("triangle", "dot"),
+    "e4": ("cross", None),
+    "e6": ("pentagon", "cross"),
+    "engineer": ("pentagon", "cross"),
+    "e7": ("star", "halo"),
+    "tanya": ("star", "halo"),
+    "medi": ("plus", "dot"),
+    "mech": ("plus", "cross"),
+    "spy": ("kite", "ring"),
+    "thf": ("kite", "dot"),
+    "dog": ("diamond", "dot"),
+    # ground vehicles
+    "1tnk": ("square", None),
+    "2tnk": ("diamond", None),
+    "3tnk": ("hexagon", None),
+    "4tnk": ("triangle", None),
+    "harv": ("tridown", None),
+    "jeep": ("pentagon", None),
+    "apc": ("hexagon", "dot"),
+    "mcv": ("trapezoid", "halo"),
+    "arty": ("star", "crosshair"),
+    "v2rl": ("star", "dot"),
+    "ftrk": ("trapezoid", "cross"),
+    "msam": ("hexagon", "antenna"),
+    "stnk": ("kite", "ring"),
+    "ftnk": ("trapezoid", "dot"),
+    "ttnk": ("hexagon", "cross"),
     # naval / aircraft
-    "dd": "diamond", "lst": "square",
-    "heli": "triangle",
+    "dd": ("diamond", "wave"),
+    "lst": ("square", "wave"),
+    "heli": ("chevron", None),
+    "hind": ("chevron", "dot"),
+    "tran": ("chevron", "ring"),
+    "mig": ("kite", "antenna"),
+    "yak": ("kite", "cross"),
+    "badr": ("kite", "halo"),
+    "u2": ("kite", "dot2"),
 }
 
 
@@ -377,14 +406,14 @@ _BUILDING_ICON: dict[str, tuple[str, str | None]] = {
     # economy
     "proc":  ("trapezoid", None),      # refinery trapezoid
     "silo":  ("bar", None),            # narrow upright bar
-    "mine":  ("tridown", None),        # not normally agent-owned
+    "mine":  ("circle", "ring"),       # neutral ore mine marker
     # power
     "powr":  ("diamond", "dot"),       # diamond w/ central dot
     "apwr":  ("diamond", "dot2"),      # diamond w/ double dot (advanced)
     # production
     "weap":  ("hexagon", None),
     "tent":  ("triangle", None),
-    "barr":  ("triangle", None),
+    "barr":  ("triangle", "dot"),
     "hpad":  ("square", "x"),          # airpad — square w/ X
     "afld":  ("square", "x"),
     "syrd":  ("square", "wave"),       # naval — square w/ wave
@@ -403,12 +432,12 @@ _BUILDING_ICON: dict[str, tuple[str, str | None]] = {
     # defences (all share crosshair-square; cheap pillbox slightly
     # smaller via `r` shrink in _draw_building_icon)
     "pbox":  ("def_square", "crosshair"),
-    "hbox":  ("def_square", "crosshair"),
-    "gun":   ("def_square", "crosshair"),
-    "agun":  ("def_square", "crosshair"),
-    "sam":   ("def_square", "crosshair"),
-    "ftur":  ("def_square", "crosshair"),
-    "tsla":  ("def_square", "crosshair"),
+    "hbox":  ("def_square", "dot"),
+    "gun":   ("def_square", "ring"),
+    "agun":  ("def_square", "x"),
+    "sam":   ("def_square", "antenna"),
+    "ftur":  ("def_square", "cross"),
+    "tsla":  ("star", "ring"),
     # walls — thin tile (drawn small/centred so a wall row reads as
     # a continuous strip rather than fat blocks)
     "brik":  ("wall_tile", None),
@@ -431,14 +460,26 @@ def _unit_shape(actor_type: str, is_building: bool) -> str:
         shape, _accent = _building_icon(actor_type)
         return shape
     t = (actor_type or "").strip().lower()
-    if t in _TYPE_SHAPE:
-        return _TYPE_SHAPE[t]
+    if t in _TYPE_ICON:
+        shape, _accent = _TYPE_ICON[t]
+        return shape
     cat = _unit_category(t, False)
     if cat == "infantry":
         return "circle"
     if cat == "harvester":
         return "tridown"
     return "square"
+
+
+def _unit_accent(actor_type: str, is_building: bool) -> str | None:
+    if is_building:
+        _shape, accent = _building_icon(actor_type)
+        return accent
+    t = (actor_type or "").strip().lower()
+    if t in _TYPE_ICON:
+        _shape, accent = _TYPE_ICON[t]
+        return accent
+    return None
 
 
 # The set of building-only shapes — used by `render_png_b64` (legacy
@@ -465,6 +506,27 @@ def _shape_points(shape, x0, y0, x1, y1):
         return [(mx, y0), (x1, y1), (x0, y1)]
     if shape == "tridown":
         return [(x0, y0), (x1, y0), (mx, y1)]
+    if shape == "kite":
+        return [(mx, y0), (x1, my + ry * 0.12), (mx, y1),
+                (x0, my + ry * 0.12)]
+    if shape == "chevron":
+        # Aircraft / helicopter marker: a forward-pointing chevron.
+        return [(mx, y0), (x1, y1), (mx, y1 - ry * 0.45),
+                (x0, y1)]
+    if shape == "plus":
+        a = min(rx, ry) * 0.36
+        return [(mx - a, y0), (mx + a, y0), (mx + a, my - a),
+                (x1, my - a), (x1, my + a), (mx + a, my + a),
+                (mx + a, y1), (mx - a, y1), (mx - a, my + a),
+                (x0, my + a), (x0, my - a), (mx - a, my - a)]
+    if shape == "cross":
+        # Diagonal cross: flame/area-effect infantry reads differently
+        # from rifle/rocket/specialist silhouettes.
+        a = min(rx, ry) * 0.32
+        return [(x0 + a, y0), (mx, my - a), (x1 - a, y0),
+                (x1, y0 + a), (mx + a, my), (x1, y1 - a),
+                (x1 - a, y1), (mx, my + a), (x0 + a, y1),
+                (x0, y1 - a), (mx - a, my), (x0, y0 + a)]
     if shape == "trapezoid":
         # Refinery silhouette — wide base, narrow top.
         top_inset = (x1 - x0) * 0.22
@@ -857,9 +919,7 @@ def render_tactical_minimap(
             is_b = force_building or bool(it.get("is_building"))
             atype = (it.get("actor_type") or it.get("type") or "?")
             shape = _unit_shape(atype, is_b)
-            accent = None
-            if is_b:
-                _shape2, accent = _building_icon(atype)
+            accent = _unit_accent(atype, is_b)
             # HP — units carry `hp` (0..1), buildings the same. Some
             # legacy callers omit the field; treat absent as full HP so
             # the bar is suppressed.
