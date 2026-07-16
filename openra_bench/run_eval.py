@@ -837,6 +837,11 @@ def evaluate(
         from .scenarios.schema import PERCEPTION_MODES as _PM
         def _suffix_of(cell: str, compiled) -> str:
             parts = cell.split(":")
+            if len(parts) >= 3 and parts[-1].startswith("handoff-"):
+                # handoff sweep: base/bad/good share (pack, level, fog);
+                # fold the kind into the key's level slot so the three
+                # arms don't dedupe each other (mirrors _persist).
+                return f"{parts[1]}:{parts[-1]}"
             if len(parts) >= 3 and parts[-1] in _PM:
                 return parts[1]  # pack:level:fog format
             if len(parts) >= 2:
@@ -903,7 +908,12 @@ def evaluate(
         cell = rec["cell"]
         parts = cell.split(":")
         from .scenarios.schema import PERCEPTION_MODES
-        if len(parts) >= 3 and parts[-1] in PERCEPTION_MODES:
+        if len(parts) >= 3 and parts[-1].startswith("handoff-"):
+            # Keep the handoff kind in the journal key (mirrors
+            # _suffix_of) so base/bad/good are distinct resume slots.
+            pack, level = parts[0], f"{parts[1]}:{parts[-1]}"
+            fog = rec.get("fog_mode") or "vision"
+        elif len(parts) >= 3 and parts[-1] in PERCEPTION_MODES:
             pack, level, fog = parts[0], parts[1], parts[-1]
         else:
             pack, level = parts[0], parts[1]
