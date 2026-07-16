@@ -103,6 +103,16 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
 .legend-mark.diamond{transform:rotate(45deg);width:10px;height:10px}
 .legend-mark.triangle{clip-path:polygon(50% 0,100% 100%,0 100%)}
 .legend-mark.tridown{clip-path:polygon(0 0,100% 0,50% 100%);background:#ffcd75}
+.legend-mark.hexagon{clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)}
+.legend-mark.pentagon{clip-path:polygon(50% 0,100% 38%,82% 100%,18% 100%,0 38%)}
+.legend-mark.star{clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 100%,50% 73%,21% 100%,32% 57%,2% 35%,39% 35%)}
+.legend-mark.kite{clip-path:polygon(50% 0,100% 56%,50% 100%,0 56%)}
+.legend-mark.chevron{clip-path:polygon(50% 0,100% 100%,50% 68%,0 100%)}
+.legend-mark.plus{clip-path:polygon(35% 0,65% 0,65% 35%,100% 35%,100% 65%,65% 65%,65% 100%,35% 100%,35% 65%,0 65%,0 35%,35% 35%)}
+.legend-mark.cross{clip-path:polygon(20% 0,50% 30%,80% 0,100% 20%,70% 50%,100% 80%,80% 100%,50% 70%,20% 100%,0 80%,30% 50%,0 20%)}
+.legend-mark.trapezoid{clip-path:polygon(25% 0,75% 0,100% 100%,0 100%)}
+.legend-mark.bar{width:6px}
+.legend-mark.def-square{box-shadow:inset 0 0 0 2px rgba(255,255,255,.55)}
 .legend-mark.building{background:#7497db}
 .legend-mark.enemy{background:#e05252}
 .legend-mark.enemy-building{background:#d2683c}
@@ -269,12 +279,20 @@ header .progress{color:var(--muted);font-size:13px;margin-left:auto}
           </div>
           <div class="game-build" id="game-build-panel">
             <label for="game-build-item">Build item</label>
-            <input id="game-build-item" list="game-build-suggestions" placeholder="powr, e3, harv, pbox">
-            <datalist id="game-build-suggestions">
-              <option value="powr"><option value="e3"><option value="e1"><option value="harv">
-              <option value="proc"><option value="pbox"><option value="tent"><option value="weap">
-              <option value="silo"><option value="apwr"><option value="2tnk"><option value="1tnk">
-            </datalist>
+            <select id="game-build-item">
+              <option value="powr">Power plant (powr)</option>
+              <option value="e3">Rocket soldier (e3)</option>
+              <option value="e1">Rifle infantry (e1)</option>
+              <option value="harv">Harvester (harv)</option>
+              <option value="proc">Ore refinery (proc)</option>
+              <option value="pbox">Pillbox (pbox)</option>
+              <option value="tent">Barracks (tent)</option>
+              <option value="weap">War factory (weap)</option>
+              <option value="silo">Silo (silo)</option>
+              <option value="apwr">Advanced power plant (apwr)</option>
+              <option value="2tnk">Medium tank (2tnk)</option>
+              <option value="1tnk">Light tank (1tnk)</option>
+            </select>
             <button class="btn-secondary btn-sm" onclick="gameQueueBuild()">Build</button>
             <button class="btn-secondary btn-sm" id="game-place-btn" onclick="gameArmPlaceBuilding()">Place</button>
             <span id="game-build-hint" style="font-size:12px;color:var(--muted)"></span>
@@ -1727,14 +1745,48 @@ function gameTypeLabel(type){
     "medi":"medic","mech":"mechanic"};
   return names[t]?names[t]+" ("+t+")":t;
 }
-function gameShapeFor(type,isBuilding){
+const GAME_UNIT_ICONS={
+  e1:["circle",null],e2:["diamond","cross"],e3:["triangle","dot"],e4:["cross",null],
+  e6:["pentagon","cross"],engineer:["pentagon","cross"],e7:["star","halo"],
+  tanya:["star","halo"],medi:["plus","dot"],mech:["plus","cross"],
+  spy:["kite","ring"],thf:["kite","dot"],dog:["diamond","dot"],
+  "1tnk":["square",null],"2tnk":["diamond",null],"3tnk":["hexagon",null],
+  "4tnk":["triangle",null],harv:["tridown",null],jeep:["pentagon",null],
+  apc:["hexagon","dot"],mcv:["trapezoid","halo"],arty:["star","crosshair"],
+  v2rl:["star","dot"],ftrk:["trapezoid","cross"],msam:["hexagon","antenna"],
+  stnk:["kite","ring"],ftnk:["trapezoid","dot"],ttnk:["hexagon","cross"],
+  dd:["diamond","wave"],lst:["square","wave"],heli:["chevron",null],
+  hind:["chevron","dot"],tran:["chevron","ring"],mig:["kite","antenna"],
+  yak:["kite","cross"],badr:["kite","halo"],u2:["kite","dot2"]
+};
+const GAME_BUILDING_ICONS={
+  fact:["pentagon","halo"],proc:["trapezoid",null],silo:["bar",null],mine:["circle","ring"],
+  powr:["diamond","dot"],apwr:["diamond","dot2"],weap:["hexagon",null],
+  tent:["triangle",null],barr:["triangle","dot"],hpad:["square","x"],afld:["square","x"],
+  syrd:["square","wave"],spen:["square","wave"],dome:["circle","ring"],radar:["circle","antenna"],
+  fix:["square","cross"],atek:["hexagon",null],stek:["hexagon",null],kenn:["circle","dot"],
+  mslo:["star",null],pdox:["star",null],iron:["star",null],
+  pbox:["def-square","crosshair"],hbox:["def-square","dot"],gun:["def-square","ring"],
+  agun:["def-square","x"],sam:["def-square","antenna"],ftur:["def-square","cross"],
+  tsla:["star","ring"],brik:["bar",null],sbag:["bar",null],cycl:["bar",null],
+  fenc:["bar",null],wall:["bar",null]
+};
+function gameIconFor(type,isBuilding){
   const t=gameTypeKey(type);
-  if(isBuilding)return "building";
-  if(t.startsWith("harv"))return "tridown";
-  if(t.startsWith("e")&&/^e\d+$/.test(t))return "circle";
-  if(t==="2tnk")return "diamond";
-  if(t==="3tnk"||t==="4tnk")return "triangle";
-  return "square";
+  if(isBuilding){
+    const icon=GAME_BUILDING_ICONS[t]||["building",null];
+    return {shape:icon[0],accent:icon[1]};
+  }
+  if(GAME_UNIT_ICONS[t]){
+    const icon=GAME_UNIT_ICONS[t];
+    return {shape:icon[0],accent:icon[1]};
+  }
+  if(t.startsWith("harv"))return {shape:"tridown",accent:null};
+  if(t.startsWith("e")&&/^e\d+$/.test(t))return {shape:"circle",accent:null};
+  return {shape:"square",accent:null};
+}
+function gameShapeFor(type,isBuilding){
+  return gameIconFor(type,isBuilding).shape;
 }
 function gameColorFor(side,isBuilding,type){
   if(side==="enemy")return isBuilding?"#d2683c":"#e05252";
@@ -1751,7 +1803,70 @@ function gameDrawMarker(ctx,x,y,r,shape){
     else{ctx.moveTo(x-r,y-r);ctx.lineTo(x+r,y-r);ctx.lineTo(x,y+r);}
     ctx.closePath();return;
   }
+  if(shape==="hexagon"||shape==="pentagon"||shape==="star"){
+    const n=shape==="hexagon"?6:5;
+    ctx.beginPath();
+    for(let i=0;i<(shape==="star"?n*2:n);i++){
+      const ang=-Math.PI/2+i*Math.PI/(shape==="star"?n:n/2);
+      const rr=shape==="star"&&i%2?r*.45:r;
+      const px=x+Math.cos(ang)*rr, py=y+Math.sin(ang)*rr;
+      if(i)ctx.lineTo(px,py);else ctx.moveTo(px,py);
+    }
+    ctx.closePath();return;
+  }
+  if(shape==="kite"){ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y+r*.12);ctx.lineTo(x,y+r);ctx.lineTo(x-r,y+r*.12);ctx.closePath();return;}
+  if(shape==="chevron"){ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y+r);ctx.lineTo(x,y+r*.38);ctx.lineTo(x-r,y+r);ctx.closePath();return;}
+  if(shape==="trapezoid"){ctx.beginPath();ctx.moveTo(x-r*.55,y-r);ctx.lineTo(x+r*.55,y-r);ctx.lineTo(x+r,y+r);ctx.lineTo(x-r,y+r);ctx.closePath();return;}
+  if(shape==="bar"){ctx.beginPath();ctx.rect(x-r*.35,y-r,r*.7,r*2);return;}
+  if(shape==="plus"){
+    const a=r*.38;
+    ctx.beginPath();ctx.moveTo(x-a,y-r);ctx.lineTo(x+a,y-r);ctx.lineTo(x+a,y-a);ctx.lineTo(x+r,y-a);
+    ctx.lineTo(x+r,y+a);ctx.lineTo(x+a,y+a);ctx.lineTo(x+a,y+r);ctx.lineTo(x-a,y+r);
+    ctx.lineTo(x-a,y+a);ctx.lineTo(x-r,y+a);ctx.lineTo(x-r,y-a);ctx.lineTo(x-a,y-a);ctx.closePath();return;
+  }
+  if(shape==="cross"){
+    const a=r*.34;
+    ctx.beginPath();ctx.moveTo(x-r+a,y-r);ctx.lineTo(x,y-a);ctx.lineTo(x+r-a,y-r);ctx.lineTo(x+r,y-r+a);
+    ctx.lineTo(x+a,y);ctx.lineTo(x+r,y+r-a);ctx.lineTo(x+r-a,y+r);ctx.lineTo(x,y+a);
+    ctx.lineTo(x-r+a,y+r);ctx.lineTo(x-r,y+r-a);ctx.lineTo(x-a,y);ctx.lineTo(x-r,y-r+a);ctx.closePath();return;
+  }
+  if(shape==="def-square"){ctx.beginPath();ctx.rect(x-r,y-r,r*2,r*2);return;}
   ctx.beginPath();ctx.rect(x-r,y-r,r*2,r*2);
+}
+function gameDrawAccent(ctx,x,y,r,accent){
+  if(!accent)return;
+  ctx.save();
+  ctx.strokeStyle="rgba(255,255,255,.9)";
+  ctx.fillStyle="rgba(255,255,255,.95)";
+  ctx.lineWidth=Math.max(1.5,r*.25);
+  if(accent==="dot"){
+    ctx.beginPath();ctx.arc(x,y,r*.28,0,Math.PI*2);ctx.fill();
+  }else if(accent==="dot2"){
+    for(const dx of [-r*.35,r*.35]){ctx.beginPath();ctx.arc(x+dx,y,r*.22,0,Math.PI*2);ctx.fill();}
+  }else if(accent==="ring"||accent==="halo"){
+    ctx.beginPath();ctx.arc(x,y,r*.52,0,Math.PI*2);ctx.stroke();
+  }else if(accent==="antenna"){
+    ctx.beginPath();ctx.moveTo(x,y+r*.25);ctx.lineTo(x,y-r*1.15);ctx.stroke();
+    ctx.beginPath();ctx.arc(x,y-r*1.15,r*.18,0,Math.PI*2);ctx.fill();
+  }else if(accent==="x"||accent==="cross"){
+    const p=r*.55;
+    ctx.beginPath();
+    if(accent==="x"){
+      ctx.moveTo(x-p,y-p);ctx.lineTo(x+p,y+p);ctx.moveTo(x+p,y-p);ctx.lineTo(x-p,y+p);
+    }else{
+      ctx.moveTo(x-p,y);ctx.lineTo(x+p,y);ctx.moveTo(x,y-p);ctx.lineTo(x,y+p);
+    }
+    ctx.stroke();
+  }else if(accent==="wave"){
+    ctx.beginPath();ctx.moveTo(x-r*.58,y-r*.15);ctx.lineTo(x-r*.12,y-r*.15);
+    ctx.moveTo(x+r*.12,y+r*.15);ctx.lineTo(x+r*.58,y+r*.15);ctx.stroke();
+  }else if(accent==="crosshair"){
+    const p=r*.6,d=r*.18;
+    ctx.beginPath();ctx.arc(x,y,d,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.moveTo(x-p,y);ctx.lineTo(x-d,y);ctx.moveTo(x+d,y);ctx.lineTo(x+p,y);
+    ctx.moveTo(x,y-p);ctx.lineTo(x,y-d);ctx.moveTo(x,y+d);ctx.lineTo(x,y+p);ctx.stroke();
+  }
+  ctx.restore();
 }
 function gameDrawHarvestPoints(ctx,points,scale){
   for(const p of points||[]){
@@ -1786,15 +1901,17 @@ function gameDrawStacks(ctx,items,scale,side){
     const isOwnBuilding=side==="own-building";
     const isBuilding=isOwnBuilding||!!u.is_building;
     const selected=(isOwn&&group.some(g=>gameIsUnitSelected(g.id)))||(isOwnBuilding&&group.some(g=>gameSelectedBuildings.has(g.id)));
-    const shape=gameShapeFor(u.type,isBuilding);
+    const icon=gameIconFor(u.type,isBuilding);
     ctx.save();
     const isPwrOff=isOwnBuilding&&group.some(g=>gamePoweredDown.has(g.id));
     ctx.fillStyle=isPwrOff?"#e05252":gameColorFor(side,isBuilding,u.type);
     ctx.strokeStyle=selected?"#fff":"rgba(0,0,0,.65)";
     ctx.lineWidth=selected?3:1.5;
     const r=selected?6:5;
-    gameDrawMarker(ctx,x,y,isBuilding?7:r,shape);
+    const rr=isBuilding?7:r;
+    gameDrawMarker(ctx,x,y,rr,icon.shape);
     ctx.fill();ctx.stroke();
+    gameDrawAccent(ctx,x,y,rr,icon.accent);
     if(group.length>1){
       ctx.fillStyle="#fff";
       ctx.strokeStyle="rgba(0,0,0,.8)";
@@ -1884,12 +2001,14 @@ function gameRenderLegend(){
   }
   for(const b of gameState.own_buildings||[]){
     const t=gameTypeKey(b.type);
-    add("building",gameTypeLabel(t),"own-building:"+t);
+    add("building "+gameShapeFor(t,true),gameTypeLabel(t),"own-building:"+t);
   }
-  const hasEnemy=(gameState.enemies||[]).some(e=>!e.is_building);
-  const hasEnemyBuilding=(gameState.enemies||[]).some(e=>e.is_building);
-  if(hasEnemy)add("enemy","enemy unit","enemy");
-  if(hasEnemyBuilding)add("enemy-building","enemy building","enemy-building");
+  for(const e of gameState.enemies||[]){
+    const t=gameTypeKey(e.type);
+    const shape=gameShapeFor(t,!!e.is_building);
+    add((e.is_building?"enemy-building ":"enemy ")+shape,
+      "enemy "+gameTypeLabel(t),"enemy:"+t+":"+!!e.is_building);
+  }
   if((gameState.harvesters||0)>0&&!seen.has("own:harv"))add("tridown","harvester (harv)","harv");
   if((gameState.harvest_points||[]).length)add("ore","visible ore / harvest target","harvest-points");
   else if((gameState.resource_capacity||0)>0)add("ore","ore / stored resources","resources");
