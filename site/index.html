@@ -693,6 +693,27 @@ let gameHarvestMode=false;
 let gamePoweredDown=new Set();
 let gameSelectedBuildings=new Set();
 
+function gameUnitIdKey(id){
+  return String(id);
+}
+
+function gameIsUnitSelected(id){
+  return gameSelected.has(gameUnitIdKey(id));
+}
+
+function gameSelectUnit(id){
+  gameSelected.add(gameUnitIdKey(id));
+}
+
+function gameDeselectUnit(id){
+  gameSelected.delete(gameUnitIdKey(id));
+}
+
+function gameSelectedUnitIds(){
+  if(!gameState)return [];
+  return (gameState.units||[]).filter(u=>gameIsUnitSelected(u.id)).map(u=>u.id);
+}
+
 async function checkServer(){
   const url=document.getElementById("server-url").value.replace(/\/$/,"");
   const dot=document.getElementById("server-dot");
@@ -1224,9 +1245,9 @@ function gameMinimapClick(e){
     }else if(!harvestHere){
       gameLog("Harvest mode: click one of the visible ore markers.");
     }else{
-      const ids=[...gameSelected];
+      const ids=gameSelectedUnitIds();
       const harvIds=ids.filter(id=>{
-        const u=(gameState.units||[]).find(x=>x.id===id);
+        const u=(gameState.units||[]).find(x=>gameUnitIdKey(x.id)===gameUnitIdKey(id));
         return u&&gameTypeKey(u.type).startsWith("harv");
       });
       const useIds=harvIds.length?harvIds:ids;
@@ -1241,10 +1262,10 @@ function gameMinimapClick(e){
     gameQueueAttack(enemyHere[0]);
   }else if(ownHere.length>0){
     gameSelectedBuildings.clear();
-    const allSelected=ownHere.every(u=>gameSelected.has(u.id));
+    const allSelected=ownHere.every(u=>gameIsUnitSelected(u.id));
     ownHere.forEach(u=>{
-      if(allSelected)gameSelected.delete(u.id);
-      else gameSelected.add(u.id);
+      if(allSelected)gameDeselectUnit(u.id);
+      else gameSelectUnit(u.id);
     });
     gameLog((allSelected?"Deselected ":"Selected ")+ownHere.length+" unit(s) at ("+ownHere[0].cell_x+","+ownHere[0].cell_y+").");
   }else if(ownBldgHere.length>0){
@@ -1257,7 +1278,8 @@ function gameMinimapClick(e){
     gameLog((allSel?"Deselected ":"Selected ")+ownBldgHere.length+" building(s) at ("+ownBldgHere[0].cell_x+","+ownBldgHere[0].cell_y+").");
   }else if(gameSelected.size>0){
     const n=gameSelected.size;
-    gameQueueOrder({mode:"move",unit_ids:[...gameSelected],target_x:p.cx,target_y:p.cy});
+    const selectedIds=gameSelectedUnitIds();
+    gameQueueOrder({mode:"move",unit_ids:selectedIds,target_x:p.cx,target_y:p.cy});
     gameSelected.clear();
     gameLog("Queued MOVE to ("+p.cx+","+p.cy+") with "+n+" unit(s). Selection cleared so another unit can receive a different order this turn.");
   }else{
@@ -1268,7 +1290,7 @@ function gameMinimapClick(e){
 
 function gameSelectAll(){
   if(!gameState)return;
-  gameState.units.forEach(u=>gameSelected.add(u.id));
+  gameState.units.forEach(u=>gameSelectUnit(u.id));
   gameLog("Selected all "+gameSelected.size+" visible unit(s).");
   gameRender();
 }
@@ -1278,7 +1300,7 @@ function gameSelectTanks(){
   gameSelected.clear();
   (gameState.units||[]).forEach(u=>{
     const type=gameTypeKey(u.type);
-    if(type.includes("tnk")||type==="mcv")gameSelected.add(u.id);
+    if(type.includes("tnk")||type==="mcv")gameSelectUnit(u.id);
   });
   gameLog("Selected "+gameSelected.size+" visible tank unit(s).");
   gameRender();
@@ -1447,7 +1469,7 @@ function gameQueueBuildPlacement(item,x,y){
 function gameDeploySelected(){
   if(!gameState||gameState.done)return;
   const ids=(gameState.units||[])
-    .filter(u=>gameSelected.has(u.id)&&gameTypeKey(u.type)==="mcv")
+    .filter(u=>gameIsUnitSelected(u.id)&&gameTypeKey(u.type)==="mcv")
     .map(u=>u.id);
   if(!ids.length){
     gameLog("Select an MCV first, then click Deploy MCV.");
@@ -1462,14 +1484,15 @@ function gameDeploySelected(){
 function gameQueueAttack(target, all=false){
   if(!target)return;
   if(all){
-    (gameState.units||[]).forEach(u=>gameSelected.add(u.id));
+    (gameState.units||[]).forEach(u=>gameSelectUnit(u.id));
   }
   if(!gameSelected.size){
     gameLog("Select friendly units first, or use All Attack for this target.");
     return;
   }
-  const n=gameSelected.size;
-  gameQueueOrder({mode:"attack",unit_ids:[...gameSelected],target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
+  const selectedIds=gameSelectedUnitIds();
+  const n=selectedIds.length;
+  gameQueueOrder({mode:"attack",unit_ids:selectedIds,target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
   gameSelected.clear();
   gameLog("Queued ATTACK on "+target.id+" at ("+target.cell_x+","+target.cell_y+") with "+n+" unit(s). It will repeat on End Turn until the target disappears or you queue another order.");
 }
@@ -1501,8 +1524,9 @@ function gameUseSpecialTarget(enemyId){
     gameLog("Select the specialist unit(s) first, then click "+spec.label+" on the target.");
     return;
   }
-  const n=gameSelected.size;
-  gameQueueOrder({mode:spec.mode,unit_ids:[...gameSelected],target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
+  const selectedIds=gameSelectedUnitIds();
+  const n=selectedIds.length;
+  gameQueueOrder({mode:spec.mode,unit_ids:selectedIds,target_x:target.cell_x,target_y:target.cell_y,target_id:target.id});
   gameSelected.clear();
   gameRepeatAction=null;
   gameLog("Queued "+spec.verb+" on "+target.id+" with "+n+" unit(s).");
@@ -1572,7 +1596,7 @@ function gameRenderActionButtons(){
   if(!deployBtn||!gameState)return;
   const tools=gameState.tools||[];
   const selectedMcvs=(gameState.units||[])
-    .filter(u=>gameSelected.has(u.id)&&gameTypeKey(u.type)==="mcv");
+    .filter(u=>gameIsUnitSelected(u.id)&&gameTypeKey(u.type)==="mcv");
   const canDeploy=tools.includes("deploy")&&selectedMcvs.length>0&&!gameState.done;
   deployBtn.style.display=canDeploy?"":"none";
   deployBtn.textContent=selectedMcvs.length>1?"Deploy MCVs":"Deploy MCV";
@@ -1876,7 +1900,7 @@ function gameDrawStacks(ctx,items,scale,side){
     const isOwn=side==="own";
     const isOwnBuilding=side==="own-building";
     const isBuilding=isOwnBuilding||!!u.is_building;
-    const selected=(isOwn&&group.some(g=>gameSelected.has(g.id)))||(isOwnBuilding&&group.some(g=>gameSelectedBuildings.has(g.id)));
+    const selected=(isOwn&&group.some(g=>gameIsUnitSelected(g.id)))||(isOwnBuilding&&group.some(g=>gameSelectedBuildings.has(g.id)));
     const icon=gameIconFor(u.type,isBuilding);
     ctx.save();
     const isPwrOff=isOwnBuilding&&group.some(g=>gamePoweredDown.has(g.id));
@@ -1999,7 +2023,7 @@ function gameRenderUnits(){
   const el=document.getElementById("game-units");
   let html='<table><tr><th></th><th>ID</th><th>Type</th><th>Pos</th><th>HP</th><th>Activity</th></tr>';
   for(const u of gameState.units){
-    const sel=gameSelected.has(u.id);
+    const sel=gameIsUnitSelected(u.id);
     html+=`<tr class="${sel?'selected':''}" onclick="gameToggleUnit('${u.id}')">
       <td>${sel?"▶":""}</td><td>${u.id}</td><td>${u.type}</td>
       <td>(${u.cell_x},${u.cell_y})</td><td style="${gameHpClass(u.hp)}">${gameHpText(u.hp)}</td><td>${u.activity||"idle"}</td></tr>`;
@@ -2119,9 +2143,9 @@ function gameSellSelected(){
 }
 
 function gameToggleUnit(uid){
-  if(gameSelected.has(uid))gameSelected.delete(uid);
-  else gameSelected.add(uid);
-  gameRenderUnits();
+  if(gameIsUnitSelected(uid))gameDeselectUnit(uid);
+  else gameSelectUnit(uid);
+  gameRender();
 }
 
 function gameLog(msg){
