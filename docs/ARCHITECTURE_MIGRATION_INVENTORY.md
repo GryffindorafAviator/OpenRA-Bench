@@ -94,6 +94,24 @@ available to compare against later refactors.
 No live-model call is required in ordinary CI.  Fixed scripted or mocked
 provider responses are the deterministic migration baseline.
 
+### Selected M0.5 reference suite
+
+The following tests are the required, deliberately small refactor gate before
+and after each migration slice.  The first runs without the native engine
+wheel; the remaining integration tests run in CI, where `test.yml` builds the
+wheel from the separately owned OpenRA-Rust repository.
+
+| Command / test | Baseline protected |
+|---|---|
+| `pytest -q tests/test_architecture_baseline.py` | Loader/compiler meaning for one perception and one action pack, using static-map fixtures so the guard is read-only. |
+| `pytest -q tests/test_integ_pipeline.py` | Deterministic scripted scenario -> engine -> score -> leaderboard pipeline. |
+| `pytest -q tests/test_playback.py` | v1 transcript, manifest, score, and playback directory semantics. |
+| `pytest -q tests/test_manual_review_flow.py` | Interactive draft -> commit/discard lifecycle and FastAPI integration. |
+| `python3 tools/validate_pack_bar.py --out /tmp/pack_bar_status.csv` | Whole-suite no-cheat/stall-loss invariant. |
+
+The full `pytest tests/` suite and the CI no-cheat job remain the merge gate;
+this focused suite is the fast diagnosis tool for architectural refactors.
+
 ## 4. Current-to-target inventory
 
 Priority: **P0** means establish a boundary early; **P1** means migrate after
@@ -286,5 +304,5 @@ listed explicitly rather than silently becoming public API.
 - [x] Current source, interface, generated-data, and test ownership are mapped.
 - [x] Cross-layer hubs and boundary violations are identified.
 - [x] Migration order, compatibility policy, risks, and exit criteria are recorded.
-- [ ] Deterministic baseline fixtures/results are selected and recorded before M1 code starts.
+- [x] Deterministic baseline fixtures/results are selected and recorded before M1 code starts.
 - [ ] M1 contract field definitions and semantic-version policy are approved.
